@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useRef, useEffect, useState } from "react";
+import { Link, Navigate } from "react-router-dom";
 import {
   MapPinIcon,
   ClockIcon,
@@ -7,20 +7,14 @@ import {
   ArrowRightIcon,
 } from "@heroicons/react/24/outline";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
+import { useAuth, SignInButton } from "@clerk/clerk-react";
 import LandingNavbar from "../components/LandingNavbar";
-import AuthModal from "../components/AuthModal";
 
 const Landing = () => {
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authTab, setAuthTab] = useState("signin");
+  const { isSignedIn, isLoaded } = useAuth();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleOption, setScheduleOption] = useState("now");
   const scheduleRef = useRef(null);
-
-  const openAuth = (tab) => {
-    setAuthTab(tab);
-    setAuthOpen(true);
-  };
 
   // Close schedule dropdown on outside click
   useEffect(() => {
@@ -33,19 +27,13 @@ const Landing = () => {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  if (isLoaded && isSignedIn) {
+    return <Navigate to="/home" />;
+  }
+
   return (
     <div className="min-h-screen bg-bg-dark">
-      <LandingNavbar
-        onSignIn={() => openAuth("signin")}
-        onSignUp={() => openAuth("signup")}
-      />
-
-      {/* Auth Modal */}
-      <AuthModal
-        isOpen={authOpen}
-        onClose={() => setAuthOpen(false)}
-        initialTab={authTab}
-      />
+      <LandingNavbar />
 
       {/* ===== HERO SECTION ===== */}
       <section className="min-h-screen flex items-center pt-20 relative overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(255,0,119,0.15),transparent_40%),linear-gradient(to_bottom,rgba(15,15,15,0.3),#0f0f0f)]">
@@ -146,24 +134,22 @@ const Landing = () => {
 
               <p className="text-text-gray text-sm mt-5">
                 Already have an account?{" "}
-                <button
-                  className="text-neon-pink font-semibold bg-transparent border-0 cursor-pointer hover:underline text-sm"
-                  onClick={() => openAuth("signin")}
-                >
-                  Sign in
-                </button>
+                <SignInButton mode="modal" forceRedirectUrl="/home">
+                  <button className="text-neon-pink font-semibold bg-transparent border-0 cursor-pointer hover:underline text-sm">
+                    Sign in
+                  </button>
+                </SignInButton>
               </p>
             </div>
 
             {/* Right Side — Logo */}
             <div className="relative flex items-center justify-center lg:hidden min-h-[500px]">
-              {/* Logo */}
               <div className="relative">
-                <div className="absolute -inset-10 bg-[radial-gradient(circle,rgba(255,0,119,0.15),transparent_70%)] pointer-events-none" />
+                <div className="absolute -inset-16 bg-[radial-gradient(circle,rgba(255,0,119,0.15),transparent_70%)] pointer-events-none" />
                 <img
-                  src="/images/image4.png"
-                  alt="FairDash"
-                  className="w-72 h-auto relative z-10 mix-blend-screen drop-shadow-[0_0_30px_rgba(255,0,119,0.4)]"
+                  src="/images/logo/fairdash-full-black.png"
+                  alt="FairDash — Fresh. Fast. Fair."
+                  className="w-[420px] h-auto relative z-10 drop-shadow-[0_0_40px_rgba(255,0,119,0.5)]"
                 />
               </div>
             </div>
@@ -268,9 +254,11 @@ const Landing = () => {
 
             {/* Logo + tagline */}
             <div>
-              <div className="font-bebas text-[28px] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)] mb-2">
-                FAIR<span className="text-neon-pink">DASH</span>
-              </div>
+              <img
+                src="/images/logo/fairdash-logo.png"
+                alt="FairDash"
+                className="w-44 mb-3 drop-shadow-[0_0_15px_rgba(255,0,119,0.4)]"
+              />
               <p className="text-text-gray text-sm leading-relaxed max-w-[220px]">
                 The fair comes to your door.
                 <br />Fresh. Fast. Fair.

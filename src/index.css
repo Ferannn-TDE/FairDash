@@ -46,3 +46,8 @@
     -ms-overflow-style: none;
   }
 }
+
+/* Clerk modal header alignment */
+.cl-headerSubtitle {
+  text-align: center;
+}

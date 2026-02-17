@@ -31,7 +31,7 @@ const LoadingAnimation = ({ onComplete }) => {
       {/* FairDash Logo with neon glow */}
       <div className="text-center mb-8 animate-float">
         <img
-          src="/images/image4.png"
+          src="/images/logo/fairdash-logo.png"
           alt="FairDash Logo"
           className="w-64 md:w-80 mx-auto mb-4 drop-shadow-[0_0_30px_rgba(255,0,119,0.6)]"
         />

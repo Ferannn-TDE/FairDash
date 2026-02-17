@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
+import { useAuth } from "@clerk/clerk-react";
 import { CartProvider } from "./context/CartContext";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
 import LoadingAnimation from "./components/LoadingAnimation";
@@ -8,8 +9,28 @@ import Cart from "./components/Cart";
 import Landing from "./pages/Landing";
 import Home from "./pages/Home";
 import Menu from "./pages/Menu";
+import Vendors from "./pages/Vendors";
+import VendorDetail from "./pages/VendorDetail";
 import Contact from "./pages/Contact";
 import RefundPolicy from "./pages/RefundPolicy";
+
+const ProtectedRoute = ({ children }) => {
+  const { isSignedIn, isLoaded } = useAuth();
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg-dark">
+        <div className="w-8 h-8 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isSignedIn) {
+    return <Navigate to="/" />;
+  }
+
+  return children;
+};
 
 const AppLayout = () => {
   const location = useLocation();
@@ -23,18 +44,19 @@ const AppLayout = () => {
       {!hideChrome && <Cart />}
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/home" element={<Home />} />
-        <Route path="/menu" element={<Menu />} />
+        <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+        <Route path="/menu" element={<ProtectedRoute><Menu /></ProtectedRoute>} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/refund-policy" element={<RefundPolicy />} />
-        <Route path="/vendors" element={<ComingSoon title="Vendors" />} />
+        <Route path="/vendors" element={<ProtectedRoute><Vendors /></ProtectedRoute>} />
+        <Route path="/vendors/:vendorId" element={<ProtectedRoute><VendorDetail /></ProtectedRoute>} />
         <Route
           path="/track"
-          element={<ComingSoon title="Track Order" />}
+          element={<ProtectedRoute><ComingSoon title="Track Order" /></ProtectedRoute>}
         />
         <Route
           path="/location"
-          element={<ComingSoon title="Live Location Map" />}
+          element={<ProtectedRoute><ComingSoon title="Live Location Map" /></ProtectedRoute>}
         />
       </Routes>
       {!hideChrome && <Footer />}
@@ -71,7 +93,7 @@ const ComingSoon = ({ title }) => {
           We're working hard to bring you this feature. Check back soon!
         </p>
         <img
-          src="/images/image4.png"
+          src="/images/logo/fairdash-logo.png"
           alt="FairDash"
           className="w-48 mx-auto opacity-20 animate-float"
         />
@@ -87,7 +109,7 @@ const Footer = () => {
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr] lg:grid-cols-2 md:grid-cols-1 gap-12 lg:gap-10 md:gap-8 mb-10">
           <div>
             <img
-              src="/images/image4.png"
+              src="/images/logo/fairdash-logo.png"
               alt="FairDash Logo"
               className="w-48 mb-4 drop-shadow-[0_0_15px_rgba(255,0,119,0.4)]"
             />

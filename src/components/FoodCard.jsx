@@ -1,5 +1,6 @@
 import { ClockIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { useCart } from '../context/CartContext';
+import { formatPrice, getVendorById } from '../utils/vendorData';
 
 const FoodCard = ({ item }) => {
   const { addToCart } = useCart();
@@ -11,14 +12,24 @@ const FoodCard = ({ item }) => {
   return (
     <div className="bg-bg-card rounded-3xl overflow-hidden transition-all duration-300 ease-out relative border border-white/5 animate-fadeIn hover:scale-[1.02] hover:shadow-glow hover:border-neon-pink">
       <div className="h-[200px] md:h-[200px] xs:h-[180px] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden before:content-[''] before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.1)_0%,transparent_70%)]">
-        <span className="text-[80px] md:text-[80px] xs:text-[60px] relative z-10 animate-float">
-          {item.emoji}
-        </span>
+        {item.image ? (
+          <img
+            src={item.image}
+            alt={item.name}
+            className="w-full h-full object-cover relative z-10"
+          />
+        ) : (
+          <span className="text-[80px] md:text-[80px] xs:text-[60px] relative z-10 animate-float">
+            {item.emoji}
+          </span>
+        )}
 
-        <div className="absolute bottom-3 right-3 bg-black/90 px-3.5 py-1.5 rounded-full text-xs font-bold border border-neon-pink flex items-center gap-1.5 text-neon-pink z-[2]">
-          <ClockIcon className="w-3.5 h-3.5" />
-          {item.deliveryTime}
-        </div>
+        {(item.deliveryTime || (item.vendorId && getVendorById(item.vendorId)?.deliveryTime)) && (
+          <div className="absolute bottom-3 right-3 bg-black/90 px-3.5 py-1.5 rounded-full text-xs font-bold border border-neon-pink flex items-center gap-1.5 text-neon-pink z-[2]">
+            <ClockIcon className="w-3.5 h-3.5" />
+            {item.deliveryTime || getVendorById(item.vendorId)?.deliveryTime}
+          </div>
+        )}
 
         {item.popular && (
           <div className="absolute top-3 left-3 bg-neon-pink px-3.5 py-1.5 rounded-full text-xs font-bold z-[2] animate-pulse-custom">
@@ -33,7 +44,7 @@ const FoodCard = ({ item }) => {
             {item.name}
           </div>
           <div className="text-neon-pink font-bold text-xl [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
-            ${item.price.toFixed(2)}
+            {formatPrice(item)}
           </div>
         </div>
 
