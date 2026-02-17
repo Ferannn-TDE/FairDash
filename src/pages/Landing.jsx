@@ -203,42 +203,66 @@ const Landing = () => {
       {/* ===== VENDOR / DRIVER SECTION ===== */}
       <section className="py-20 lg:py-16 md:py-12 bg-bg-card">
         <div className="max-w-[1400px] mx-auto px-[8%] lg:px-10 md:px-6 sm:px-5">
-          <div className="grid grid-cols-2 lg:grid-cols-1 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Become a Vendor Card */}
-            <div className="relative rounded-3xl overflow-hidden bg-[#1a1a1a] border border-white/5 p-10 lg:p-8 md:p-6 group hover:border-neon-pink/30 transition-all duration-300">
-              <div className="text-[120px] lg:text-[80px] md:text-[60px] mb-6 leading-none">🍗</div>
-              <h3 className="font-bebas text-4xl md:text-3xl mb-3 tracking-wide">
-                Become a Vendor
-              </h3>
-              <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[400px] md:max-w-full">
-                Partner with FairDash and reach thousands of fair food lovers in
-                your area.
-              </p>
-              <Link
-                to="/contact"
-                className="inline-flex items-center gap-2 text-neon-pink font-semibold uppercase tracking-wide text-sm no-underline hover:gap-3 transition-all duration-300"
-              >
-                Partner With Us <ArrowRightIcon className="w-4 h-4" />
-              </Link>
+            <div className="relative rounded-3xl overflow-hidden bg-[#1a1a1a] border border-white/5 group hover:border-neon-pink/30 transition-all duration-300">
+              {/* Image with overlay */}
+              <div className="relative h-64 overflow-hidden">
+                <img
+                  src="/images/landing/fair-food-vendor.jpg"
+                  alt="Fair food vendor display"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a1a] via-[#1a1a1a]/60 to-transparent" />
+              </div>
+
+              {/* Content */}
+              <div className="relative p-10 lg:p-8 md:p-6 -mt-16">
+                <h3 className="font-bebas text-4xl md:text-3xl mb-3 tracking-wide text-white drop-shadow-lg">
+                  Become a Vendor
+                </h3>
+                <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[400px] md:max-w-full">
+                  Partner with FairDash and reach thousands of fair food lovers in
+                  your area.
+                </p>
+                <Link
+                  to="/contact"
+                  className="inline-flex items-center gap-2 text-neon-pink font-semibold uppercase tracking-wide text-sm no-underline hover:gap-3 transition-all duration-300"
+                >
+                  Partner With Us <ArrowRightIcon className="w-4 h-4" />
+                </Link>
+              </div>
               <div className="absolute top-0 right-0 w-40 h-40 bg-[radial-gradient(circle,rgba(255,0,119,0.1),transparent_70%)] pointer-events-none" />
             </div>
 
             {/* Become a Driver Card */}
-            <div className="relative rounded-3xl overflow-hidden bg-[#1a1a1a] border border-white/5 p-10 lg:p-8 md:p-6 group hover:border-neon-pink/30 transition-all duration-300">
-              <div className="text-[120px] lg:text-[80px] md:text-[60px] mb-6 leading-none">🛵</div>
-              <h3 className="font-bebas text-4xl md:text-3xl mb-3 tracking-wide">
-                Become a Driver
-              </h3>
-              <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[400px] md:max-w-full">
-                Join our delivery team and earn money delivering fair food to
-                happy customers.
-              </p>
-              <Link
-                to="/contact"
-                className="inline-flex items-center gap-2 text-neon-pink font-semibold uppercase tracking-wide text-sm no-underline hover:gap-3 transition-all duration-300"
-              >
-                Apply to Drive <ArrowRightIcon className="w-4 h-4" />
-              </Link>
+            <div className="relative rounded-3xl overflow-hidden bg-[#1a1a1a] border border-white/5 group hover:border-neon-pink/30 transition-all duration-300">
+              {/* Image with overlay */}
+              <div className="relative h-64 overflow-hidden">
+                <img
+                  src="/images/landing/delivery-driver.jpg"
+                  alt="Delivery driver on motorcycle"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a1a] via-[#1a1a1a]/60 to-transparent" />
+              </div>
+
+              {/* Content */}
+              <div className="relative p-10 lg:p-8 md:p-6 -mt-16">
+                <h3 className="font-bebas text-4xl md:text-3xl mb-3 tracking-wide text-white drop-shadow-lg">
+                  Become a Driver
+                </h3>
+                <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[400px] md:max-w-full">
+                  Join our delivery team and earn money delivering fair food to
+                  happy customers.
+                </p>
+                <Link
+                  to="/contact"
+                  className="inline-flex items-center gap-2 text-neon-pink font-semibold uppercase tracking-wide text-sm no-underline hover:gap-3 transition-all duration-300"
+                >
+                  Apply to Drive <ArrowRightIcon className="w-4 h-4" />
+                </Link>
+              </div>
               <div className="absolute top-0 right-0 w-40 h-40 bg-[radial-gradient(circle,rgba(255,0,119,0.1),transparent_70%)] pointer-events-none" />
             </div>
           </div>

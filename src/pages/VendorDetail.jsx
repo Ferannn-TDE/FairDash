@@ -137,7 +137,7 @@ const VendorDetail = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-6">
+          <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-6">
             {items.map((item) => (
               <VendorItemCard key={item.id} item={item} />
             ))}

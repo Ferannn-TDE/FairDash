@@ -59,7 +59,7 @@ const Home = () => {
   const deliveryFee = cartCount > 0 ? 2.99 : 0;
 
   return (
-    <div className="h-screen overflow-hidden bg-bg-dark block lg:grid lg:grid-cols-[260px_1fr_340px] xl:grid-cols-[280px_1fr_380px]">
+    <div className="min-h-screen bg-bg-dark lg:h-screen lg:overflow-hidden block lg:grid lg:grid-cols-[260px_1fr_340px] xl:grid-cols-[280px_1fr_380px]">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
@@ -153,8 +153,8 @@ const Home = () => {
       </aside>
 
       {/* ===== CENTER CONTENT ===== */}
-      <div className="overflow-y-auto lg:h-full">
-        <div className="p-8 md:p-6 sm:p-5">
+      <div className="overflow-y-auto lg:h-full w-full min-w-0">
+        <div className="p-8 md:p-6 sm:p-5 xs:p-4">
           {/* Mobile hamburger */}
           <button
             className="block lg:hidden mb-4 p-2 bg-bg-card border border-white/10 rounded-xl text-white"
@@ -317,7 +317,7 @@ const Home = () => {
               </Link>
             </div>
 
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
+            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
               {popularItems.map((item) => (
                 <FoodCard key={item.id} item={item} />
               ))}
@@ -367,7 +367,7 @@ const Home = () => {
 
           {/* Footer inside scrollable area */}
           <footer className="border-t border-white/5 pt-6 pb-4 mt-4">
-            <div className="flex justify-between items-center text-text-gray text-xs sm:flex-col sm:gap-3 sm:text-center">
+            <div className="flex flex-col sm:flex-row justify-between items-center text-text-gray text-xs gap-3 sm:gap-0 text-center sm:text-left">
               <p>&copy; 2026 FairDash. All rights reserved.</p>
               <div className="flex gap-4">
                 <Link

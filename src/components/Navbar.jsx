@@ -107,7 +107,7 @@ const Navbar = () => {
         )}
 
         <button
-          className="lg:hidden block bg-transparent border-0 text-white cursor-pointer p-2"
+          className="lg:hidden block bg-transparent border-0 text-white cursor-pointer p-2.5"
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         >
           {mobileMenuOpen ? (
