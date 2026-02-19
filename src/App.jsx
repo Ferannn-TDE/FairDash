@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Link,
+  Navigate,
+  useLocation,
+} from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { CartProvider } from "./context/CartContext";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
@@ -44,19 +51,55 @@ const AppLayout = () => {
       {!hideChrome && <Cart />}
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-        <Route path="/menu" element={<ProtectedRoute><Menu /></ProtectedRoute>} />
+        <Route
+          path="/home"
+          element={
+            <ProtectedRoute>
+              <Home />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/menu"
+          element={
+            <ProtectedRoute>
+              <Menu />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/contact" element={<Contact />} />
         <Route path="/refund-policy" element={<RefundPolicy />} />
-        <Route path="/vendors" element={<ProtectedRoute><Vendors /></ProtectedRoute>} />
-        <Route path="/vendors/:vendorId" element={<ProtectedRoute><VendorDetail /></ProtectedRoute>} />
+        <Route
+          path="/vendors"
+          element={
+            <ProtectedRoute>
+              <Vendors />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/vendors/:vendorId"
+          element={
+            <ProtectedRoute>
+              <VendorDetail />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/track"
-          element={<ProtectedRoute><ComingSoon title="Track Order" /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <ComingSoon title="Track Order" />
+            </ProtectedRoute>
+          }
         />
         <Route
           path="/location"
-          element={<ProtectedRoute><ComingSoon title="Live Location Map" /></ProtectedRoute>}
+          element={
+            <ProtectedRoute>
+              <ComingSoon title="Live Location Map" />
+            </ProtectedRoute>
+          }
         />
       </Routes>
       {!hideChrome && <Footer />}
@@ -105,7 +148,7 @@ const ComingSoon = ({ title }) => {
 const Footer = () => {
   return (
     <footer className="bg-bg-card border-t border-white/10 py-16 lg:py-12 md:py-10 mt-auto">
-      <div className="max-w-[1400px] mx-auto px-[8%] lg:px-10 md:px-6 sm:px-5">
+      <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr] lg:grid-cols-2 md:grid-cols-1 gap-12 lg:gap-10 md:gap-8 mb-10">
           <div>
             <img
@@ -115,6 +158,7 @@ const Footer = () => {
             />
             <p className="text-text-gray text-sm leading-relaxed">
               The fair comes to your door.
+              <br />
               <br />
               Fresh. Fast. Fair.
             </p>

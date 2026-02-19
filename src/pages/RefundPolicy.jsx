@@ -6,7 +6,7 @@ const RefundPolicy = () => {
     <div className="pt-20 min-h-screen">
       {/* Hero Section */}
       <section className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-16 lg:py-12 md:py-10 border-b border-white/10">
-        <div className="max-w-[1400px] mx-auto px-[8%] lg:px-10 md:px-6 sm:px-5">
+        <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
           <h1 className="font-bebas text-[clamp(3rem,6vw,5rem)] text-center mb-4 tracking-[2px]">
             <span className="text-neon-pink">Refund</span> Policy
           </h1>
@@ -15,7 +15,7 @@ const RefundPolicy = () => {
 
       {/* Content */}
       <section className="py-16 lg:py-12 md:py-10">
-        <div className="max-w-[800px] mx-auto px-[8%] lg:px-10 md:px-6 sm:px-5">
+        <div className="max-w-[800px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
           <div className="bg-bg-card rounded-3xl p-10 lg:p-8 md:p-6 border border-white/5">
             <div className="space-y-6 text-text-gray leading-relaxed">
               <p className="text-lg">

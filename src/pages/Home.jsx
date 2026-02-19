@@ -88,7 +88,7 @@ const Home = () => {
         </div>
 
         {/* Menu Section */}
-        <div className="text-[11px] uppercase tracking-[1px] text-text-gray font-bold mb-4">
+        <div className="text-[0.6875rem] uppercase tracking-[1px] text-text-gray font-bold mb-4">
           Menu
         </div>
         {sidebarMenu.map((item) => {
@@ -114,7 +114,7 @@ const Home = () => {
         <div className="flex-1" />
 
         {/* Orders Section */}
-        <div className="text-[11px] uppercase tracking-[1px] text-text-gray font-bold mb-4">
+        <div className="text-[0.6875rem] uppercase tracking-[1px] text-text-gray font-bold mb-4">
           Orders
         </div>
         {sidebarOrders.map((item) => {
@@ -155,28 +155,7 @@ const Home = () => {
       {/* ===== CENTER CONTENT ===== */}
       <div className="overflow-y-auto lg:h-full w-full min-w-0">
         <div className="p-8 md:p-6 sm:p-5 xs:p-4">
-          {/* Mobile hamburger */}
-          <button
-            className="block lg:hidden mb-4 p-2 bg-bg-card border border-white/10 rounded-xl text-white"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="w-6 h-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
-
-          {/* Header */}
+          {/* Header — hamburger integrated inline */}
           <div className="flex justify-between items-center mb-8">
             <div>
               <h1 className="text-2xl font-extrabold text-white mb-1">
@@ -186,8 +165,19 @@ const Home = () => {
                 Hungry for state fair classics?
               </p>
             </div>
-            <div className="hidden md:flex bg-bg-card px-4 py-2.5 rounded-full text-sm font-semibold text-white border border-white/10 items-center gap-2 whitespace-nowrap">
-              📍 Springfield Fairgrounds
+            <div className="flex items-center gap-3">
+              <div className="hidden md:flex bg-bg-card px-4 py-2.5 rounded-full text-sm font-semibold text-white border border-white/10 items-center gap-2 whitespace-nowrap">
+                📍 Springfield Fairgrounds
+              </div>
+              <button
+                className="lg:hidden p-2.5 bg-bg-card border border-white/10 rounded-xl text-neon-pink hover:border-neon-pink hover:bg-white/5 transition-all duration-200"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open menu"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -249,7 +239,7 @@ const Home = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Feature Card — 30 Min Delivery */}
               <div className="bg-bg-card rounded-2xl p-7 sm:p-6 border border-neon-pink/20 bg-[linear-gradient(135deg,rgba(255,0,119,0.08),transparent_60%)] transition-all duration-300 hover:border-neon-pink/40 hover:-translate-y-0.5 hover:shadow-glow">
-                <div className="text-[40px] mb-3">⚡</div>
+                <div className="text-[2.5rem] mb-3">⚡</div>
                 <div className="font-bold text-lg text-neon-pink mb-1">
                   30 Min Delivery
                 </div>
@@ -260,7 +250,7 @@ const Home = () => {
 
               {/* Feature Card — No Entry Fee */}
               <div className="bg-bg-card rounded-2xl p-7 sm:p-6 border border-white/5 transition-all duration-300 hover:border-neon-pink/30 hover:-translate-y-0.5 hover:shadow-glow">
-                <div className="text-[40px] mb-3">🎟️</div>
+                <div className="text-[2.5rem] mb-3">🎟️</div>
                 <div className="font-bold text-lg text-white mb-1">
                   No Entry Fee
                 </div>
@@ -292,10 +282,10 @@ const Home = () => {
                   to={`/menu?category=${cat.id}`}
                   className="min-w-[130px] h-[130px] bg-bg-card rounded-2xl flex flex-col items-center justify-center border border-white/5 transition-all duration-300 cursor-pointer no-underline text-white hover:border-neon-pink hover:-translate-y-1 hover:shadow-glow group"
                 >
-                  <span className="text-[40px] mb-2.5 transition-transform duration-300 group-hover:scale-125">
+                  <span className="text-[2.5rem] mb-2.5 transition-transform duration-300 group-hover:scale-125">
                     {cat.emoji}
                   </span>
-                  <span className="font-semibold text-xs text-center uppercase tracking-[0.5px]">
+                  <span className="font-semibold text-[0.6875rem] text-center uppercase tracking-[0.5px]">
                     {cat.name}
                   </span>
                 </Link>
@@ -349,7 +339,7 @@ const Home = () => {
                     {vendor.emoji}
                   </div>
                   <div>
-                    <h4 className="text-[15px] font-semibold text-white mb-1">
+                    <h4 className="text-[0.9375rem] font-semibold text-white mb-1">
                       {vendor.name}
                     </h4>
                     <div className="text-xs text-text-gray flex items-center gap-2">
@@ -436,7 +426,7 @@ const Home = () => {
 
             {cart.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-text-gray py-8">
-                <div className="text-[40px] mb-3">🛒</div>
+                <div className="text-[2.5rem] mb-3">🛒</div>
                 <span className="text-sm mb-1">Your cart is empty</span>
                 <span className="text-xs text-text-gray/60">
                   Add items from the menu
@@ -515,7 +505,7 @@ const Home = () => {
                   : "Checkout ($0.00)"}
               </button>
               {cartCount > 0 && (
-                <p className="text-center mt-2.5 text-text-gray text-[11px]">
+                <p className="text-center mt-2.5 text-text-gray text-[0.6875rem]">
                   ⚡ 30-minute delivery guarantee
                 </p>
               )}

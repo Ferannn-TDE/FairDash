@@ -52,7 +52,7 @@ const CartItem = ({ item, updateQuantity, removeFromCart }) => {
   };
 
   return (
-    <div className="relative mb-[15px] overflow-hidden rounded-2xl">
+    <div className="relative mb-4 overflow-hidden rounded-2xl">
       {/* Red delete background — only visible when swiping */}
       <div
         className={`absolute inset-0 bg-red-600 flex items-center justify-end pr-5 rounded-2xl transition-opacity duration-150 ${
@@ -76,12 +76,12 @@ const CartItem = ({ item, updateQuantity, removeFromCart }) => {
               : "none",
           opacity: isRemoving ? 0 : 1,
         }}
-        className="flex items-center gap-[15px] p-5 bg-bg-card rounded-2xl relative border border-transparent hover:border-neon-pink/30 hover:bg-bg-card/80 transition-colors duration-300"
+        className="flex items-center gap-4 p-5 bg-bg-card rounded-2xl relative border border-transparent hover:border-neon-pink/30 hover:bg-bg-card/80 transition-colors duration-300"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="text-[40px]">{item.emoji}</div>
+        <div className="text-[2.5rem]">{item.emoji}</div>
         <div className="flex-1">
           <div className="font-semibold mb-1">{item.name}</div>
           <div className="text-neon-pink font-bold text-sm">
@@ -129,7 +129,7 @@ const Cart = () => {
         onClick={() => setIsCartOpen(false)}
       />
       <div className="fixed top-0 right-0 w-[450px] md:w-[450px] xs:w-full h-screen bg-bg-dark z-[1000] flex flex-col animate-slideInRight border-l border-white/10">
-        <div className="p-[30px] border-b border-white/10 flex justify-between items-center">
+        <div className="p-7 border-b border-white/10 flex justify-between items-center">
           <div className="flex items-center gap-3 text-neon-pink">
             <ShoppingBagIcon className="w-6 h-6" />
             <h2 className="text-2xl m-0 font-bebas tracking-wide">
@@ -172,7 +172,7 @@ const Cart = () => {
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto p-5 px-[30px]">
+            <div className="flex-1 overflow-y-auto p-5 px-7">
               {cart.map((item) => (
                 <CartItem
                   key={item.id}
@@ -183,7 +183,7 @@ const Cart = () => {
               ))}
             </div>
 
-            <div className="p-[30px] border-t border-white/10 bg-bg-dark">
+            <div className="p-7 border-t border-white/10 bg-bg-dark">
               <div className="mb-5">
                 <div className="flex justify-between mb-3 text-text-gray text-sm">
                   <span>Subtotal</span>
@@ -201,7 +201,7 @@ const Cart = () => {
               <button className="w-full py-4 bg-neon-pink border-0 text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-300 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense">
                 Checkout • ${(getCartTotal() + 2.99).toFixed(2)}
               </button>
-              <p className="text-center mt-[15px] text-text-gray text-[13px]">
+              <p className="text-center mt-[15px] text-text-gray text-[0.8125rem]">
                 ⚡ 30-minute delivery guarantee
               </p>
 

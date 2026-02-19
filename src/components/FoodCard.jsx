@@ -19,7 +19,7 @@ const FoodCard = ({ item }) => {
             className="w-full h-full object-cover relative z-10"
           />
         ) : (
-          <span className="text-[80px] md:text-[80px] xs:text-[60px] relative z-10 animate-float">
+          <span className="text-[5rem] md:text-[5rem] xs:text-[3.75rem] relative z-10 animate-float">
             {item.emoji}
           </span>
         )}
@@ -57,7 +57,7 @@ const FoodCard = ({ item }) => {
             {item.tags.map((tag, index) => (
               <span
                 key={index}
-                className="bg-white/5 text-text-gray px-3 py-1 rounded-xl text-[11px] font-medium uppercase tracking-[0.5px] border border-white/5"
+                className="bg-white/5 text-text-gray px-3 py-1 rounded-xl text-[0.6875rem] font-medium uppercase tracking-[0.5px] border border-white/5"
               >
                 {tag}
               </span>

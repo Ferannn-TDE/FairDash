@@ -18,7 +18,7 @@ const VendorItemCard = ({ item }) => {
             className="w-full h-full object-cover relative z-10"
           />
         ) : (
-          <span className="text-[64px] relative z-10 animate-float">
+          <span className="text-[4rem] relative z-10 animate-float">
             {item.emoji}
           </span>
         )}
@@ -48,7 +48,7 @@ const VendorItemCard = ({ item }) => {
             {item.tags.map((tag) => (
               <span
                 key={tag}
-                className="bg-white/5 text-text-gray px-2.5 py-0.5 rounded-lg text-[11px] font-medium uppercase tracking-wide border border-white/5"
+                className="bg-white/5 text-text-gray px-2.5 py-0.5 rounded-lg text-[0.6875rem] font-medium uppercase tracking-wide border border-white/5"
               >
                 {tag}
               </span>
@@ -82,7 +82,7 @@ const VendorDetail = () => {
     <div className="pt-20 min-h-screen">
       {/* Header */}
       <div className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-12 md:py-8 border-b border-white/10">
-        <div className="max-w-[1400px] mx-auto px-[8%] md:px-5">
+        <div className="max-w-[1400px] mx-auto px-[6%] md:px-5">
           {/* Back button */}
           <Link
             to="/vendors"
@@ -94,7 +94,7 @@ const VendorDetail = () => {
 
           <div className="flex items-center gap-5 md:flex-col md:items-start">
             {/* Vendor emoji */}
-            <div className="w-20 h-20 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center text-[40px] flex-shrink-0">
+            <div className="w-20 h-20 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center text-[2.5rem] flex-shrink-0">
               {vendor.emoji}
             </div>
 
@@ -125,12 +125,12 @@ const VendorDetail = () => {
       </div>
 
       {/* Items Grid */}
-      <div className="max-w-[1400px] mx-auto px-[8%] md:px-5 py-10 pb-20">
+      <div className="max-w-[1400px] mx-auto px-[6%] md:px-5 py-10 pb-20">
         <h2 className="font-bebas text-[2rem] tracking-wide mb-8">Menu</h2>
 
         {items.length === 0 ? (
           <div className="text-center py-20">
-            <div className="text-[80px] mb-4 opacity-30">🍽️</div>
+            <div className="text-[5rem] mb-4 opacity-30">🍽️</div>
             <h3 className="font-bebas text-2xl mb-2">No items yet</h3>
             <p className="text-text-gray">
               This vendor hasn't added any items to their menu.
