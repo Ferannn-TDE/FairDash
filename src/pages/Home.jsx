@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useUser, useClerk } from "@clerk/clerk-react";
+import { useMobileMenu } from "../context/MobileMenuContext";
 import {
   MagnifyingGlassIcon,
   ArrowRightIcon,
@@ -38,11 +39,11 @@ const getGreeting = () => {
 
 const Home = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { setIsMobileMenuOpen } = useMobileMenu();
   const popularItems = getPopularItems();
   const { cart, removeFromCart, updateQuantity, getCartTotal, getCartCount } =
     useCart();
@@ -60,21 +61,8 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-bg-dark lg:h-screen lg:overflow-hidden block lg:grid lg:grid-cols-[260px_1fr_340px] xl:grid-cols-[280px_1fr_380px]">
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* ===== LEFT SIDEBAR ===== */}
-      <aside
-        className={`bg-bg-card border-r border-white/10 flex-col p-6 overflow-y-auto z-50
-          hidden lg:flex lg:h-full
-          max-lg:fixed max-lg:top-0 max-lg:left-0 max-lg:w-[280px] max-lg:h-full max-lg:transition-transform max-lg:duration-300
-          ${sidebarOpen ? "max-lg:flex max-lg:translate-x-0" : "max-lg:-translate-x-full"}`}
-      >
+      {/* ===== LEFT SIDEBAR — desktop only ===== */}
+      <aside className="hidden lg:flex bg-bg-card border-r border-white/10 flex-col p-6 overflow-y-auto h-full z-50">
         {/* Brand */}
         <div className="flex items-center gap-3 mb-12">
           <img
@@ -97,7 +85,7 @@ const Home = () => {
             <Link
               key={item.label}
               to={item.to}
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => setIsMobileMenuOpen(false)}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mb-1 no-underline transition-all duration-200 ${
                 location.pathname === item.to
                   ? "bg-neon-pink/10 text-neon-pink"
@@ -123,7 +111,7 @@ const Home = () => {
             <Link
               key={item.label}
               to={item.to}
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => setIsMobileMenuOpen(false)}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mb-1 no-underline transition-all duration-200 ${
                 location.pathname === item.to
                   ? "bg-neon-pink/10 text-neon-pink"
@@ -171,7 +159,7 @@ const Home = () => {
               </div>
               <button
                 className="lg:hidden p-2.5 bg-bg-card border border-white/10 rounded-xl text-neon-pink hover:border-neon-pink hover:bg-white/5 transition-all duration-200"
-                onClick={() => setSidebarOpen(true)}
+                onClick={() => setIsMobileMenuOpen(true)}
                 aria-label="Open menu"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -356,23 +344,32 @@ const Home = () => {
           </div>
 
           {/* Footer inside scrollable area */}
-          <footer className="border-t border-white/5 pt-6 pb-4 mt-4">
-            <div className="flex flex-col sm:flex-row justify-between items-center text-text-gray text-xs gap-3 sm:gap-0 text-center sm:text-left">
-              <p>&copy; 2026 FairDash. All rights reserved.</p>
-              <div className="flex gap-4">
-                <Link
-                  to="/contact"
-                  className="text-text-gray no-underline hover:text-neon-pink transition-colors duration-200"
-                >
-                  Contact
-                </Link>
-                <Link
-                  to="/refund-policy"
-                  className="text-text-gray no-underline hover:text-neon-pink transition-colors duration-200"
-                >
-                  Refund Policy
-                </Link>
+          <footer className="border-t border-white/10 pt-8 pb-4 mt-8">
+            <div className="mb-6">
+              <div className="font-bebas text-[1.5rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)] mb-1">
+                FAIR<span className="text-neon-pink">DASH</span>
               </div>
+              <p className="text-text-gray text-xs m-0">The fair comes to your door. Fresh. Fast. Fair.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div>
+                <h5 className="font-bebas text-[0.875rem] text-neon-pink mb-2">Company</h5>
+                <Link to="/contact" className="block text-text-gray text-xs hover:text-neon-pink no-underline mb-1">Contact</Link>
+                <Link to="/refund-policy" className="block text-text-gray text-xs hover:text-neon-pink no-underline">Refund Policy</Link>
+              </div>
+              <div>
+                <h5 className="font-bebas text-[0.875rem] text-neon-pink mb-2">Join Us</h5>
+                <Link to="/contact" className="block text-text-gray text-xs hover:text-neon-pink no-underline mb-1">Vendor</Link>
+                <Link to="/contact" className="block text-text-gray text-xs hover:text-neon-pink no-underline">Driver</Link>
+              </div>
+              <div>
+                <h5 className="font-bebas text-[0.875rem] text-neon-pink mb-2">Connect</h5>
+                <a href="https://www.facebook.com/fairdash217" target="_blank" rel="noopener noreferrer" className="block text-text-gray text-xs hover:text-neon-pink no-underline mb-1">Facebook</a>
+                <a href="mailto:fairdash217@gmail.com" className="block text-text-gray text-xs hover:text-neon-pink no-underline">Email</a>
+              </div>
+            </div>
+            <div className="pt-4 border-t border-white/5 text-text-gray text-xs text-center">
+              &copy; 2026 FairDash. All rights reserved.
             </div>
           </footer>
         </div>
