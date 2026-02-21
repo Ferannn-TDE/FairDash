@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { ClerkProvider } from '@clerk/clerk-react'
+import { dark } from '@clerk/themes'
 import App from './App.jsx'
 import './index.css'
 
@@ -13,33 +14,63 @@ if (!PUBLISHABLE_KEY) {
 /**
  * Clerk appearance — global theme for all Clerk components.
  *
- * Branding: The FAIRDASH wordmark is injected via CSS pseudo-elements
- * on .cl-headerTitle (see index.css). Clerk's default header text is
- * hidden via font-size: 0, so only our brand shows.
+ * Base: @clerk/themes `dark` — fills in sensible dark-mode defaults
+ * so our overrides only need to handle FairDash-specific values.
  *
- * Design tokens (tailwind.config.js):
+ * Design tokens:
  *   neon-pink: #FF0077 | bg-dark: #0F0F0F | bg-card: #1A1A1A | text-gray: #A1A1A1
  */
 const clerkAppearance = {
-  layout: {
-    logoImageUrl: '/images/logo/fairdash-logo.png',
-    socialButtonsVariant: 'iconButton',
-    socialButtonsPlacement: 'top',
-    shimmer: true,
-    animations: true,
-  },
+  // Dark theme as base — handles backdrop, scrollbars, and system chrome
+  baseTheme: dark,
+
   variables: {
+    // Primary action color — neon pink throughout
     colorPrimary: '#FF0077',
-    colorBackground: '#1A1A1A',
+    colorDanger: '#ef4444',
+    colorSuccess: '#10b981',
+    colorWarning: '#f59e0b',
+
+    // Background
+    colorBackground: '#1A1A1A',       // Card / modal background
+    colorInputBackground: '#0f0f0f', // Input fields — deeper dark
+
+    // Text
     colorText: '#ffffff',
     colorTextSecondary: '#A1A1A1',
-    colorInputBackground: 'rgba(255, 255, 255, 0.05)',
-    colorInputText: '#ffffff',
-    colorDanger: '#ef4444',
-    borderRadius: '0.75rem',
+    colorTextOnPrimaryBackground: '#ffffff',
+
+    // Neutral (borders, dividers, placeholders)
+    colorNeutral: '#A1A1A1',
+
+    // Typography
     fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamilyButtons: '"Bebas Neue", cursive',
     fontSize: '0.9375rem',
+    fontWeight: {
+      normal: 400,
+      medium: 500,
+      semibold: 600,
+      bold: 700,
+    },
+
+    // Shape — matches rounded-xl used throughout FairDash
+    borderRadius: '0.75rem',
   },
+
+  layout: {
+    logoImageUrl: '/images/logo/fairdash-logo.png',
+    logoLinkUrl: '/home',
+    logoPlacement: 'inside',
+    socialButtonsVariant: 'iconButton',
+    socialButtonsPlacement: 'bottom',
+    showOptionalFields: true,
+    animations: true,
+    shimmer: true,
+    termsPageUrl: 'https://fairdash.app/refund-policy',
+    privacyPageUrl: 'https://fairdash.app/refund-policy',
+  },
+
   elements: {
     // ── Modal overlay & container ──
     modalBackdrop: 'bg-black/80 backdrop-blur-sm',
@@ -48,13 +79,13 @@ const clerkAppearance = {
     rootBox: 'w-full',
     cardBox: '!rounded-2xl',
 
-    // ── Header — logoImageUrl handles branding ──
+    // ── Header — logo handles branding, title hidden ──
     headerTitle: '!hidden',
     logoBox: '!justify-center !mb-2',
     logoImage: '!h-12',
     headerSubtitle: '!text-[#A1A1A1] !text-sm !mt-2',
 
-    // ── Social login icon buttons — large 60x60 targets ──
+    // ── Social login icon buttons — large 60×60 targets ──
     socialButtonsProviders: '!gap-5 justify-center',
     socialButtonsIconButton: [
       '!w-[60px] !h-[60px] !rounded-2xl',
@@ -78,26 +109,28 @@ const clerkAppearance = {
     dividerLine: '!bg-white/[0.08]',
     dividerText: '!text-[#A1A1A1] !text-[11px] uppercase !tracking-[2px] !px-5',
 
-    // ── Form fields — taller inputs, more spacing ──
+    // ── Form fields ──
     formFieldRow: '!mb-5',
     formFieldLabel: '!text-[#A1A1A1] !text-[13px] !font-semibold !mb-2',
     formFieldInput: [
-      '!bg-white/[0.04] !border-2 !border-white/10 !text-white',
+      '!bg-[#0f0f0f] !border-2 !border-white/10 !text-white',
       '!h-[52px] !px-5 !rounded-xl !text-[15px]',
       'placeholder:!text-white/25',
       'focus:!border-[#FF0077] focus:!ring-2 focus:!ring-[#FF0077]/15',
       'hover:!border-white/20',
       'transition-all duration-200',
     ].join(' '),
-    formFieldInputShowPasswordButton: '!text-[#A1A1A1] hover:!text-white !mr-1',
+    formFieldInputShowPasswordButton: '!text-[#A1A1A1] hover:!text-[#FF0077] !mr-1',
+    formFieldErrorText: '!text-red-400 !text-xs !mt-1',
 
-    // ── Primary CTA — tall, prominent, glowing ──
+    // ── Primary CTA ──
     formButtonPrimary: [
       '!bg-[#FF0077] hover:!bg-[#e0006b]',
       '!h-[56px] !text-sm !font-bold uppercase !tracking-[2px] !rounded-xl',
-      '!shadow-[0_0_20px_rgba(255,0,119,0.25)]',
-      'hover:!shadow-[0_0_30px_rgba(255,0,119,0.5)]',
-      'active:!scale-[0.98]',
+      '!shadow-[0_4px_12px_rgba(255,0,119,0.3)]',
+      'hover:!shadow-[0_6px_20px_rgba(255,0,119,0.5)]',
+      'hover:!translate-y-[-1px]',
+      'active:!scale-[0.98] active:!translate-y-0',
       'transition-all duration-300 ease-out',
       '!mt-3',
     ].join(' '),
@@ -115,9 +148,17 @@ const clerkAppearance = {
 
     // ── Verification / OTP ──
     formResendCodeLink: '!text-[#FF0077] hover:!text-[#ff3399]',
-    otpCodeFieldInput: '!border-2 !border-white/10 !bg-white/[0.04] !text-white !rounded-xl !h-[52px] !w-[52px] !text-lg',
+    otpCodeFieldInput: [
+      '!border-2 !border-white/10 !bg-[#0f0f0f] !text-white',
+      '!rounded-xl !h-[52px] !w-[52px] !text-lg !font-bold',
+      'focus:!border-[#FF0077] focus:!ring-2 focus:!ring-[#FF0077]/15',
+      'transition-all duration-200',
+    ].join(' '),
 
-    // ── Error states ──
+    // ── Back link ──
+    backLink: '!text-[#FF0077] hover:!text-[#ff3399] transition-colors duration-200',
+
+    // ── Alert / error banners ──
     alert: '!bg-red-500/10 !border-2 !border-red-500/20 !text-red-300 !rounded-xl !text-sm !p-4',
     alertText: '!text-red-300',
 

@@ -65,6 +65,8 @@ export default {
         'sm': '640px',
         'md': '768px',
         'lg': '968px',
+        'tablet': '62.5rem',
+        'desktop': '78.125rem',
         'xl': '1400px',
       },
     },

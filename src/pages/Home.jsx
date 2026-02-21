@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useUser, useClerk } from "@clerk/clerk-react";
+import toast from "react-hot-toast";
 import { useMobileMenu } from "../context/MobileMenuContext";
+import SignOutModal from "../components/SignOutModal";
 import {
   MagnifyingGlassIcon,
   ArrowRightIcon,
@@ -13,6 +15,8 @@ import {
   HeartIcon,
   TruckIcon,
   ClockIcon,
+  Bars3Icon,
+  ShoppingBagIcon,
 } from "@heroicons/react/24/outline";
 import { useCart } from "../context/CartContext";
 import FoodCard from "../components/FoodCard";
@@ -39,14 +43,22 @@ const getGreeting = () => {
 
 const Home = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [showSignOutModal, setShowSignOutModal] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useUser();
   const { signOut } = useClerk();
   const { setIsMobileMenuOpen } = useMobileMenu();
   const popularItems = getPopularItems();
-  const { cart, removeFromCart, updateQuantity, getCartTotal, getCartCount } =
+  const { cart, removeFromCart, updateQuantity, getCartTotal, getCartCount, setIsCartOpen } =
     useCart();
+
+  const handleSignOut = () => {
+    signOut(() => {
+      toast.success("Signed out successfully. See you soon! 👋");
+      navigate("/");
+    });
+  };
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -60,9 +72,48 @@ const Home = () => {
   const deliveryFee = cartCount > 0 ? 2.99 : 0;
 
   return (
-    <div className="min-h-screen bg-bg-dark lg:h-screen lg:overflow-hidden block lg:grid lg:grid-cols-[260px_1fr_340px] xl:grid-cols-[280px_1fr_380px]">
+    <>
+    <div className="min-h-screen bg-bg-dark desktop:h-screen desktop:overflow-hidden block desktop:grid desktop:grid-cols-[260px_1fr_340px] xl:grid-cols-[280px_1fr_380px]">
+
+      {/* ===== MOBILE STICKY NAV — hidden at desktop+ ===== */}
+      <div className="desktop:hidden fixed top-0 left-0 right-0 z-50 bg-bg-dark/80 backdrop-blur-md border-b border-white/10">
+        <div className="flex justify-between items-center px-4 py-4">
+          <div className="flex items-center gap-2">
+            <img
+              src="/images/logo/fairdash-icon.png"
+              alt="FairDash"
+              className="h-8 w-auto object-contain"
+            />
+            <span className="font-bebas text-[1.25rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
+              FAIR<span className="text-neon-pink">DASH</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsCartOpen(true)}
+              className="relative p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
+              aria-label="Open cart"
+            >
+              <ShoppingBagIcon className="w-6 h-6 text-white" />
+              {cartCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-neon-pink text-white text-[0.6875rem] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {cartCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
+              aria-label="Open menu"
+            >
+              <Bars3Icon className="w-6 h-6 text-neon-pink" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* ===== LEFT SIDEBAR — desktop only ===== */}
-      <aside className="hidden lg:flex bg-bg-card border-r border-white/10 flex-col p-6 overflow-y-auto h-full z-50">
+      <aside className="hidden desktop:flex bg-bg-card border-r border-white/10 flex-col p-6 overflow-y-auto h-full z-50">
         {/* Brand */}
         <div className="flex items-center gap-3 mb-12">
           <img
@@ -132,8 +183,8 @@ const Home = () => {
 
         {/* Logout */}
         <button
-          onClick={() => signOut(() => navigate("/"))}
-          className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mt-4 text-text-gray hover:bg-white/5 hover:text-white transition-all duration-200 bg-transparent border-0 cursor-pointer w-full text-left"
+          onClick={() => setShowSignOutModal(true)}
+          className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mt-4 text-text-gray hover:bg-white/5 hover:text-red-400 transition-all duration-200 bg-transparent border-0 cursor-pointer w-full text-left"
         >
           <ArrowRightOnRectangleIcon className="w-5 h-5" />
           Logout
@@ -141,9 +192,12 @@ const Home = () => {
       </aside>
 
       {/* ===== CENTER CONTENT ===== */}
-      <div className="overflow-y-auto lg:h-full w-full min-w-0">
-        <div className="p-8 md:p-6 sm:p-5 xs:p-4">
-          {/* Header — hamburger integrated inline */}
+      <div className="overflow-y-auto desktop:h-full w-full min-w-0">
+        {/* Spacer for mobile fixed nav */}
+        <div className="h-16 desktop:hidden" />
+
+        <div className="p-6 md:p-4 sm:p-3">
+          {/* Header */}
           <div className="flex justify-between items-center mb-8">
             <div>
               <h1 className="text-2xl font-extrabold text-white mb-1">
@@ -157,15 +211,6 @@ const Home = () => {
               <div className="hidden md:flex bg-bg-card px-4 py-2.5 rounded-full text-sm font-semibold text-white border border-white/10 items-center gap-2 whitespace-nowrap">
                 📍 Springfield Fairgrounds
               </div>
-              <button
-                className="lg:hidden p-2.5 bg-bg-card border border-white/10 rounded-xl text-neon-pink hover:border-neon-pink hover:bg-white/5 transition-all duration-200"
-                onClick={() => setIsMobileMenuOpen(true)}
-                aria-label="Open menu"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
             </div>
           </div>
 
@@ -376,7 +421,7 @@ const Home = () => {
       </div>
 
       {/* ===== RIGHT WIDGET COLUMN ===== */}
-      <div className="hidden lg:flex h-full border-l border-white/10 flex-col overflow-y-auto">
+      <div className="hidden desktop:flex h-full border-l border-white/10 flex-col overflow-y-auto">
         <div className="p-6 flex flex-col gap-5 flex-1">
           {/* Map Widget */}
           <div className="h-[200px] bg-bg-card rounded-2xl border border-white/5 relative overflow-hidden flex items-center justify-center flex-shrink-0">
@@ -511,6 +556,13 @@ const Home = () => {
         </div>
       </div>
     </div>
+
+    <SignOutModal
+      isOpen={showSignOutModal}
+      onClose={() => setShowSignOutModal(false)}
+      onConfirm={handleSignOut}
+    />
+    </>
   );
 };
 

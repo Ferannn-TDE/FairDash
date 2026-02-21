@@ -1,6 +1,18 @@
+import { useEffect } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 
 const SidePanel = ({ isOpen, onClose, type, children }) => {
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
+
   return (
     <>
       {/* Overlay — conditionally rendered */}
@@ -42,7 +54,7 @@ const SidePanel = ({ isOpen, onClose, type, children }) => {
         </div>
 
         {/* Content — flex col so Cart can have sticky footer */}
-        <div className="h-[calc(100%-88px)] flex flex-col">{children}</div>
+        <div className="h-[calc(100vh-88px)] overflow-y-auto pb-20">{children}</div>
       </div>
     </>
   );

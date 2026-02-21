@@ -12,6 +12,7 @@ import { CartProvider } from "./context/CartContext";
 import { MobileMenuProvider } from "./context/MobileMenuContext";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
 import LoadingAnimation from "./components/LoadingAnimation";
+import ToastConfig from "./components/Toast";
 import Navbar from "./components/Navbar";
 import Cart from "./components/Cart";
 import MobileNavPanel from "./components/MobileNavPanel";
@@ -131,6 +132,7 @@ function App() {
 
   return (
     <CartProvider>
+      <ToastConfig />
       <MobileMenuProvider>
         {loading ? (
           <LoadingAnimation onComplete={() => setLoading(false)} />

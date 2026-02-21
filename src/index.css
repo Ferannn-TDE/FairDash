@@ -47,7 +47,68 @@
   }
 }
 
-/* Clerk modal header alignment */
+/* ─────────────────────────────────────────
+   Clerk component overrides — FairDash theme
+   ───────────────────────────────────────── */
+
+/* Header subtitle alignment */
 .cl-headerSubtitle {
   text-align: center;
+}
+
+/* Neon glow on card */
+.cl-card {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Input focus ring — neon pink */
+.cl-formFieldInput:focus {
+  box-shadow: 0 0 0 3px rgba(255, 0, 119, 0.1) !important;
+}
+
+/* OTP field focus ring */
+.cl-otpCodeFieldInput:focus {
+  box-shadow: 0 0 0 3px rgba(255, 0, 119, 0.1) !important;
+}
+
+/* Smooth transitions on all interactive Clerk elements */
+.cl-button,
+.cl-formButtonPrimary,
+.cl-socialButtonsBlockButton,
+.cl-socialButtonsIconButton,
+.cl-formFieldInput {
+  transition: all 0.3s ease-out !important;
+}
+
+/* Neon glow on primary button hover */
+.cl-formButtonPrimary:hover {
+  box-shadow: 0 6px 20px rgba(255, 0, 119, 0.5) !important;
+}
+
+/* Bebas Neue for header and primary button */
+.cl-headerTitle,
+.cl-formButtonPrimary {
+  font-family: 'Bebas Neue', cursive !important;
+  letter-spacing: 0.1em !important;
+}
+
+/* Loading spinner — neon pink */
+.cl-spinner {
+  border-color: #FF0077 rgba(255, 0, 119, 0.15) rgba(255, 0, 119, 0.15) !important;
+}
+
+/* Modal scrollbar — neon pink tint */
+.cl-modalContent::-webkit-scrollbar {
+  width: 6px;
+}
+.cl-modalContent::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 3px;
+}
+.cl-modalContent::-webkit-scrollbar-thumb {
+  background: rgba(255, 0, 119, 0.3);
+  border-radius: 3px;
+}
+.cl-modalContent::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 0, 119, 0.5);
 }

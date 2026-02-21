@@ -121,6 +121,7 @@ const Cart = () => {
       onClose={() => setIsCartOpen(false)}
       type="cart"
     >
+      <div className="min-h-full flex flex-col">
       {cart.length === 0 ? (
         /* Empty state — flex-1 to vertically center */
         <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
@@ -150,8 +151,8 @@ const Cart = () => {
         </div>
       ) : (
         <>
-          {/* Scrollable items — flex-1 */}
-          <div className="flex-1 overflow-y-auto p-5 px-7">
+          {/* Items */}
+          <div className="p-5 px-7">
             {cart.map((item) => (
               <CartItem
                 key={item.id}
@@ -162,8 +163,8 @@ const Cart = () => {
             ))}
           </div>
 
-          {/* Checkout footer — flex-shrink-0 stays at bottom */}
-          <div className="flex-shrink-0 p-7 border-t border-white/10 bg-bg-dark">
+          {/* Checkout footer — flows naturally */}
+          <div className="p-7 border-t border-white/10 bg-bg-dark">
             <div className="mb-5">
               <div className="flex justify-between mb-3 text-text-gray text-sm">
                 <span>Subtotal</span>
@@ -202,6 +203,7 @@ const Cart = () => {
           </div>
         </>
       )}
+      </div>
     </SidePanel>
   );
 };

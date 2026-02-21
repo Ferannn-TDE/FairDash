@@ -1,4 +1,5 @@
 import { ClockIcon, PlusIcon } from '@heroicons/react/24/outline';
+import toast from 'react-hot-toast';
 import { useCart } from '../context/CartContext';
 import { formatPrice, getVendorById } from '../utils/vendorData';
 
@@ -7,6 +8,7 @@ const FoodCard = ({ item }) => {
 
   const handleAddToCart = () => {
     addToCart(item);
+    toast.success(`${item.name} added to cart! 🎉`);
   };
 
   return (
