@@ -33,11 +33,20 @@ const MobileNavPanel = () => {
   const close = () => setIsMobileMenuOpen(false);
 
   const handleSignOut = () => {
-    close();
     signOut(() => {
       toast.success("Signed out successfully. See you soon! 👋");
       navigate("/");
     });
+  };
+
+  const handleOpenSignOutModal = () => {
+    // Close side panel first
+    close();
+
+    // Wait for SidePanel animation to finish (match its transition duration)
+    setTimeout(() => {
+      setShowSignOutModal(true);
+    }, 250); // Adjust if your SidePanel uses 200ms or 300ms
   };
 
   return (
@@ -98,7 +107,7 @@ const MobileNavPanel = () => {
           {/* Sign Out */}
           {isSignedIn && (
             <button
-              onClick={() => setShowSignOutModal(true)}
+              onClick={handleOpenSignOutModal}
               className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-text-gray hover:text-red-400 hover:bg-white/5 rounded-xl transition-all duration-200 font-semibold text-[0.9375rem] bg-transparent border-t border-white/10 cursor-pointer mt-2 pt-4"
             >
               <ArrowRightOnRectangleIcon className="w-5 h-5" />

@@ -313,12 +313,12 @@ const Home = () => {
                 <Link
                   key={cat.id}
                   to={`/menu?category=${cat.id}`}
-                  className="min-w-[130px] h-[130px] bg-bg-card rounded-2xl flex flex-col items-center justify-center border border-white/5 transition-all duration-300 cursor-pointer no-underline text-white hover:border-neon-pink hover:-translate-y-1 hover:shadow-glow group"
+                  className="min-w-[130px] h-[130px] bg-bg-card rounded-2xl flex flex-col items-center justify-center border border-white/5 transition-all duration-300 cursor-pointer no-underline text-white hover:scale-[1.02] hover:shadow-[0_8px_30px_rgba(255,0,119,0.15)] hover:border-neon-pink/30 hover:bg-white/5 group"
                 >
-                  <span className="text-[2.5rem] mb-2.5 transition-transform duration-300 group-hover:scale-125">
+                  <span className="text-[2.5rem] mb-2.5 transition-transform duration-300 group-hover:scale-110">
                     {cat.emoji}
                   </span>
-                  <span className="font-semibold text-[0.6875rem] text-center uppercase tracking-[0.5px]">
+                  <span className="font-semibold text-[0.6875rem] text-center uppercase tracking-[0.5px] transition-colors duration-300 group-hover:text-neon-pink">
                     {cat.name}
                   </span>
                 </Link>
@@ -404,8 +404,8 @@ const Home = () => {
               </div>
               <div>
                 <h5 className="font-bebas text-[0.875rem] text-neon-pink mb-2">Join Us</h5>
-                <Link to="/contact" className="block text-text-gray text-xs hover:text-neon-pink no-underline mb-1">Vendor</Link>
-                <Link to="/contact" className="block text-text-gray text-xs hover:text-neon-pink no-underline">Driver</Link>
+                <Link to="/become-vendor" className="block text-text-gray text-xs hover:text-neon-pink no-underline mb-1">Vendor</Link>
+                <Link to="/become-driver" className="block text-text-gray text-xs hover:text-neon-pink no-underline">Driver</Link>
               </div>
               <div>
                 <h5 className="font-bebas text-[0.875rem] text-neon-pink mb-2">Connect</h5>
@@ -423,16 +423,6 @@ const Home = () => {
       {/* ===== RIGHT WIDGET COLUMN ===== */}
       <div className="hidden desktop:flex h-full border-l border-white/10 flex-col overflow-y-auto">
         <div className="p-6 flex flex-col gap-5 flex-1">
-          {/* Map Widget */}
-          <div className="h-[200px] bg-bg-card rounded-2xl border border-white/5 relative overflow-hidden flex items-center justify-center flex-shrink-0">
-            <span className="text-text-gray font-semibold text-sm">
-              [ Interactive Map ]
-            </span>
-            <div className="absolute bottom-4 left-4 bg-bg-dark px-3 py-2 rounded-xl text-xs font-bold text-white border border-white/10">
-              2 Drivers Nearby
-            </div>
-          </div>
-
           {/* Recent Order Preview */}
           <div className="bg-bg-card rounded-2xl border border-white/5 p-4 flex-shrink-0">
             <div className="text-xs uppercase tracking-wide text-text-gray font-bold mb-3">

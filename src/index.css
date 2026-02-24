@@ -112,3 +112,105 @@
 .cl-modalContent::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 0, 119, 0.5);
 }
+
+/* ─────────────────────────────────────────
+   Date input — dark theme
+   ───────────────────────────────────────── */
+input[type="date"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-datetime-edit {
+  color: #ffffff;
+  padding: 0;
+}
+
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  color: #ffffff;
+}
+
+input[type="date"]::-webkit-datetime-edit-text {
+  color: #999999;
+}
+
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+  color: #ffffff;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 1;
+  width: 1.25rem;
+  height: 1.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23FF0077'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  filter: none;
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 0.7;
+  transform: scale(1.1);
+}
+
+/* Firefox */
+input[type="date"]::-moz-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.7) sepia(1) saturate(5) hue-rotate(290deg) brightness(1.2);
+}
+
+/* ─────────────────────────────────────────
+   Google Maps Autocomplete dropdown — FairDash theme
+   ───────────────────────────────────────── */
+.pac-container {
+  background-color: #1a1a1a !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 0.75rem !important;
+  margin-top: 0.5rem !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
+  font-family: 'Inter', sans-serif !important;
+  overflow: hidden !important;
+}
+
+.pac-container::after {
+  display: none !important;
+}
+
+.pac-item {
+  background-color: transparent !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+  padding: 0.75rem 1rem !important;
+  cursor: pointer !important;
+  transition: background-color 0.2s ease !important;
+  color: #999999 !important;
+  font-size: 0.875rem !important;
+}
+
+.pac-item:first-child {
+  border-top: none !important;
+}
+
+.pac-item:hover,
+.pac-item-selected {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+}
+
+.pac-item-query {
+  color: #ffffff !important;
+  font-size: 0.875rem !important;
+}
+
+.pac-matched {
+  color: #FF0077 !important;
+  font-weight: 600 !important;
+}
+
+.pac-icon {
+  display: none !important;
+}

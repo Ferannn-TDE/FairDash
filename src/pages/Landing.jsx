@@ -1,20 +1,39 @@
 import { useRef, useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import {
-  MapPinIcon,
   ClockIcon,
   ChevronDownIcon,
   ArrowRightIcon,
 } from "@heroicons/react/24/outline";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
 import { useAuth, SignInButton } from "@clerk/clerk-react";
+import { APIProvider } from "@vis.gl/react-google-maps";
 import LandingNavbar from "../components/LandingNavbar";
+import AddressAutocomplete from "../components/AddressAutocomplete";
 
 const Landing = () => {
   const { isSignedIn, isLoaded } = useAuth();
+  const navigate = useNavigate();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleOption, setScheduleOption] = useState("now");
   const scheduleRef = useRef(null);
+  const [address, setAddress] = useState("");
+  const [selectedPlace, setSelectedPlace] = useState(null);
+
+  const handleFindFood = () => {
+    sessionStorage.setItem("deliveryAddress", address);
+    if (selectedPlace?.geometry?.location) {
+      sessionStorage.setItem(
+        "deliveryPlace",
+        JSON.stringify({
+          lat: selectedPlace.geometry.location.lat(),
+          lng: selectedPlace.geometry.location.lng(),
+          formatted_address: selectedPlace.formatted_address,
+        })
+      );
+    }
+    navigate("/home");
+  };
 
   // Close schedule dropdown on outside click
   useEffect(() => {
@@ -32,6 +51,7 @@ const Landing = () => {
   }
 
   return (
+    <APIProvider apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}>
     <div className="min-h-screen bg-bg-dark">
       <LandingNavbar />
 
@@ -60,19 +80,19 @@ const Landing = () => {
               </p>
 
               {/* Address + Schedule Input Bar */}
-              <div className="bg-bg-card border border-white/10 rounded-2xl p-3 max-w-[600px] md:max-w-full focus-within:border-neon-pink focus-within:shadow-glow transition-all duration-300">
+              <div
+                className="bg-bg-card border border-white/10 rounded-2xl p-3 max-w-[600px] md:max-w-full focus-within:border-neon-pink focus-within:shadow-glow transition-all duration-300"
+                onKeyDown={(e) => e.key === "Enter" && address.trim() && handleFindFood()}
+              >
 
                 {/* Row 1: Location input + Schedule dropdown */}
                 <div className="flex items-center gap-2 mb-2">
-                  {/* Location Input */}
-                  <div className="flex items-center gap-2 flex-1 px-3 py-2">
-                    <MapPinIcon className="w-5 h-5 text-neon-pink flex-shrink-0" />
-                    <input
-                      type="text"
-                      placeholder="Delivery address"
-                      className="bg-transparent border-0 text-white outline-none flex-1 text-[1rem] placeholder:text-text-gray w-full"
-                    />
-                  </div>
+                  {/* Address Autocomplete */}
+                  <AddressAutocomplete
+                    value={address}
+                    onChange={setAddress}
+                    onPlaceSelect={setSelectedPlace}
+                  />
 
                   {/* Divider */}
                   <div className="w-px h-8 bg-white/10 flex-shrink-0" />
@@ -103,10 +123,7 @@ const Landing = () => {
                               ? "bg-neon-pink/10 text-neon-pink"
                               : "bg-transparent text-text-gray hover:text-white hover:bg-white/5"
                           }`}
-                          onClick={() => {
-                            setScheduleOption("now");
-                            setScheduleOpen(false);
-                          }}
+                          onClick={() => { setScheduleOption("now"); setScheduleOpen(false); }}
                         >
                           ⚡ Deliver now
                         </button>
@@ -116,10 +133,7 @@ const Landing = () => {
                               ? "bg-neon-pink/10 text-neon-pink"
                               : "bg-transparent text-text-gray hover:text-white hover:bg-white/5"
                           }`}
-                          onClick={() => {
-                            setScheduleOption("later");
-                            setScheduleOpen(false);
-                          }}
+                          onClick={() => { setScheduleOption("later"); setScheduleOpen(false); }}
                         >
                           📅 Schedule for later
                         </button>
@@ -129,12 +143,13 @@ const Landing = () => {
                 </div>
 
                 {/* Row 2: Find Food — full width */}
-                <Link
-                  to="/home"
-                  className="block w-full bg-neon-pink text-white px-6 py-3 rounded-xl font-bold uppercase tracking-wide text-[0.875rem] transition-all duration-300 hover:bg-[#e0006b] hover:shadow-glow no-underline text-center"
+                <button
+                  onClick={handleFindFood}
+                  disabled={!address.trim()}
+                  className="block w-full bg-neon-pink text-white px-6 py-3 rounded-xl font-bold uppercase tracking-wide text-[0.875rem] transition-all duration-300 hover:bg-[#e0006b] hover:shadow-glow border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Find Food
-                </Link>
+                </button>
               </div>
 
               <p className="text-text-gray text-sm mt-5">
@@ -231,7 +246,7 @@ const Landing = () => {
                   your area.
                 </p>
                 <Link
-                  to="/contact"
+                  to="/become-vendor"
                   className="inline-flex items-center gap-2 text-neon-pink font-semibold uppercase tracking-wide text-sm no-underline hover:gap-3 transition-all duration-300"
                 >
                   Partner With Us <ArrowRightIcon className="w-4 h-4" />
@@ -262,7 +277,7 @@ const Landing = () => {
                   happy customers.
                 </p>
                 <Link
-                  to="/contact"
+                  to="/become-driver"
                   className="inline-flex items-center gap-2 text-neon-pink font-semibold uppercase tracking-wide text-sm no-underline hover:gap-3 transition-all duration-300"
                 >
                   Apply to Drive <ArrowRightIcon className="w-4 h-4" />
@@ -319,13 +334,13 @@ const Landing = () => {
               </h4>
               <ul className="list-none p-0 space-y-2">
                 <li>
-                  <Link to="/contact"
+                  <Link to="/become-vendor"
                     className="text-text-gray no-underline text-[0.875rem] transition-colors duration-300 hover:text-neon-pink">
                     Become a Vendor
                   </Link>
                 </li>
                 <li>
-                  <Link to="/contact"
+                  <Link to="/become-driver"
                     className="text-text-gray no-underline text-[0.875rem] transition-colors duration-300 hover:text-neon-pink">
                     Become a Driver
                   </Link>
@@ -381,6 +396,7 @@ const Landing = () => {
         </div>
       </footer>
     </div>
+    </APIProvider>
   );
 };
 

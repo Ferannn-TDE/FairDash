@@ -6,7 +6,6 @@ import {
   vendorCategories,
   getVendorsByCategory,
   getItemCountByVendor,
-  searchVendors,
 } from "../utils/vendorData";
 
 const VendorCard = ({ vendor }) => {
@@ -60,7 +59,12 @@ const Vendors = () => {
     : getVendorsByCategory(activeCategory);
 
   if (searchQuery.trim()) {
-    filtered = searchVendors(searchQuery);
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(
+      (v) =>
+        v.name.toLowerCase().includes(q) ||
+        v.description.toLowerCase().includes(q)
+    );
   }
 
   return (
@@ -82,10 +86,7 @@ const Vendors = () => {
               type="text"
               placeholder="Search vendors..."
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                if (e.target.value.trim()) setActiveCategory("all");
-              }}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full py-[1.125rem] px-6 pl-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-300 placeholder:text-text-gray focus:border-neon-pink focus:shadow-glow"
             />
           </div>

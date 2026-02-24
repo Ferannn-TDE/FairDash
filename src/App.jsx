@@ -23,6 +23,9 @@ import Vendors from "./pages/Vendors";
 import VendorDetail from "./pages/VendorDetail";
 import Contact from "./pages/Contact";
 import RefundPolicy from "./pages/RefundPolicy";
+import ManageAccount from "./pages/ManageAccount";
+import BecomeVendor from "./pages/BecomeVendor";
+import BecomeDriver from "./pages/BecomeDriver";
 
 const ProtectedRoute = ({ children }) => {
   const { isSignedIn, isLoaded } = useAuth();
@@ -121,6 +124,16 @@ const AppLayout = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/account"
+          element={
+            <ProtectedRoute>
+              <ManageAccount />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/become-vendor" element={<BecomeVendor />} />
+        <Route path="/become-driver" element={<BecomeDriver />} />
       </Routes>
       {!hideChrome && <Footer />}
     </div>
@@ -195,8 +208,8 @@ const Footer = () => {
           <div>
             <h4 className="font-bebas text-[1rem] tracking-wide mb-3 text-neon-pink">Join Us</h4>
             <ul className="list-none p-0 space-y-2">
-              <li><Link to="/contact" className="text-text-gray no-underline text-[0.875rem] transition-colors duration-300 hover:text-neon-pink">Become a Vendor</Link></li>
-              <li><Link to="/contact" className="text-text-gray no-underline text-[0.875rem] transition-colors duration-300 hover:text-neon-pink">Become a Driver</Link></li>
+              <li><Link to="/become-vendor" className="text-text-gray no-underline text-[0.875rem] transition-colors duration-300 hover:text-neon-pink">Become a Vendor</Link></li>
+              <li><Link to="/become-driver" className="text-text-gray no-underline text-[0.875rem] transition-colors duration-300 hover:text-neon-pink">Become a Driver</Link></li>
             </ul>
           </div>
           <div>
