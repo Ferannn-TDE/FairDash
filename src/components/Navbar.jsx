@@ -14,7 +14,7 @@ import { useMobileMenu } from "../context/MobileMenuContext";
 import SignOutModal from "./SignOutModal";
 
 const navLinkClass =
-  "text-text-gray no-underline font-medium transition-all duration-300 uppercase text-[0.875rem] tracking-wide relative after:content-[''] after:absolute after:-bottom-[5px] after:left-0 after:w-0 after:h-0.5 after:bg-neon-pink after:transition-all after:duration-300 hover:text-neon-pink hover:after:w-full";
+  "text-text-gray no-underline font-medium transition-all duration-300 uppercase text-[0.875rem] tracking-wide relative after:content-[''] after:absolute after:-bottom-[0.3125rem] after:left-0 after:w-0 after:h-0.5 after:bg-neon-pink after:transition-all after:duration-300 hover:text-neon-pink hover:after:w-full";
 
 const Navbar = () => {
   const { getCartCount, setIsCartOpen } = useCart();
@@ -47,7 +47,7 @@ const Navbar = () => {
   return (
     <>
       <nav className="fixed top-0 w-full bg-bg-dark/90 backdrop-blur-md border-b border-white/10 z-50">
-        <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 py-4">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 py-4">
           <div className="flex justify-between items-center">
 
             {/* Logo */}
@@ -60,7 +60,7 @@ const Navbar = () => {
                 alt="FairDash"
                 className="h-10 md:h-8 w-auto object-contain"
               />
-              <span className="font-bebas text-[1.5rem] md:text-[1.25rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
+              <span className="font-bebas text-[1.5rem] md:text-[1.25rem] tracking-[0.125rem] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
                 FAIR<span className="text-neon-pink">DASH</span>
               </span>
             </Link>
@@ -96,7 +96,7 @@ const Navbar = () => {
                   </button>
 
                   {isDropdownOpen && (
-                    <div className="absolute right-0 mt-2 w-56 bg-bg-card border border-white/10 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)] overflow-hidden animate-fadeIn z-10">
+                    <div className="absolute right-0 mt-2 w-56 bg-bg-card border border-white/10 rounded-xl shadow-[0_1.25rem_3.75rem_rgba(0,0,0,0.5)] overflow-hidden animate-fadeIn z-10">
                       {/* User info */}
                       <div className="px-4 py-3 border-b border-white/10">
                         <p className="text-white font-semibold text-sm truncate">

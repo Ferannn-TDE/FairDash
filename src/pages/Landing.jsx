@@ -10,6 +10,8 @@ import { useAuth, SignInButton } from "@clerk/clerk-react";
 import { APIProvider } from "@vis.gl/react-google-maps";
 import LandingNavbar from "../components/LandingNavbar";
 import AddressAutocomplete from "../components/AddressAutocomplete";
+import { getPopularItems } from '../utils/menuData';
+import { formatPrice } from '../utils/vendorData';
 
 const Landing = () => {
   const { isSignedIn, isLoaded } = useAuth();
@@ -57,7 +59,7 @@ const Landing = () => {
 
       {/* ===== HERO SECTION ===== */}
       <section className="min-h-screen flex items-center pt-20 relative overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(255,0,119,0.15),transparent_40%),linear-gradient(to_bottom,rgba(15,15,15,0.3),#0f0f0f)]">
-        <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 w-full">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 w-full">
           <div className="grid grid-cols-1 md:grid-cols-[6fr_4fr] items-center gap-10 min-h-[80vh] lg:min-h-0 lg:py-20">
             {/* Left Content */}
             <div className="z-[2] animate-fadeIn">
@@ -73,7 +75,7 @@ const Landing = () => {
                 </span>
               </h1>
 
-              <p className="text-text-gray text-[clamp(1rem,2vw,1.25rem)] mb-10 leading-relaxed max-w-[500px]">
+              <p className="text-text-gray text-[clamp(1rem,2vw,1.25rem)] mb-10 leading-relaxed max-w-[31.25rem]">
                 Order your favorite fair foods from local vendors.
                 <br />
                 Fresh. Fast. Fair. ⚡
@@ -81,7 +83,7 @@ const Landing = () => {
 
               {/* Address + Schedule Input Bar */}
               <div
-                className="bg-bg-card border border-white/10 rounded-2xl p-3 max-w-[600px] md:max-w-full focus-within:border-neon-pink focus-within:shadow-glow transition-all duration-300"
+                className="bg-bg-card border border-white/10 rounded-2xl p-3 max-w-[37.5rem] md:max-w-full focus-within:border-neon-pink focus-within:shadow-glow transition-all duration-300"
                 onKeyDown={(e) => e.key === "Enter" && address.trim() && handleFindFood()}
               >
 
@@ -116,7 +118,7 @@ const Landing = () => {
                     </button>
 
                     {scheduleOpen && (
-                      <div className="absolute top-full right-0 mt-2 bg-bg-card border border-white/10 rounded-xl overflow-hidden shadow-xl z-50 min-w-[200px]">
+                      <div className="absolute top-full right-0 mt-2 bg-bg-card border border-white/10 rounded-xl overflow-hidden shadow-xl z-50 min-w-[12.5rem]">
                         <button
                           className={`w-full px-4 py-3 text-left text-[0.875rem] flex items-center gap-2 border-0 cursor-pointer transition-colors duration-200 ${
                             scheduleOption === "now"
@@ -163,13 +165,13 @@ const Landing = () => {
             </div>
 
             {/* Right Side — Logo */}
-            <div className="hidden md:flex relative items-center justify-center min-h-[500px]">
+            <div className="hidden md:flex relative items-center justify-center min-h-[31.25rem]">
               <div className="relative">
                 <div className="absolute -inset-16 bg-[radial-gradient(circle,rgba(255,0,119,0.15),transparent_70%)] pointer-events-none" />
                 <img
                   src="/images/logo/fairdash-full-black.png"
                   alt="FairDash — Fresh. Fast. Fair."
-                  className="w-[420px] h-auto relative z-10 drop-shadow-[0_0_40px_rgba(255,0,119,0.5)]"
+                  className="w-[26.25rem] h-auto relative z-10 drop-shadow-[0_0_40px_rgba(255,0,119,0.5)]"
                 />
               </div>
             </div>
@@ -177,12 +179,89 @@ const Landing = () => {
         </div>
 
         {/* Background glow */}
-        <div className="absolute -top-1/2 -right-1/5 w-[800px] h-[800px] bg-[radial-gradient(circle,rgba(255,0,119,0.12)_0%,transparent_70%)] animate-float-slow pointer-events-none" />
+        <div className="absolute -top-1/2 -right-1/5 w-[50rem] h-[50rem] bg-[radial-gradient(circle,rgba(255,0,119,0.12)_0%,transparent_70%)] animate-float-slow pointer-events-none" />
+      </section>
+
+      {/* ===== TRENDING MENU PREVIEW ===== */}
+      <section className="py-16 md:py-12 bg-bg-dark">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
+          {/* Header */}
+          <div className="flex items-end justify-between mb-8 md:mb-6">
+            <div>
+              <p className="text-neon-pink text-xs font-bold uppercase tracking-widest mb-2">What's Hot</p>
+              <h2 className="font-bebas text-[clamp(2rem,4vw,3rem)] tracking-wide m-0">
+                Trending <span className="text-neon-pink">Now</span>
+              </h2>
+            </div>
+            <Link
+              to="/menu"
+              className="hidden md:inline-flex items-center gap-2 text-sm font-semibold text-text-gray no-underline hover:text-neon-pink transition-colors duration-300 uppercase tracking-wide"
+            >
+              View Full Menu <ArrowRightIcon className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {/* Cards grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {getPopularItems().slice(0, 4).map((item) => (
+              <div
+                key={item.id}
+                onClick={() => navigate("/menu")}
+                className="bg-bg-card rounded-xl overflow-hidden border border-white/5 cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:border-neon-pink/30 hover:shadow-glow group"
+              >
+                {/* Image / Emoji */}
+                <div className="relative aspect-square bg-gradient-to-br from-[#252525] to-bg-card overflow-hidden">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <span className="text-5xl">{item.emoji}</span>
+                    </div>
+                  )}
+                  {item.popular && (
+                    <div className="absolute top-2 left-2 bg-neon-pink px-2 py-0.5 rounded-full text-[0.625rem] font-bold">
+                      🔥 Popular
+                    </div>
+                  )}
+                </div>
+
+                {/* Info */}
+                <div className="p-3 md:p-4">
+                  <div className="flex items-start justify-between gap-1 mb-1">
+                    <p className="font-bebas text-base md:text-lg tracking-wide leading-tight line-clamp-1 text-white m-0">
+                      {item.name}
+                    </p>
+                    <span className="text-neon-pink font-bold text-sm md:text-base whitespace-nowrap flex-shrink-0">
+                      {formatPrice(item)}
+                    </span>
+                  </div>
+                  <p className="text-text-gray text-[0.6875rem] md:text-xs leading-relaxed line-clamp-2 m-0">
+                    {item.description}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Mobile CTA */}
+          <div className="mt-6 md:hidden">
+            <Link
+              to="/menu"
+              className="flex items-center justify-center gap-2 w-full py-3.5 bg-neon-pink text-white font-bold uppercase tracking-wide text-sm rounded-xl no-underline hover:bg-[#e0006b] transition-colors duration-300"
+            >
+              View Full Menu <ArrowRightIcon className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
       </section>
 
       {/* ===== STATS BAR ===== */}
       <section className="py-8 border-y border-white/5 bg-bg-card/50">
-        <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
           <div className="flex justify-around items-center flex-wrap gap-6">
             <div className="text-center">
               <div className="font-bebas text-4xl text-neon-pink [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
@@ -222,7 +301,7 @@ const Landing = () => {
 
       {/* ===== VENDOR / DRIVER SECTION ===== */}
       <section className="py-20 lg:py-16 md:py-12 bg-bg-card">
-        <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Become a Vendor Card */}
             <div className="relative rounded-3xl overflow-hidden bg-[#1a1a1a] border border-white/5 group hover:border-neon-pink/30 transition-all duration-300">
@@ -241,7 +320,7 @@ const Landing = () => {
                 <h3 className="font-bebas text-4xl md:text-3xl mb-3 tracking-wide text-white drop-shadow-lg">
                   Become a Vendor
                 </h3>
-                <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[400px] md:max-w-full">
+                <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[25rem] md:max-w-full">
                   Partner with FairDash and reach thousands of fair food lovers in
                   your area.
                 </p>
@@ -272,7 +351,7 @@ const Landing = () => {
                 <h3 className="font-bebas text-4xl md:text-3xl mb-3 tracking-wide text-white drop-shadow-lg">
                   Become a Driver
                 </h3>
-                <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[400px] md:max-w-full">
+                <p className="text-text-gray text-lg md:text-base leading-relaxed mb-6 max-w-[25rem] md:max-w-full">
                   Join our delivery team and earn money delivering fair food to
                   happy customers.
                 </p>
@@ -291,7 +370,7 @@ const Landing = () => {
 
       {/* ===== LANDING FOOTER ===== */}
       <footer className="bg-bg-dark border-t border-white/10 py-12 md:py-8">
-        <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
 
           {/* Logo + tagline */}
           <div className="mb-8">
@@ -300,7 +379,7 @@ const Landing = () => {
               alt="FairDash"
               className="w-40 mb-3 drop-shadow-[0_0_15px_rgba(255,0,119,0.4)]"
             />
-            <p className="text-text-gray text-[0.875rem] leading-relaxed max-w-[260px]">
+            <p className="text-text-gray text-[0.875rem] leading-relaxed max-w-[16.25rem]">
               The fair comes to your door. Fresh. Fast. Fair.
             </p>
           </div>

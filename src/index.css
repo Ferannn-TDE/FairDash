@@ -58,17 +58,17 @@
 
 /* Neon glow on card */
 .cl-card {
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 1.25rem 3.75rem rgba(0, 0, 0, 0.5) !important;
 }
 
 /* Input focus ring — neon pink */
 .cl-formFieldInput:focus {
-  box-shadow: 0 0 0 3px rgba(255, 0, 119, 0.1) !important;
+  box-shadow: 0 0 0 0.1875rem rgba(255, 0, 119, 0.1) !important;
 }
 
 /* OTP field focus ring */
 .cl-otpCodeFieldInput:focus {
-  box-shadow: 0 0 0 3px rgba(255, 0, 119, 0.1) !important;
+  box-shadow: 0 0 0 0.1875rem rgba(255, 0, 119, 0.1) !important;
 }
 
 /* Smooth transitions on all interactive Clerk elements */
@@ -82,7 +82,7 @@
 
 /* Neon glow on primary button hover */
 .cl-formButtonPrimary:hover {
-  box-shadow: 0 6px 20px rgba(255, 0, 119, 0.5) !important;
+  box-shadow: 0 0.375rem 1.25rem rgba(255, 0, 119, 0.5) !important;
 }
 
 /* Bebas Neue for header and primary button */
@@ -99,15 +99,15 @@
 
 /* Modal scrollbar — neon pink tint */
 .cl-modalContent::-webkit-scrollbar {
-  width: 6px;
+  width: 0.375rem;
 }
 .cl-modalContent::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 3px;
+  border-radius: 0.1875rem;
 }
 .cl-modalContent::-webkit-scrollbar-thumb {
   background: rgba(255, 0, 119, 0.3);
-  border-radius: 3px;
+  border-radius: 0.1875rem;
 }
 .cl-modalContent::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 0, 119, 0.5);
@@ -172,7 +172,7 @@ input[type="date"]::-moz-calendar-picker-indicator {
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 0.75rem !important;
   margin-top: 0.5rem !important;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 1.25rem 3.75rem rgba(0, 0, 0, 0.5) !important;
   font-family: 'Inter', sans-serif !important;
   overflow: hidden !important;
 }

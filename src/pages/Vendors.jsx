@@ -17,7 +17,7 @@ const VendorCard = ({ vendor }) => {
       className="bg-bg-card rounded-2xl border border-white/5 overflow-hidden transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow no-underline group"
     >
       {/* Emoji hero */}
-      <div className="h-[140px] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden">
+      <div className="h-[8.75rem] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.08),transparent_70%)]" />
         <span className="text-[4rem] relative z-10 transition-transform duration-300 group-hover:scale-110">
           {vendor.emoji}
@@ -71,8 +71,8 @@ const Vendors = () => {
     <div className="pt-20 min-h-screen">
       {/* Header */}
       <div className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-[3.75rem] pb-10 md:py-10 border-b border-white/10">
-        <div className="max-w-[1400px] mx-auto px-[6%] md:px-5">
-          <h1 className="font-bebas text-[clamp(2.5rem,6vw,4rem)] text-center mb-2.5 tracking-[2px]">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
+          <h1 className="font-bebas text-[clamp(2.5rem,6vw,4rem)] text-center mb-2.5 tracking-[0.125rem]">
             <span className="text-neon-pink">Italian Fest</span> Vendors
           </h1>
           <p className="text-center text-text-gray text-lg mb-10">
@@ -80,7 +80,7 @@ const Vendors = () => {
           </p>
 
           {/* Search */}
-          <div className="max-w-[600px] mx-auto relative">
+          <div className="max-w-[37.5rem] mx-auto relative">
             <MagnifyingGlassIcon className="w-5 h-5 absolute left-6 top-1/2 -translate-y-1/2 text-text-gray pointer-events-none" />
             <input
               type="text"
@@ -93,11 +93,11 @@ const Vendors = () => {
         </div>
       </div>
 
-      <div className="max-w-[1400px] mx-auto px-[6%] md:px-5">
+      <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
         {/* Category filters */}
         <div className="py-10 md:py-[1.875rem] border-b border-white/5">
           <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide mb-5 font-semibold">
-            <FunnelIcon className="w-[18px] h-[18px]" />
+            <FunnelIcon className="w-[1.125rem] h-[1.125rem]" />
             <span>Filter by Category</span>
           </div>
           <div className="flex gap-3 md:gap-2 flex-wrap">
@@ -145,7 +145,7 @@ const Vendors = () => {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-6">
+            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-6">
               {filtered.map((vendor) => (
                 <VendorCard key={vendor.id} vendor={vendor} />
               ))}

@@ -25,7 +25,7 @@ const SidePanel = ({ isOpen, onClose, type, children }) => {
 
       {/* Panel — always in DOM, slides from right */}
       <div
-        className={`fixed top-0 right-0 h-screen w-[95%] sm:w-[90%] md:w-[450px] bg-bg-dark border-l border-white/10 z-[1000] transform transition-transform duration-300 ease-out ${
+        className={`fixed top-0 right-0 h-screen w-[95%] sm:w-[90%] md:w-[28.125rem] bg-bg-dark border-l border-white/10 z-[1000] transform transition-transform duration-300 ease-out ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -38,7 +38,7 @@ const SidePanel = ({ isOpen, onClose, type, children }) => {
               alt="FairDash"
               className="h-8 w-auto mix-blend-screen"
             />
-            <span className="font-bebas text-xl tracking-[2px] text-white">
+            <span className="font-bebas text-xl tracking-[0.125rem] text-white">
               FAIR<span className="text-neon-pink">DASH</span>
             </span>
           </div>
@@ -54,7 +54,7 @@ const SidePanel = ({ isOpen, onClose, type, children }) => {
         </div>
 
         {/* Content — flex col so Cart can have sticky footer */}
-        <div className="h-[calc(100vh-88px)] overflow-y-auto pb-20">{children}</div>
+        <div className="h-[calc(100vh-5.5rem)] overflow-y-auto pb-20">{children}</div>
       </div>
     </>
   );

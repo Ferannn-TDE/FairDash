@@ -13,6 +13,7 @@ import { MobileMenuProvider } from "./context/MobileMenuContext";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
 import LoadingAnimation from "./components/LoadingAnimation";
 import ToastConfig from "./components/Toast";
+import ScrollToTop from "./components/ScrollToTop";
 import Navbar from "./components/Navbar";
 import Cart from "./components/Cart";
 import MobileNavPanel from "./components/MobileNavPanel";
@@ -53,6 +54,7 @@ const AppLayout = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <ScrollToTop />
       {!hideChrome && <Navbar />}
       <Cart />
       <MobileNavPanel />
@@ -66,32 +68,11 @@ const AppLayout = () => {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/menu"
-          element={
-            <ProtectedRoute>
-              <Menu />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/menu" element={<Menu />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/refund-policy" element={<RefundPolicy />} />
-        <Route
-          path="/vendors"
-          element={
-            <ProtectedRoute>
-              <Vendors />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/vendors/:vendorId"
-          element={
-            <ProtectedRoute>
-              <VendorDetail />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/vendors" element={<Vendors />} />
+        <Route path="/vendors/:vendorId" element={<VendorDetail />} />
         <Route
           path="/track"
           element={
@@ -161,7 +142,7 @@ function App() {
 
 const ComingSoon = ({ title }) => {
   return (
-    <div className="min-h-[calc(100vh-80px)] flex items-center justify-center pt-20 pb-5 px-5">
+    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center pt-20 pb-5 px-5">
       <div className="text-center max-w-[600px]">
         <h1 className="font-bebas text-[clamp(2.5rem,6vw,4.5rem)] leading-tight mb-5 tracking-[2px]">
           <span className="text-neon-pink">{title}</span>
@@ -184,7 +165,7 @@ const ComingSoon = ({ title }) => {
 const Footer = () => {
   return (
     <footer className="bg-bg-dark border-t border-white/10 py-12 md:py-8 mt-auto">
-      <div className="max-w-[1400px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
+      <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4">
 
         {/* Logo */}
         <div className="mb-8 md:mb-6">

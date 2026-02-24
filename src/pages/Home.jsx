@@ -73,7 +73,7 @@ const Home = () => {
 
   return (
     <>
-    <div className="min-h-screen bg-bg-dark desktop:h-screen desktop:overflow-hidden block desktop:grid desktop:grid-cols-[260px_1fr_340px] xl:grid-cols-[280px_1fr_380px]">
+    <div className="min-h-screen bg-bg-dark desktop:h-screen desktop:overflow-hidden block desktop:grid desktop:grid-cols-[16.25rem_1fr_21.25rem] xl:grid-cols-[17.5rem_1fr_23.75rem]">
 
       {/* ===== MOBILE STICKY NAV — hidden at desktop+ ===== */}
       <div className="desktop:hidden fixed top-0 left-0 right-0 z-50 bg-bg-dark/80 backdrop-blur-md border-b border-white/10">
@@ -84,7 +84,7 @@ const Home = () => {
               alt="FairDash"
               className="h-8 w-auto object-contain"
             />
-            <span className="font-bebas text-[1.25rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
+            <span className="font-bebas text-[1.25rem] tracking-[0.125rem] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
               FAIR<span className="text-neon-pink">DASH</span>
             </span>
           </div>
@@ -121,13 +121,13 @@ const Home = () => {
             alt="FairDash"
             className="w-10 h-10 object-contain flex-shrink-0"
           />
-          <span className="font-bebas text-4xl tracking-[2px] text-white">
+          <span className="font-bebas text-4xl tracking-[0.125rem] text-white">
             FAIR <span className="text-neon-pink">DASH</span>
           </span>
         </div>
 
         {/* Menu Section */}
-        <div className="text-[0.6875rem] uppercase tracking-[1px] text-text-gray font-bold mb-4">
+        <div className="text-[0.6875rem] uppercase tracking-[0.0625rem] text-text-gray font-bold mb-4">
           Menu
         </div>
         {sidebarMenu.map((item) => {
@@ -153,7 +153,7 @@ const Home = () => {
         <div className="flex-1" />
 
         {/* Orders Section */}
-        <div className="text-[0.6875rem] uppercase tracking-[1px] text-text-gray font-bold mb-4">
+        <div className="text-[0.6875rem] uppercase tracking-[0.0625rem] text-text-gray font-bold mb-4">
           Orders
         </div>
         {sidebarOrders.map((item) => {
@@ -247,7 +247,7 @@ const Home = () => {
                   Order from your phone. Pick up curbside or get it delivered.
                 </p>
                 <form
-                  className="bg-white/10 rounded-2xl flex items-center border border-white/10 max-w-[500px] transition-all duration-300 focus-within:border-neon-pink focus-within:shadow-glow"
+                  className="bg-white/10 rounded-2xl flex items-center border border-white/10 max-w-[31.25rem] transition-all duration-300 focus-within:border-neon-pink focus-within:shadow-glow"
                   onSubmit={handleSearch}
                 >
                   <input
@@ -259,13 +259,13 @@ const Home = () => {
                   />
                   <button
                     type="submit"
-                    className="bg-neon-pink border-0 m-1.5 w-[44px] h-[44px] rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
+                    className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
                   >
                     <MagnifyingGlassIcon className="w-5 h-5" />
                   </button>
                 </form>
               </div>
-              <div className="absolute -top-20 -right-20 w-[300px] h-[300px] bg-[radial-gradient(circle,rgba(255,0,119,0.12)_0%,transparent_70%)] pointer-events-none" />
+              <div className="absolute -top-20 -right-20 w-[18.75rem] h-[18.75rem] bg-[radial-gradient(circle,rgba(255,0,119,0.12)_0%,transparent_70%)] pointer-events-none" />
             </div>
 
             {/* Two Feature Cards — ALWAYS side by side */}
@@ -313,12 +313,12 @@ const Home = () => {
                 <Link
                   key={cat.id}
                   to={`/menu?category=${cat.id}`}
-                  className="min-w-[130px] h-[130px] bg-bg-card rounded-2xl flex flex-col items-center justify-center border border-white/5 transition-all duration-300 cursor-pointer no-underline text-white hover:scale-[1.02] hover:shadow-[0_8px_30px_rgba(255,0,119,0.15)] hover:border-neon-pink/30 hover:bg-white/5 group"
+                  className="min-w-[8.125rem] h-[8.125rem] bg-bg-card rounded-2xl flex flex-col items-center justify-center border border-white/5 transition-all duration-300 cursor-pointer no-underline text-white hover:scale-[1.02] hover:shadow-[0_8px_30px_rgba(255,0,119,0.15)] hover:border-neon-pink/30 hover:bg-white/5 group"
                 >
                   <span className="text-[2.5rem] mb-2.5 transition-transform duration-300 group-hover:scale-110">
                     {cat.emoji}
                   </span>
-                  <span className="font-semibold text-[0.6875rem] text-center uppercase tracking-[0.5px] transition-colors duration-300 group-hover:text-neon-pink">
+                  <span className="font-semibold text-[0.6875rem] text-center uppercase tracking-[0.03125rem] transition-colors duration-300 group-hover:text-neon-pink">
                     {cat.name}
                   </span>
                 </Link>
@@ -340,7 +340,7 @@ const Home = () => {
               </Link>
             </div>
 
-            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
+            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-5">
               {popularItems.map((item) => (
                 <FoodCard key={item.id} item={item} />
               ))}
@@ -391,7 +391,7 @@ const Home = () => {
           {/* Footer inside scrollable area */}
           <footer className="border-t border-white/10 pt-8 pb-4 mt-8">
             <div className="mb-6">
-              <div className="font-bebas text-[1.5rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)] mb-1">
+              <div className="font-bebas text-[1.5rem] tracking-[0.125rem] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)] mb-1">
                 FAIR<span className="text-neon-pink">DASH</span>
               </div>
               <p className="text-text-gray text-xs m-0">The fair comes to your door. Fresh. Fast. Fair.</p>
@@ -489,7 +489,7 @@ const Home = () => {
                       >
                         <MinusIcon className="w-3.5 h-3.5" />
                       </button>
-                      <span className="text-xs font-bold min-w-[16px] text-center text-white">
+                      <span className="text-xs font-bold min-w-4 text-center text-white">
                         {item.quantity}
                       </span>
                       <button

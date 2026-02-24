@@ -9,7 +9,7 @@ const VendorItemCard = ({ item }) => {
   return (
     <div className="bg-bg-card rounded-2xl overflow-hidden border border-white/5 transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow animate-fadeIn">
       {/* Image / Emoji area */}
-      <div className="h-[160px] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden">
+      <div className="h-[10rem] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.08),transparent_70%)]" />
         {item.image ? (
           <img
@@ -60,7 +60,7 @@ const VendorItemCard = ({ item }) => {
           onClick={() => addToCart(item)}
           className="w-full py-3 bg-white/5 border border-white/10 text-white font-semibold rounded-xl cursor-pointer transition-all duration-300 flex items-center justify-center gap-2 uppercase tracking-wide text-sm hover:bg-neon-pink hover:border-neon-pink hover:shadow-glow"
         >
-          <PlusIcon className="w-[18px] h-[18px]" />
+          <PlusIcon className="w-[1.125rem] h-[1.125rem]" />
           Add to Cart
         </button>
       </div>
@@ -82,7 +82,7 @@ const VendorDetail = () => {
     <div className="pt-20 min-h-screen">
       {/* Header */}
       <div className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-12 md:py-8 border-b border-white/10">
-        <div className="max-w-[1400px] mx-auto px-[6%] md:px-5">
+        <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
           {/* Back button */}
           <Link
             to="/vendors"
@@ -99,7 +99,7 @@ const VendorDetail = () => {
             </div>
 
             <div className="flex-1">
-              <h1 className="font-bebas text-[clamp(2rem,5vw,3.5rem)] leading-tight tracking-[2px] mb-1">
+              <h1 className="font-bebas text-[clamp(2rem,5vw,3.5rem)] leading-tight tracking-[0.125rem] mb-1">
                 {vendor.name}
               </h1>
               <p className="text-text-gray text-base mb-3">
@@ -125,7 +125,7 @@ const VendorDetail = () => {
       </div>
 
       {/* Items Grid */}
-      <div className="max-w-[1400px] mx-auto px-[6%] md:px-5 py-10 pb-20">
+      <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5 py-10 pb-20">
         <h2 className="font-bebas text-[2rem] tracking-wide mb-8">Menu</h2>
 
         {items.length === 0 ? (
@@ -137,7 +137,7 @@ const VendorDetail = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-6">
+          <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-6">
             {items.map((item) => (
               <VendorItemCard key={item.id} item={item} />
             ))}

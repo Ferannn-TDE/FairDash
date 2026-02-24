@@ -90,7 +90,7 @@ const CartItem = ({ item, updateQuantity, removeFromCart }) => {
           >
             <MinusIcon className="w-4 h-4" />
           </button>
-          <span className="font-bold min-w-[24px] text-center">
+          <span className="font-bold min-w-6 text-center">
             {item.quantity}
           </span>
           <button
@@ -145,7 +145,7 @@ const Cart = () => {
           <h3 className="font-bebas text-2xl mb-2.5 tracking-wide text-white">
             Your cart is empty
           </h3>
-          <p className="text-text-gray text-sm leading-relaxed max-w-[200px]">
+          <p className="text-text-gray text-sm leading-relaxed max-w-[12.5rem]">
             Add some fair favorites to get started!
           </p>
         </div>

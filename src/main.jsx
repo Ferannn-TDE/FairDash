@@ -88,7 +88,7 @@ const clerkAppearance = {
     // ── Social login icon buttons — large 60×60 targets ──
     socialButtonsProviders: '!gap-5 justify-center',
     socialButtonsIconButton: [
-      '!w-[60px] !h-[60px] !rounded-2xl',
+      '!w-[3.75rem] !h-[3.75rem] !rounded-2xl',
       '!border-2 !border-white/10 !bg-white/[0.04]',
       'hover:!bg-white/[0.1] hover:!border-[#FF0077]/50 hover:!scale-105',
       'active:!scale-95',
@@ -107,14 +107,14 @@ const clerkAppearance = {
     // ── "or" divider ──
     dividerRow: '!my-7',
     dividerLine: '!bg-white/[0.08]',
-    dividerText: '!text-[#A1A1A1] !text-[11px] uppercase !tracking-[2px] !px-5',
+    dividerText: '!text-[#A1A1A1] !text-[0.6875rem] uppercase !tracking-[0.125rem] !px-5',
 
     // ── Form fields ──
     formFieldRow: '!mb-5',
-    formFieldLabel: '!text-[#A1A1A1] !text-[13px] !font-semibold !mb-2',
+    formFieldLabel: '!text-[#A1A1A1] !text-[0.8125rem] !font-semibold !mb-2',
     formFieldInput: [
       '!bg-[#0f0f0f] !border-2 !border-white/10 !text-white',
-      '!h-[52px] !px-5 !rounded-xl !text-[15px]',
+      '!h-[3.25rem] !px-5 !rounded-xl !text-[0.9375rem]',
       'placeholder:!text-white/25',
       'focus:!border-[#FF0077] focus:!ring-2 focus:!ring-[#FF0077]/15',
       'hover:!border-white/20',
@@ -126,10 +126,10 @@ const clerkAppearance = {
     // ── Primary CTA ──
     formButtonPrimary: [
       '!bg-[#FF0077] hover:!bg-[#e0006b]',
-      '!h-[56px] !text-sm !font-bold uppercase !tracking-[2px] !rounded-xl',
+      '!h-[3.5rem] !text-sm !font-bold uppercase !tracking-[0.125rem] !rounded-xl',
       '!shadow-[0_4px_12px_rgba(255,0,119,0.3)]',
       'hover:!shadow-[0_6px_20px_rgba(255,0,119,0.5)]',
-      'hover:!translate-y-[-1px]',
+      'hover:!translate-y-[-0.0625rem]',
       'active:!scale-[0.98] active:!translate-y-0',
       'transition-all duration-300 ease-out',
       '!mt-3',
@@ -150,7 +150,7 @@ const clerkAppearance = {
     formResendCodeLink: '!text-[#FF0077] hover:!text-[#ff3399]',
     otpCodeFieldInput: [
       '!border-2 !border-white/10 !bg-[#0f0f0f] !text-white',
-      '!rounded-xl !h-[52px] !w-[52px] !text-lg !font-bold',
+      '!rounded-xl !h-[3.25rem] !w-[3.25rem] !text-lg !font-bold',
       'focus:!border-[#FF0077] focus:!ring-2 focus:!ring-[#FF0077]/15',
       'transition-all duration-200',
     ].join(' '),
