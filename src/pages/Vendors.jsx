@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { MagnifyingGlassIcon, FunnelIcon } from "@heroicons/react/24/outline";
+import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import {
   vendors,
-  vendorCategories,
-  getVendorsByCategory,
   getItemCountByVendor,
 } from "../utils/vendorData";
 
@@ -51,20 +49,24 @@ const VendorCard = ({ vendor }) => {
 };
 
 const Vendors = () => {
-  const [activeCategory, setActiveCategory] = useState("all");
+  const [selectedVendor, setSelectedVendor] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  let filtered = activeCategory === "all"
-    ? vendors
-    : getVendorsByCategory(activeCategory);
+  const isSearching = searchQuery.trim().length > 0;
 
-  if (searchQuery.trim()) {
+  const clearSearch = () => setSearchQuery("");
+
+  let filtered = vendors;
+
+  if (isSearching) {
     const q = searchQuery.toLowerCase();
     filtered = filtered.filter(
       (v) =>
         v.name.toLowerCase().includes(q) ||
         v.description.toLowerCase().includes(q)
     );
+  } else if (selectedVendor !== "all") {
+    filtered = filtered.filter((v) => v.id === selectedVendor);
   }
 
   return (
@@ -87,51 +89,83 @@ const Vendors = () => {
               placeholder="Search vendors..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full py-[1.125rem] px-6 pl-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-300 placeholder:text-text-gray focus:border-neon-pink focus:shadow-glow"
+              className="w-full py-[1.125rem] px-6 pl-14 pr-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-300 placeholder:text-text-gray focus:border-neon-pink focus:shadow-glow"
             />
+            {isSearching && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-5 top-1/2 -translate-y-1/2 p-1 text-text-gray hover:text-white transition-colors bg-transparent border-0 cursor-pointer"
+                aria-label="Clear search"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
-        {/* Category filters */}
-        <div className="py-10 md:py-[1.875rem] border-b border-white/5">
-          <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide mb-5 font-semibold">
-            <FunnelIcon className="w-[1.125rem] h-[1.125rem]" />
-            <span>Filter by Category</span>
-          </div>
-          <div className="flex gap-3 md:gap-2 flex-wrap">
-            {vendorCategories.map((cat) => (
+        {/* Vendor name filters — hidden while searching */}
+        {!isSearching && (
+          <div className="py-10 md:py-[1.875rem] border-b border-white/5">
+            <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide mb-5 font-semibold">
+              <BuildingStorefrontIcon className="w-[1.125rem] h-[1.125rem]" />
+              <span>Filter by Vendor</span>
+            </div>
+            <div className="flex gap-3 md:gap-2 flex-wrap">
               <button
-                key={cat.id}
                 className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${
-                  activeCategory === cat.id
+                  selectedVendor === "all"
                     ? "bg-neon-pink border-neon-pink text-white shadow-glow"
                     : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20"
                 }`}
-                onClick={() => {
-                  setActiveCategory(cat.id);
-                  setSearchQuery("");
-                }}
+                onClick={() => setSelectedVendor("all")}
               >
-                <span className="text-lg">{cat.emoji}</span>
-                {cat.name}
+                <BuildingStorefrontIcon className="w-4 h-4" />
+                All Vendors
               </button>
-            ))}
+
+              {vendors.map((vendor) => (
+                <button
+                  key={vendor.id}
+                  className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${
+                    selectedVendor === vendor.id
+                      ? "bg-neon-pink border-neon-pink text-white shadow-glow"
+                      : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20"
+                  }`}
+                  onClick={() => setSelectedVendor(vendor.id)}
+                >
+                  <span className="text-base">{vendor.emoji}</span>
+                  {vendor.name}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Vendor Grid */}
         <div className="py-10 pb-20">
           <div className="flex md:flex-col md:items-start md:gap-2.5 justify-between items-center mb-[1.875rem] pb-5 border-b border-white/5">
             <h2 className="font-bebas text-[2rem] tracking-wide">
-              {searchQuery
+              {isSearching
                 ? `Results for "${searchQuery}"`
-                : vendorCategories.find((c) => c.id === activeCategory)?.name || "All Vendors"}
+                : selectedVendor === "all"
+                ? "All Vendors"
+                : vendors.find((v) => v.id === selectedVendor)?.name || "Vendors"}
             </h2>
-            <span className="text-text-gray text-sm font-medium">
-              {filtered.length} {filtered.length === 1 ? "vendor" : "vendors"}
-            </span>
+            <div className="flex items-center gap-4">
+              <span className="text-text-gray text-sm font-medium">
+                {filtered.length} {filtered.length === 1 ? "vendor" : "vendors"}
+              </span>
+              {isSearching && (
+                <button
+                  onClick={clearSearch}
+                  className="text-neon-pink text-sm font-semibold hover:text-[#e0006b] transition-colors bg-transparent border-0 cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {filtered.length === 0 ? (
@@ -141,11 +175,21 @@ const Vendors = () => {
                 No vendors found
               </h3>
               <p className="text-text-gray text-lg">
-                Try adjusting your search or filter
+                {isSearching
+                  ? `No results for "${searchQuery}"`
+                  : "Try selecting a different vendor filter"}
               </p>
+              {isSearching && (
+                <button
+                  onClick={clearSearch}
+                  className="mt-6 px-6 py-3 bg-neon-pink text-white rounded-xl font-bold text-sm hover:bg-[#e0006b] transition-colors border-0 cursor-pointer uppercase tracking-wide"
+                >
+                  Clear Search
+                </button>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-6">
+            <div className="grid grid-cols-2 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 xs:gap-6">
               {filtered.map((vendor) => (
                 <VendorCard key={vendor.id} vendor={vendor} />
               ))}

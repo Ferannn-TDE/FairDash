@@ -415,7 +415,7 @@ const Home = () => {
               </Link>
             </div>
 
-            <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-5">
+            <div className="grid grid-cols-2 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 xs:gap-5">
               {popularItems.map((item) => (
                 <FoodCard key={item.id} item={item} />
               ))}
