@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   PlusIcon,
   MinusIcon,
@@ -106,6 +107,7 @@ const CartItem = ({ item, updateQuantity, removeFromCart }) => {
 };
 
 const Cart = () => {
+  const navigate = useNavigate();
   const {
     cart,
     removeFromCart,
@@ -114,6 +116,11 @@ const Cart = () => {
     isCartOpen,
     setIsCartOpen,
   } = useCart();
+
+  const handleCheckout = () => {
+    setIsCartOpen(false);
+    navigate("/checkout");
+  };
 
   return (
     <SidePanel
@@ -179,7 +186,10 @@ const Cart = () => {
                 <span>${(getCartTotal() + 2.99).toFixed(2)}</span>
               </div>
             </div>
-            <button className="w-full py-4 bg-neon-pink border-0 text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-300 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense">
+            <button
+              onClick={handleCheckout}
+              className="w-full py-4 bg-neon-pink border-0 text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-300 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense"
+            >
               Checkout • ${(getCartTotal() + 2.99).toFixed(2)}
             </button>
             <p className="text-center mt-4 text-text-gray text-[0.8125rem]">
