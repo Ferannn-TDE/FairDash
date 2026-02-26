@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useUser, useClerk } from "@clerk/clerk-react";
 import toast from "react-hot-toast";
@@ -21,7 +21,7 @@ import {
 import { useCart } from "../context/CartContext";
 import FoodCard from "../components/FoodCard";
 import { categories, getPopularItems } from "../utils/menuData";
-import { vendors as allVendors } from "../utils/vendorData";
+import { vendors as allVendors, searchVendorItems } from "../utils/vendorData";
 
 const sidebarMenu = [
   { label: "Menu", icon: Squares2X2Icon, to: "/menu" },
@@ -43,15 +43,36 @@ const getGreeting = () => {
 
 const Home = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [locationText, setLocationText] = useState("Springfield Fairgrounds");
   const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const searchRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useUser();
   const { signOut } = useClerk();
   const { setIsMobileMenuOpen } = useMobileMenu();
   const popularItems = getPopularItems();
-  const { cart, removeFromCart, updateQuantity, getCartTotal, getCartCount, setIsCartOpen } =
+  const { cart, addToCart, updateQuantity, getCartTotal, getCartCount, setIsCartOpen } =
     useCart();
+
+  // Load saved delivery address
+  useEffect(() => {
+    const saved = sessionStorage.getItem("deliveryAddress");
+    if (saved) setLocationText(saved.split(",")[0].trim());
+  }, []);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setShowSearchResults(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleSignOut = () => {
     signOut(() => {
@@ -60,11 +81,29 @@ const Home = () => {
     });
   };
 
-  const handleSearch = (e) => {
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    if (query.trim().length > 0) {
+      setSearchResults(searchVendorItems(query));
+      setShowSearchResults(true);
+    } else {
+      setShowSearchResults(false);
+    }
+  };
+
+  const handleSearchSubmit = (e) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      window.location.href = `/menu?search=${encodeURIComponent(searchQuery)}`;
+      navigate(`/menu?search=${encodeURIComponent(searchQuery)}`);
+      setShowSearchResults(false);
     }
+  };
+
+  const handleAddFromSearch = (item) => {
+    addToCart(item);
+    toast.success(`${item.name} added to cart! 🎉`);
+    setShowSearchResults(false);
+    setSearchQuery("");
   };
 
   const cartCount = getCartCount();
@@ -208,8 +247,8 @@ const Home = () => {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <div className="hidden md:flex bg-bg-card px-4 py-2.5 rounded-full text-sm font-semibold text-white border border-white/10 items-center gap-2 whitespace-nowrap">
-                📍 Springfield Fairgrounds
+              <div className="hidden md:flex bg-bg-card px-4 py-2.5 rounded-full text-sm font-semibold text-white border border-white/10 items-center gap-2 whitespace-nowrap max-w-[12rem] truncate">
+                📍 {locationText}
               </div>
             </div>
           </div>
@@ -246,24 +285,60 @@ const Home = () => {
                 <p className="text-text-gray text-base sm:text-sm mb-5">
                   Order from your phone. Pick up curbside or get it delivered.
                 </p>
-                <form
-                  className="bg-white/10 rounded-2xl flex items-center border border-white/10 max-w-[31.25rem] transition-all duration-300 focus-within:border-neon-pink focus-within:shadow-glow"
-                  onSubmit={handleSearch}
-                >
-                  <input
-                    type="text"
-                    className="bg-transparent border-0 text-white py-4 px-5 flex-grow text-base outline-none placeholder:text-text-gray min-w-0"
-                    placeholder="🔍 Search Corn Dogs, Lemonade..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
+                <div className="relative max-w-[31.25rem]" ref={searchRef}>
+                  <form
+                    className="bg-white/10 rounded-2xl flex items-center border border-white/10 transition-all duration-300 focus-within:border-neon-pink focus-within:shadow-glow"
+                    onSubmit={handleSearchSubmit}
                   >
-                    <MagnifyingGlassIcon className="w-5 h-5" />
-                  </button>
-                </form>
+                    <input
+                      type="text"
+                      className="bg-transparent border-0 text-white py-4 px-5 flex-grow text-base outline-none placeholder:text-text-gray min-w-0"
+                      placeholder="🔍 Search Corn Dogs, Lemonade..."
+                      value={searchQuery}
+                      onChange={(e) => handleSearch(e.target.value)}
+                    />
+                    <button
+                      type="submit"
+                      className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
+                    >
+                      <MagnifyingGlassIcon className="w-5 h-5" />
+                    </button>
+                  </form>
+
+                  {/* Search results dropdown */}
+                  {showSearchResults && (
+                    <div className="absolute top-full mt-2 w-full bg-bg-card border border-white/10 rounded-2xl max-h-80 overflow-y-auto z-20 shadow-[0_1.25rem_3.75rem_rgba(0,0,0,0.5)]">
+                      {searchResults.length > 0 ? (
+                        searchResults.slice(0, 6).map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => handleAddFromSearch(item)}
+                            className="w-full p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 flex gap-3 items-center text-left bg-transparent border-0"
+                          >
+                            {item.image ? (
+                              <img
+                                src={item.image}
+                                alt={item.name}
+                                className="w-12 h-12 object-cover rounded-lg flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-lg bg-bg-dark flex items-center justify-center text-xl flex-shrink-0">
+                                {item.emoji}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white font-semibold text-sm truncate">{item.name}</p>
+                              <p className="text-neon-pink font-bold text-xs">${item.price?.toFixed(2) ?? `${item.priceMin?.toFixed(2)}+`}</p>
+                            </div>
+                            <PlusIcon className="w-4 h-4 text-text-gray flex-shrink-0" />
+                          </button>
+                        ))
+                      ) : (
+                        <p className="p-4 text-text-gray text-center text-sm">No results found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="absolute -top-20 -right-20 w-[18.75rem] h-[18.75rem] bg-[radial-gradient(circle,rgba(255,0,119,0.12)_0%,transparent_70%)] pointer-events-none" />
             </div>
@@ -531,6 +606,7 @@ const Home = () => {
                     : "bg-white/5 text-text-gray border border-white/10"
                 }`}
                 disabled={cartCount === 0}
+                onClick={() => cartCount > 0 && navigate("/checkout")}
               >
                 {cartCount > 0
                   ? `Checkout • $${(cartTotal + deliveryFee).toFixed(2)}`

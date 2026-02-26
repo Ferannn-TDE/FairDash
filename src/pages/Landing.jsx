@@ -10,6 +10,7 @@ import { useAuth, SignInButton } from "@clerk/clerk-react";
 import { APIProvider } from "@vis.gl/react-google-maps";
 import LandingNavbar from "../components/LandingNavbar";
 import AddressAutocomplete from "../components/AddressAutocomplete";
+import LoadingScreen from "../components/LoadingScreen";
 import { getPopularItems } from '../utils/menuData';
 import { formatPrice } from '../utils/vendorData';
 
@@ -21,8 +22,11 @@ const Landing = () => {
   const scheduleRef = useRef(null);
   const [address, setAddress] = useState("");
   const [selectedPlace, setSelectedPlace] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleFindFood = () => {
+    if (!address.trim()) return;
+
     sessionStorage.setItem("deliveryAddress", address);
     if (selectedPlace?.geometry?.location) {
       sessionStorage.setItem(
@@ -34,7 +38,11 @@ const Landing = () => {
         })
       );
     }
-    navigate("/home");
+
+    setIsLoading(true);
+    setTimeout(() => {
+      navigate("/menu");
+    }, 2000);
   };
 
   // Close schedule dropdown on outside click
@@ -47,6 +55,10 @@ const Landing = () => {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
   if (isLoaded && isSignedIn) {
     return <Navigate to="/home" />;

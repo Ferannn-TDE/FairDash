@@ -27,6 +27,7 @@ import RefundPolicy from "./pages/RefundPolicy";
 import ManageAccount from "./pages/ManageAccount";
 import BecomeVendor from "./pages/BecomeVendor";
 import BecomeDriver from "./pages/BecomeDriver";
+import Checkout from "./pages/Checkout";
 
 const ProtectedRoute = ({ children }) => {
   const { isSignedIn, isLoaded } = useAuth();
@@ -115,6 +116,14 @@ const AppLayout = () => {
         />
         <Route path="/become-vendor" element={<BecomeVendor />} />
         <Route path="/become-driver" element={<BecomeDriver />} />
+        <Route
+          path="/checkout"
+          element={
+            <ProtectedRoute>
+              <Checkout />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
       {!hideChrome && <Footer />}
     </div>

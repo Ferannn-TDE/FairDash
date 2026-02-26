@@ -12,41 +12,32 @@ if (!PUBLISHABLE_KEY) {
 }
 
 /**
- * Clerk appearance — global theme for all Clerk components.
- *
- * Base: @clerk/themes `dark` — fills in sensible dark-mode defaults
- * so our overrides only need to handle FairDash-specific values.
+ * Clerk appearance — FairDash × Spotify-style layout.
  *
  * Design tokens:
- *   neon-pink: #FF0077 | bg-dark: #0F0F0F | bg-card: #1A1A1A | text-gray: #A1A1A1
+ *   neon-pink: #FF0077 | pure-black: #000000 | bg-input: #121212 | text-muted: #b3b3b3
  */
 const clerkAppearance = {
-  // Dark theme as base — handles backdrop, scrollbars, and system chrome
   baseTheme: dark,
 
   variables: {
-    // Primary action color — neon pink throughout
     colorPrimary: '#FF0077',
     colorDanger: '#ef4444',
     colorSuccess: '#10b981',
     colorWarning: '#f59e0b',
 
-    // Background
-    colorBackground: '#1A1A1A',       // Card / modal background
-    colorInputBackground: '#0f0f0f', // Input fields — deeper dark
+    colorBackground: '#0f0f0f',
+    colorInputBackground: '#121212',
 
-    // Text
     colorText: '#ffffff',
-    colorTextSecondary: '#A1A1A1',
-    colorTextOnPrimaryBackground: '#ffffff',
+    colorTextSecondary: '#b3b3b3',
+    colorTextOnPrimaryBackground: '#000000',
 
-    // Neutral (borders, dividers, placeholders)
-    colorNeutral: '#A1A1A1',
+    colorNeutral: '#535353',
 
-    // Typography
-    fontFamily: 'Inter, system-ui, sans-serif',
-    fontFamilyButtons: '"Bebas Neue", cursive',
-    fontSize: '0.9375rem',
+    fontFamily: 'Inter, sans-serif',
+    fontFamilyButtons: 'Inter, sans-serif',
+    fontSize: '1rem',
     fontWeight: {
       normal: 400,
       medium: 500,
@@ -54,119 +45,119 @@ const clerkAppearance = {
       bold: 700,
     },
 
-    // Shape — matches rounded-xl used throughout FairDash
-    borderRadius: '0.75rem',
+    borderRadius: '62.5rem',
+    spacing: '1rem',
   },
 
   layout: {
-    logoImageUrl: '/images/logo/fairdash-logo.png',
+    logoImageUrl: '/images/image4.png',
     logoLinkUrl: '/home',
     logoPlacement: 'inside',
-    socialButtonsVariant: 'iconButton',
-    socialButtonsPlacement: 'bottom',
-    showOptionalFields: true,
+    socialButtonsVariant: 'blockButton',
+    socialButtonsPlacement: 'top',
+    showOptionalFields: false,
     animations: true,
-    shimmer: true,
-    termsPageUrl: 'https://fairdash.app/refund-policy',
-    privacyPageUrl: 'https://fairdash.app/refund-policy',
+    shimmer: false,
+    termsPageUrl: '/refund-policy',
+    privacyPageUrl: '/refund-policy',
   },
 
   elements: {
-    // ── Modal overlay & container ──
-    modalBackdrop: 'bg-black/80 backdrop-blur-sm',
-    modalContent: '!shadow-[0_25px_60px_rgba(0,0,0,0.6)]',
-    card: '!bg-[#1A1A1A] !border !border-white/[0.08] !rounded-2xl !shadow-none',
+    // ── Root & modal ──
     rootBox: 'w-full',
-    cardBox: '!rounded-2xl',
+    modalBackdrop: '!bg-black/80 !backdrop-blur-sm',
+    modalContent: '!bg-black !border-0 !rounded-lg !shadow-none',
+    cardBox: '!rounded-lg',
 
-    // ── Header — logo handles branding, title hidden ──
-    headerTitle: '!hidden',
-    logoBox: '!justify-center !mb-2',
-    logoImage: '!h-12',
-    headerSubtitle: '!text-[#A1A1A1] !text-sm !mt-2',
+    // ── Card — pure black, no border ──
+    card: '!bg-black !border-0 !shadow-none !rounded-lg !py-12 !px-6 !max-w-[28rem] !mx-auto',
 
-    // ── Social login icon buttons — large 60×60 targets ──
-    socialButtonsProviders: '!gap-5 justify-center',
-    socialButtonsIconButton: [
-      '!w-[3.75rem] !h-[3.75rem] !rounded-2xl',
-      '!border-2 !border-white/10 !bg-white/[0.04]',
-      'hover:!bg-white/[0.1] hover:!border-[#FF0077]/50 hover:!scale-105',
-      'active:!scale-95',
-      'transition-all duration-200 ease-out',
-      '!shadow-[0_2px_8px_rgba(0,0,0,0.2)]',
-    ].join(' '),
-    socialButtonsProviderIcon: '!w-6 !h-6',
+    // ── Logo & header ──
+    logoBox: '!justify-center !mb-12',
+    logoImage: '!h-24 !w-auto !mix-blend-screen ![filter:brightness(1.2)]',
+    headerTitle: '!text-[2rem] !font-bold !text-white !mb-8 !text-center !tracking-[0.02em]',
+    headerSubtitle: '!hidden',
+
+    // ── Social buttons — full-width pill, stacked ──
+    socialButtonsProviders: '!gap-3 !w-full !flex !flex-col',
     socialButtonsBlockButton: [
-      '!h-14 !rounded-xl',
-      '!border-2 !border-white/10 !bg-white/[0.04]',
-      'hover:!bg-white/[0.08] hover:!border-[#FF0077]/40',
-      'transition-all duration-200',
+      '!relative !w-full !h-12 !rounded-[62.5rem]',
+      '!border !border-[#727272] !bg-transparent',
+      '!text-white !font-bold',
+      'hover:!border-white hover:!bg-white/[0.05] hover:!scale-[1.02]',
+      'active:!scale-[0.98]',
+      'transition-all !duration-200',
     ].join(' '),
-    socialButtonsBlockButtonText: '!text-white !font-semibold',
+    socialButtonsBlockButtonText: '!text-white !font-bold',
+    socialButtonsProviderIcon: '!w-6 !h-6',
 
-    // ── "or" divider ──
-    dividerRow: '!my-7',
-    dividerLine: '!bg-white/[0.08]',
-    dividerText: '!text-[#A1A1A1] !text-[0.6875rem] uppercase !tracking-[0.125rem] !px-5',
+    // ── Divider ──
+    dividerRow: '!my-8',
+    dividerLine: '!bg-[#292929]',
+    dividerText: '!hidden',
 
     // ── Form fields ──
-    formFieldRow: '!mb-5',
-    formFieldLabel: '!text-[#A1A1A1] !text-[0.8125rem] !font-semibold !mb-2',
+    formFieldRow: '!mb-4',
+    formFieldLabel: '!text-white !text-[0.875rem] !font-bold !mb-2 !tracking-[0.02em]',
+    formFieldHintText: '!hidden',
     formFieldInput: [
-      '!bg-[#0f0f0f] !border-2 !border-white/10 !text-white',
-      '!h-[3.25rem] !px-5 !rounded-xl !text-[0.9375rem]',
-      'placeholder:!text-white/25',
-      'focus:!border-[#FF0077] focus:!ring-2 focus:!ring-[#FF0077]/15',
-      'hover:!border-white/20',
-      'transition-all duration-200',
+      '!bg-[#121212] !border !border-[#727272] !text-white',
+      '!rounded-[0.25rem] !py-3.5 !px-4 !text-[1rem] !min-h-[3rem]',
+      'placeholder:!text-[#6a6a6a]',
+      'focus:!border-white focus:!ring-0 focus:!shadow-none',
+      'hover:!border-white',
+      'transition-all !duration-200',
     ].join(' '),
-    formFieldInputShowPasswordButton: '!text-[#A1A1A1] hover:!text-[#FF0077] !mr-1',
-    formFieldErrorText: '!text-red-400 !text-xs !mt-1',
+    formFieldInputShowPasswordButton: '!text-[#b3b3b3] hover:!text-white !mr-1',
+    formFieldErrorText: '!text-[#f15e6c] !text-[0.875rem] !mt-1',
 
-    // ── Primary CTA ──
+    // ── Primary CTA — pill, black text ──
     formButtonPrimary: [
-      '!bg-[#FF0077] hover:!bg-[#e0006b]',
-      '!h-[3.5rem] !text-sm !font-bold uppercase !tracking-[0.125rem] !rounded-xl',
-      '!shadow-[0_4px_12px_rgba(255,0,119,0.3)]',
-      'hover:!shadow-[0_6px_20px_rgba(255,0,119,0.5)]',
-      'hover:!translate-y-[-0.0625rem]',
-      'active:!scale-[0.98] active:!translate-y-0',
-      'transition-all duration-300 ease-out',
-      '!mt-3',
+      '!bg-[#FF0077] hover:!bg-[#ff3399]',
+      '!text-[#000000] !font-bold uppercase !tracking-[0.1em]',
+      '!min-h-[3.5rem] !rounded-[62.5rem]',
+      '!shadow-none',
+      'hover:!scale-[1.02]',
+      'active:!scale-[0.98]',
+      'transition-all !duration-200',
+      '!mt-8',
     ].join(' '),
 
-    // ── Footer ("Don't have an account?") ──
-    footer: '!mt-7',
-    footerAction: '!pt-5 !border-t !border-white/[0.06] !justify-center',
-    footerActionLink: '!text-[#FF0077] hover:!text-[#ff3399] !font-bold transition-colors duration-200 !ml-1',
-    footerActionText: '!text-[#A1A1A1] !text-sm',
+    // ── Footer ──
+    footer: '!mt-8',
+    footerAction: '!pt-8 ![border-top:1px_solid_#292929] !justify-center',
+    footerActionLink: '!text-white hover:!text-[#FF0077] !font-semibold transition-colors !duration-200 !ml-1 !underline',
+    footerActionText: '!text-[#b3b3b3]',
 
     // ── Identity preview (after entering email) ──
-    identityPreview: '!bg-white/[0.04] !border-2 !border-white/10 !rounded-xl !py-3.5 !px-5',
+    identityPreview: '!bg-white/[0.04] !border !border-[#727272] !rounded-[0.25rem] !py-3.5 !px-4',
     identityPreviewEditButton: '!text-[#FF0077] hover:!text-[#ff3399]',
-    identityPreviewText: '!text-white',
+    identityPreviewText: '!text-white !text-[0.875rem]',
 
     // ── Verification / OTP ──
     formResendCodeLink: '!text-[#FF0077] hover:!text-[#ff3399]',
     otpCodeFieldInput: [
-      '!border-2 !border-white/10 !bg-[#0f0f0f] !text-white',
-      '!rounded-xl !h-[3.25rem] !w-[3.25rem] !text-lg !font-bold',
-      'focus:!border-[#FF0077] focus:!ring-2 focus:!ring-[#FF0077]/15',
-      'transition-all duration-200',
+      '!border !border-[#727272] !bg-[#121212] !text-white',
+      '!rounded-[0.25rem] !h-[3rem] !w-[3rem] !text-xl !font-bold',
+      'focus:!border-white focus:!ring-0 focus:!shadow-none',
+      'transition-all !duration-200',
     ].join(' '),
 
     // ── Back link ──
-    backLink: '!text-[#FF0077] hover:!text-[#ff3399] transition-colors duration-200',
+    backLink: '!text-white hover:!text-[#FF0077] !underline transition-colors !duration-200',
+
+    // ── Forgot password / form actions ──
+    formFieldAction: '!text-white hover:!text-[#FF0077] !font-semibold !underline transition-colors !duration-200',
 
     // ── Alert / error banners ──
-    alert: '!bg-red-500/10 !border-2 !border-red-500/20 !text-red-300 !rounded-xl !text-sm !p-4',
-    alertText: '!text-red-300',
+    alert: '!bg-[#2e77d0]/10 !border !border-[#2e77d0]/20 !text-white !rounded-[0.25rem] !text-sm !p-4',
+    alertText: '!text-white !text-[0.875rem]',
 
-    // ── Internal spacing ──
-    main: '!px-10 !py-8',
+    // ── Badge — float above button, don't affect spacing ──
+    badge: '!absolute !-top-2 !right-4 !bg-transparent !text-[#b3b3b3] !text-[0.75rem] !font-medium !p-0 !border-0 !shadow-none !z-10 !m-0 !leading-none',
 
-    // ── Clerk badge ──
-    footerPages: '!mt-5 !opacity-40 hover:!opacity-70 transition-opacity duration-200',
+    // ── Hide Clerk branding ──
+    footerPages: '!hidden',
   },
 }
 
