@@ -13,35 +13,35 @@ const VendorCard = ({ vendor }) => {
   return (
     <Link
       to={`/vendors/${vendor.id}`}
-      className="bg-bg-card rounded-2xl border border-white/5 overflow-hidden transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow no-underline group"
+      className="bg-bg-card rounded-xl md:rounded-2xl border border-white/5 overflow-hidden transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow no-underline group flex flex-col h-full"
     >
-      {/* Emoji hero */}
-      <div className="h-[8.75rem] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden">
+      {/* Emoji hero — aspect-square for uniform image area */}
+      <div className="relative w-full aspect-square bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center overflow-hidden flex-shrink-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.08),transparent_70%)]" />
-        <span className="text-[4rem] relative z-10 transition-transform duration-300 group-hover:scale-110">
+        <span className="text-[2.5rem] md:text-[4rem] relative z-10 transition-transform duration-300 group-hover:scale-110">
           {vendor.emoji}
         </span>
-        <div className="absolute top-3 right-3 bg-black/70 px-2.5 py-1 rounded-full text-[0.6875rem] font-bold text-neon-pink border border-neon-pink/30">
+        <div className="absolute top-2 right-2 md:top-3 md:right-3 bg-black/70 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-[0.5625rem] md:text-[0.6875rem] font-bold text-neon-pink border border-neon-pink/30">
           {itemCount} {itemCount === 1 ? "item" : "items"}
         </div>
       </div>
 
       {/* Info */}
-      <div className="p-5">
-        <h3 className="font-bebas text-xl tracking-wide text-white mb-1">
+      <div className="p-3 md:p-5 flex flex-col flex-1">
+        <h3 className="font-bebas text-base md:text-xl tracking-wide text-white mb-1 line-clamp-2 min-h-[2rem] md:min-h-[3rem] leading-tight">
           {vendor.name}
         </h3>
-        <p className="text-text-gray text-sm leading-relaxed mb-3 line-clamp-2">
+        <p className="text-text-gray text-[0.6875rem] md:text-sm leading-relaxed mb-2 md:mb-3 line-clamp-2 min-h-[2rem] md:min-h-[2.5rem]">
           {vendor.description}
         </p>
-        <div className="flex items-center gap-3 text-xs text-text-gray">
+        <div className="flex items-center flex-wrap gap-1.5 md:gap-3 text-[0.625rem] md:text-xs text-text-gray mb-3 md:mb-4">
           <span className="text-yellow-400">⭐ {vendor.rating}</span>
-          <span>•</span>
+          <span className="hidden md:inline">•</span>
           <span>{vendor.deliveryTime}</span>
-          <span>•</span>
+          <span className="hidden md:inline">•</span>
           <span>{vendor.priceRange}</span>
         </div>
-        <div className="mt-4 text-center py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold text-white uppercase tracking-wide transition-all duration-300 group-hover:bg-neon-pink group-hover:border-neon-pink group-hover:shadow-glow">
+        <div className="mt-auto text-center py-2 md:py-2.5 rounded-lg md:rounded-xl bg-white/5 border border-white/10 text-[0.625rem] md:text-sm font-semibold text-white uppercase tracking-wide transition-all duration-300 group-hover:bg-neon-pink group-hover:border-neon-pink group-hover:shadow-glow">
           View Menu
         </div>
       </div>

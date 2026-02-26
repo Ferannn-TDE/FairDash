@@ -1,72 +1,7 @@
 import { useParams, Link, Navigate } from "react-router-dom";
-import { ArrowLeftIcon, ClockIcon, PlusIcon } from "@heroicons/react/24/outline";
-import { getVendorById, getItemsByVendor, formatPrice } from "../utils/vendorData";
-import { useCart } from "../context/CartContext";
-
-const VendorItemCard = ({ item }) => {
-  const { addToCart } = useCart();
-
-  return (
-    <div className="bg-bg-card rounded-2xl overflow-hidden border border-white/5 transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow animate-fadeIn">
-      {/* Image / Emoji area */}
-      <div className="h-[10rem] bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.08),transparent_70%)]" />
-        {item.image ? (
-          <img
-            src={item.image}
-            alt={item.name}
-            className="w-full h-full object-cover relative z-10"
-          />
-        ) : (
-          <span className="text-[4rem] relative z-10 animate-float">
-            {item.emoji}
-          </span>
-        )}
-        {item.popular && (
-          <div className="absolute top-3 left-3 bg-neon-pink px-3 py-1 rounded-full text-xs font-bold z-[2]">
-            🔥 Popular
-          </div>
-        )}
-      </div>
-
-      {/* Info */}
-      <div className="p-5">
-        <div className="flex justify-between items-start mb-2 gap-3">
-          <h3 className="font-bebas text-xl tracking-wide text-white flex-1">
-            {item.name}
-          </h3>
-          <span className="text-neon-pink font-bold text-lg whitespace-nowrap [text-shadow:0_0_15px_rgba(255,0,119,0.3)]">
-            {formatPrice(item)}
-          </span>
-        </div>
-        <p className="text-text-gray text-sm leading-relaxed mb-4">
-          {item.description}
-        </p>
-
-        {item.tags && (
-          <div className="flex flex-wrap gap-1.5 mb-4">
-            {item.tags.map((tag) => (
-              <span
-                key={tag}
-                className="bg-white/5 text-text-gray px-2.5 py-0.5 rounded-lg text-[0.6875rem] font-medium uppercase tracking-wide border border-white/5"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-
-        <button
-          onClick={() => addToCart(item)}
-          className="w-full py-3 bg-white/5 border border-white/10 text-white font-semibold rounded-xl cursor-pointer transition-all duration-300 flex items-center justify-center gap-2 uppercase tracking-wide text-sm hover:bg-neon-pink hover:border-neon-pink hover:shadow-glow"
-        >
-          <PlusIcon className="w-[1.125rem] h-[1.125rem]" />
-          Add to Cart
-        </button>
-      </div>
-    </div>
-  );
-};
+import { ArrowLeftIcon, ClockIcon } from "@heroicons/react/24/outline";
+import { getVendorById, getItemsByVendor } from "../utils/vendorData";
+import FoodCard from "../components/FoodCard";
 
 const VendorDetail = () => {
   const { vendorId } = useParams();
@@ -137,9 +72,9 @@ const VendorDetail = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-6">
+          <div className="grid grid-cols-2 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 xs:gap-6">
             {items.map((item) => (
-              <VendorItemCard key={item.id} item={item} />
+              <FoodCard key={item.id} item={item} />
             ))}
           </div>
         )}
