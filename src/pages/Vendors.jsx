@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   vendors,
   getItemCountByVendor,
@@ -52,7 +53,9 @@ const Vendors = () => {
   const [selectedVendor, setSelectedVendor] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
+  const isMobile = useMediaQuery("(max-width: 48rem)");
   const isSearching = searchQuery.trim().length > 0;
+  const [showFilters, setShowFilters] = useState(false);
 
   const clearSearch = () => setSearchQuery("");
 
@@ -105,21 +108,61 @@ const Vendors = () => {
       </div>
 
       <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
-        {/* Vendor name filters — hidden while searching */}
-        {!isSearching && (
-          <div className="py-10 md:py-[1.875rem] border-b border-white/5">
-            <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide mb-5 font-semibold">
-              <BuildingStorefrontIcon className="w-[1.125rem] h-[1.125rem]" />
-              <span>Filter by Vendor</span>
+        {/* Search results indicator — mobile only */}
+        {isSearching && isMobile && (
+          <div className="py-5 border-b border-white/5">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-white text-sm font-semibold">
+                Results for "{searchQuery}"
+              </p>
+              <button
+                onClick={clearSearch}
+                className="text-neon-pink text-sm font-semibold hover:text-[#e0006b] transition-colors bg-transparent border-0 cursor-pointer"
+              >
+                Clear
+              </button>
             </div>
-            <div className="flex gap-3 md:gap-2 flex-wrap">
+            <p className="text-text-gray text-sm">
+              {filtered.length} {filtered.length === 1 ? "vendor" : "vendors"} found
+            </p>
+          </div>
+        )}
+
+        {/* Vendor name filters — hidden on mobile while searching */}
+        {!(isSearching && isMobile) && (
+          <div className="py-5 md:py-[1.875rem] border-b border-white/5">
+            {/* Header — clickable toggle on mobile */}
+            <button
+              className="flex items-center justify-between w-full mb-4 bg-transparent border-0 cursor-pointer p-0"
+              onClick={() => isMobile && setShowFilters((v) => !v)}
+            >
+              <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide font-semibold">
+                <BuildingStorefrontIcon className="w-[1.125rem] h-[1.125rem]" />
+                <span>
+                  Filter by Vendor
+                  {isMobile && selectedVendor !== "all" && (
+                    <span className="ml-2 text-neon-pink normal-case">
+                      ({vendors.find((v) => v.id === selectedVendor)?.name})
+                    </span>
+                  )}
+                </span>
+              </div>
+              {isMobile && (
+                showFilters
+                  ? <ChevronUpIcon className="w-5 h-5 text-text-gray flex-shrink-0" />
+                  : <ChevronDownIcon className="w-5 h-5 text-text-gray flex-shrink-0" />
+              )}
+            </button>
+
+            {/* Pills — always shown on desktop, toggled on mobile */}
+            <div className={isMobile && !showFilters ? "hidden" : "flex gap-3 md:gap-2 flex-wrap"}>
               <button
                 className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${
                   selectedVendor === "all"
                     ? "bg-neon-pink border-neon-pink text-white shadow-glow"
                     : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20"
                 }`}
-                onClick={() => setSelectedVendor("all")}
+                onClick={() => { setSelectedVendor("all"); if (isMobile) setShowFilters(false); }}
               >
                 <BuildingStorefrontIcon className="w-4 h-4" />
                 All Vendors
@@ -133,7 +176,7 @@ const Vendors = () => {
                       ? "bg-neon-pink border-neon-pink text-white shadow-glow"
                       : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20"
                   }`}
-                  onClick={() => setSelectedVendor(vendor.id)}
+                  onClick={() => { setSelectedVendor(vendor.id); if (isMobile) setShowFilters(false); }}
                 >
                   <span className="text-base">{vendor.emoji}</span>
                   {vendor.name}

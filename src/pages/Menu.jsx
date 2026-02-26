@@ -1,14 +1,20 @@
 import { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MagnifyingGlassIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 import FoodCard from '../components/FoodCard';
 import { menuItems } from '../utils/menuData';
 import { vendors } from '../utils/vendorData';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 
 const Menu = () => {
   const [searchParams] = useSearchParams();
   const [selectedVendor, setSelectedVendor] = useState('all');
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
+
+  const isMobile = useMediaQuery('(max-width: 48rem)');
+  const isSearching = searchQuery.trim().length > 0;
+  const clearSearch = () => setSearchQuery('');
+  const [showFilters, setShowFilters] = useState(false);
 
   // Only show vendors that have at least one item
   const activeVendors = useMemo(() => {
@@ -17,14 +23,15 @@ const Menu = () => {
   }, []);
 
   const filteredItems = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return menuItems.filter((item) => {
-      const matchesVendor = selectedVendor === 'all' || item.vendorId === selectedVendor;
-      const q = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        !q ||
-        item.name.toLowerCase().includes(q) ||
-        item.description?.toLowerCase().includes(q);
-      return matchesVendor && matchesSearch;
+      if (q) {
+        return (
+          item.name.toLowerCase().includes(q) ||
+          item.description?.toLowerCase().includes(q)
+        );
+      }
+      return selectedVendor === 'all' || item.vendorId === selectedVendor;
     });
   }, [selectedVendor, searchQuery]);
 
@@ -50,65 +57,118 @@ const Menu = () => {
               placeholder="Search for foods..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full py-[1.125rem] px-6 pl-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-300 placeholder:text-text-gray focus:border-neon-pink focus:shadow-glow"
+              className="w-full py-[1.125rem] px-6 pl-14 pr-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-300 placeholder:text-text-gray focus:border-neon-pink focus:shadow-glow"
             />
+            {isSearching && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-5 top-1/2 -translate-y-1/2 p-1 text-text-gray hover:text-white transition-colors bg-transparent border-0 cursor-pointer"
+                aria-label="Clear search"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
-        {/* Vendor Filter */}
-        <div className="py-10 md:py-[1.875rem] border-b border-white/5">
-          <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide mb-5 font-semibold">
-            <BuildingStorefrontIcon className="w-[1.125rem] h-[1.125rem]" />
-            <span>Filter by Vendor</span>
-          </div>
-          <div className="flex gap-3 md:gap-2 flex-wrap">
+        {/* Vendor Filter — hidden on mobile while searching */}
+        {!(isSearching && isMobile) && (
+          <div className="py-5 md:py-[1.875rem] border-b border-white/5">
+            {/* Header — clickable toggle on mobile */}
             <button
-              className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${
-                selectedVendor === 'all'
-                  ? 'bg-neon-pink border-neon-pink text-white shadow-glow'
-                  : 'bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20 hover:scale-[1.02]'
-              }`}
-              onClick={() => setSelectedVendor('all')}
+              className="flex items-center justify-between w-full mb-4 bg-transparent border-0 cursor-pointer p-0"
+              onClick={() => isMobile && setShowFilters((v) => !v)}
             >
-              All Vendors
+              <div className="flex items-center gap-2.5 text-text-gray text-sm uppercase tracking-wide font-semibold">
+                <BuildingStorefrontIcon className="w-[1.125rem] h-[1.125rem]" />
+                <span>
+                  Filter by Vendor
+                  {isMobile && selectedVendor !== 'all' && (
+                    <span className="ml-2 text-neon-pink normal-case">
+                      ({activeVendors.find((v) => v.id === selectedVendor)?.name})
+                    </span>
+                  )}
+                </span>
+              </div>
+              {isMobile && (
+                showFilters
+                  ? <ChevronUpIcon className="w-5 h-5 text-text-gray flex-shrink-0" />
+                  : <ChevronDownIcon className="w-5 h-5 text-text-gray flex-shrink-0" />
+              )}
             </button>
-            {activeVendors.map((vendor) => (
+
+            {/* Pills — always shown on desktop, toggled on mobile */}
+            <div className={isMobile && !showFilters ? 'hidden' : 'flex gap-3 md:gap-2 flex-wrap'}>
               <button
-                key={vendor.id}
                 className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${
-                  selectedVendor === vendor.id
+                  selectedVendor === 'all'
                     ? 'bg-neon-pink border-neon-pink text-white shadow-glow'
                     : 'bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20 hover:scale-[1.02]'
                 }`}
-                onClick={() => setSelectedVendor(vendor.id)}
+                onClick={() => { setSelectedVendor('all'); if (isMobile) setShowFilters(false); }}
               >
-                <span className="text-lg">{vendor.emoji}</span>
-                {vendor.name}
+                All Vendors
               </button>
-            ))}
+              {activeVendors.map((vendor) => (
+                <button
+                  key={vendor.id}
+                  className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${
+                    selectedVendor === vendor.id
+                      ? 'bg-neon-pink border-neon-pink text-white shadow-glow'
+                      : 'bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20 hover:scale-[1.02]'
+                  }`}
+                  onClick={() => { setSelectedVendor(vendor.id); if (isMobile) setShowFilters(false); }}
+                >
+                  <span className="text-lg">{vendor.emoji}</span>
+                  {vendor.name}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Results */}
         <div className="py-10 pb-20">
           <div className="flex md:flex-col md:items-start md:gap-2.5 justify-between items-center mb-[1.875rem] pb-5 border-b border-white/5">
             <h2 className="font-bebas text-[2rem] tracking-wide m-0">
-              {searchQuery.trim()
-                ? `Search results for "${searchQuery}"`
+              {isSearching
+                ? `Results for "${searchQuery}"`
                 : activeVendorName || 'All Items'}
             </h2>
-            <span className="text-text-gray text-sm font-medium">
-              {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'}
-            </span>
+            <div className="flex items-center gap-4">
+              <span className="text-text-gray text-sm font-medium">
+                {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'}
+              </span>
+              {isSearching && (
+                <button
+                  onClick={clearSearch}
+                  className="text-neon-pink text-sm font-semibold hover:text-[#e0006b] transition-colors bg-transparent border-0 cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {filteredItems.length === 0 ? (
             <div className="text-center py-20 px-5">
               <div className="text-[6.25rem] mb-5 opacity-30">🔍</div>
               <h3 className="font-bebas text-[2rem] mb-2.5 tracking-wide">No items found</h3>
-              <p className="text-text-gray text-lg">Try a different vendor or search term</p>
+              <p className="text-text-gray text-lg">
+                {isSearching
+                  ? `No results for "${searchQuery}"`
+                  : 'Try a different vendor or search term'}
+              </p>
+              {isSearching && (
+                <button
+                  onClick={clearSearch}
+                  className="mt-6 px-6 py-3 bg-neon-pink text-white rounded-xl font-bold text-sm hover:bg-[#e0006b] transition-colors border-0 cursor-pointer uppercase tracking-wide"
+                >
+                  Clear Search
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">

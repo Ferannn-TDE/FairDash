@@ -3,7 +3,7 @@ import { ClockIcon, PlusIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import { useCart } from '../context/CartContext';
-import { formatPrice, getVendorById } from '../utils/vendorData';
+import { getVendorById } from '../utils/vendorData';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import SizeSelectionModal from './SizeSelectionModal';
 
@@ -82,7 +82,7 @@ const FoodCard = ({ item }) => {
               {item.name}
             </div>
             <div className="text-neon-pink font-bold text-base md:text-xl whitespace-nowrap [text-shadow:0_0_20px_rgba(255,0,119,0.4)] flex-shrink-0">
-              {formatPrice(item)}
+              ${(item.priceMin ?? item.price).toFixed(2)}
             </div>
           </div>
 

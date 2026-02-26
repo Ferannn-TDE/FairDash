@@ -6,6 +6,7 @@ import { useMobileMenu } from "../context/MobileMenuContext";
 import SignOutModal from "../components/SignOutModal";
 import {
   MagnifyingGlassIcon,
+  XMarkIcon,
   ArrowRightIcon,
   PlusIcon,
   MinusIcon,
@@ -80,6 +81,8 @@ const Home = () => {
       navigate("/");
     });
   };
+
+  const isSearching = searchQuery.trim().length > 0;
 
   const handleSearch = (query) => {
     setSearchQuery(query);
@@ -297,54 +300,31 @@ const Home = () => {
                       value={searchQuery}
                       onChange={(e) => handleSearch(e.target.value)}
                     />
-                    <button
-                      type="submit"
-                      className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
-                    >
-                      <MagnifyingGlassIcon className="w-5 h-5" />
-                    </button>
+                    {searchQuery ? (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchQuery(""); setShowSearchResults(false); }}
+                        className="bg-transparent border-0 m-1.5 w-11 h-11 rounded-xl text-text-gray cursor-pointer flex items-center justify-center transition-all duration-300 hover:text-white hover:bg-white/5 flex-shrink-0"
+                        aria-label="Clear search"
+                      >
+                        <XMarkIcon className="w-5 h-5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
+                      >
+                        <MagnifyingGlassIcon className="w-5 h-5" />
+                      </button>
+                    )}
                   </form>
-
-                  {/* Search results dropdown */}
-                  {showSearchResults && (
-                    <div className="absolute top-full mt-2 w-full bg-bg-card border border-white/10 rounded-2xl max-h-80 overflow-y-auto z-20 shadow-[0_1.25rem_3.75rem_rgba(0,0,0,0.5)]">
-                      {searchResults.length > 0 ? (
-                        searchResults.slice(0, 6).map((item) => (
-                          <button
-                            key={item.id}
-                            onClick={() => handleAddFromSearch(item)}
-                            className="w-full p-3 hover:bg-white/5 cursor-pointer border-b border-white/5 last:border-0 flex gap-3 items-center text-left bg-transparent border-0"
-                          >
-                            {item.image ? (
-                              <img
-                                src={item.image}
-                                alt={item.name}
-                                className="w-12 h-12 object-cover rounded-lg flex-shrink-0"
-                              />
-                            ) : (
-                              <div className="w-12 h-12 rounded-lg bg-bg-dark flex items-center justify-center text-xl flex-shrink-0">
-                                {item.emoji}
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-white font-semibold text-sm truncate">{item.name}</p>
-                              <p className="text-neon-pink font-bold text-xs">${item.price?.toFixed(2) ?? `${item.priceMin?.toFixed(2)}+`}</p>
-                            </div>
-                            <PlusIcon className="w-4 h-4 text-text-gray flex-shrink-0" />
-                          </button>
-                        ))
-                      ) : (
-                        <p className="p-4 text-text-gray text-center text-sm">No results found</p>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
               <div className="absolute -top-20 -right-20 w-[18.75rem] h-[18.75rem] bg-[radial-gradient(circle,rgba(255,0,119,0.12)_0%,transparent_70%)] pointer-events-none" />
             </div>
 
-            {/* Two Feature Cards — ALWAYS side by side */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Two Feature Cards — hidden while searching */}
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-5 ${isSearching ? "hidden" : ""}`}>
               {/* Feature Card — 30 Min Delivery */}
               <div className="bg-bg-card rounded-2xl p-7 sm:p-6 border border-neon-pink/20 bg-[linear-gradient(135deg,rgba(255,0,119,0.08),transparent_60%)] transition-all duration-300 hover:border-neon-pink/40 hover:-translate-y-0.5 hover:shadow-glow">
                 <div className="text-[2.5rem] mb-3">⚡</div>
@@ -369,8 +349,43 @@ const Home = () => {
             </div>
           </div>
 
+          {/* ===== SEARCH RESULTS — shown when searching ===== */}
+          {isSearching && (
+            <div className="mb-10">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="font-bebas text-[1.75rem] tracking-wide">
+                  Results for "{searchQuery}"
+                </h2>
+                <div className="flex items-center gap-4">
+                  <span className="text-text-gray text-sm">
+                    {searchResults.length} {searchResults.length === 1 ? "item" : "items"}
+                  </span>
+                  <button
+                    onClick={() => { setSearchQuery(""); setShowSearchResults(false); }}
+                    className="text-neon-pink text-sm font-semibold hover:text-[#e0006b] transition-colors bg-transparent border-0 cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              {searchResults.length > 0 ? (
+                <div className="grid grid-cols-2 xs:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 xs:gap-5">
+                  {searchResults.map((item) => (
+                    <FoodCard key={item.id} item={item} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-16 px-5">
+                  <div className="text-[5rem] mb-4 opacity-30">🔍</div>
+                  <h3 className="font-bebas text-[1.75rem] mb-2 tracking-wide">No results found</h3>
+                  <p className="text-text-gray">Try a different search term</p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ===== EXPLORE CATEGORIES ===== */}
-          <div className="mb-10">
+          <div className={`mb-10 ${isSearching ? "hidden" : ""}`}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="font-bebas text-[1.75rem] tracking-wide">
                 Explore the Fairgrounds
@@ -402,7 +417,7 @@ const Home = () => {
           </div>
 
           {/* ===== TRENDING NOW ===== */}
-          <div className="mb-10">
+          <div className={`mb-10 ${isSearching ? "hidden" : ""}`}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="font-bebas text-[1.75rem] tracking-wide">
                 🔥 Trending Now
@@ -423,7 +438,7 @@ const Home = () => {
           </div>
 
           {/* ===== POPULAR VENDORS ===== */}
-          <div className="mb-10">
+          <div className={`mb-10 ${isSearching ? "hidden" : ""}`}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="font-bebas text-[1.75rem] tracking-wide">
                 Popular Vendors
