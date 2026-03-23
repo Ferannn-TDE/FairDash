@@ -8,6 +8,7 @@ import {
   TruckIcon,
   ClockIcon,
   ArrowRightOnRectangleIcon,
+  UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import toast from "react-hot-toast";
 import SidePanel from "./SidePanel";
@@ -23,7 +24,7 @@ const navLinks = [
 ];
 
 const MobileNavPanel = () => {
-  const { isMobileMenuOpen, setIsMobileMenuOpen } = useMobileMenu();
+  const { isMobileMenuOpen, setIsMobileMenuOpen, setIsAccountPanelOpen } = useMobileMenu();
   const location = useLocation();
   const navigate = useNavigate();
   const { isSignedIn, user } = useUser();
@@ -97,6 +98,20 @@ const MobileNavPanel = () => {
               </Link>
             );
           })}
+
+          {/* Manage Account */}
+          {isSignedIn && (
+            <button
+              onClick={() => {
+                close();
+                setIsAccountPanelOpen(true);
+              }}
+              className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-text-gray hover:bg-white/5 hover:text-white rounded-xl transition-all duration-200 font-semibold text-[0.9375rem] mb-1 bg-transparent border-0 cursor-pointer"
+            >
+              <UserCircleIcon className="w-5 h-5" />
+              Manage Account
+            </button>
+          )}
 
           {/* Free Delivery Promo */}
           <div className="mt-4 mb-2 p-5 bg-neon-pink/10 rounded-2xl border border-neon-pink/20">

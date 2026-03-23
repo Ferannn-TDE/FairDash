@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
+  BuildingStorefrontIcon,
 } from "@heroicons/react/24/outline";
 import toast from "react-hot-toast";
 import { useCart } from "../context/CartContext";
@@ -56,12 +57,12 @@ const Navbar = () => {
               className="flex items-center gap-3 no-underline transition-transform duration-300 ease-out hover:scale-105"
             >
               <img
-                src="/images/logo/fairdash-icon.png"
-                alt="FairDash"
+                src="/images/logo/icon.png"
+                alt="FairSynq"
                 className="h-10 md:h-8 w-auto object-contain"
               />
               <span className="font-bebas text-[1.5rem] md:text-[1.25rem] tracking-[0.125rem] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
-                FAIR<span className="text-neon-pink">DASH</span>
+                FAIR<span className="text-neon-pink">SYNQ</span>
               </span>
             </Link>
 
@@ -119,6 +120,18 @@ const Navbar = () => {
                           <UserCircleIcon className="w-5 h-5 text-text-gray flex-shrink-0" />
                           Manage Account
                         </Link>
+
+                        <div className="mx-4 my-1 border-t border-white/10" />
+                        <Link
+                          to="/vendor/dashboard"
+                          onClick={() => setIsDropdownOpen(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-neon-pink hover:bg-neon-pink/5 transition-colors no-underline text-sm font-semibold"
+                        >
+                          <BuildingStorefrontIcon className="w-5 h-5 flex-shrink-0" />
+                          Vendor Dashboard
+                        </Link>
+
+                        <div className="mx-4 my-1 border-t border-white/10" />
                         <button
                           onClick={() => {
                             setIsDropdownOpen(false);

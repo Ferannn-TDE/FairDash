@@ -1,0 +1,65 @@
+import { db } from '@/lib/db'
+import { success, apiError } from '@/lib/api-response'
+import { handleApiError } from '@/lib/api-error'
+import { requireVendorAuth } from '@/lib/auth'
+
+// GET /api/menu/:id
+export async function GET(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const item = await db.menuItem.findUnique({
+      where: { id: params.id },
+      include: { vendor: { select: { id: true, name: true, boothNumber: true } } },
+    })
+    if (!item) return apiError('Menu item not found', 404, 'NOT_FOUND')
+    return success(item)
+  } catch (err) {
+    return handleApiError(err)
+  }
+}
+
+// PATCH /api/menu/:id
+// Update availability (sold-out toggle) or item details. Vendor auth required.
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await requireVendorAuth()
+    const body = await req.json()
+    const { name, description, price, category, imageUrl, isAvailable } = body
+
+    const item = await db.menuItem.update({
+      where: { id: params.id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+        ...(price !== undefined && { price: Number(price) }),
+        ...(category !== undefined && { category }),
+        ...(imageUrl !== undefined && { imageUrl }),
+        ...(isAvailable !== undefined && { isAvailable: Boolean(isAvailable) }),
+      },
+    })
+
+    return success(item)
+  } catch (err) {
+    return handleApiError(err)
+  }
+}
+
+// DELETE /api/menu/:id
+// Vendor auth required.
+export async function DELETE(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    await requireVendorAuth()
+    await db.menuItem.delete({ where: { id: params.id } })
+    return success({ deleted: true })
+  } catch (err) {
+    return handleApiError(err)
+  }
+}

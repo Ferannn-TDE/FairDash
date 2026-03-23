@@ -137,7 +137,7 @@ const Cart = () => {
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.08),transparent_70%)]" />
               <img
                 src="/images/image4.png"
-                alt="FairDash"
+                alt="FairSynq"
                 className="w-28 h-auto relative z-10 animate-float mix-blend-screen"
                 onError={(e) => {
                   e.target.style.display = "none";
@@ -145,7 +145,7 @@ const Cart = () => {
                 }}
               />
               <div className="font-bebas text-4xl text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)] hidden">
-                FAIR<span className="text-neon-pink">DASH</span>
+                FAIR<span className="text-neon-pink">SYNQ</span>
               </div>
             </div>
           </div>

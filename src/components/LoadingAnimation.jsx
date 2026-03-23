@@ -28,11 +28,11 @@ const LoadingAnimation = ({ onComplete }) => {
         fadeOut ? "opacity-0" : "opacity-100"
       }`}
     >
-      {/* FairDash Logo with neon glow */}
+      {/* FairSynq Logo with neon glow */}
       <div className="text-center mb-8 animate-float">
         <img
-          src="/images/logo/fairdash-logo.png"
-          alt="FairDash Logo"
+          src="/images/logo/fairsynq.jpg"
+          alt="FairSynq Logo"
           className="w-64 md:w-80 mx-auto mb-4 drop-shadow-[0_0_30px_rgba(255,0,119,0.6)]"
         />
         <p className="text-text-gray text-sm md:text-base uppercase tracking-widest">

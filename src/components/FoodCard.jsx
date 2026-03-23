@@ -3,7 +3,6 @@ import { ClockIcon, PlusIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import { useCart } from '../context/CartContext';
-import { getVendorById } from '../utils/vendorData';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import SizeSelectionModal from './SizeSelectionModal';
 
@@ -38,8 +37,7 @@ const FoodCard = ({ item }) => {
     if (!isDesktop) setIsCartOpen(true);
   };
 
-  const deliveryTime =
-    item.deliveryTime || getVendorById(item.vendorId)?.deliveryTime;
+  const deliveryTime = item.deliveryTime || (item.prepTime ? `${item.prepTime} min` : null);
 
   return (
     <>

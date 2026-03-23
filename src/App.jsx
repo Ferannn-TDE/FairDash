@@ -7,7 +7,7 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import { CartProvider } from "./context/CartContext";
 import { MobileMenuProvider } from "./context/MobileMenuContext";
 import { FaFacebookF, FaEnvelope } from "react-icons/fa";
@@ -17,17 +17,19 @@ import ScrollToTop from "./components/ScrollToTop";
 import Navbar from "./components/Navbar";
 import Cart from "./components/Cart";
 import MobileNavPanel from "./components/MobileNavPanel";
-import Landing from "./pages/Landing";
-import Home from "./pages/Home";
-import Menu from "./pages/Menu";
-import Vendors from "./pages/Vendors";
-import VendorDetail from "./pages/VendorDetail";
-import Contact from "./pages/Contact";
-import RefundPolicy from "./pages/RefundPolicy";
-import ManageAccount from "./pages/ManageAccount";
-import BecomeVendor from "./pages/BecomeVendor";
-import BecomeDriver from "./pages/BecomeDriver";
-import Checkout from "./pages/Checkout";
+import MobileAccountPanel from "./components/MobileAccountPanel";
+import Landing from "./views/Landing";
+import Home from "./views/Home";
+import Menu from "./views/Menu";
+import Vendors from "./views/Vendors";
+import VendorDetail from "./views/VendorDetail";
+import Contact from "./views/Contact";
+import RefundPolicy from "./views/RefundPolicy";
+import ManageAccount from "./views/ManageAccount";
+import BecomeVendor from "./views/BecomeVendor";
+import BecomeDriver from "./views/BecomeDriver";
+import Checkout from "./views/Checkout";
+import VendorDashboard from "./views/vendor/VendorDashboard";
 
 const ProtectedRoute = ({ children }) => {
   const { isSignedIn, isLoaded } = useAuth();
@@ -47,11 +49,29 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+// Vendor-only route — must be signed in AND have isVendor: true in Clerk metadata
+const VendorRoute = ({ children }) => {
+  const { isSignedIn, isLoaded } = useAuth();
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg-dark">
+        <div className="w-8 h-8 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isSignedIn) return <Navigate to="/" />;
+
+  return children;
+};
+
 const AppLayout = () => {
   const location = useLocation();
   const isLanding = location.pathname === "/";
   const isHome = location.pathname === "/home";
-  const hideChrome = isLanding || isHome;
+  const isVendorPortal = location.pathname.startsWith("/vendor/");
+  const hideChrome = isLanding || isHome || isVendorPortal;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -59,6 +79,7 @@ const AppLayout = () => {
       {!hideChrome && <Navbar />}
       <Cart />
       <MobileNavPanel />
+      <MobileAccountPanel />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route
@@ -116,6 +137,32 @@ const AppLayout = () => {
         />
         <Route path="/become-vendor" element={<BecomeVendor />} />
         <Route path="/become-driver" element={<BecomeDriver />} />
+
+        {/* ── Vendor Portal (vendor role required) ── */}
+        <Route
+          path="/vendor/dashboard"
+          element={<VendorRoute><VendorDashboard /></VendorRoute>}
+        />
+        <Route
+          path="/vendor/orders"
+          element={<VendorRoute><ComingSoon title="Vendor Orders" /></VendorRoute>}
+        />
+        <Route
+          path="/vendor/menu"
+          element={<VendorRoute><ComingSoon title="Vendor Menu Manager" /></VendorRoute>}
+        />
+        <Route
+          path="/vendor/analytics"
+          element={<VendorRoute><ComingSoon title="Vendor Analytics" /></VendorRoute>}
+        />
+        <Route
+          path="/vendor/reviews"
+          element={<VendorRoute><ComingSoon title="Vendor Reviews" /></VendorRoute>}
+        />
+        <Route
+          path="/vendor/settings"
+          element={<VendorRoute><ComingSoon title="Vendor Settings" /></VendorRoute>}
+        />
         <Route
           path="/checkout"
           element={
@@ -162,8 +209,8 @@ const ComingSoon = ({ title }) => {
           We're working hard to bring you this feature. Check back soon!
         </p>
         <img
-          src="/images/logo/fairdash-logo.png"
-          alt="FairDash"
+          src="/images/logo/fairsynq.jpg"
+          alt="FairSynq"
           className="w-48 mx-auto opacity-20 animate-float"
         />
       </div>
@@ -179,7 +226,7 @@ const Footer = () => {
         {/* Logo */}
         <div className="mb-8 md:mb-6">
           <div className="font-bebas text-[1.75rem] md:text-[1.5rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)] mb-2">
-            FAIR<span className="text-neon-pink">DASH</span>
+            FAIR<span className="text-neon-pink">SYNQ</span>
           </div>
           <p className="text-text-gray text-[0.875rem] leading-relaxed m-0">
             The fair comes to your door. Fresh. Fast. Fair.
@@ -213,7 +260,7 @@ const Footer = () => {
 
         {/* Copyright — remove the unused mb-10 wrapper */}
         <div className="pt-6 border-t border-white/5 flex justify-between items-center md:flex-col md:gap-4">
-          <p className="text-text-gray text-[0.875rem] m-0">&copy; 2026 FairDash. All rights reserved.</p>
+          <p className="text-text-gray text-[0.875rem] m-0">&copy; 2026 FairSynq. All rights reserved.</p>
           <div className="flex items-center gap-4">
             <a
               href="mailto:fairdash217@gmail.com"

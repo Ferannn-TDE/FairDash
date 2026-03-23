@@ -4,7 +4,10 @@
       "Bash(npm run dev:*)",
       "Bash(npm install:*)",
       "WebFetch(domain:clerk.com)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(npx next:*)",
+      "Bash(npm run:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }

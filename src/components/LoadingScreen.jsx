@@ -26,7 +26,7 @@ const LoadingScreen = () => {
       <div className="text-center px-6">
         <img
           src="/images/image4.png"
-          alt="FairDash"
+          alt="FairSynq"
           className="w-28 h-28 mx-auto mb-8 animate-pulse object-contain"
           style={{ filter: 'brightness(1.2)', mixBlendMode: 'screen' }}
         />
