@@ -12,7 +12,7 @@ if (!PUBLISHABLE_KEY) {
 }
 
 /**
- * Clerk appearance — FairDash × Spotify-style layout.
+ * Clerk appearance — FairSynq × Spotify-style layout.
  *
  * Design tokens:
  *   neon-pink: #FF0077 | pure-black: #000000 | bg-input: #121212 | text-muted: #b3b3b3

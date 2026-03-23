@@ -1,0 +1,434 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+// MULTI-TENANCY: Events are the top-level tenant
+// ============================================================================
+
+model Event {
+  id   String @id @default(cuid())
+  name String
+
+  urlSlug String      @unique // e.g., "springfield-fair-2026"
+  status  EventStatus @default(UPCOMING) // Replaces isActive Boolean
+
+  // Dates
+  startDate DateTime
+  endDate   DateTime
+
+  // Branding (white-label)
+  logoUrl      String?
+  primaryColor String  @default("#FF0077")
+  qrCodeUrl    String?
+
+  // Discovery coords (customer-facing map pin — distinct from staging zone)
+  eventLat Float?
+  eventLng Float?
+
+  // GPS boundaries + staging zone (stored as JSON)
+  gpsBoundaries  Json?
+  stagingZoneLat Float?
+  stagingZoneLng Float?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  vendors           Vendor[]
+  orders            Order[]
+  adminUsers        AdminUser[]
+  fulfillmentConfig FulfillmentConfig?
+
+  @@index([urlSlug])
+  @@index([status])
+}
+
+enum EventStatus {
+  ACTIVE   // Event is live and accepting orders
+  UPCOMING // Event is scheduled but not yet open
+  INACTIVE // Event has ended or been deactivated
+}
+
+// ============================================================================
+// FULFILLMENT CONFIGURATION (1-1 with Event)
+// Centralises all per-event fulfillment mode toggles + related config.
+// ============================================================================
+
+model FulfillmentConfig {
+  id      String @id @default(cuid())
+  eventId String @unique
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  // ── Enabled modes ──────────────────────────────────────────────────────────
+  boothPickupEnabled  Boolean @default(true)
+  curbsideEnabled     Boolean @default(false)
+  homeDeliveryEnabled Boolean @default(false)
+
+  // ── Curbside config ────────────────────────────────────────────────────────
+  curbsideZoneLat         Float?
+  curbsideZoneLng         Float?
+  curbsideZoneDescription String? // e.g. "North parking lot, Row A"
+  curbsideMethod          CurbsideMethod?
+
+  // ── Home delivery config ───────────────────────────────────────────────────
+  homeDeliveryFee            Float? // Flat fee charged to customer
+  homeDeliveryRadiusKm       Float? // Max delivery radius from event coords
+  runnerTransportDescription String? // e.g. "Delivered by golf cart"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eventId])
+}
+
+enum CurbsideMethod {
+  RUNNER_DELIVERS // Runner brings the order to the customer's vehicle
+  CUSTOMER_WALKS  // Customer walks to a designated handoff zone
+}
+
+// ============================================================================
+// USERS: Synced from Clerk
+// ============================================================================
+
+model User {
+  id      String  @id @default(cuid())
+  clerkId String  @unique // Matches Clerk user ID
+  email   String  @unique
+  name    String?
+  phone   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  orders        Order[]
+  vendorMembers VendorMember[]
+  adminUsers    AdminUser[]
+
+  @@index([clerkId])
+  @@index([email])
+}
+
+// ============================================================================
+// VENDORS
+// ============================================================================
+
+model Vendor {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  // Basic info
+  name        String
+  description String?
+  cuisineType String
+  boothNumber String?
+
+  // Vendor type
+  vendorType VendorType @default(OPTION_A)
+
+  // Status
+  status    VendorStatus @default(PENDING)
+  isBusy    Boolean      @default(false)
+  busyUntil DateTime? // Auto-clears after 15 min
+  isOffline Boolean      @default(false) // Vendor entirely offline
+
+  // Onboarding documents
+  foodHandlerPermitUrl String?
+  insuranceUrl         String?
+  insuranceExpiryDate  DateTime?
+  insuranceExpired     Boolean   @default(false)
+
+  // Booth photos (array of URLs)
+  boothPhotoUrls Json?
+
+  // Stripe Connect
+  stripeAccountId String?
+  stripeVerified  Boolean @default(false)
+
+  // Commission
+  commissionRate Float @default(0.07) // 7% FairSynq platform fee on subtotal
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  menuItems     MenuItem[]
+  orders        Order[]
+  vendorMembers VendorMember[]
+  cancellations Cancellation[]
+  payouts       Payout[]
+  notifications VendorNotification[]
+
+  @@index([eventId])
+  @@index([status])
+  @@index([stripeVerified])
+  @@index([isOffline])
+}
+
+enum VendorType {
+  OPTION_A // Self-service (Stripe Connect, own device)
+  OPTION_B // FairSynq managed (Square Terminal, settled at event end)
+}
+
+enum VendorStatus {
+  PENDING   // Application submitted, awaiting approval
+  ACTIVE    // Approved and live
+  PAUSED    // Temporarily paused by operator
+  SUSPENDED // Suspended by admin
+  REJECTED  // Application declined
+}
+
+model VendorMember {
+  id       String @id @default(cuid())
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     String @default("staff") // owner | manager | staff
+
+  createdAt DateTime @default(now())
+
+  @@unique([vendorId, userId])
+  @@index([vendorId])
+  @@index([userId])
+}
+
+// ============================================================================
+// MENU ITEMS
+// ============================================================================
+
+model MenuItem {
+  id       String @id @default(cuid())
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  price       Float
+  category    String
+  imageUrl    String?
+  prepTime    Int     @default(15) // Minutes to prepare — used for estimated ready time
+
+  isAvailable Boolean @default(true) // Sold-out toggle
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  orderItems OrderItem[]
+
+  @@index([vendorId])
+  @@index([isAvailable])
+}
+
+// ============================================================================
+// ORDERS
+// ============================================================================
+
+model Order {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+
+  customerId String
+  customer   User   @relation(fields: [customerId], references: [id])
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  // Status
+  status OrderStatus @default(PLACED)
+
+  // Fulfillment
+  fulfillmentType FulfillmentType @default(BOOTH_PICKUP)
+
+  // Pricing (all in USD)
+  subtotal     Float  // Sum of item prices × quantities
+  deliveryFee  Float? // Home delivery only — passed through to runner pool
+  total        Float  // subtotal + deliveryFee (if applicable)
+  fairSynqFee  Float  // 7% of subtotal, auto-deducted at transfer
+  vendorPayout Float  // subtotal - fairSynqFee (delivery fee excluded)
+
+  // Customer info
+  customerName   String
+  customerPhone  String
+  pickupLocation String? // Booth number or staging zone (BOOTH_PICKUP / CURBSIDE)
+
+  // ── Curbside fields ────────────────────────────────────────────────────────
+  vehicleMake  String? // e.g. "Toyota"
+  vehicleColor String? // e.g. "Silver"
+  vehiclePlate String? // e.g. "ABC 1234"
+
+  // ── Home delivery address ──────────────────────────────────────────────────
+  deliveryStreet String?
+  deliveryCity   String?
+  deliveryZip    String?
+
+  // Stripe (per-transaction)
+  stripePaymentIntentId String?
+  stripeChargeId        String?
+  stripeTransferId      String? // Transfer to vendor Stripe account
+
+  // Timestamps
+  placedAt    DateTime  @default(now())
+  acceptedAt  DateTime?
+  readyAt     DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+
+  // Cancellation metadata
+  cancelledBy        String? // "vendor" | "customer" | "system"
+  cancellationReason String?
+
+  // Uncollected (15-min timeout after READY)
+  uncollectedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  orderItems   OrderItem[]
+  cancellation Cancellation?
+
+  @@index([eventId])
+  @@index([customerId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([placedAt])
+  @@index([fulfillmentType])
+}
+
+enum OrderStatus {
+  PLACED        // Customer placed order, awaiting vendor acceptance
+  ACCEPTED      // Vendor accepted
+  PREPARING     // Vendor is preparing the order
+  READY         // Ready for pickup / runner dispatched
+  COMPLETED     // Collected by customer or delivered by runner
+  CANCELLED     // Cancelled by vendor, customer, or system
+  UNCOLLECTED   // Customer never collected (15-min timeout after READY)
+  UNDELIVERABLE // Home delivery address unreachable by runner
+}
+
+enum FulfillmentType {
+  BOOTH_PICKUP  // Customer collects directly at vendor booth
+  CURBSIDE      // Runner delivers to customer's vehicle in parking zone
+  HOME_DELIVERY // Runner delivers to customer's off-site address
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+
+  quantity            Int
+  unitPrice           Float
+  subtotal            Float
+  specialInstructions String?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// ============================================================================
+// CANCELLATIONS
+// ============================================================================
+
+model Cancellation {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  reason       String?
+  cancelledAt  DateTime @default(now())
+  refundIssued Boolean  @default(false)
+  refundAmount Float?
+
+  @@index([vendorId])
+}
+
+// ============================================================================
+// PAYOUTS: Per-transaction Stripe transfers
+// ============================================================================
+
+model Payout {
+  id      String @id @default(cuid())
+  eventId String
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  // Amounts (USD)
+  grossAmount Float // Order subtotal (excludes delivery fee)
+  fairSynqFee Float // 7% of subtotal kept by FairSynq
+  netAmount   Float // grossAmount - fairSynqFee transferred to vendor
+
+  // Stripe transfer record
+  stripeTransferId String @unique
+  stripeStatus     String // pending | paid | failed
+
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([vendorId])
+  @@index([eventId])
+}
+
+// ============================================================================
+// ADMIN USERS
+// ============================================================================
+
+model AdminUser {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role    AdminRole
+  eventId String? // null = super_admin (platform-wide), set = event_operator
+  event   Event?  @relation(fields: [eventId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([role])
+}
+
+enum AdminRole {
+  SUPER_ADMIN    // Full platform access
+  EVENT_OPERATOR // Scoped to a single event
+}
+
+// ============================================================================
+// VENDOR NOTIFICATIONS
+// ============================================================================
+
+model VendorNotification {
+  id       String @id @default(cuid())
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  type    String // new_order | order_cancelled | payout_sent | system
+  message String
+
+  sentAt         DateTime  @default(now())
+  acknowledgedAt DateTime?
+
+  @@index([vendorId])
+}

@@ -48,7 +48,7 @@
 }
 
 /* ─────────────────────────────────────────
-   Clerk component overrides — FairDash × Spotify style
+   Clerk component overrides — FairSynq × Spotify style
    ───────────────────────────────────────── */
 
 /* Root & card — pure black */
@@ -292,7 +292,7 @@ input[type="date"]::-moz-calendar-picker-indicator {
 }
 
 /* ─────────────────────────────────────────
-   Google Maps Autocomplete dropdown — FairDash theme
+   Google Maps Autocomplete dropdown — FairSynq theme
    ───────────────────────────────────────── */
 .pac-container {
   background-color: #1a1a1a !important;

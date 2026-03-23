@@ -6,12 +6,12 @@ const LandingNavbar = () => {
     <nav className="fixed top-0 left-0 right-0 w-full px-8 lg:px-10 md:px-5 py-4 flex justify-between items-center bg-bg-dark/95 backdrop-blur-sm z-[100] border-b border-white/10">
       <Link to="/" className="flex items-center gap-2 no-underline">
         <img
-          src="/images/logo/fairdash-icon.png"
-          alt="FairDash"
+          src="/images/logo/icon.png"
+          alt="FairSynq"
           className="w-9 h-9 xs:w-7 xs:h-7 object-contain"
         />
         <span className="font-bebas text-[2rem] xs:text-[1.5rem] tracking-[2px] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
-          FAIR<span className="text-neon-pink">DASH</span>
+          FAIR<span className="text-neon-pink">SYNQ</span>
         </span>
       </Link>
 

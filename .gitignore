@@ -29,3 +29,13 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Next.js build output (contains baked-in NEXT_PUBLIC_ env vars — never commit)
+.next/
+out/
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
+# Temp Office lock files
+~$*

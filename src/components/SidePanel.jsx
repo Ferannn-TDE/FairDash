@@ -35,11 +35,11 @@ const SidePanel = ({ isOpen, onClose, type, children }) => {
           <div className="flex items-center gap-2">
             <img
               src="/images/image4.png"
-              alt="FairDash"
+              alt="FairSynq"
               className="h-8 w-auto mix-blend-screen"
             />
             <span className="font-bebas text-xl tracking-[0.125rem] text-white">
-              FAIR<span className="text-neon-pink">DASH</span>
+              FAIR<span className="text-neon-pink">SYNQ</span>
             </span>
           </div>
 

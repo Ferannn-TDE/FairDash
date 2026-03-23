@@ -4,9 +4,10 @@ const MobileMenuContext = createContext(null);
 
 export const MobileMenuProvider = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isAccountPanelOpen, setIsAccountPanelOpen] = useState(false);
 
   return (
-    <MobileMenuContext.Provider value={{ isMobileMenuOpen, setIsMobileMenuOpen }}>
+    <MobileMenuContext.Provider value={{ isMobileMenuOpen, setIsMobileMenuOpen, isAccountPanelOpen, setIsAccountPanelOpen }}>
       {children}
     </MobileMenuContext.Provider>
   );
