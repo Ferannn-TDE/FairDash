@@ -1,258 +1,238 @@
-# 🚀 FairDash Deployment Guide
+# FairSynq Deployment Guide
 
-## Quick Deploy Options
+## Architecture
 
-### Option 1: Netlify (Recommended)
+| Service | Platform | What it runs |
+|---------|----------|-------------|
+| Frontend + API routes | **Vercel** (free Hobby) | Next.js app — React SPA + all `/api/*` serverless functions |
+| Webhook server + worker | **Render** (free tier) | Express server handling Clerk/Stripe webhooks + BullMQ order-timeout worker |
+| Database | **Supabase** | Existing PostgreSQL instance — no changes needed |
 
-1. **Push to GitHub**
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin YOUR_REPO_URL
-   git push -u origin main
-   ```
+### Why two services?
 
-2. **Deploy on Netlify**
-   - Go to [netlify.com](https://netlify.com)
-   - Click "Add new site" → "Import an existing project"
-   - Connect to GitHub and select your repo
-   - Build settings:
-     - Build command: `npm run build`
-     - Publish directory: `dist`
-   - Click "Deploy"
+The Next.js API routes (`/api/orders`, `/api/vendors`, etc.) use `@clerk/nextjs/server` and `next/headers` — APIs that are only available inside the Next.js runtime. Vercel runs them natively as serverless functions.
 
-3. **Custom Domain**
-   - Go to Site settings → Domain management
-   - Add custom domain: `fairdash.net`
-   - Update DNS records as instructed
-
-### Option 2: Vercel
-
-1. **Install Vercel CLI**
-   ```bash
-   npm i -g vercel
-   ```
-
-2. **Deploy**
-   ```bash
-   cd fairdash-app
-   vercel
-   ```
-
-3. **Production Deploy**
-   ```bash
-   vercel --prod
-   ```
-
-### Option 3: GitHub Pages
-
-1. **Install gh-pages**
-   ```bash
-   npm install --save-dev gh-pages
-   ```
-
-2. **Update package.json**
-   ```json
-   {
-     "homepage": "https://YOUR_USERNAME.github.io/fairdash",
-     "scripts": {
-       "predeploy": "npm run build",
-       "deploy": "gh-pages -d dist"
-     }
-   }
-   ```
-
-3. **Update vite.config.js**
-   ```javascript
-   export default defineConfig({
-     plugins: [react()],
-     base: '/fairdash/'
-   })
-   ```
-
-4. **Deploy**
-   ```bash
-   npm run deploy
-   ```
-
-## Environment Variables
-
-If you add API keys or backend URLs:
-
-1. **Create `.env` file**
-   ```
-   VITE_API_URL=https://api.fairdash.net
-   VITE_STRIPE_KEY=pk_test_...
-   ```
-
-2. **Access in code**
-   ```javascript
-   const apiUrl = import.meta.env.VITE_API_URL;
-   ```
-
-3. **Add to hosting platform**
-   - Netlify: Site settings → Environment variables
-   - Vercel: Project settings → Environment Variables
-
-## Build Optimization
-
-### Analyze Bundle Size
-```bash
-npm run build -- --mode production
-```
-
-### Performance Tips
-1. Enable lazy loading for routes
-2. Optimize images (use WebP)
-3. Add service worker for PWA
-4. Enable gzip compression
-5. Use CDN for static assets
-
-## Custom Domain Setup
-
-### DNS Configuration for fairdash.net
-
-1. **Netlify DNS**
-   ```
-   A Record:  @  →  75.2.60.5
-   CNAME:  www  →  YOUR_SITE.netlify.app
-   ```
-
-2. **Cloudflare (Recommended)**
-   - Add site to Cloudflare
-   - Update nameservers
-   - Enable SSL/TLS
-   - Enable Auto Minify
-   - Enable Brotli compression
-
-## SSL Certificate
-
-All recommended platforms provide free SSL:
-- Netlify: Automatic Let's Encrypt
-- Vercel: Automatic
-- Cloudflare: Free SSL
-
-## Monitoring & Analytics
-
-### Add Analytics
-```html
-<!-- Add to index.html -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=GA_ID"></script>
-```
-
-### Error Tracking
-Consider adding:
-- Sentry for error monitoring
-- LogRocket for session replay
-
-## CI/CD Pipeline
-
-### GitHub Actions Example
-Create `.github/workflows/deploy.yml`:
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Build
-      run: npm run build
-      
-    - name: Deploy to Netlify
-      uses: netlify/actions/cli@master
-      with:
-        args: deploy --prod
-      env:
-        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-        NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-```
-
-## Rollback Strategy
-
-### Netlify
-- Go to Deploys → Find previous deploy → Publish
-
-### Vercel
-```bash
-vercel rollback
-```
-
-### Git-based
-```bash
-git revert HEAD
-git push
-```
-
-## Performance Checklist
-
-- [ ] Enable compression
-- [ ] Optimize images
-- [ ] Minimize bundle size
-- [ ] Enable caching headers
-- [ ] Use CDN
-- [ ] Add service worker
-- [ ] Enable HTTP/2
-- [ ] Lazy load routes
-- [ ] Preload critical assets
-
-## Post-Deployment
-
-1. **Test on Multiple Devices**
-   - Desktop browsers
-   - Mobile browsers
-   - Tablet sizes
-
-2. **Check Performance**
-   - Google PageSpeed Insights
-   - Lighthouse audit
-   - WebPageTest
-
-3. **Monitor**
-   - Setup uptime monitoring
-   - Configure alerts
-   - Check error logs
-
-## Troubleshooting
-
-### Build Fails
-- Clear node_modules: `rm -rf node_modules && npm install`
-- Check Node version: `node -v` (should be 16+)
-- Review build logs
-
-### 404 on Refresh
-Add `_redirects` file to public folder:
-```
-/*    /index.html   200
-```
-
-### Slow Loading
-- Check bundle size
-- Enable code splitting
-- Optimize images
-- Use lazy loading
+The BullMQ worker (`workers/order-worker.ts`) processes delayed jobs (e.g. marking an uncollected order after 15 minutes) and must run as a **persistent process** — something serverless functions can't do. The webhook handlers are co-located on the same Render service for simplicity.
 
 ---
 
-For questions or issues, refer to the platform-specific documentation:
-- [Netlify Docs](https://docs.netlify.com)
-- [Vercel Docs](https://vercel.com/docs)
-- [Vite Deploy Guide](https://vitejs.dev/guide/static-deploy.html)
+## Prerequisites
+
+- GitHub repo with the FairSynq codebase pushed to `main`
+- [Supabase](https://supabase.com) project already set up (existing DB — do not create a new one)
+- [Clerk](https://clerk.com) application created
+- [Stripe](https://stripe.com) account with Connect enabled
+- [Upstash](https://upstash.com) Redis instance (free tier, for BullMQ)
+- [Firebase](https://firebase.google.com) project with Realtime Database enabled
+
+---
+
+## Step 1 — Get your Supabase connection strings
+
+1. Open [Supabase Dashboard](https://supabase.com/dashboard) → your project
+2. Go to **Settings → Database**
+3. Scroll to **Connection string** section
+4. Copy two strings:
+
+   **Transaction pooler** (for Vercel serverless functions):
+   ```
+   postgresql://postgres.YOURREF:PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true
+   ```
+
+   **Direct connection** (for Render persistent server + Prisma migrations):
+   ```
+   postgresql://postgres.YOURREF:PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres
+   ```
+
+5. Run migrations against the direct URL before deploying:
+   ```bash
+   DIRECT_URL="<direct-url>" DATABASE_URL="<pooler-url>" npx prisma migrate deploy
+   ```
+
+---
+
+## Step 2 — Deploy Frontend to Vercel
+
+### 2a. Connect repo
+
+1. Go to [vercel.com/new](https://vercel.com/new)
+2. Import your GitHub repository
+3. Vercel auto-detects Next.js — no framework changes needed
+4. Leave **Build Command** and **Output Directory** as defaults (overridden by `vercel.json`)
+
+### 2b. Set environment variables
+
+In **Project Settings → Environment Variables**, add all variables from the `FRONTEND (VERCEL)` section of `.env.example`:
+
+| Variable | Where to get it |
+|----------|----------------|
+| `NEXT_PUBLIC_APP_URL` | Your Vercel deployment URL (e.g. `https://fairdash.vercel.app`) |
+| `NEXT_PUBLIC_API_URL` | Your Render service URL (e.g. `https://fairdash-api.onrender.com`) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → API Keys |
+| `CLERK_SECRET_KEY` | Clerk Dashboard → API Keys |
+| `CLERK_WEBHOOK_SECRET` | Clerk Dashboard → Webhooks (set after Step 3) |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe Dashboard → Developers → API keys |
+| `STRIPE_SECRET_KEY` | Stripe Dashboard → Developers → API keys |
+| `STRIPE_WEBHOOK_SECRET` | Stripe Dashboard → Webhooks (set after Step 4) |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Cloud Console → APIs & Services |
+| `NEXT_PUBLIC_FIREBASE_*` | Firebase Console → Project Settings → General |
+| `FIREBASE_PROJECT_ID` | Firebase Console → Project Settings → Service Accounts |
+| `FIREBASE_CLIENT_EMAIL` | Firebase Console → Project Settings → Service Accounts |
+| `FIREBASE_PRIVATE_KEY` | Firebase Console → Generate new private key |
+| `DATABASE_URL` | Supabase **Transaction pooler** URL (port 6543) |
+| `DIRECT_URL` | Supabase **Direct** URL (port 5432) |
+| `REDIS_URL` | Upstash Console → your Redis database |
+
+### 2c. Deploy
+
+Click **Deploy**. Vercel will install dependencies, run `npx prisma generate && next build`, and deploy.
+
+---
+
+## Step 3 — Deploy Backend to Render
+
+### 3a. Create web service
+
+1. Go to [dashboard.render.com](https://dashboard.render.com) → **New → Web Service**
+2. Connect your GitHub repository
+3. Configure:
+   - **Name**: `fairdash-api`
+   - **Branch**: `main`
+   - **Runtime**: Node
+   - **Build Command**: `npm install && npx prisma generate`
+   - **Start Command**: `npx ts-node --compiler-options '{"module":"CommonJS"}' server.ts`
+   - **Plan**: Free
+
+   > Alternatively, push `render.yaml` to your repo and use **New → Blueprint** to auto-configure everything.
+
+### 3b. Set environment variables
+
+In the Render service dashboard → **Environment**, add:
+
+| Variable | Value |
+|----------|-------|
+| `NODE_ENV` | `production` |
+| `DATABASE_URL` | Supabase **transaction pooler** URL (port 6543) |
+| `DIRECT_URL` | Supabase **direct** URL (port 5432) — Render uses this for the persistent connection |
+| `CLERK_SECRET_KEY` | Same as Vercel |
+| `CLERK_WEBHOOK_SECRET` | From Clerk Dashboard → Webhooks |
+| `STRIPE_SECRET_KEY` | Same as Vercel |
+| `STRIPE_WEBHOOK_SECRET` | From Stripe Dashboard → Webhooks |
+| `FIREBASE_PROJECT_ID` | Same as Vercel |
+| `FIREBASE_CLIENT_EMAIL` | Same as Vercel |
+| `FIREBASE_PRIVATE_KEY` | Same as Vercel |
+| `NEXT_PUBLIC_FIREBASE_DATABASE_URL` | Firebase Realtime Database URL |
+| `REDIS_URL` | Upstash Redis URL |
+| `FRONTEND_URL` | Your Vercel URL (e.g. `https://fairdash.vercel.app`) |
+
+### 3c. Deploy
+
+Click **Create Web Service**. Render will build and deploy. The health check endpoint at `/health` confirms it's running.
+
+---
+
+## Step 4 — Configure Clerk Webhooks
+
+1. Open [Clerk Dashboard](https://dashboard.clerk.com) → your application → **Webhooks**
+2. Click **Add Endpoint**
+3. Set **Endpoint URL** to:
+   ```
+   https://fairdash-api.onrender.com/api/webhooks/clerk
+   ```
+4. Subscribe to events: `user.created`, `user.updated`, `user.deleted`
+5. Copy the **Signing Secret** → add it as `CLERK_WEBHOOK_SECRET` in both Vercel and Render
+
+---
+
+## Step 5 — Configure Stripe Webhooks
+
+1. Open [Stripe Dashboard](https://dashboard.stripe.com) → **Developers → Webhooks**
+2. Click **Add endpoint**
+3. Set **Endpoint URL** to:
+   ```
+   https://fairdash-api.onrender.com/api/webhooks/stripe
+   ```
+4. Subscribe to events: `payment_intent.succeeded`, `payment_intent.payment_failed`, `transfer.created`, `transfer.paid`
+5. Copy the **Signing secret** → add it as `STRIPE_WEBHOOK_SECRET` in both Vercel and Render
+
+---
+
+## Step 6 — Verify everything is connected
+
+### Health checks
+
+```bash
+# Render backend
+curl https://fairdash-api.onrender.com/health
+# Expected: {"status":"ok","service":"fairdash-api","timestamp":"..."}
+
+# Vercel frontend
+curl https://fairdash.vercel.app/api/health
+# Expected: {"status":"ok"}
+```
+
+### Database
+
+```bash
+curl https://fairdash.vercel.app/api/test-db
+# Expected: {"success":true,...}
+```
+
+### Clerk webhook (test from Clerk Dashboard)
+
+Go to Clerk Dashboard → Webhooks → your endpoint → **Send test event** → `user.created`
+Check Render logs for: `[Clerk Webhook] user.created → synced user ...`
+
+### Stripe webhook (test from Stripe Dashboard)
+
+Go to Stripe Dashboard → Webhooks → your endpoint → **Send test webhook** → `payment_intent.succeeded`
+Check Render logs for: `[Stripe Webhook] payment_intent.succeeded → ...`
+
+---
+
+## Troubleshooting
+
+### Render service sleeps after 15 minutes (free tier)
+
+The Render free tier spins down inactive services. This is acceptable for the webhook server (Clerk/Stripe will retry failed deliveries), but means the BullMQ worker will be offline during sleep.
+
+**Fix**: Use [UptimeRobot](https://uptimerobot.com) (free) to ping `https://fairdash-api.onrender.com/health` every 10 minutes, keeping the service alive.
+
+### Build fails because `ts-node` or `prisma` not found
+
+The Render build command uses `npm install --include=dev` to ensure `ts-node`, `prisma`, and TypeScript type packages are available even when `NODE_ENV=production`. This is already set in `render.yaml`. If you created the service manually, make sure your **Build Command** is:
+```
+npm install --include=dev && npx prisma generate
+```
+
+### FIREBASE_PRIVATE_KEY line breaks
+
+Firebase private keys contain literal `\n` characters. When pasting into Render/Vercel, paste the raw key with actual newlines (use the multi-line env var editor) or wrap in quotes: `"-----BEGIN RSA PRIVATE KEY-----\nMII...\n-----END RSA PRIVATE KEY-----\n"`.
+
+### CORS errors from frontend
+
+Check that `FRONTEND_URL` on Render exactly matches your Vercel deployment URL (no trailing slash). If using a custom domain, update `FRONTEND_URL` to the custom domain.
+
+### Prisma migration in CI
+
+Run migrations manually before deploying:
+```bash
+DATABASE_URL="<pooler-url>" DIRECT_URL="<direct-url>" npx prisma migrate deploy
+```
+Or add it to the Render **Build Command**:
+```
+npm install && npx prisma generate && npx prisma migrate deploy
+```
+
+---
+
+## Local Development
+
+```bash
+cp .env.example .env.local
+# Fill in values
+
+npm run dev          # Next.js (frontend + API routes) on localhost:3000
+npm run start:api    # Express server (webhooks + worker) on localhost:8080
+npm run worker       # BullMQ worker only (standalone)
+```
