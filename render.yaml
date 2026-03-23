@@ -1,0 +1,67 @@
+services:
+  # ── FairSynq API / Worker (Render Web Service) ──────────────────────────────
+  # Handles: Clerk webhooks, Stripe webhooks, BullMQ order-timeout worker
+  # Regular API routes (/api/orders, /api/vendors, etc.) run on Vercel as
+  # Next.js serverless functions — they are NOT served from this process.
+  #
+  # Webhook URLs to configure after deploy:
+  #   Clerk Dashboard  → https://fairdash-api.onrender.com/api/webhooks/clerk
+  #   Stripe Dashboard → https://fairdash-api.onrender.com/api/webhooks/stripe
+  - type: web
+    name: fairdash-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install --include=dev && npx prisma generate
+    startCommand: npx ts-node --compiler-options '{"module":"CommonJS"}' server.ts
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # ── Database (Supabase) ──────────────────────────────────────────────────
+      # Use the DIRECT connection (port 5432) for the long-lived server process.
+      # pgbouncer (port 6543) is for serverless; it drops prepared statements
+      # that Prisma needs for persistent connections.
+      - key: DATABASE_URL
+        sync: false   # Set manually in Render dashboard
+
+      - key: DIRECT_URL
+        sync: false   # Set manually in Render dashboard
+
+      # ── Clerk ────────────────────────────────────────────────────────────────
+      - key: CLERK_SECRET_KEY
+        sync: false
+
+      - key: CLERK_WEBHOOK_SECRET
+        sync: false
+
+      # ── Stripe ───────────────────────────────────────────────────────────────
+      - key: STRIPE_SECRET_KEY
+        sync: false
+
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+
+      # ── Firebase Admin ───────────────────────────────────────────────────────
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      - key: NEXT_PUBLIC_FIREBASE_DATABASE_URL
+        sync: false
+
+      # ── Redis (BullMQ) ───────────────────────────────────────────────────────
+      - key: REDIS_URL
+        sync: false
+
+      # ── CORS ─────────────────────────────────────────────────────────────────
+      - key: FRONTEND_URL
+        value: https://fairdash.vercel.app   # Update to your actual Vercel domain
