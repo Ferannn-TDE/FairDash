@@ -429,7 +429,7 @@ const VendorSidebar = ({ onClose, onSignOutRequest, vendorName, isStoreOpen, onT
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2.5">
           <img
-            src="/images/logo/icon.png"
+            src="/images/logo/newIcon.png"
             alt="FairSynq"
             className="w-8 h-8 object-contain flex-shrink-0"
           />

@@ -87,7 +87,7 @@ const ManageAccount = () => {
             {!isEditing ? (
               <button
                 onClick={() => setIsEditing(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer bg-transparent"
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 hover:border-white/20 active:scale-[0.97] transition-all duration-200 cursor-pointer bg-transparent"
               >
                 <PencilIcon className="w-4 h-4" />
                 Edit
@@ -96,14 +96,14 @@ const ManageAccount = () => {
               <div className="flex gap-2">
                 <button
                   onClick={handleSave}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] active:scale-[0.97] transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
                 >
                   <CheckIcon className="w-4 h-4" />
                   Save
                 </button>
                 <button
                   onClick={handleCancel}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-white/5 border border-white/10 text-text-gray rounded-xl text-sm font-semibold hover:bg-white/10 transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-white/5 border border-white/10 text-text-gray rounded-xl text-sm font-semibold hover:bg-white/10 hover:border-white/20 active:scale-[0.97] transition-all duration-200 cursor-pointer"
                 >
                   <XMarkIcon className="w-4 h-4" />
                   Cancel

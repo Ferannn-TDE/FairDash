@@ -70,7 +70,7 @@ const Contact = () => {
                     required
                     value={formData.name}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-300 focus:border-neon-pink focus:shadow-glow"
+                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-200 hover:border-white/20 focus:border-neon-pink focus:shadow-glow"
                     placeholder="Your name"
                   />
                 </div>
@@ -89,7 +89,7 @@ const Contact = () => {
                     required
                     value={formData.email}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-300 focus:border-neon-pink focus:shadow-glow"
+                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-200 hover:border-white/20 focus:border-neon-pink focus:shadow-glow"
                     placeholder="your@email.com"
                   />
                 </div>
@@ -107,7 +107,7 @@ const Contact = () => {
                     name="phone"
                     value={formData.phone}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-300 focus:border-neon-pink focus:shadow-glow"
+                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-200 hover:border-white/20 focus:border-neon-pink focus:shadow-glow"
                     placeholder="(555) 123-4567"
                   />
                 </div>
@@ -126,14 +126,14 @@ const Contact = () => {
                     value={formData.message}
                     onChange={handleChange}
                     rows="5"
-                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-300 focus:border-neon-pink focus:shadow-glow resize-none"
+                    className="w-full px-4 py-3 bg-bg-dark border border-white/10 rounded-xl text-white outline-none transition-all duration-200 hover:border-white/20 focus:border-neon-pink focus:shadow-glow resize-none"
                     placeholder="How can we help you?"
                   ></textarea>
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-4 bg-neon-pink text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-300 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense"
+                  className="w-full py-4 bg-neon-pink text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-200 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense active:scale-[0.97]"
                 >
                   Send Message
                 </button>

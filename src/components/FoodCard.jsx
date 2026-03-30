@@ -105,7 +105,7 @@ const FoodCard = ({ item }) => {
 
           {/* Add to Cart — pinned to bottom */}
           <button
-            className="mt-auto w-full py-2 md:py-3.5 bg-white/5 border border-white/10 text-white font-semibold rounded-lg md:rounded-xl cursor-pointer transition-all duration-300 ease-out flex items-center justify-center gap-1.5 md:gap-2 uppercase tracking-wide text-[0.6875rem] md:text-sm hover:bg-neon-pink hover:border-neon-pink hover:shadow-glow"
+            className="mt-auto w-full py-2 md:py-3.5 bg-white/5 border border-white/10 text-white font-semibold rounded-lg md:rounded-xl cursor-pointer transition-all duration-200 ease-out flex items-center justify-center gap-1.5 md:gap-2 uppercase tracking-wide text-[0.6875rem] md:text-sm hover:bg-neon-pink hover:border-neon-pink hover:shadow-glow active:scale-[0.97]"
             onClick={handleAddToCart}
           >
             <PlusIcon className="w-3 h-3 md:w-[1.125rem] md:h-[1.125rem]" />

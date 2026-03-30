@@ -72,7 +72,7 @@ const Landing = () => {
       {/* ===== HERO SECTION ===== */}
       <section className="min-h-screen flex items-center pt-20 relative overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(255,0,119,0.15),transparent_40%),linear-gradient(to_bottom,rgba(15,15,15,0.3),#0f0f0f)]">
         <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 w-full">
-          <div className="grid grid-cols-1 md:grid-cols-[6fr_4fr] items-center gap-10 min-h-[80vh] lg:min-h-0 lg:py-20">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr] lg:grid-cols-[55fr_45fr] items-center gap-8 lg:gap-12 min-h-[80vh] lg:min-h-0 lg:py-20">
             {/* Left Content */}
             <div className="z-[2] animate-fadeIn">
               <h1 className="font-bebas text-[clamp(5rem,13vw,12rem)] md:text-[5rem] sm:text-[4rem] leading-[0.9] mb-8">
@@ -177,13 +177,19 @@ const Landing = () => {
             </div>
 
             {/* Right Side — Logo */}
-            <div className="hidden md:flex relative items-center justify-center min-h-[31.25rem]">
-              <div className="relative">
-                <div className="absolute -inset-16 bg-[radial-gradient(circle,rgba(255,0,119,0.15),transparent_70%)] pointer-events-none" />
+            <div className="hidden md:flex relative items-center justify-center">
+              <div className="relative w-full max-w-[26rem] lg:max-w-[30rem] xl:max-w-[34rem]">
+                {/* Ambient pink glow behind the image */}
+                <div className="absolute inset-0 scale-75 bg-[radial-gradient(circle,rgba(255,0,119,0.4),transparent_65%)] blur-3xl pointer-events-none" />
+                <div className="absolute -inset-20 bg-[radial-gradient(circle,rgba(255,0,119,0.12),transparent_70%)] pointer-events-none" />
                 <img
                   src="/images/logo/fairsynq.jpg"
                   alt="FairSynq — Fresh. Fast. Fair."
-                  className="w-[26.25rem] h-auto relative z-10 drop-shadow-[0_0_40px_rgba(255,0,119,0.5)]"
+                  className="w-full h-auto relative z-10"
+                  style={{
+                    maskImage: 'radial-gradient(ellipse at center, black 40%, transparent 75%)',
+                    WebkitMaskImage: 'radial-gradient(ellipse at center, black 40%, transparent 75%)',
+                  }}
                 />
               </div>
             </div>
@@ -389,7 +395,11 @@ const Landing = () => {
             <img
               src="/images/logo/fairsynq.jpg"
               alt="FairSynq"
-              className="w-40 mb-3 drop-shadow-[0_0_15px_rgba(255,0,119,0.4)]"
+              className="w-40 mb-3"
+              style={{
+                maskImage: 'radial-gradient(ellipse at center, black 45%, transparent 78%)',
+                WebkitMaskImage: 'radial-gradient(ellipse at center, black 45%, transparent 78%)',
+              }}
             />
             <p className="text-text-gray text-[0.875rem] leading-relaxed max-w-[16.25rem]">
               The fair comes to your door. Fresh. Fast. Fair.

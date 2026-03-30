@@ -90,7 +90,7 @@ const MobileNavPanel = () => {
                 className={`flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-[0.9375rem] mb-1 no-underline transition-all duration-200 ${
                   location.pathname === item.to
                     ? "bg-neon-pink/10 text-neon-pink"
-                    : "text-text-gray hover:bg-white/5 hover:text-white"
+                    : "text-text-gray hover:bg-white/10 hover:text-white"
                 }`}
               >
                 <Icon className="w-5 h-5" />
@@ -106,7 +106,7 @@ const MobileNavPanel = () => {
                 close();
                 setIsAccountPanelOpen(true);
               }}
-              className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-text-gray hover:bg-white/5 hover:text-white rounded-xl transition-all duration-200 font-semibold text-[0.9375rem] mb-1 bg-transparent border-0 cursor-pointer"
+              className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-text-gray hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200 font-semibold text-[0.9375rem] mb-1 bg-transparent border-0 cursor-pointer"
             >
               <UserCircleIcon className="w-5 h-5" />
               Manage Account
@@ -123,7 +123,7 @@ const MobileNavPanel = () => {
           {isSignedIn && (
             <button
               onClick={handleOpenSignOutModal}
-              className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-text-gray hover:text-red-400 hover:bg-white/5 rounded-xl transition-all duration-200 font-semibold text-[0.9375rem] bg-transparent border-t border-white/10 cursor-pointer mt-2 pt-4"
+              className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-text-gray hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all duration-200 font-semibold text-[0.9375rem] bg-transparent border-t border-white/10 cursor-pointer mt-2 pt-4"
             >
               <ArrowRightOnRectangleIcon className="w-5 h-5" />
               Sign Out

@@ -146,16 +146,16 @@ const ManageAccountPanel = () => {
               key={item.label}
               to={item.to}
               onClick={close}
-              className="flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-white/[0.04] transition-all duration-150 no-underline group"
+              className="flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-white/[0.04] transition-all duration-200 no-underline group"
             >
-              <div className="w-8 h-8 bg-white/[0.05] rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-neon-pink/10 transition-colors duration-150">
-                <Icon className="w-4 h-4 text-text-gray group-hover:text-neon-pink transition-colors duration-150" />
+              <div className="w-8 h-8 bg-white/[0.05] rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-neon-pink/10 transition-colors duration-200">
+                <Icon className="w-4 h-4 text-text-gray group-hover:text-neon-pink transition-colors duration-200" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium leading-tight group-hover:text-neon-pink transition-colors duration-150">{item.label}</p>
+                <p className="text-white text-sm font-medium leading-tight group-hover:text-neon-pink transition-colors duration-200">{item.label}</p>
                 <p className="text-text-gray/60 text-[0.6875rem] truncate mt-0.5">{item.description}</p>
               </div>
-              <ChevronRightIcon className="w-3.5 h-3.5 text-white/20 flex-shrink-0 group-hover:text-neon-pink/50 transition-colors duration-150" />
+              <ChevronRightIcon className="w-3.5 h-3.5 text-white/20 flex-shrink-0 group-hover:text-neon-pink/50 transition-colors duration-200" />
             </Link>
           );
         })}

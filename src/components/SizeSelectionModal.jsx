@@ -17,7 +17,7 @@ const SizeSelectionModal = ({ item, isOpen, onClose, onSelectSize }) => {
         {/* Close */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-text-gray hover:text-white transition-colors bg-transparent border-0 cursor-pointer p-1"
+          className="absolute top-4 right-4 text-text-gray hover:text-white hover:bg-white/10 rounded-lg transition-colors duration-200 bg-transparent border-0 cursor-pointer p-1"
         >
           <XMarkIcon className="w-5 h-5" />
         </button>
@@ -36,7 +36,7 @@ const SizeSelectionModal = ({ item, isOpen, onClose, onSelectSize }) => {
             <button
               key={size.name}
               onClick={() => onSelectSize({ ...item, price: size.price, sizeName: size.name })}
-              className="w-full p-4 bg-bg-dark border border-white/10 rounded-xl hover:border-neon-pink/40 hover:bg-white/5 transition-all duration-200 flex items-center justify-between cursor-pointer text-left"
+              className="w-full p-4 bg-bg-dark border border-white/10 rounded-xl hover:border-neon-pink/30 hover:bg-white/5 active:scale-[0.97] transition-all duration-200 flex items-center justify-between cursor-pointer text-left"
             >
               <span className="text-white font-semibold">{size.name}</span>
               <span className="text-neon-pink font-bold">${size.price.toFixed(2)}</span>
