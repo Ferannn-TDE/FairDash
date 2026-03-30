@@ -122,7 +122,7 @@ const Home = () => {
         <div className="flex justify-between items-center px-4 py-4">
           <div className="flex items-center gap-2">
             <img
-              src="/images/logo/icon.png"
+              src="/images/logo/newIcon.png"
               alt="FairSynq"
               className="h-8 w-auto object-contain"
             />
@@ -133,7 +133,7 @@ const Home = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
+              className="relative p-2 hover:bg-white/10 rounded-lg transition-colors duration-200 cursor-pointer bg-transparent border-0"
               aria-label="Open cart"
             >
               <ShoppingBagIcon className="w-6 h-6 text-white" />
@@ -145,7 +145,7 @@ const Home = () => {
             </button>
             <button
               onClick={() => setIsMobileMenuOpen(true)}
-              className="p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors duration-200 cursor-pointer bg-transparent border-0"
               aria-label="Open menu"
             >
               <Bars3Icon className="w-6 h-6 text-neon-pink" />
@@ -159,7 +159,7 @@ const Home = () => {
         {/* Brand */}
         <div className="flex items-center gap-3 mb-12">
           <img
-            src="/images/logo/icon.png"
+            src="/images/logo/newIcon.png"
             alt="FairSynq"
             className="w-10 h-10 object-contain flex-shrink-0"
           />
@@ -182,7 +182,7 @@ const Home = () => {
               className={`flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mb-1 no-underline transition-all duration-200 ${
                 location.pathname === item.to
                   ? "bg-neon-pink/10 text-neon-pink"
-                  : "text-text-gray hover:bg-white/5 hover:text-white"
+                  : "text-text-gray hover:bg-white/10 hover:text-white"
               }`}
             >
               <Icon className="w-5 h-5" />
@@ -208,7 +208,7 @@ const Home = () => {
               className={`flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mb-1 no-underline transition-all duration-200 ${
                 location.pathname === item.to
                   ? "bg-neon-pink/10 text-neon-pink"
-                  : "text-text-gray hover:bg-white/5 hover:text-white"
+                  : "text-text-gray hover:bg-white/10 hover:text-white"
               }`}
             >
               <Icon className="w-5 h-5" />
@@ -226,7 +226,7 @@ const Home = () => {
         {/* Logout */}
         <button
           onClick={() => setShowSignOutModal(true)}
-          className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mt-4 text-text-gray hover:bg-white/5 hover:text-red-400 transition-all duration-200 bg-transparent border-0 cursor-pointer w-full text-left"
+          className="flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm mt-4 text-text-gray hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 bg-transparent border-0 cursor-pointer w-full text-left"
         >
           <ArrowRightOnRectangleIcon className="w-5 h-5" />
           Logout
@@ -268,7 +268,7 @@ const Home = () => {
               <Link
                 key={action.label}
                 to={action.to}
-                className="flex items-center gap-2 px-4 py-2.5 bg-bg-card border border-white/5 rounded-xl text-sm font-medium text-text-gray no-underline whitespace-nowrap transition-all duration-200 hover:border-neon-pink/30 hover:text-white"
+                className="flex items-center gap-2 px-4 py-2.5 bg-bg-card border border-white/5 rounded-xl text-sm font-medium text-text-gray no-underline whitespace-nowrap transition-all duration-200 hover:border-neon-pink/30 hover:text-white active:scale-[0.97]"
               >
                 <span>{action.emoji}</span> {action.label}
               </Link>
@@ -305,7 +305,7 @@ const Home = () => {
                       <button
                         type="button"
                         onClick={() => { setSearchQuery(""); setShowSearchResults(false); }}
-                        className="bg-transparent border-0 m-1.5 w-11 h-11 rounded-xl text-text-gray cursor-pointer flex items-center justify-center transition-all duration-300 hover:text-white hover:bg-white/5 flex-shrink-0"
+                        className="bg-transparent border-0 m-1.5 w-11 h-11 rounded-xl text-text-gray cursor-pointer flex items-center justify-center transition-all duration-200 hover:text-white hover:bg-white/10 flex-shrink-0"
                         aria-label="Clear search"
                       >
                         <XMarkIcon className="w-5 h-5" />
@@ -313,7 +313,7 @@ const Home = () => {
                     ) : (
                       <button
                         type="submit"
-                        className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-glow flex-shrink-0"
+                        className="bg-neon-pink border-0 m-1.5 w-11 h-11 rounded-xl text-white cursor-pointer flex items-center justify-center transition-all duration-200 hover:scale-110 hover:shadow-glow active:scale-[0.97] flex-shrink-0"
                       >
                         <MagnifyingGlassIcon className="w-5 h-5" />
                       </button>
@@ -618,7 +618,7 @@ const Home = () => {
               <button
                 className={`w-full py-3.5 rounded-2xl font-bold text-sm cursor-pointer transition-all duration-300 border-0 uppercase tracking-wide ${
                   cartCount > 0
-                    ? "bg-neon-pink text-white hover:bg-[#e0006b] hover:shadow-glow-intense"
+                    ? "bg-neon-pink text-white hover:bg-[#e0006b] hover:shadow-glow-intense active:scale-[0.97]"
                     : "bg-white/5 text-text-gray border border-white/10"
                 }`}
                 disabled={cartCount === 0}

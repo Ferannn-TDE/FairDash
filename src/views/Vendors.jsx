@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import VendorCardSkeleton from "../components/skeletons/VendorCardSkeleton";
 
 const EVENT_SLUG = 'springfield-fair-2026';
 
@@ -122,7 +123,7 @@ const Vendors = () => {
               placeholder="Search vendors..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full py-[1.125rem] px-6 pl-14 pr-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-300 placeholder:text-text-gray focus:border-neon-pink focus:shadow-glow"
+              className="w-full py-[1.125rem] px-6 pl-14 pr-14 bg-bg-dark border border-white/10 rounded-full text-white text-base outline-none transition-all duration-200 placeholder:text-text-gray hover:border-white/20 focus:border-neon-pink focus:shadow-glow"
             />
             {isSearching && (
               <button
@@ -169,7 +170,7 @@ const Vendors = () => {
 
             <div className={isMobile && !showFilters ? "hidden" : "flex gap-3 md:gap-2 flex-wrap"}>
               <button
-                className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${selectedVendor === "all" ? "bg-neon-pink border-neon-pink text-white shadow-glow" : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20"}`}
+                className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${selectedVendor === "all" ? "bg-neon-pink border-neon-pink text-white shadow-glow active:scale-[0.97]" : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20 active:scale-[0.97]"}`}
                 onClick={() => { setSelectedVendor("all"); if (isMobile) setShowFilters(false); }}
               >
                 <BuildingStorefrontIcon className="w-4 h-4" />
@@ -179,7 +180,7 @@ const Vendors = () => {
               {vendors.map(vendor => (
                 <button
                   key={vendor.id}
-                  className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${selectedVendor === vendor.id ? "bg-neon-pink border-neon-pink text-white shadow-glow" : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20"}`}
+                  className={`px-6 py-3 md:px-[1.125rem] md:py-2.5 md:text-[0.8125rem] border rounded-full font-medium text-sm cursor-pointer transition-all duration-300 ease-out flex items-center gap-2 ${selectedVendor === vendor.id ? "bg-neon-pink border-neon-pink text-white shadow-glow active:scale-[0.97]" : "bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20 active:scale-[0.97]"}`}
                   onClick={() => { setSelectedVendor(vendor.id); if (isMobile) setShowFilters(false); }}
                 >
                   🍽️ {vendor.name}
@@ -201,9 +202,11 @@ const Vendors = () => {
           </div>
 
           {loading ? (
-            <div className="text-center py-20">
-              <div className="inline-block w-8 h-8 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
-              <p className="text-text-gray mt-4">Loading vendors...</p>
+            <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 sm:gap-6" aria-hidden="true">
+              <span className="sr-only">Loading vendors...</span>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <VendorCardSkeleton key={i} />
+              ))}
             </div>
           ) : error ? (
             <div className="text-center py-20">

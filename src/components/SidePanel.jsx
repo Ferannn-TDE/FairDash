@@ -46,7 +46,7 @@ const SidePanel = ({ isOpen, onClose, type, children }) => {
           {/* Close button */}
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors duration-300 bg-transparent border-0 cursor-pointer"
+            className="p-2 hover:bg-white/10 rounded-lg transition-colors duration-200 bg-transparent border-0 cursor-pointer"
             aria-label="Close"
           >
             <XMarkIcon className="w-6 h-6 text-text-gray hover:text-white transition-colors" />

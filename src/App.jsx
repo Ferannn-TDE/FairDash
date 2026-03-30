@@ -30,6 +30,8 @@ import BecomeVendor from "./views/BecomeVendor";
 import BecomeDriver from "./views/BecomeDriver";
 import Checkout from "./views/Checkout";
 import VendorDashboard from "./views/vendor/VendorDashboard";
+import TrackOrder from "./views/TrackOrder";
+import Location from "./views/Location";
 
 const ProtectedRoute = ({ children }) => {
   const { isSignedIn, isLoaded } = useAuth();
@@ -97,19 +99,15 @@ const AppLayout = () => {
         <Route path="/vendors/:vendorId" element={<VendorDetail />} />
         <Route
           path="/track"
-          element={
-            <ProtectedRoute>
-              <ComingSoon title="Track Order" />
-            </ProtectedRoute>
-          }
+          element={<ProtectedRoute><TrackOrder /></ProtectedRoute>}
+        />
+        <Route
+          path="/track/:orderId"
+          element={<ProtectedRoute><TrackOrder /></ProtectedRoute>}
         />
         <Route
           path="/location"
-          element={
-            <ProtectedRoute>
-              <ComingSoon title="Live Location Map" />
-            </ProtectedRoute>
-          }
+          element={<ProtectedRoute><Location /></ProtectedRoute>}
         />
         <Route
           path="/favorites"

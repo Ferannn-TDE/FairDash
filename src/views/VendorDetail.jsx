@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import FoodCard from "../components/FoodCard";
+import VendorDetailSkeleton from "../components/skeletons/VendorDetailSkeleton";
 
 const VendorDetail = () => {
   const { vendorId } = useParams();
@@ -29,11 +30,7 @@ const VendorDetail = () => {
   }, [vendorId]);
 
   if (loading) {
-    return (
-      <div className="pt-20 min-h-screen flex items-center justify-center">
-        <div className="inline-block w-8 h-8 border-2 border-neon-pink border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <VendorDetailSkeleton />;
   }
 
   if (notFound) return <Navigate to="/vendors" />;

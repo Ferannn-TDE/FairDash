@@ -6,7 +6,7 @@ const LandingNavbar = () => {
     <nav className="fixed top-0 left-0 right-0 w-full px-8 lg:px-10 md:px-5 py-4 flex justify-between items-center bg-bg-dark/95 backdrop-blur-sm z-[100] border-b border-white/10">
       <Link to="/" className="flex items-center gap-2 no-underline">
         <img
-          src="/images/logo/icon.png"
+          src="/images/logo/newIcon.png"
           alt="FairSynq"
           className="w-9 h-9 xs:w-7 xs:h-7 object-contain"
         />

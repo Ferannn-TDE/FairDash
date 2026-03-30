@@ -188,7 +188,7 @@ const Cart = () => {
             </div>
             <button
               onClick={handleCheckout}
-              className="w-full py-4 bg-neon-pink border-0 text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-300 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense"
+              className="w-full py-4 bg-neon-pink border-0 text-white font-bold text-base rounded-xl cursor-pointer transition-all duration-200 ease-out uppercase tracking-wide hover:bg-[#e0006b] hover:shadow-glow-intense active:scale-[0.97]"
             >
               Checkout • ${(getCartTotal() + 2.99).toFixed(2)}
             </button>

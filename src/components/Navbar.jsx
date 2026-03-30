@@ -57,9 +57,9 @@ const Navbar = () => {
               className="flex items-center gap-3 no-underline transition-transform duration-300 ease-out hover:scale-105"
             >
               <img
-                src="/images/logo/icon.png"
+                src="/images/logo/newIcon.png"
                 alt="FairSynq"
-                className="h-10 md:h-8 w-auto object-contain"
+                className="h-9 w-9 object-contain flex-shrink-0"
               />
               <span className="font-bebas text-[1.5rem] md:text-[1.25rem] tracking-[0.125rem] text-white [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
                 FAIR<span className="text-neon-pink">SYNQ</span>
@@ -82,7 +82,7 @@ const Navbar = () => {
                 <div className="hidden tablet:block relative" ref={dropdownRef}>
                   <button
                     onClick={() => setIsDropdownOpen((o) => !o)}
-                    className="flex items-center gap-2 p-1.5 pr-3 hover:bg-white/5 rounded-xl transition-all duration-200 group bg-transparent border-0 cursor-pointer"
+                    className="flex items-center gap-2 p-1.5 pr-3 hover:bg-white/10 active:scale-[0.97] rounded-xl transition-all duration-200 group bg-transparent border-0 cursor-pointer"
                   >
                     <div className="w-9 h-9 rounded-full bg-gradient-to-br from-neon-pink via-neon-pink to-[#cc0060] flex items-center justify-center shadow-lg ring-2 ring-white/10 group-hover:ring-neon-pink/30 transition-all flex-shrink-0">
                       <span className="text-white text-sm font-bold">
@@ -115,7 +115,7 @@ const Navbar = () => {
                         <Link
                           to="/account"
                           onClick={() => setIsDropdownOpen(false)}
-                          className="flex items-center gap-3 px-4 py-2.5 text-white hover:bg-white/5 transition-colors no-underline text-sm"
+                          className="flex items-center gap-3 px-4 py-2.5 text-white hover:bg-white/10 transition-colors duration-200 no-underline text-sm"
                         >
                           <UserCircleIcon className="w-5 h-5 text-text-gray flex-shrink-0" />
                           Manage Account
@@ -137,7 +137,7 @@ const Navbar = () => {
                             setIsDropdownOpen(false);
                             setShowSignOutModal(true);
                           }}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-text-gray hover:text-red-400 hover:bg-red-400/5 transition-colors bg-transparent border-0 cursor-pointer text-sm"
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-text-gray hover:text-red-400 hover:bg-red-500/10 transition-colors duration-200 bg-transparent border-0 cursor-pointer text-sm"
                         >
                           <ArrowRightOnRectangleIcon className="w-5 h-5 flex-shrink-0" />
                           Sign Out
@@ -148,7 +148,7 @@ const Navbar = () => {
                 </div>
               ) : (
                 <SignInButton mode="modal" forceRedirectUrl="/home">
-                  <button className="hidden tablet:block px-7 py-2.5 bg-transparent border-2 border-neon-pink text-neon-pink font-semibold uppercase cursor-pointer transition-all duration-300 ease-out rounded-lg text-[0.875rem] tracking-wide shadow-glow hover:bg-neon-pink hover:text-white hover:shadow-glow-intense">
+                  <button className="hidden tablet:block px-7 py-2.5 bg-transparent border-2 border-neon-pink text-neon-pink font-semibold uppercase cursor-pointer transition-all duration-200 ease-out rounded-lg text-[0.875rem] tracking-wide shadow-glow hover:bg-neon-pink hover:text-white hover:shadow-glow-intense active:scale-[0.97]">
                     Sign In
                   </button>
                 </SignInButton>
@@ -157,7 +157,7 @@ const Navbar = () => {
               {/* Cart — always visible */}
               <button
                 onClick={() => setIsCartOpen(true)}
-                className="relative p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
+                className="relative p-2 hover:bg-white/10 rounded-lg transition-colors duration-200 cursor-pointer bg-transparent border-0"
                 aria-label="Open cart"
               >
                 <ShoppingBagIcon className="w-6 h-6 text-white" />
@@ -171,7 +171,7 @@ const Navbar = () => {
               {/* Hamburger — below tablet only */}
               <button
                 onClick={() => setIsMobileMenuOpen(true)}
-                className="tablet:hidden p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
+                className="tablet:hidden p-2 hover:bg-white/10 rounded-lg transition-colors duration-200 cursor-pointer bg-transparent border-0"
                 aria-label="Open menu"
               >
                 <Bars3Icon className="w-6 h-6 text-neon-pink" />

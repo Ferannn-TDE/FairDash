@@ -23,7 +23,7 @@ const SignOutModal = ({ isOpen, onClose, onConfirm }) => {
 
             <button
               onClick={onClose}
-              className="p-1 hover:bg-white/5 rounded-lg transition-colors bg-transparent border-0 cursor-pointer"
+              className="p-1 hover:bg-white/10 rounded-lg transition-colors duration-200 bg-transparent border-0 cursor-pointer"
             >
               <XMarkIcon className="w-5 h-5 text-text-gray hover:text-white transition-colors" />
             </button>
@@ -39,7 +39,7 @@ const SignOutModal = ({ isOpen, onClose, onConfirm }) => {
           <div className="flex gap-3">
             <button
               onClick={onClose}
-              className="flex-1 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer"
+              className="flex-1 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 hover:border-white/20 active:scale-[0.97] transition-all duration-200 cursor-pointer"
             >
               Cancel
             </button>
@@ -49,7 +49,7 @@ const SignOutModal = ({ isOpen, onClose, onConfirm }) => {
                 onConfirm();
                 onClose();
               }}
-              className="flex-1 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+              className="flex-1 py-3 bg-red-500 text-white rounded-xl font-semibold text-sm hover:bg-red-600 active:bg-red-700 active:scale-[0.97] transition-all duration-200 cursor-pointer border-0"
             >
               Sign Out
             </button>

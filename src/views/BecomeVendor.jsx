@@ -293,8 +293,8 @@ const BecomeVendor = () => {
                     onClick={() => toggleCategory(cat)}
                     className={`px-4 py-2 rounded-full text-sm font-medium border cursor-pointer transition-all duration-200 ${
                       foodCategories.includes(cat)
-                        ? "bg-neon-pink border-neon-pink text-white"
-                        : "bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white"
+                        ? "bg-neon-pink border-neon-pink text-white active:scale-[0.97]"
+                        : "bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white active:scale-[0.97]"
                     }`}
                   >
                     {cat}
@@ -473,13 +473,13 @@ const BecomeVendor = () => {
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Link
                 to="/vendor/dashboard"
-                className="px-8 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors no-underline shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+                className="px-8 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] active:scale-[0.97] transition-all duration-200 no-underline shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
               >
                 Go to Vendor Portal
               </Link>
               <Link
                 to="/home"
-                className="px-8 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all no-underline"
+                className="px-8 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 active:scale-[0.97] transition-all duration-200 no-underline"
               >
                 Back to Home
               </Link>
@@ -493,7 +493,7 @@ const BecomeVendor = () => {
             {step > 1 ? (
               <button
                 onClick={() => setStep((s) => s - 1)}
-                className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all cursor-pointer"
+                className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 active:scale-[0.97] transition-all duration-200 cursor-pointer"
               >
                 <ChevronLeftIcon className="w-4 h-4" />
                 Back
@@ -501,7 +501,7 @@ const BecomeVendor = () => {
             ) : (
               <Link
                 to="/home"
-                className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 text-text-gray rounded-xl font-semibold text-sm hover:bg-white/10 transition-all no-underline"
+                className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 text-text-gray rounded-xl font-semibold text-sm hover:bg-white/10 active:scale-[0.97] transition-all duration-200 no-underline"
               >
                 Cancel
               </Link>
@@ -511,7 +511,7 @@ const BecomeVendor = () => {
               <button
                 onClick={() => setStep((s) => s + 1)}
                 disabled={step === 1 ? !canProceedStep1 : !canProceedStep2}
-                className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink"
+                className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] active:scale-[0.97] transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink disabled:active:scale-100"
               >
                 Next
                 <ChevronRightIcon className="w-4 h-4" />
@@ -520,7 +520,7 @@ const BecomeVendor = () => {
               <button
                 onClick={handleSubmit}
                 disabled={!canProceedStep3}
-                className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink"
+                className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] active:scale-[0.97] transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink disabled:active:scale-100"
               >
                 Submit Application
                 <CheckIcon className="w-4 h-4" />
