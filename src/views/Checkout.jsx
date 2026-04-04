@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeftIcon,
@@ -6,37 +6,25 @@ import {
   BuildingStorefrontIcon,
   TruckIcon,
   HomeIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { useUser } from '@clerk/clerk-react';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { APIProvider } from '@vis.gl/react-google-maps';
 import { getStripe } from '../lib/stripe';
 import { useCart } from '../context/CartContext';
+import AddressAutocomplete from '../components/AddressAutocomplete';
 
 const inputClass =
   'w-full p-3 bg-bg-dark border border-white/10 rounded-xl text-white placeholder:text-text-gray focus:border-neon-pink focus:outline-none transition-colors duration-200 text-sm';
 const labelClass = 'block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5';
 const sectionClass = 'bg-bg-card border border-white/10 rounded-2xl p-6';
 
-const FULFILLMENT_OPTIONS = [
-  {
-    value: 'BOOTH_PICKUP',
-    label: 'Booth Pickup',
-    sub: 'Walk to the vendor booth',
-    icon: BuildingStorefrontIcon,
-  },
-  {
-    value: 'CURBSIDE',
-    label: 'Curbside',
-    sub: 'We bring it to your car',
-    icon: TruckIcon,
-  },
-  {
-    value: 'HOME_DELIVERY',
-    label: 'Home Delivery',
-    sub: 'Deliver to your address',
-    icon: HomeIcon,
-  },
+const ALL_FULFILLMENT_OPTIONS = [
+  { value: 'BOOTH_PICKUP', label: 'Booth Pickup',   sub: 'Walk to the vendor booth',   icon: BuildingStorefrontIcon },
+  { value: 'CURBSIDE',     label: 'Curbside',        sub: 'We bring it to your car',     icon: TruckIcon },
+  { value: 'HOME_DELIVERY', label: 'Home Delivery',  sub: 'Deliver to your address',     icon: HomeIcon },
 ];
 
 // ─── Payment step (rendered inside <Elements>) ─────────────────────────────
@@ -52,9 +40,7 @@ const PaymentStep = ({ orderId, summary, onBack, onSuccess }) => {
     try {
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
-        confirmParams: {
-          return_url: window.location.origin + '/home',
-        },
+        confirmParams: { return_url: window.location.origin + '/home' },
         redirect: 'if_required',
       });
 
@@ -74,23 +60,33 @@ const PaymentStep = ({ orderId, summary, onBack, onSuccess }) => {
     <div className="space-y-6">
       <div className={sectionClass}>
         <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Payment</h2>
-        <PaymentElement
-          options={{
-            layout: 'tabs',
-            fields: { billingDetails: { address: 'never' } },
-          }}
-        />
+        <PaymentElement options={{ layout: 'tabs', fields: { billingDetails: { address: 'never' } } }} />
       </div>
 
-      {/* Summary card */}
+      {/* Payment summary */}
       <div className={sectionClass}>
         <h2 className="font-bebas text-xl tracking-wide text-white mb-4">Order Total</h2>
         <div className="space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-text-gray">Subtotal</span><span className="text-white">${summary.subtotal.toFixed(2)}</span></div>
+          <div className="flex justify-between">
+            <span className="text-text-gray">Subtotal</span>
+            <span className="text-white">${summary.subtotal.toFixed(2)}</span>
+          </div>
           {summary.deliveryFee != null && (
-            <div className="flex justify-between"><span className="text-text-gray">Delivery Fee</span><span className="text-white">${summary.deliveryFee.toFixed(2)}</span></div>
+            <div className="flex justify-between">
+              <span className="text-text-gray">Delivery Fee</span>
+              <span className="text-white">${summary.deliveryFee.toFixed(2)}</span>
+            </div>
           )}
-          <div className="flex justify-between"><span className="text-text-gray">Platform Fee</span><span className="text-white">${summary.fairSynqFee.toFixed(2)}</span></div>
+          {summary.serviceCharge != null && summary.serviceCharge > 0 && (
+            <div className="flex justify-between">
+              <span className="text-text-gray">Event service charge</span>
+              <span className="text-white">${summary.serviceCharge.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-text-gray">Platform Fee</span>
+            <span className="text-white">${summary.fairSynqFee.toFixed(2)}</span>
+          </div>
           <div className="flex justify-between pt-3 border-t border-white/10">
             <span className="text-white font-bold">Total</span>
             <span className="text-neon-pink font-bold text-xl">${summary.total.toFixed(2)}</span>
@@ -101,7 +97,7 @@ const PaymentStep = ({ orderId, summary, onBack, onSuccess }) => {
       <div className="flex gap-3">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 px-5 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold hover:bg-white/10 transition-colors cursor-pointer border-0"
+          className="flex items-center gap-2 px-5 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold hover:bg-white/10 transition-colors cursor-pointer"
         >
           <ArrowLeftIcon className="w-4 h-4" />
           Back
@@ -132,15 +128,64 @@ const Checkout = () => {
   const { cart, getCartTotal, getCartCount, clearCart, cartVendorId, cartEventId } = useCart();
   const { user } = useUser();
 
+  // ── Event config (fulfillment options, service charge) ──────────────────
+  const [eventConfig, setEventConfig] = useState(null);
+
+  useEffect(() => {
+    if (!cartEventId) return;
+    fetch(`/api/events/${cartEventId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.data) {
+          setEventConfig(data.data);
+          // Auto-select if only one fulfillment type is enabled
+          const fc = data.data.fulfillmentConfig;
+          if (fc) {
+            const enabled = ALL_FULFILLMENT_OPTIONS.filter(opt => {
+              if (opt.value === 'BOOTH_PICKUP') return fc.boothPickupEnabled;
+              if (opt.value === 'CURBSIDE')     return fc.curbsideEnabled;
+              if (opt.value === 'HOME_DELIVERY') return fc.homeDeliveryEnabled;
+              return true;
+            });
+            if (enabled.length === 1) setFulfillmentType(enabled[0].value);
+          }
+        }
+      })
+      .catch(err => console.error('[Checkout] Failed to load event config:', err));
+  }, [cartEventId]);
+
+  // ── Derived config values ────────────────────────────────────────────────
+  const fulfillmentOptions = useMemo(() => {
+    const fc = eventConfig?.fulfillmentConfig;
+    if (!fc) return ALL_FULFILLMENT_OPTIONS;
+    return ALL_FULFILLMENT_OPTIONS.filter(opt => {
+      if (opt.value === 'BOOTH_PICKUP') return fc.boothPickupEnabled;
+      if (opt.value === 'CURBSIDE')     return fc.curbsideEnabled;
+      if (opt.value === 'HOME_DELIVERY') return fc.homeDeliveryEnabled;
+      return true;
+    });
+  }, [eventConfig]);
+
+  const configDeliveryFee = eventConfig?.fulfillmentConfig?.homeDeliveryFee ?? 2.99;
+  const serviceChargeAmount =
+    eventConfig?.serviceChargeEnabled && eventConfig?.serviceChargeAmount
+      ? eventConfig.serviceChargeAmount
+      : 0;
+
+  // ── Estimated ready time from cart item prepTimes ────────────────────────
+  const estimatedReadyMin = useMemo(() => {
+    const times = cart.map(i => i.prepTime).filter(Boolean);
+    return times.length > 0 ? Math.max(...times) : null;
+  }, [cart]);
+
+  // ── Form state ──────────────────────────────────────────────────────────
   const [fulfillmentType, setFulfillmentType] = useState('BOOTH_PICKUP');
   const [form, setForm] = useState({
     name: user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : '',
     phone: user?.primaryPhoneNumber?.phoneNumber ?? '',
-    // Curbside
     vehicleMake: '',
     vehicleColor: '',
     vehiclePlate: '',
-    // Home delivery
     deliveryStreet: sessionStorage.getItem('deliveryAddress') || '',
     deliveryCity: '',
     deliveryZip: '',
@@ -154,7 +199,23 @@ const Checkout = () => {
   const cartTotal = getCartTotal();
   const cartCount = getCartCount();
 
+  // Estimated totals before order is placed
+  const estimatedDeliveryFee = fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee : 0;
+  const estimatedTotal = parseFloat((cartTotal + estimatedDeliveryFee + serviceChargeAmount).toFixed(2));
+
   const handleChange = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+  // Parse address components from Google Places selection
+  const handlePlaceSelect = (place) => {
+    const comps = place.address_components ?? [];
+    const get = (type) => comps.find(c => c.types.includes(type))?.long_name ?? '';
+    setForm(prev => ({
+      ...prev,
+      deliveryStreet: place.formatted_address,
+      deliveryCity: get('locality') || get('sublocality') || get('administrative_area_level_2'),
+      deliveryZip: get('postal_code'),
+    }));
+  };
 
   const validate = () => {
     if (!form.name.trim() || !form.phone.trim()) {
@@ -172,8 +233,8 @@ const Checkout = () => {
       }
     }
     if (fulfillmentType === 'HOME_DELIVERY') {
-      if (!form.deliveryStreet.trim() || !form.deliveryCity.trim() || !form.deliveryZip.trim()) {
-        toast.error('Full delivery address is required');
+      if (!form.deliveryStreet.trim()) {
+        toast.error('Delivery address is required');
         return false;
       }
     }
@@ -203,8 +264,8 @@ const Checkout = () => {
         }),
         ...(fulfillmentType === 'HOME_DELIVERY' && {
           deliveryStreet: form.deliveryStreet.trim(),
-          deliveryCity: form.deliveryCity.trim(),
-          deliveryZip: form.deliveryZip.trim(),
+          deliveryCity: form.deliveryCity.trim() || form.deliveryStreet.trim(),
+          deliveryZip: form.deliveryZip.trim() || '00000',
         }),
       };
 
@@ -232,10 +293,10 @@ const Checkout = () => {
   };
 
   const handleSuccess = useCallback(() => {
-    toast.success('Order placed! 🎉');
+    toast.success('Order placed!');
     clearCart();
-    navigate('/home');
-  }, [clearCart, navigate]);
+    navigate(`/track?orderId=${orderId}`);
+  }, [clearCart, navigate, orderId]);
 
   if (cartCount === 0) {
     return (
@@ -243,7 +304,7 @@ const Checkout = () => {
         <div className="text-5xl mb-4">🛒</div>
         <h2 className="font-bebas text-3xl text-white mb-2">Your cart is empty</h2>
         <p className="text-text-gray mb-6">Add some fair food before checking out.</p>
-        <button onClick={() => navigate('/menu')} className="px-6 py-3 bg-neon-pink text-white font-bold rounded-xl hover:bg-[#e0006b] transition-colors">
+        <button onClick={() => navigate(-1)} className="px-6 py-3 bg-neon-pink text-white font-bold rounded-xl hover:bg-[#e0006b] transition-colors">
           Browse Menu
         </button>
       </div>
@@ -255,7 +316,10 @@ const Checkout = () => {
       {/* Header */}
       <div className="sticky top-[4.5rem] z-10 bg-bg-dark/90 backdrop-blur-md border-b border-white/10">
         <div className="max-w-[75rem] mx-auto px-6 py-4 flex items-center gap-4">
-          <button onClick={() => clientSecret ? setClientSecret(null) : navigate(-1)} className="p-2 hover:bg-white/5 rounded-lg transition-colors bg-transparent border-0 cursor-pointer">
+          <button
+            onClick={() => clientSecret ? setClientSecret(null) : navigate(-1)}
+            className="p-2 hover:bg-white/5 rounded-lg transition-colors bg-transparent border-0 cursor-pointer"
+          >
             <ArrowLeftIcon className="w-5 h-5 text-white" />
           </button>
           <h1 className="font-bebas text-2xl tracking-wide text-white">
@@ -295,30 +359,36 @@ const Checkout = () => {
               </Elements>
             ) : (
               <>
-                {/* Fulfillment Type */}
-                <div className={sectionClass}>
-                  <h2 className="font-bebas text-xl tracking-wide text-white mb-5">How would you like it?</h2>
-                  <div className="space-y-3">
-                    {FULFILLMENT_OPTIONS.map(opt => {
-                      const Icon = opt.icon;
-                      return (
-                        <button
-                          key={opt.value}
-                          onClick={() => setFulfillmentType(opt.value)}
-                          className={`w-full p-4 rounded-xl border-2 transition-all duration-200 text-left cursor-pointer ${fulfillmentType === opt.value ? 'border-neon-pink bg-neon-pink/10' : 'border-white/10 bg-transparent hover:border-white/20'}`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Icon className="w-5 h-5 text-white flex-shrink-0" />
-                            <div>
-                              <p className="text-white font-semibold text-sm">{opt.label}</p>
-                              <p className="text-text-gray text-xs mt-0.5">{opt.sub}</p>
+                {/* Fulfillment Type — hidden when only one option */}
+                {fulfillmentOptions.length > 1 && (
+                  <div className={sectionClass}>
+                    <h2 className="font-bebas text-xl tracking-wide text-white mb-5">How would you like it?</h2>
+                    <div className="space-y-3">
+                      {fulfillmentOptions.map(opt => {
+                        const Icon = opt.icon;
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => setFulfillmentType(opt.value)}
+                            className={`w-full p-4 rounded-xl border-2 transition-all duration-200 text-left cursor-pointer ${fulfillmentType === opt.value ? 'border-neon-pink bg-neon-pink/10' : 'border-white/10 bg-transparent hover:border-white/20'}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Icon className="w-5 h-5 text-white flex-shrink-0" />
+                              <div>
+                                <p className="text-white font-semibold text-sm">{opt.label}</p>
+                                <p className="text-text-gray text-xs mt-0.5">
+                                  {opt.value === 'HOME_DELIVERY'
+                                    ? `${opt.sub} — $${configDeliveryFee.toFixed(2)} fee`
+                                    : opt.sub}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Customer Info */}
                 <div className={sectionClass}>
@@ -362,22 +432,18 @@ const Checkout = () => {
                 {fulfillmentType === 'HOME_DELIVERY' && (
                   <div className={sectionClass}>
                     <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Delivery Address</h2>
-                    <div className="space-y-4">
+                    <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ''}>
                       <div>
                         <label className={labelClass}>Street Address *</label>
-                        <input type="text" name="deliveryStreet" value={form.deliveryStreet} onChange={handleChange} className={inputClass} placeholder="147 E Grove Ave" />
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className={labelClass}>City *</label>
-                          <input type="text" name="deliveryCity" value={form.deliveryCity} onChange={handleChange} className={inputClass} placeholder="Springfield" />
-                        </div>
-                        <div>
-                          <label className={labelClass}>ZIP Code *</label>
-                          <input type="text" name="deliveryZip" value={form.deliveryZip} onChange={handleChange} className={inputClass} placeholder="62701" maxLength={10} />
+                        <div className="bg-bg-dark border border-white/10 rounded-xl focus-within:border-neon-pink transition-colors">
+                          <AddressAutocomplete
+                            value={form.deliveryStreet}
+                            onChange={(val) => setForm(prev => ({ ...prev, deliveryStreet: val }))}
+                            onPlaceSelect={handlePlaceSelect}
+                          />
                         </div>
                       </div>
-                    </div>
+                    </APIProvider>
                   </div>
                 )}
 
@@ -407,6 +473,7 @@ const Checkout = () => {
             <div className="bg-bg-card border border-white/10 rounded-2xl p-6 sticky top-36">
               <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Order Summary</h2>
 
+              {/* Item list grouped by vendor name */}
               <div className="space-y-3 mb-5 max-h-64 overflow-y-auto -mx-1 px-1">
                 {cart.map(item => (
                   <div key={`${item.id}-${item.sizeName || ''}`} className="flex gap-3 pb-3 border-b border-white/5 last:border-0 last:pb-0">
@@ -428,25 +495,48 @@ const Checkout = () => {
                 ))}
               </div>
 
+              {/* Estimated ready time */}
+              {estimatedReadyMin && (
+                <div className="flex items-center gap-2 py-3 px-3 mb-4 bg-white/[0.03] border border-white/5 rounded-xl">
+                  <ClockIcon className="w-4 h-4 text-neon-pink flex-shrink-0" />
+                  <span className="text-text-gray text-xs">Ready in ~<span className="text-white font-semibold">{estimatedReadyMin} min</span></span>
+                </div>
+              )}
+
+              {/* Price breakdown */}
               <div className="space-y-2 pb-4 border-b border-white/10 text-sm">
                 <div className="flex justify-between">
                   <span className="text-text-gray">Subtotal</span>
                   <span className="text-white">${cartTotal.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-text-gray">Fulfillment</span>
-                  <span className="text-white capitalize">{FULFILLMENT_OPTIONS.find(o => o.value === fulfillmentType)?.label}</span>
-                </div>
+                {fulfillmentType === 'HOME_DELIVERY' && (
+                  <div className="flex justify-between">
+                    <span className="text-text-gray">Delivery Fee</span>
+                    <span className="text-white">${configDeliveryFee.toFixed(2)}</span>
+                  </div>
+                )}
+                {serviceChargeAmount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-text-gray">Event service charge</span>
+                    <span className="text-white">${serviceChargeAmount.toFixed(2)}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-between py-4">
-                <span className="text-white font-bold">Est. Subtotal</span>
-                <span className="text-neon-pink font-bold text-xl">${cartTotal.toFixed(2)}</span>
+                <span className="text-white font-bold">
+                  {clientSecret ? 'Total' : 'Est. Total'}
+                </span>
+                <span className="text-neon-pink font-bold text-xl">
+                  ${clientSecret ? (summary?.total ?? estimatedTotal).toFixed(2) : estimatedTotal.toFixed(2)}
+                </span>
               </div>
 
-              <p className="text-text-gray text-xs text-center">
-                Final total confirmed at payment step
-              </p>
+              {!clientSecret && (
+                <p className="text-text-gray text-xs text-center">
+                  Platform fee added at payment step
+                </p>
+              )}
             </div>
           </div>
 

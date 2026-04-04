@@ -1,3 +1,4 @@
+import { clerkClient } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import { success, apiError, paginated } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
@@ -77,6 +78,17 @@ export async function POST(req: Request) {
         },
       },
     })
+
+    // Set publicMetadata.role = 'vendor' so requireVendorAuth() passes immediately
+    try {
+      const clerk = await clerkClient()
+      await clerk.users.updateUserMetadata(clerkId, {
+        publicMetadata: { role: 'vendor' },
+      })
+    } catch (err) {
+      // Non-fatal — vendor record exists; admin can manually set role if needed
+      console.error('[Vendors] Failed to set Clerk publicMetadata for', clerkId, err)
+    }
 
     return success(vendor, 201)
   } catch (err) {

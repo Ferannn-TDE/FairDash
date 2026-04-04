@@ -11,9 +11,12 @@ import {
   ChatBubbleLeftEllipsisIcon,
   ReceiptPercentIcon,
   BuildingStorefrontIcon,
+  TruckIcon,
 } from "@heroicons/react/24/outline";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
 import toast from "react-hot-toast";
+import { getDatabase, ref, onValue, off } from "firebase/database";
+import { getFirebaseApp } from "../lib/firebase";
 import TrackOrderSkeleton from "../components/skeletons/TrackOrderSkeleton";
 
 // ─── Status config ─────────────────────────────────────────────────────────────
@@ -324,10 +327,63 @@ const OrderMetaCard = ({ order }) => {
   );
 };
 
+// ─── Status Banner ─────────────────────────────────────────────────────────────
+// Contextual message shown below the stepper based on current status + fulfillment
+
+const StatusBanner = ({ order }) => {
+  const { status, fulfillmentType, estimatedReadyAt, vendor, vehicleColor, vehicleMake } = order;
+
+  let icon = ClockIcon;
+  let colorClass = "bg-amber-500/10 border-amber-500/20 text-amber-300";
+  let message = null;
+
+  if (status === "PLACED") {
+    message = "Waiting for the vendor to accept your order (up to 2 minutes)…";
+  } else if (status === "ACCEPTED" || status === "PREPARING") {
+    icon = ClockIcon;
+    colorClass = "bg-blue-500/10 border-blue-500/20 text-blue-300";
+    const readyStr = estimatedReadyAt
+      ? ` Estimated ready at ${new Date(estimatedReadyAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+      : "";
+    message = `The vendor is preparing your order.${readyStr}`;
+  } else if (status === "READY") {
+    icon = CheckCircleIcon;
+    colorClass = "bg-neon-pink/10 border-neon-pink/20 text-neon-pink";
+    if (fulfillmentType === "BOOTH_PICKUP") {
+      message = vendor?.boothNumber
+        ? `Order ready at Booth #${vendor.boothNumber}. Walk to the express lane.`
+        : "Your order is ready for pickup at the vendor booth!";
+    } else if (fulfillmentType === "CURBSIDE") {
+      message = vehicleColor && vehicleMake
+        ? `Your order is ready. A Runner is bringing it to your ${vehicleColor} ${vehicleMake}.`
+        : "Your order is ready. A Runner is on their way to your vehicle.";
+    } else {
+      message = "Your order is out for delivery!";
+    }
+  } else if (status === "COMPLETED") {
+    icon = CheckCircleIcon;
+    colorClass = "bg-emerald-500/10 border-emerald-500/20 text-emerald-400";
+    message = fulfillmentType === "HOME_DELIVERY"
+      ? "Delivered! We hope you enjoy your food."
+      : "Order complete! Enjoy your food.";
+  } else {
+    return null;
+  }
+
+  const Icon = icon;
+  return (
+    <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border mb-6 ${colorClass}`}>
+      <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+      <p className="text-sm font-medium leading-snug">{message}</p>
+    </div>
+  );
+};
+
 // ─── Cancel Modal ──────────────────────────────────────────────────────────────
 
-const CancelModal = ({ isOpen, onClose, onConfirm, loading }) => {
+const CancelModal = ({ isOpen, onClose, onConfirm, loading, orderStatus }) => {
   if (!isOpen) return null;
+  const feeApplies = orderStatus === "ACCEPTED";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
@@ -341,9 +397,22 @@ const CancelModal = ({ isOpen, onClose, onConfirm, loading }) => {
             <p className="text-text-gray text-xs">This cannot be undone.</p>
           </div>
         </div>
-        <p className="text-text-gray text-sm mb-6">
-          Your order will be cancelled and a full refund will be issued to your original payment method within 5–10 business days.
-        </p>
+        {feeApplies ? (
+          <div className="mb-6 space-y-3">
+            <p className="text-text-gray text-sm">
+              The vendor has already accepted your order. A{" "}
+              <span className="text-white font-semibold">$5.00 cancellation fee</span> will be
+              retained and the remainder refunded to your original payment method within 5–10 business days.
+            </p>
+            <p className="text-[0.6875rem] text-amber-400/80">
+              Cancellations after a vendor has started your order incur a $5.00 fee.
+            </p>
+          </div>
+        ) : (
+          <p className="text-text-gray text-sm mb-6">
+            Your order will be cancelled and a full refund will be issued to your original payment method within 5–10 business days.
+          </p>
+        )}
         <div className="flex gap-3">
           <button
             onClick={onClose}
@@ -357,7 +426,7 @@ const CancelModal = ({ isOpen, onClose, onConfirm, loading }) => {
             disabled={loading}
             className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 active:bg-red-700 active:scale-[0.97] transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Cancelling…" : "Cancel Order"}
+            {loading ? "Cancelling…" : feeApplies ? "Cancel (−$5.00 fee)" : "Cancel Order"}
           </button>
         </div>
       </div>
@@ -493,6 +562,50 @@ const TrackOrder = () => {
   const [cancelling, setCancelling] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [runnerLocation, setRunnerLocation] = useState(null); // { lat, lng }
+
+  // ── Firebase RTDB — real-time status subscription ──────────────────────
+  // Path: fairs/{eventId}/customerOrders/{customerId}/{orderId}
+  // Falls back to polling (below) when Firebase is not configured.
+  useEffect(() => {
+    if (!orderId || !order?.eventId || !order?.customerId) return;
+
+    const app = getFirebaseApp();
+    if (!app) return; // no Firebase — polling handles it
+
+    const db = getDatabase(app);
+    const orderRef = ref(db, `fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`);
+
+    onValue(orderRef, (snap) => {
+      const data = snap.val();
+      if (data?.status) {
+        setOrder(prev => prev ? { ...prev, status: data.status, updatedAt: data.updatedAt } : prev);
+      }
+    });
+
+    return () => off(orderRef);
+  }, [orderId, order?.eventId, order?.customerId]);
+
+  // ── Firebase RTDB — runner location (HOME_DELIVERY READY only) ─────────
+  // Path: fairs/{eventId}/runnerLocation/{runnerId}
+  useEffect(() => {
+    if (!order?.eventId || !order?.runnerId) return;
+    if (order.status !== "READY" && order.status !== "RUNNER_COLLECTED") return;
+    if (order.fulfillmentType !== "HOME_DELIVERY") return;
+
+    const app = getFirebaseApp();
+    if (!app) return;
+
+    const db = getDatabase(app);
+    const locRef = ref(db, `fairs/${order.eventId}/runnerLocation/${order.runnerId}`);
+
+    onValue(locRef, (snap) => {
+      const loc = snap.val();
+      if (loc?.lat && loc?.lng) setRunnerLocation({ lat: loc.lat, lng: loc.lng });
+    });
+
+    return () => off(locRef);
+  }, [order?.eventId, order?.runnerId, order?.status, order?.fulfillmentType]);
 
   // Fetch a specific order
   const fetchOrder = useCallback(async () => {
@@ -511,8 +624,9 @@ const TrackOrder = () => {
   }, [orderId]);
 
   // Poll every 15 seconds while order is active
-  // TODO: Replace with Firebase RTDB subscription at customerOrders/{customerId}/{orderId}
+  // TODO: Replace with Firebase RTDB subscription at fairs/{eventId}/customerOrders/{customerId}/{orderId}
   //       when NEXT_PUBLIC_FIREBASE_DATABASE_URL and related vars are configured.
+  //       Phase 1.5 — see PLAN_V4.md §3
   useEffect(() => {
     if (!orderId) return;
     fetchOrder();
@@ -542,7 +656,12 @@ const TrackOrder = () => {
       const json = await res.json();
       if (!json.success) throw new Error(json.error?.message || "Cancellation failed");
       setShowCancelModal(false);
-      toast.success("Order cancelled. Your refund is on the way.");
+      const fee = json.data?.cancellationFee;
+      toast.success(
+        fee > 0
+          ? `Order cancelled. Refund issued minus $${fee.toFixed(2)} cancellation fee.`
+          : "Order cancelled. Full refund is on the way."
+      );
       fetchOrder();
     } catch (err) {
       toast.error(err.message || "Could not cancel order. Please contact support.");
@@ -609,9 +728,12 @@ const TrackOrder = () => {
 
         <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5 py-6">
           {/* ── Status stepper (full-width) ───────────────────────────────────── */}
-          <div className="mb-6">
+          <div className="mb-4">
             <OrderStepper status={order.status} steps={steps} />
           </div>
+
+          {/* ── Contextual status banner ──────────────────────────────────────── */}
+          <StatusBanner order={order} />
 
           {/* ── Two-column layout ─────────────────────────────────────────────── */}
           <div className="grid grid-cols-[1fr_22rem] lg:grid-cols-1 gap-5">
@@ -625,17 +747,31 @@ const TrackOrder = () => {
                   <div className="relative w-full h-64 md:h-48">
                     <iframe
                       title="Order location"
-                      src={mapSrc}
+                      src={
+                        runnerLocation
+                          ? `https://maps.google.com/maps?q=${runnerLocation.lat},${runnerLocation.lng}&output=embed&hl=en&z=16`
+                          : mapSrc
+                      }
                       className="w-full h-full border-0"
                       loading="lazy"
                       allowFullScreen
                       referrerPolicy="no-referrer-when-downgrade"
                     />
-                    {/* Live tracking badge */}
-                    <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-sm px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-text-gray border border-white/10">
-                      <span className="w-2 h-2 rounded-full bg-text-gray/40" />
-                      Live tracking coming soon
-                    </div>
+                    {/* Tracking badge */}
+                    {runnerLocation ? (
+                      <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-sm px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-neon-pink border border-neon-pink/30">
+                        <TruckIcon className="w-3.5 h-3.5" />
+                        Runner location live
+                        <span className="w-2 h-2 rounded-full bg-neon-pink animate-pulse" />
+                      </div>
+                    ) : (
+                      <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-sm px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-semibold text-text-gray border border-white/10">
+                        <span className="w-2 h-2 rounded-full bg-text-gray/40" />
+                        {order.fulfillmentType === "HOME_DELIVERY" && order.status === "READY"
+                          ? "Awaiting runner location…"
+                          : "Order location"}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -695,6 +831,7 @@ const TrackOrder = () => {
         onClose={() => setShowCancelModal(false)}
         onConfirm={handleCancel}
         loading={cancelling}
+        orderStatus={order?.status}
       />
       <SupportModal
         isOpen={showSupportModal}

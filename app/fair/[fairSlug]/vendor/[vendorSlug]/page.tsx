@@ -1,0 +1,210 @@
+'use client'
+
+import { useParams } from 'next/navigation'
+import { notFound } from 'next/navigation'
+import { StarIcon } from '@heroicons/react/24/solid'
+import { PlusIcon, MinusIcon, ShoppingBagIcon, ClockIcon } from '@heroicons/react/24/outline'
+import toast from 'react-hot-toast'
+import { useFair } from '../../../../_contexts/FairContext'
+import { useFairCart } from '../../../../_contexts/FairCartContext'
+import { getVendorBySlug, type MenuItem, type MockVendor } from '@/lib/mock'
+
+// ── Fix 3: Card layout with image support ─────────────────────────────────────
+
+function MenuItemCard({
+  item,
+  vendor,
+  accentColor,
+}: {
+  item: MenuItem
+  vendor: MockVendor
+  accentColor: string
+}) {
+  const { addItem, items, updateQty } = useFairCart()
+  const cartItem = items.find((i) => i.menuItemId === item.id)
+  const qty = cartItem?.quantity ?? 0
+
+  return (
+    <div className={`bg-bg-card border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 transition-colors duration-200 ${!item.available ? 'opacity-50' : ''}`}>
+
+      {/* Image area — gradient placeholder when no imageUrl */}
+      {item.imageUrl ? (
+        <div className="h-28 sm:h-32 overflow-hidden">
+          <img
+            src={item.imageUrl}
+            alt={item.name}
+            className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+          />
+        </div>
+      ) : (
+        <div
+          className="h-24 sm:h-28 flex items-center justify-center"
+          style={{ background: `linear-gradient(135deg, ${accentColor}10, ${accentColor}05)` }}
+        >
+          <span className="text-3xl opacity-25">🍽️</span>
+        </div>
+      )}
+
+      {/* Card body */}
+      <div className="p-4">
+        {/* Name + price */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-white text-sm sm:text-base leading-snug">{item.name}</h3>
+            {item.popular && (
+              <span className="inline-block mt-1 px-2 py-0.5 bg-yellow-400/15 text-yellow-400 text-[0.6rem] font-semibold uppercase tracking-wide rounded">
+                Popular
+              </span>
+            )}
+          </div>
+          <span className="text-base font-semibold text-white tabular-nums shrink-0">
+            ${item.price.toFixed(2)}
+          </span>
+        </div>
+
+        {/* Description */}
+        {item.description && (
+          <p className="text-text-gray text-xs mt-2 leading-relaxed line-clamp-2">{item.description}</p>
+        )}
+
+        {/* Bottom row: prep time + add/qty */}
+        <div className="mt-3 flex items-center justify-between gap-2">
+          {item.prepTime ? (
+            <span className="flex items-center gap-1 text-text-gray text-xs">
+              <ClockIcon className="w-3 h-3 shrink-0" /> {item.prepTime} min
+            </span>
+          ) : (
+            <span />
+          )}
+
+          {item.available && (
+            qty === 0 ? (
+              <button
+                onClick={() => {
+                  addItem(item, vendor)
+                  toast.success(`${item.name} added`)
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0"
+                style={{ background: accentColor }}
+              >
+                <PlusIcon className="w-3.5 h-3.5" />
+                Add
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => updateQty(item.id, qty - 1)}
+                  className="w-7 h-7 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+                >
+                  <MinusIcon className="w-3.5 h-3.5 text-white" />
+                </button>
+                <span className="text-white font-semibold w-4 text-center text-sm tabular-nums">{qty}</span>
+                <button
+                  onClick={() => addItem(item, vendor)}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity"
+                  style={{ background: accentColor }}
+                >
+                  <PlusIcon className="w-3.5 h-3.5 text-white" />
+                </button>
+              </div>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function VendorMenuPage() {
+  const params = useParams<{ fairSlug: string; vendorSlug: string }>()
+  const { fair } = useFair()
+  const { itemCount, subtotal, syncToSpaCart } = useFairCart()
+  const accentColor = fair.branding?.accentColor ?? '#FF0077'
+
+  const vendor = getVendorBySlug(params.fairSlug, params.vendorSlug)
+  if (!vendor) notFound()
+
+  const categories = Array.from(new Set(vendor.menu.map((m) => m.category)))
+
+  const handleCheckout = () => {
+    syncToSpaCart()
+    window.location.href = `/fair/${fair.slug}/cart`
+  }
+
+  return (
+    // Fix 2: NO back link here — the FairNavbar handles all back navigation contextually.
+    <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 text-white">
+      <div className="flex flex-col lg:flex-row gap-8">
+
+        {/* Main: vendor info + menu */}
+        <div className="flex-1">
+
+          {/* Vendor header */}
+          <div className="flex items-start gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <div
+              className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 font-bebas text-2xl sm:text-3xl"
+              style={{ background: `${accentColor}22`, border: `1px solid ${accentColor}44`, color: accentColor }}
+            >
+              {vendor.name.charAt(0)}
+            </div>
+            <div className="min-w-0">
+              <h1 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-tight">{vendor.name}</h1>
+              <p className="text-text-gray text-xs sm:text-sm">{vendor.cuisineType} · Booth {vendor.boothNumber}</p>
+              {vendor.rating && (
+                <span className="flex items-center gap-1 text-yellow-400 text-xs sm:text-sm font-semibold mt-1">
+                  <StarIcon className="w-3.5 h-3.5 shrink-0" /> {vendor.rating.toFixed(1)}
+                  <span className="text-text-gray font-normal text-xs">({vendor.reviewCount} reviews)</span>
+                </span>
+              )}
+              {vendor.description && (
+                <p className="text-text-gray text-xs sm:text-sm mt-1.5 max-w-xl leading-relaxed">{vendor.description}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Fix 3: Category grid — 2 cols on sm+ */}
+          {categories.map((category, i) => (
+            <section key={category} className={i === 0 ? 'mb-8' : 'mt-10 mb-8'}>
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="font-bebas text-xs sm:text-sm text-white uppercase tracking-widest whitespace-nowrap">
+                  {category}
+                </h2>
+                <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+              </div>
+              {/* Fix 3: grid instead of vertical stack */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {vendor.menu
+                  .filter((m) => m.category === category)
+                  .map((item) => (
+                    <MenuItemCard key={item.id} item={item} vendor={vendor} accentColor={accentColor} />
+                  ))}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        {/* Sidebar: cart summary (desktop) */}
+        {itemCount > 0 && (
+          <div className="lg:w-72 shrink-0">
+            <div className="bg-bg-card border border-white/10 rounded-2xl p-5 sticky top-20">
+              <h2 className="font-bebas text-xl text-white tracking-wide mb-1">Your Order</h2>
+              <p className="text-text-gray text-sm mb-4">
+                {itemCount} item{itemCount !== 1 ? 's' : ''} · ${subtotal.toFixed(2)}
+              </p>
+              <button
+                onClick={handleCheckout}
+                className="w-full py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                style={{ background: accentColor }}
+              >
+                <ShoppingBagIcon className="w-4 h-4" />
+                View Cart
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

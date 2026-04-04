@@ -6,16 +6,15 @@
  *
  * Graceful no-Redis fallback: if REDIS_URL is unset, all queue operations
  * are skipped and a warning is logged. The app stays functional; delayed
- * jobs (e.g. UNCOLLECTED timeout) simply won't fire until Redis is wired up.
+ * jobs simply won't fire until Redis is wired up.
  *
- * Connection strategy: we pass a plain RedisOptions object rather than an
- * IORedis instance so BullMQ uses its own bundled ioredis — this avoids
- * dual-version type conflicts between top-level ioredis and bullmq's copy.
+ * All job payloads include eventId so the worker can namespace Firebase
+ * writes under fairs/{eventId}/... without an extra DB round-trip.
  */
 
 import { Queue, ConnectionOptions } from 'bullmq'
 
-// ─── Connection options ───────────────────────────────────────────────────────
+// ─── Connection ───────────────────────────────────────────────────────────────
 
 function buildConnectionOptions(url: string): ConnectionOptions {
   const parsed = new URL(url)
@@ -48,27 +47,58 @@ function getConnectionOptions(): ConnectionOptions | null {
   }
 }
 
-// ─── Queue names ─────────────────────────────────────────────────────────────
+// ─── Queue name ───────────────────────────────────────────────────────────────
 
 export const ORDER_QUEUE_NAME = 'fairsynq-orders'
 
-// ─── Job names ────────────────────────────────────────────────────────────────
+// ─── Job name constants ───────────────────────────────────────────────────────
+// Single source of truth. Worker imports these same constants.
 
-export const JOB_UNCOLLECTED = 'mark-uncollected'    // booth / curbside 15-min timeout
-export const JOB_UNDELIVERABLE = 'mark-undeliverable' // home delivery timeout
+/** Order timeout: vendor did not accept within 2 minutes → auto-cancel + full refund */
+export const JOB_UNACCEPTED = 'mark-unaccepted'
 
-// ─── Delays ──────────────────────────────────────────────────────────────────
+/** Order timeout: booth/curbside not collected 10 min after READY → UNCOLLECTED, no refund */
+export const JOB_UNCOLLECTED = 'mark-uncollected'
 
-export const UNCOLLECTED_DELAY_MS = 15 * 60 * 1000   // 15 minutes
+/** Order timeout: home delivery not completed 10 min after READY → UNDELIVERABLE, no refund */
+export const JOB_UNDELIVERABLE = 'mark-undeliverable'
 
-// ─── Job payloads ─────────────────────────────────────────────────────────────
+/** Vendor heartbeat stale 5 min → auto-hide from customer menu (isOffline = true) */
+export const JOB_HIDE_VENDOR = 'auto-hide-vendor'
 
-export interface UncollectedJobData {
-  orderId: string
-  vendorId: string
+/** IncidentReport filed → if operator does not respond in 5 min → auto-refund */
+export const JOB_INCIDENT_REFUND = 'incident-auto-refund'
+
+/** Dispute OPEN → if admin does not resolve in 24 hr → status ESCALATED */
+export const JOB_ESCALATE_DISPUTE = 'escalate-dispute'
+
+/** Event closed → generate post-event report and email operator within 48 hr */
+export const JOB_POST_EVENT_REPORT = 'generate-post-event-report'
+
+/** Emergency cancel → bulk Stripe refund all open orders for an event */
+export const JOB_BULK_REFUND = 'bulk-refund-event'
+
+// ─── Job payload ──────────────────────────────────────────────────────────────
+// Unified interface — all jobs share the same queue so all payloads must be
+// compatible with the Worker<JobData> generic. Fields are optional when not
+// relevant to a specific job type.
+
+export interface JobData {
+  // Present on every job — enables namespaced Firebase writes without a DB lookup
+  eventId: string
+
+  // Order/vendor jobs
+  orderId?: string
+  vendorId?: string
+
+  // Dispute job
+  disputeId?: string
+
+  // Incident job
+  incidentId?: string
 }
 
-// ─── Queue singleton ─────────────────────────────────────────────────────────
+// ─── Queue singleton ──────────────────────────────────────────────────────────
 
 const globalForQueue = globalThis as unknown as {
   orderQueue: Queue | undefined

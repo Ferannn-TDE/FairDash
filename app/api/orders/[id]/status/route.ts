@@ -10,9 +10,8 @@ import {
   getOrderQueue,
   JOB_UNCOLLECTED,
   JOB_UNDELIVERABLE,
-  UNCOLLECTED_DELAY_MS,
-  UncollectedJobData,
 } from '@/lib/queues'
+import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD } from '@/lib/constants'
 
 // PATCH /api/orders/:id/status
 // Advance an order through its lifecycle. Caller must be a VendorMember of the order's vendor.
@@ -105,6 +104,12 @@ export async function PATCH(
       where: { id: order.id },
       data: {
         status: newStatus,
+        // ACCEPTED: mark the "Start Order" moment and lock in the cancellation fee.
+        // From this point, any customer cancellation retains ORDER_CANCELLATION_FEE_USD.
+        ...(newStatus === OrderStatus.ACCEPTED && {
+          startedAt: new Date(),
+          cancellationFee: ORDER_CANCELLATION_FEE_USD,
+        }),
         ...(newStatus === OrderStatus.CANCELLED && {
           cancelledBy: 'vendor',
           cancellationReason: reason ?? null,
@@ -119,14 +124,14 @@ export async function PATCH(
     if (newStatus === OrderStatus.READY) {
       const queue = getOrderQueue()
       if (queue) {
-        const jobData: UncollectedJobData = { orderId: order.id, vendorId: order.vendorId }
+        const jobData = { orderId: order.id, vendorId: order.vendorId, eventId: order.eventId }
 
         if (order.fulfillmentType === FulfillmentType.HOME_DELIVERY) {
-          // HOME_DELIVERY uses same 15-min window but marks UNDELIVERABLE
-          await queue.add(JOB_UNDELIVERABLE, jobData, { delay: UNCOLLECTED_DELAY_MS })
+          // HOME_DELIVERY → UNDELIVERABLE after 10 min (playbook: curbside wait time)
+          await queue.add(JOB_UNDELIVERABLE, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
         } else {
-          // BOOTH_PICKUP + CURBSIDE → UNCOLLECTED after 15 min
-          await queue.add(JOB_UNCOLLECTED, jobData, { delay: UNCOLLECTED_DELAY_MS })
+          // BOOTH_PICKUP + CURBSIDE → UNCOLLECTED after 10 min
+          await queue.add(JOB_UNCOLLECTED, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
         }
       }
     }
@@ -148,12 +153,12 @@ export async function PATCH(
       const patch = { status: newStatus, updatedAt: now }
 
       rtdb
-        .ref(`orders/${order.vendorId}/${order.id}`)
+        .ref(`fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`)
         .update(patch)
         .catch(err => console.error('[Status] RTDB vendor write failed:', err))
 
       rtdb
-        .ref(`customerOrders/${order.customerId}/${order.id}`)
+        .ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`)
         .update(patch)
         .catch(err => console.error('[Status] RTDB customer write failed:', err))
     }

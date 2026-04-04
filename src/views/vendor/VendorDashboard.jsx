@@ -33,6 +33,11 @@ import {
 } from "../../utils/vendorPortalData";
 
 // ─────────────────────────────────────────
+//  TODO Phase 1.6: Replace mock data with live Firebase RTDB listener
+//  Vendor orders path:  fairs/{eventId}/orders/{vendorId}
+//  Heartbeat write path: fairs/{eventId}/vendors/{vendorId}/heartbeat
+//  See PLAN_V4.md §3 for full RTDB structure.
+// ─────────────────────────────────────────
 //  Sub-components
 // ─────────────────────────────────────────
 
