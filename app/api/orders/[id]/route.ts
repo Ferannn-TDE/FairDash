@@ -20,7 +20,7 @@ export async function GET(
         vendor: { select: { id: true, name: true, boothNumber: true } },
         orderItems: {
           include: {
-            menuItem: { select: { name: true, imageUrl: true, category: true } },
+            menuItem: { select: { name: true, imageUrl: true, category: true, prepTime: true } },
           },
         },
         cancellation: true,

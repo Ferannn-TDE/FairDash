@@ -37,6 +37,22 @@ model Event {
   stagingZoneLat Float?
   stagingZoneLng Float?
 
+  // Multi-fair metadata
+  description String?
+  timezone    String  @default("America/Chicago")
+
+  // Platform controls
+  isPaused Boolean @default(false) // one-button platform pause — blocks new orders
+
+  // Operator service charge (goes 100% to operator, not FairSynq)
+  serviceChargeEnabled    Boolean @default(false)
+  serviceChargeAmount     Float?  // e.g., 1.50 per order
+  operatorStripeAccountId String? // destination for service charge + delivery fee transfers
+
+  // Organizer
+  organizerId String?
+  organizer   FairOrganizer? @relation(fields: [organizerId], references: [id])
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -46,6 +62,8 @@ model Event {
   orders            Order[]
   adminUsers        AdminUser[]
   fulfillmentConfig FulfillmentConfig?
+  runners           Runner[]
+  postEventReport   PostEventReport?
 
   @@index([urlSlug])
   @@index([status])
@@ -105,6 +123,8 @@ model User {
   name    String?
   phone   String?
 
+  fcmToken String? // Firebase Cloud Messaging push token
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -112,6 +132,9 @@ model User {
   orders        Order[]
   vendorMembers VendorMember[]
   adminUsers    AdminUser[]
+  runner        Runner?
+  orgMembers    OrgMember[]
+  favoriteItems FavoriteItem[]
 
   @@index([clerkId])
   @@index([email])
@@ -140,6 +163,7 @@ model Vendor {
   isBusy    Boolean      @default(false)
   busyUntil DateTime? // Auto-clears after 15 min
   isOffline Boolean      @default(false) // Vendor entirely offline
+  lastHeartbeatAt DateTime? // Updated every 30s by vendor dashboard; stale > 5 min → auto-hide
 
   // Onboarding documents
   foodHandlerPermitUrl String?
@@ -155,7 +179,7 @@ model Vendor {
   stripeVerified  Boolean @default(false)
 
   // Commission
-  commissionRate Float @default(0.07) // 7% FairSynq platform fee on subtotal
+  commissionRate Float @default(0.10) // 10% FairSynq platform fee on subtotal
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -168,6 +192,7 @@ model Vendor {
   cancellations Cancellation[]
   payouts       Payout[]
   notifications VendorNotification[]
+  disputes      Dispute[]
 
   @@index([eventId])
   @@index([status])
@@ -225,7 +250,8 @@ model MenuItem {
   updatedAt DateTime @updatedAt
 
   // Relations
-  orderItems OrderItem[]
+  orderItems    OrderItem[]
+  favoriteItems FavoriteItem[]
 
   @@index([vendorId])
   @@index([isAvailable])
@@ -274,6 +300,26 @@ model Order {
   deliveryCity   String?
   deliveryZip    String?
 
+  // Operator service charge collected at checkout (goes to event operator, not FairSynq)
+  serviceCharge Float?
+
+  // Cancellation fee ($5 if customer cancels after vendor accepts)
+  cancellationFee Float?
+
+  // Runner dispatch
+  runnerId     String?
+  dispatchedAt DateTime?
+
+  // Curbside — mandatory Runner photo before Delivered
+  curbsidePhotoUrl String?
+
+  // Home delivery — GPS confirmation (must be within 100m of address)
+  runnerConfirmedLat Float?
+  runnerConfirmedLng Float?
+
+  // Estimated ready time (placedAt + max(item.prepTime) across order items)
+  estimatedReadyAt DateTime?
+
   // Stripe (per-transaction)
   stripePaymentIntentId String?
   stripeChargeId        String?
@@ -282,6 +328,7 @@ model Order {
   // Timestamps
   placedAt    DateTime  @default(now())
   acceptedAt  DateTime?
+  startedAt   DateTime? // When vendor taps Accept — triggers $5 cancellation fee window
   readyAt     DateTime?
   completedAt DateTime?
   cancelledAt DateTime?
@@ -290,15 +337,18 @@ model Order {
   cancelledBy        String? // "vendor" | "customer" | "system"
   cancellationReason String?
 
-  // Uncollected (15-min timeout after READY)
+  // Uncollected (timeout after READY)
   uncollectedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  orderItems   OrderItem[]
-  cancellation Cancellation?
+  orderItems    OrderItem[]
+  cancellation  Cancellation?
+  orderEvents   OrderEvent[]
+  incidentReports IncidentReport[]
+  disputes      Dispute[]
 
   @@index([eventId])
   @@index([customerId])
@@ -309,14 +359,16 @@ model Order {
 }
 
 enum OrderStatus {
-  PLACED        // Customer placed order, awaiting vendor acceptance
-  ACCEPTED      // Vendor accepted
-  PREPARING     // Vendor is preparing the order
-  READY         // Ready for pickup / runner dispatched
-  COMPLETED     // Collected by customer or delivered by runner
-  CANCELLED     // Cancelled by vendor, customer, or system
-  UNCOLLECTED   // Customer never collected (15-min timeout after READY)
-  UNDELIVERABLE // Home delivery address unreachable by runner
+  PLACED           // Customer placed order, awaiting vendor acceptance
+  ACCEPTED         // Vendor accepted (starts $5 cancellation fee window)
+  PREPARING        // Vendor is preparing the order
+  READY            // Ready for pickup / runner dispatched
+  RUNNER_COLLECTED // Runner confirmed pickup from vendor booth
+  COMPLETED        // Collected by customer or delivered by runner
+  DELIVERED        // Runner confirmed home delivery (GPS-verified)
+  CANCELLED        // Cancelled by vendor, customer, or system
+  UNCOLLECTED      // Customer never collected (10-min timeout after READY)
+  UNDELIVERABLE    // Home delivery address unreachable by runner
 }
 
 enum FulfillmentType {
@@ -431,4 +483,215 @@ model VendorNotification {
   acknowledgedAt DateTime?
 
   @@index([vendorId])
+}
+
+// ============================================================================
+// FAIR ORGANIZER
+// Org-level profile for event operators. One organizer can run multiple fairs.
+// ============================================================================
+
+model FairOrganizer {
+  id               String   @id @default(cuid())
+  name             String
+  contactEmail     String
+  contactPhone     String?
+  website          String?
+  stripeCustomerId String?  // for 2027 licensing billing
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  fairs   Event[]
+  members OrgMember[]
+}
+
+model OrgMember {
+  id          String        @id @default(cuid())
+  organizerId String
+  organizer   FairOrganizer @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String        @default("member") // owner | member
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizerId, userId])
+  @@index([organizerId])
+  @@index([userId])
+}
+
+// ============================================================================
+// RUNNERS
+// Event-staff role — assigned per event, tracked per-event.
+// ============================================================================
+
+model Runner {
+  id      String @id @default(cuid())
+  userId  String @unique
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  status RunnerStatus @default(OFFLINE)
+
+  // Performance — used to enforce 90% minimum completion rate
+  completionRate  Float @default(1.0) // 0.0–1.0
+  totalDispatched Int   @default(0)
+  totalCompleted  Int   @default(0)
+
+  // Live GPS (written every 5s during active HOME_DELIVERY)
+  currentLat        Float?
+  currentLng        Float?
+  locationUpdatedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  incidentReports IncidentReport[]
+
+  @@index([eventId])
+  @@index([status])
+}
+
+enum RunnerStatus {
+  OFFLINE     // Not active / off shift
+  ACTIVE      // Checked in and available for dispatch
+  ON_DELIVERY // Currently fulfilling an order
+}
+
+// ============================================================================
+// INCIDENT REPORTS
+// Filed by Runner when an order is dropped, damaged, or lost.
+// Operator has 5 minutes to respond before auto-refund triggers.
+// ============================================================================
+
+model IncidentReport {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  runnerId String
+  runner   Runner @relation(fields: [runnerId], references: [id])
+
+  type          IncidentType
+  affectedItems Json?   // array of orderItemIds; null = entire order
+  notes         String?
+  photoUrl      String?
+
+  reportedAt          DateTime  @default(now())
+  resolvedAt          DateTime?
+  resolution          String?   // full_refund | partial_refund | replacement | none
+  autoRefundTriggered Boolean   @default(false)
+
+  @@index([orderId])
+  @@index([runnerId])
+}
+
+enum IncidentType {
+  DROPPED
+  DAMAGED
+  LOST
+  MISSING_ITEMS
+}
+
+// ============================================================================
+// DISPUTES
+// Vendor-initiated. 7-day submission window. 24-hour admin SLA before escalation.
+// ============================================================================
+
+model Dispute {
+  id       String @id @default(cuid())
+  orderId  String
+  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  reason   String
+  evidence Json?
+
+  status      DisputeStatus @default(OPEN)
+  submittedAt DateTime      @default(now())
+  resolvedAt  DateTime?
+  resolution  String?
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+enum DisputeStatus {
+  OPEN      // Filed, awaiting admin action
+  RESOLVED  // Admin has resolved
+  ESCALATED // 24-hour SLA elapsed without action
+}
+
+// ============================================================================
+// ORDER EVENT AUDIT LOG
+// Written on every status transition. Required for dispute cross-referencing
+// and the post-event reconciliation engine.
+// ============================================================================
+
+model OrderEvent {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  eventType String  // placed | accepted | preparing | ready | runner_collected | completed | delivered | cancelled | uncollected | undeliverable
+  actorId   String? // userId of who triggered this transition
+  actorRole String? // customer | vendor | runner | system
+  metadata  Json?   // e.g., { reason: "...", refundAmount: 5.00 }
+
+  timestamp DateTime @default(now())
+
+  @@index([orderId])
+  @@index([timestamp])
+}
+
+// ============================================================================
+// POST-EVENT REPORT
+// Auto-generated within 48 hours of Close Event.
+// ============================================================================
+
+model PostEventReport {
+  id      String @id @default(cuid())
+  eventId String @unique
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  generatedAt DateTime  @default(now())
+  emailedAt   DateTime?
+
+  // Core metrics
+  totalOrders  Int
+  totalRevenue Float
+
+  // Breakdown fields (JSON for flexibility)
+  revenueByType     Json  // { BOOTH_PICKUP: x, CURBSIDE: y, HOME_DELIVERY: z }
+  vendorBreakdown   Json  // [{ vendorId, name, revenue, orderCount, avgFulfillmentMins, cancellationRate }]
+  peakWindows       Json  // [{ windowStart, windowEnd, orderCount }] — 30-min buckets
+  runnerPerformance Json  // [{ runnerId, name, completionRate, totalDispatched, incidents }]
+  cancellationLog   Json  // [{ orderId, reason, cancelledBy, refundIssued, refundAmount }]
+  platformIssues    Json? // any outages, heartbeat drops, Stripe errors
+
+  recommendations String? // plain text, written by system or FairSynq staff
+  pdfUrl          String? // Supabase Storage URL after PDF generation
+
+  @@index([eventId])
+}
+
+// ============================================================================
+// FAVORITE ITEMS
+// Customer-saved menu items. Per-user, per-item unique.
+// ============================================================================
+
+model FavoriteItem {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, menuItemId])
+  @@index([userId])
 }

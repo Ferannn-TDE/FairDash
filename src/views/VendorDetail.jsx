@@ -5,7 +5,7 @@ import FoodCard from "../components/FoodCard";
 import VendorDetailSkeleton from "../components/skeletons/VendorDetailSkeleton";
 
 const VendorDetail = () => {
-  const { vendorId } = useParams();
+  const { vendorId, eventSlug } = useParams();
   const [vendor, setVendor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -33,7 +33,7 @@ const VendorDetail = () => {
     return <VendorDetailSkeleton />;
   }
 
-  if (notFound) return <Navigate to="/vendors" />;
+  if (notFound) return <Navigate to={eventSlug ? `/${eventSlug}/vendors` : '/vendors'} />;
 
   // Normalise menu items into the shape FoodCard expects
   const items = (vendor?.menuItems ?? []).map(item => ({
@@ -58,7 +58,7 @@ const VendorDetail = () => {
       <div className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-12 md:py-8 border-b border-white/10">
         <div className="max-w-[87.5rem] mx-auto px-[6%] md:px-5">
           <Link
-            to="/vendors"
+            to={eventSlug ? `/${eventSlug}/vendors` : '/vendors'}
             className="inline-flex items-center gap-2 text-text-gray text-sm font-medium no-underline hover:text-neon-pink transition-colors duration-200 mb-6"
           >
             <ArrowLeftIcon className="w-4 h-4" />

@@ -9,9 +9,11 @@ export async function GET(
   { params }: { params: { slug: string } }
 ) {
   try {
-    const event = await db.event.findUnique({
-      where: { urlSlug: params.slug },
+    // Accept both URL slug and raw UUID so callers with only an eventId can also use this route
+    const event = await db.event.findFirst({
+      where: { OR: [{ urlSlug: params.slug }, { id: params.slug }] },
       include: {
+        fulfillmentConfig: true,
         _count: {
           select: {
             vendors: {

@@ -1,10 +1,12 @@
 import { NextRequest } from 'next/server'
 import { OrderStatus } from '@prisma/client'
+import Stripe from 'stripe'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { ORDER_CANCELLATION_FEE_USD } from '@/lib/constants'
 
 // PATCH /api/orders/:id/cancel
 // Customer-initiated cancellation.
@@ -26,15 +28,23 @@ export async function PATCH(
     if (!dbUser) return apiError('User not found', 404, 'USER_NOT_FOUND')
     if (order.customerId !== dbUser.id) return apiError('Access denied', 403, 'FORBIDDEN')
 
-    // Only PLACED or ACCEPTED can be cancelled by the customer
-    const cancellable: OrderStatus[] = [OrderStatus.PLACED, OrderStatus.ACCEPTED]
-    if (!cancellable.includes(order.status)) {
+    // PREPARING or later cannot be cancelled
+    const cancellable = [OrderStatus.PLACED, OrderStatus.ACCEPTED] as const
+    if (!(cancellable as readonly OrderStatus[]).includes(order.status)) {
       throw new ApiError(
-        'Orders can only be cancelled before the vendor starts preparing them',
+        'Order cannot be cancelled at this stage',
         409,
-        'CANNOT_CANCEL'
+        'CANCEL_NOT_ALLOWED'
       )
     }
+
+    // Determine refund amount based on whether the vendor has already accepted
+    //   PLACED   → full refund (vendor hasn't started yet)
+    //   ACCEPTED → partial refund: total − $5 cancellation fee
+    const isFeeApplicable = order.status === OrderStatus.ACCEPTED
+    const refundAmountDollars = isFeeApplicable
+      ? Math.max(0, order.total - ORDER_CANCELLATION_FEE_USD)
+      : order.total
 
     // Update order status
     await db.order.update({
@@ -44,6 +54,8 @@ export async function PATCH(
         cancelledAt: new Date(),
         cancelledBy: 'customer',
         cancellationReason: 'Customer requested cancellation',
+        // Persist the retained fee so reports can reconcile
+        cancellationFee: isFeeApplicable ? ORDER_CANCELLATION_FEE_USD : null,
       },
     })
 
@@ -53,13 +65,19 @@ export async function PATCH(
 
     if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
       try {
-        const refund = await stripe.refunds.create({
+        const refundParams: Stripe.RefundCreateParams = {
           payment_intent: order.stripePaymentIntentId,
-          metadata: { orderId: order.id, reason: 'customer_cancelled' },
-        })
+          metadata: {
+            orderId: order.id,
+            reason: isFeeApplicable ? 'customer_cancelled_after_accept' : 'customer_cancelled',
+          },
+          // Partial refund when cancellation fee applies; omit for full refund
+          ...(isFeeApplicable && { amount: Math.round(refundAmountDollars * 100) }),
+        }
+        const refund = await stripe.refunds.create(refundParams)
         refundIssued = true
         refundAmount = refund.amount / 100
-        console.log(`[Cancel] Refund ${refund.id} issued — $${refundAmount} for order ${order.id}`)
+        console.log(`[Cancel] Refund ${refund.id} — $${refundAmount} for order ${order.id}${isFeeApplicable ? ` ($${ORDER_CANCELLATION_FEE_USD} fee retained)` : ''}`)
       } catch (err) {
         console.error(`[Cancel] Stripe refund failed for order ${order.id}:`, err)
       }
@@ -75,10 +93,16 @@ export async function PATCH(
         refundIssued,
         refundAmount,
       },
-      update: {},
+      update: { refundIssued, refundAmount },
     })
 
-    return success({ orderId: order.id, status: OrderStatus.CANCELLED, refundIssued })
+    return success({
+      orderId: order.id,
+      status: OrderStatus.CANCELLED,
+      refundIssued,
+      refundAmount,
+      cancellationFee: isFeeApplicable ? ORDER_CANCELLATION_FEE_USD : 0,
+    })
   } catch (err) {
     return handleApiError(err)
   }

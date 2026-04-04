@@ -48,6 +48,42 @@
 }
 
 /* ─────────────────────────────────────────
+   Landing page animation keyframes
+   ───────────────────────────────────────── */
+
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.15;
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+.hero-glow {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 800px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #FF007740 0%, transparent 70%);
+  animation: pulse-glow 6s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow {
+    animation: none;
+    opacity: 0.15;
+  }
+}
+
+/* ─────────────────────────────────────────
    Clerk component overrides — FairSynq × Spotify style
    ───────────────────────────────────────── */
 

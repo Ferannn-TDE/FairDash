@@ -1,17 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import VendorCardSkeleton from "../components/skeletons/VendorCardSkeleton";
 
-const EVENT_SLUG = 'springfield-fair-2026';
-
-const VendorCard = ({ vendor }) => {
+const VendorCard = ({ vendor, eventSlug }) => {
   const itemCount = vendor._count?.menuItems ?? vendor.menuItemCount ?? 0;
 
   return (
     <Link
-      to={`/vendors/${vendor.id}`}
+      to={`/${eventSlug}/vendors/${vendor.id}`}
       className="bg-bg-card rounded-xl md:rounded-2xl border border-white/5 overflow-hidden transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow no-underline group flex flex-col h-full"
     >
       {/* Image / Emoji hero */}
@@ -60,6 +58,7 @@ const VendorCard = ({ vendor }) => {
 };
 
 const Vendors = () => {
+  const { eventSlug } = useParams();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -72,7 +71,7 @@ const Vendors = () => {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/vendors?eventSlug=${EVENT_SLUG}&limit=100`)
+    fetch(`/api/vendors?eventSlug=${eventSlug}&limit=100`)
       .then(async r => {
         const json = await r.json();
         if (!r.ok) throw new Error(json?.error?.message ?? `HTTP ${r.status}`);
@@ -87,7 +86,7 @@ const Vendors = () => {
         setError(err.message || 'Failed to load vendors');
         setLoading(false);
       });
-  }, []);
+  }, [eventSlug]);
 
   const clearSearch = () => setSearchQuery("");
 
@@ -230,7 +229,7 @@ const Vendors = () => {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 sm:gap-6">
               {filtered.map(vendor => (
-                <VendorCard key={vendor.id} vendor={vendor} />
+                <VendorCard key={vendor.id} vendor={vendor} eventSlug={eventSlug} />
               ))}
             </div>
           )}

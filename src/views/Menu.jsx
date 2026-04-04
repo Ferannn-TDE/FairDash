@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 import FoodCard from '../components/FoodCard';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import FoodCardSkeleton from '../components/skeletons/FoodCardSkeleton';
-
-const EVENT_SLUG = 'springfield-fair-2026';
 
 // Normalise DB menu items into the shape FoodCard expects
 const normaliseItem = (item) => ({
@@ -23,6 +21,7 @@ const normaliseItem = (item) => ({
 });
 
 const Menu = () => {
+  const { eventSlug } = useParams();
   const [searchParams] = useSearchParams();
   const [allItems, setAllItems] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -38,7 +37,7 @@ const Menu = () => {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/menu?eventSlug=${EVENT_SLUG}&limit=100`)
+    fetch(`/api/menu?eventSlug=${eventSlug}&limit=100`)
       .then(async r => {
         const json = await r.json();
         if (!r.ok) throw new Error(json?.error?.message ?? `HTTP ${r.status}`);
@@ -61,7 +60,7 @@ const Menu = () => {
         setError(err.message || 'Failed to load menu');
         setLoading(false);
       });
-  }, []);
+  }, [eventSlug]);
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

@@ -28,7 +28,7 @@ This Vendor Agreement ("Agreement") is entered into between FairSynq LLC ("FairS
 To become a FairSynq vendor, you must: (a) be a legally registered business or sole proprietor operating under applicable local and state law; (b) hold all required food handler permits, health department certifications, and business licenses for your jurisdiction; (c) maintain valid general liability insurance of at least $1,000,000 per occurrence; and (d) agree to operate within the designated FairSynq service area during scheduled fair events.
 
 2. PLATFORM FEES & COMMISSIONS
-FairSynq charges a commission of 7% on each completed order processed through the platform. This commission covers payment processing, platform maintenance, customer support, and driver dispatch services. Vendors will receive payment via ACH direct deposit within 3–5 business days after each event settlement period. FairSynq reserves the right to adjust commission rates with 30 days' written notice.
+FairSynq charges a commission of 10% on each completed order processed through the platform. This commission covers payment processing, platform maintenance, customer support, and driver dispatch services. Vendors will receive payment via ACH direct deposit within 3–5 business days after each event settlement period. FairSynq reserves the right to adjust commission rates with 30 days' written notice.
 
 3. MENU & PRICING
 Vendors are responsible for maintaining accurate, up-to-date menu listings including item names, descriptions, allergen information, and pricing. Prices listed on FairSynq must match or be lower than prices charged at your on-site booth. FairSynq may remove or flag menu items that violate health guidelines, contain misleading information, or are consistently reported as unavailable.
@@ -64,6 +64,7 @@ const BecomeVendor = () => {
   const [step, setStep] = useState(1);
   const [agreed, setAgreed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [business, setBusiness] = useState({
     name: "",
@@ -120,15 +121,31 @@ const BecomeVendor = () => {
   };
 
   const handleSubmit = async () => {
+    setIsSubmitting(true);
     try {
-      // Mark user as a vendor in Clerk metadata so the portal becomes accessible
-      await user?.update({ unsafeMetadata: { isVendor: true } });
-    } catch {
-      // Non-fatal — portal link will appear after next sign-in if this fails
+      const eventSlug = new URLSearchParams(window.location.search).get('event');
+      const response = await fetch('/api/vendors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventSlug,
+          name: business.name,
+          cuisineType: business.type,
+          boothNumber: business.location || undefined,
+        }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error ?? 'Vendor registration failed');
+      }
+      setSubmitted(true);
+      setStep(4);
+      toast.success("Application submitted! Welcome to FairSynq.");
+    } catch (err) {
+      toast.error(err?.message ?? 'Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-    setSubmitted(true);
-    setStep(4);
-    toast.success("Application submitted! We'll be in touch within 2–3 business days.");
   };
 
   const canProceedStep1 = business.name.trim() && business.type && business.email.trim();
@@ -449,7 +466,7 @@ const BecomeVendor = () => {
               <span className="text-sm text-text-gray leading-relaxed">
                 I have read and agree to the{" "}
                 <span className="text-neon-pink font-semibold">Vendor Terms & Conditions</span>{" "}
-                outlined above. I understand that FairSynq charges a 7% commission on all orders.
+                outlined above. I understand that FairSynq charges a 10% commission on all orders.
               </span>
             </label>
           </div>
@@ -519,11 +536,11 @@ const BecomeVendor = () => {
             ) : (
               <button
                 onClick={handleSubmit}
-                disabled={!canProceedStep3}
+                disabled={!canProceedStep3 || isSubmitting}
                 className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] active:scale-[0.97] transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink disabled:active:scale-100"
               >
-                Submit Application
-                <CheckIcon className="w-4 h-4" />
+                {isSubmitting ? 'Submitting…' : 'Submit Application'}
+                {!isSubmitting && <CheckIcon className="w-4 h-4" />}
               </button>
             )}
           </div>

@@ -7,7 +7,15 @@
       "Bash(echo:*)",
       "Bash(npx next:*)",
       "Bash(npm run:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(grep \"\\\\.md$\")",
+      "Bash(ls:*)",
+      "Bash(for file:*)",
+      "Bash(do)",
+      "Read(//Users/feran/Desktop/fairdash-app/**)",
+      "Bash(done)",
+      "Bash(grep -r \"springfield\\\\|hardcoded\\\\|DEFAULT_EVENT\\\\|SINGLE_EVENT\" /Users/feran/Desktop/fairdash-app/app /Users/feran/Desktop/fairdash-app/lib /Users/feran/Desktop/fairdash-app/src --include=*.ts --include=*.tsx --include=*.js --include=*.jsx)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

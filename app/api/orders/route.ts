@@ -11,7 +11,6 @@ import { requireAuth } from '@/lib/auth'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PLATFORM_FEE_RATE = 0.07
 const DEFAULT_DELIVERY_FEE = 2.99 // fallback when FulfillmentConfig.homeDeliveryFee is unset
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -253,8 +252,8 @@ export async function POST(req: NextRequest) {
 
     const subtotal = parseFloat(subtotalAccumulator.toFixed(2))
 
-    // Fee: 7% of subtotal only — delivery fee goes entirely to platform/runner pool
-    const fairSynqFee = parseFloat((subtotal * PLATFORM_FEE_RATE).toFixed(2))
+    // Fee: vendor.commissionRate % of subtotal only — delivery fee goes entirely to platform/runner pool
+    const fairSynqFee = parseFloat((subtotal * vendor.commissionRate).toFixed(2))
     const vendorPayout = parseFloat((subtotal - fairSynqFee).toFixed(2))
 
     // Delivery fee: only for HOME_DELIVERY; sourced from FulfillmentConfig
@@ -263,7 +262,13 @@ export async function POST(req: NextRequest) {
         ? parseFloat((config?.homeDeliveryFee ?? DEFAULT_DELIVERY_FEE).toFixed(2))
         : null
 
-    const total = parseFloat((subtotal + (deliveryFee ?? 0)).toFixed(2))
+    // Service charge: operator-set per-order fee applied when enabled on the event
+    const serviceCharge =
+      event.serviceChargeEnabled && event.serviceChargeAmount
+        ? parseFloat(event.serviceChargeAmount.toFixed(2))
+        : 0
+
+    const total = parseFloat((subtotal + (deliveryFee ?? 0) + serviceCharge).toFixed(2))
 
     const itemCount = lineItems.reduce((sum, i) => sum + i.quantity, 0)
 
@@ -320,6 +325,7 @@ export async function POST(req: NextRequest) {
         fulfillmentType,
         fairSynqFee: fairSynqFee.toFixed(2),
         deliveryFee: (deliveryFee ?? 0).toFixed(2),
+        serviceCharge: serviceCharge.toFixed(2),
         // orderId patched in step 7 after DB write
       },
     }
@@ -345,6 +351,7 @@ export async function POST(req: NextRequest) {
           // Pricing
           subtotal,
           deliveryFee,
+          serviceCharge: serviceCharge > 0 ? serviceCharge : null,
           total,
           fairSynqFee,
           vendorPayout,
@@ -390,7 +397,7 @@ export async function POST(req: NextRequest) {
       )
 
     // ── 8. Firebase RTDB — real-time vendor push ───────────────────────────
-    // Path: orders/{vendorId}/{orderId}
+    // Path: fairs/{eventId}/orders/{vendorId}/{orderId}
     // The vendor dashboard listens on this path for incoming order alerts.
     const rtdb = getRealtimeDb()
     if (rtdb) {
@@ -399,7 +406,7 @@ export async function POST(req: NextRequest) {
         .join(', ')
 
       rtdb
-        .ref(`orders/${vendorId}/${order.id}`)
+        .ref(`fairs/${eventId}/orders/${vendorId}/${order.id}`)
         .set({
           orderId: order.id,
           status: 'PLACED',
@@ -424,6 +431,7 @@ export async function POST(req: NextRequest) {
         summary: {
           subtotal,
           deliveryFee,
+          serviceCharge: serviceCharge > 0 ? serviceCharge : null,
           fairSynqFee,
           total,
           itemCount,

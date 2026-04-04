@@ -6,7 +6,13 @@ import {
   Link,
   Navigate,
   useLocation,
+  useParams,
 } from "react-router-dom";
+
+// Fallback event slug for backward-compat redirects.
+// Set NEXT_PUBLIC_DEFAULT_EVENT_SLUG in .env.local to override.
+const DEFAULT_EVENT_SLUG =
+  process.env.NEXT_PUBLIC_DEFAULT_EVENT_SLUG ?? 'springfield-fair-2026';
 import { useAuth, useUser } from "@clerk/clerk-react";
 import { CartProvider } from "./context/CartContext";
 import { MobileMenuProvider } from "./context/MobileMenuContext";
@@ -68,6 +74,12 @@ const VendorRoute = ({ children }) => {
   return children;
 };
 
+// Redirect /vendors/:vendorId → /:defaultEventSlug/vendors/:vendorId
+const VendorDetailRedirect = () => {
+  const { vendorId } = useParams();
+  return <Navigate to={`/${DEFAULT_EVENT_SLUG}/vendors/${vendorId}`} replace />;
+};
+
 const AppLayout = () => {
   const location = useLocation();
   const isLanding = location.pathname === "/";
@@ -92,11 +104,18 @@ const AppLayout = () => {
             </ProtectedRoute>
           }
         />
-        <Route path="/menu" element={<Menu />} />
+        {/* Namespaced event routes */}
+        <Route path="/:eventSlug/menu" element={<Menu />} />
+        <Route path="/:eventSlug/vendors" element={<Vendors />} />
+        <Route path="/:eventSlug/vendors/:vendorId" element={<VendorDetail />} />
+
+        {/* Backward-compat redirects — keeps old bookmarks / links working */}
+        <Route path="/menu" element={<Navigate to={`/${DEFAULT_EVENT_SLUG}/menu`} replace />} />
+        <Route path="/vendors" element={<Navigate to={`/${DEFAULT_EVENT_SLUG}/vendors`} replace />} />
+        <Route path="/vendors/:vendorId" element={<VendorDetailRedirect />} />
+
         <Route path="/contact" element={<Contact />} />
         <Route path="/refund-policy" element={<RefundPolicy />} />
-        <Route path="/vendors" element={<Vendors />} />
-        <Route path="/vendors/:vendorId" element={<VendorDetail />} />
         <Route
           path="/track"
           element={<ProtectedRoute><TrackOrder /></ProtectedRoute>}
