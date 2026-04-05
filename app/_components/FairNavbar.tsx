@@ -80,7 +80,7 @@ export default function FairNavbar() {
         {/* Right: cart */}
         <Link
           href={`${base}/cart`}
-          className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm font-semibold leading-none hover:bg-white/10 transition-colors shrink-0"
+          className="relative hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm font-semibold leading-none hover:bg-white/10 transition-colors shrink-0"
         >
           <ShoppingBagIcon className="w-4 h-4" />
           <span className="hidden sm:inline">Cart</span>

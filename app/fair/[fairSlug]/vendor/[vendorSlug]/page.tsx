@@ -25,11 +25,11 @@ function MenuItemCard({
   const qty = cartItem?.quantity ?? 0
 
   return (
-    <div className={`bg-bg-card border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 transition-colors duration-200 ${!item.available ? 'opacity-50' : ''}`}>
+    <div className={`bg-bg-card border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors duration-200 flex flex-col ${!item.available ? 'opacity-50' : ''}`}>
 
-      {/* Image area — gradient placeholder when no imageUrl */}
+      {/* Image area — aspect-[4/3] gradient placeholder when no imageUrl */}
       {item.imageUrl ? (
-        <div className="h-28 sm:h-32 overflow-hidden">
+        <div className="aspect-[4/3] overflow-hidden">
           <img
             src={item.imageUrl}
             alt={item.name}
@@ -38,40 +38,40 @@ function MenuItemCard({
         </div>
       ) : (
         <div
-          className="h-24 sm:h-28 flex items-center justify-center"
-          style={{ background: `linear-gradient(135deg, ${accentColor}10, ${accentColor}05)` }}
+          className="aspect-[4/3] flex items-center justify-center"
+          style={{ background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}06)` }}
         >
-          <span className="text-3xl opacity-25">🍽️</span>
+          <span className="text-2xl opacity-20">🍽️</span>
         </div>
       )}
 
       {/* Card body */}
-      <div className="p-4">
-        {/* Name + price */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-white text-sm sm:text-base leading-snug">{item.name}</h3>
-            {item.popular && (
-              <span className="inline-block mt-1 px-2 py-0.5 bg-yellow-400/15 text-yellow-400 text-[0.6rem] font-semibold uppercase tracking-wide rounded">
-                Popular
-              </span>
-            )}
-          </div>
-          <span className="text-base font-semibold text-white tabular-nums shrink-0">
-            ${item.price.toFixed(2)}
+      <div className="p-3 flex flex-col flex-1">
+        {/* Name */}
+        <h3 className="font-semibold text-white text-xs sm:text-sm leading-snug line-clamp-2">{item.name}</h3>
+
+        {/* Popular badge */}
+        {item.popular && (
+          <span className="inline-block mt-1 px-1.5 py-0.5 bg-yellow-400/15 text-yellow-400 text-[0.55rem] font-semibold uppercase tracking-wide rounded w-fit">
+            Popular
           </span>
-        </div>
+        )}
+
+        {/* Price */}
+        <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
+          ${item.price.toFixed(2)}
+        </p>
 
         {/* Description */}
         {item.description && (
-          <p className="text-text-gray text-xs mt-2 leading-relaxed line-clamp-2">{item.description}</p>
+          <p className="text-text-gray text-[0.65rem] mt-1 leading-relaxed line-clamp-2 flex-1">{item.description}</p>
         )}
 
         {/* Bottom row: prep time + add/qty */}
-        <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="mt-2 flex items-center justify-between gap-1">
           {item.prepTime ? (
-            <span className="flex items-center gap-1 text-text-gray text-xs">
-              <ClockIcon className="w-3 h-3 shrink-0" /> {item.prepTime} min
+            <span className="flex items-center gap-0.5 text-text-gray text-[0.6rem]">
+              <ClockIcon className="w-2.5 h-2.5 shrink-0" /> {item.prepTime}m
             </span>
           ) : (
             <span />
@@ -84,27 +84,27 @@ function MenuItemCard({
                   addItem(item, vendor)
                   toast.success(`${item.name} added`)
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0"
+                className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[0.65rem] font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0"
                 style={{ background: accentColor }}
               >
-                <PlusIcon className="w-3.5 h-3.5" />
+                <PlusIcon className="w-3 h-3" />
                 Add
               </button>
             ) : (
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center shrink-0 rounded-lg overflow-hidden border border-white/10">
                 <button
                   onClick={() => updateQty(item.id, qty - 1)}
-                  className="w-7 h-7 rounded-lg bg-white/10 border border-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+                  className="w-6 h-6 bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
                 >
-                  <MinusIcon className="w-3.5 h-3.5 text-white" />
+                  <MinusIcon className="w-3 h-3 text-white" />
                 </button>
-                <span className="text-white font-semibold w-4 text-center text-sm tabular-nums">{qty}</span>
+                <span className="text-white font-semibold w-5 text-center text-xs tabular-nums bg-white/5">{qty}</span>
                 <button
                   onClick={() => addItem(item, vendor)}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity"
+                  className="w-6 h-6 flex items-center justify-center hover:opacity-80 transition-opacity"
                   style={{ background: accentColor }}
                 >
-                  <PlusIcon className="w-3.5 h-3.5 text-white" />
+                  <PlusIcon className="w-3 h-3 text-white" />
                 </button>
               </div>
             )
@@ -173,8 +173,7 @@ export default function VendorMenuPage() {
                 </h2>
                 <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
               </div>
-              {/* Fix 3: grid instead of vertical stack */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {vendor.menu
                   .filter((m) => m.category === category)
                   .map((item) => (
