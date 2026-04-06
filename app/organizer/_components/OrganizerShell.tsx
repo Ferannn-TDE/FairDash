@@ -30,12 +30,14 @@ function SidebarLink({
   label,
   indent = false,
   exact = false,
+  onClick,
 }: {
   href: string
   icon: React.ElementType
   label: string
   indent?: boolean
   exact?: boolean
+  onClick?: () => void
 }) {
   const pathname = usePathname()
   const active = exact
@@ -44,6 +46,7 @@ function SidebarLink({
   return (
     <Link
       href={href}
+      onClick={onClick}
       className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-inter transition-colors
         ${indent ? 'ml-3' : ''}
         ${active ? 'bg-[#FF0077]/10 text-[#FF0077]' : 'text-[#888] hover:text-white hover:bg-white/5'}`}
@@ -77,21 +80,21 @@ function SidebarContent({ currentFairId, onClose }: { currentFairId: string | nu
 
       {/* Nav */}
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        <SidebarLink href="/organizer" icon={HomeIcon} label="Dashboard" exact />
-        <SidebarLink href="/organizer/fairs" icon={CalendarDaysIcon} label="My Fairs" />
-        <SidebarLink href="/organizer/settings" icon={Cog6ToothIcon} label="Settings" />
+        <SidebarLink href="/organizer" icon={HomeIcon} label="Dashboard" exact onClick={onClose} />
+        <SidebarLink href="/organizer/fairs" icon={CalendarDaysIcon} label="My Fairs" onClick={onClose} />
+        <SidebarLink href="/organizer/settings" icon={Cog6ToothIcon} label="Settings" onClick={onClose} />
 
         {currentFair && (
           <div className="mt-5 pt-4 border-t border-white/5">
             <p className="px-3 mb-2 text-[10px] font-semibold text-[#555] uppercase tracking-widest truncate">
               {currentFair.name}
             </p>
-            <SidebarLink href={`/organizer/fair/${currentFair.id}`} icon={HomeIcon} label="Overview" indent exact />
-            <SidebarLink href={`/organizer/fair/${currentFair.id}/vendors`} icon={BuildingStorefrontIcon} label="Vendors" indent />
-            <SidebarLink href={`/organizer/fair/${currentFair.id}/orders`} icon={ClipboardDocumentListIcon} label="Orders" indent />
-            <SidebarLink href={`/organizer/fair/${currentFair.id}/analytics`} icon={ChartBarIcon} label="Analytics" indent />
-            <SidebarLink href={`/organizer/fair/${currentFair.id}/settings`} icon={Cog6ToothIcon} label="Settings" indent />
-            <SidebarLink href={`/organizer/fair/${currentFair.id}/disputes`} icon={ExclamationTriangleIcon} label="Disputes" indent />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}`} icon={HomeIcon} label="Overview" indent exact onClick={onClose} />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}/vendors`} icon={BuildingStorefrontIcon} label="Vendors" indent onClick={onClose} />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}/orders`} icon={ClipboardDocumentListIcon} label="Orders" indent onClick={onClose} />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}/analytics`} icon={ChartBarIcon} label="Analytics" indent onClick={onClose} />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}/settings`} icon={Cog6ToothIcon} label="Settings" indent onClick={onClose} />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}/disputes`} icon={ExclamationTriangleIcon} label="Disputes" indent onClick={onClose} />
           </div>
         )}
       </nav>
