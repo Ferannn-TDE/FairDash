@@ -184,9 +184,9 @@ export default function VendorMenuPage() {
           ))}
         </div>
 
-        {/* Sidebar: cart summary (desktop) */}
+        {/* Sidebar: cart summary (desktop only — mobile uses bottom nav Cart tab) */}
         {itemCount > 0 && (
-          <div className="lg:w-72 shrink-0">
+          <div className="hidden lg:block lg:w-72 shrink-0">
             <div className="bg-bg-card border border-white/10 rounded-2xl p-5 sticky top-20">
               <h2 className="font-bebas text-xl text-white tracking-wide mb-1">Your Order</h2>
               <p className="text-text-gray text-sm mb-4">

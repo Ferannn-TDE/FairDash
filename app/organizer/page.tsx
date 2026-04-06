@@ -27,14 +27,14 @@ export default function OrganizerDashboard() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="font-bebas text-3xl text-white tracking-wide">Dashboard</h1>
           <p className="text-sm text-[#666] font-inter mt-1">Welcome back. Here&apos;s what&apos;s happening today.</p>
         </div>
         <Link
           href="/organizer/fairs/new"
-          className="px-4 py-2 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors"
+          className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors whitespace-nowrap"
         >
           + New Fair
         </Link>
