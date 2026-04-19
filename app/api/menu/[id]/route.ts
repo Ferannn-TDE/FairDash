@@ -29,7 +29,7 @@ export async function PATCH(
   try {
     await requireVendorAuth()
     const body = await req.json()
-    const { name, description, price, category, imageUrl, isAvailable } = body
+    const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
 
     const item = await db.menuItem.update({
       where: { id: params.id },
@@ -40,6 +40,7 @@ export async function PATCH(
         ...(category !== undefined && { category }),
         ...(imageUrl !== undefined && { imageUrl }),
         ...(isAvailable !== undefined && { isAvailable: Boolean(isAvailable) }),
+        ...(prepTime !== undefined && { prepTime: Number(prepTime) }),
       },
     })
 

@@ -18,23 +18,23 @@ export default function OrganizerFairsPage() {
 
       <div className="space-y-3">
         {mockOrganizerFairs.map(fair => (
-          <div key={fair.id} className="bg-[#111111] border border-white/5 rounded-xl p-5 flex items-center justify-between hover:border-white/10 transition-colors">
-            <div className="flex items-center gap-4 min-w-0">
+          <div key={fair.id} className="bg-[#111111] border border-white/5 rounded-xl p-4 sm:p-5 flex items-center gap-3 hover:border-white/10 transition-colors">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-bebas text-xl"
                 style={{ background: `${fair.accentColor}20`, color: fair.accentColor }}>
                 {fair.name[0]}
               </div>
               <div className="min-w-0">
                 <p className="font-semibold text-white truncate">{fair.name}</p>
-                <p className="text-xs text-[#666] font-inter">{fair.dates.start} – {fair.dates.end} · {fair.vendorCount}/{fair.maxVendors} vendors</p>
+                <p className="text-xs text-[#666] font-inter truncate">{fair.dates.start} – {fair.dates.end} · {fair.vendorCount}/{fair.maxVendors} vendors</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 shrink-0 ml-4">
-              <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`hidden sm:inline-flex px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase
                 ${fair.status === 'active' ? 'bg-green-500/15 text-green-400' : 'bg-sky-500/15 text-sky-400'}`}>
                 {fair.status}
               </span>
-              <Link href={`/organizer/fair/${fair.id}`} className="px-3 py-1.5 text-xs font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors">
+              <Link href={`/organizer/fair/${fair.id}`} className="px-3 py-1.5 text-xs font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
                 Manage →
               </Link>
             </div>

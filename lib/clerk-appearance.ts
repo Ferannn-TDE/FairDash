@@ -32,9 +32,7 @@ export const clerkAppearance = {
   },
 
   layout: {
-    logoImageUrl: '/images/image4.png',
-    logoLinkUrl: '/home',
-    logoPlacement: 'inside' as const,
+    logoPlacement: 'none' as const,
     socialButtonsVariant: 'blockButton' as const,
     socialButtonsPlacement: 'top' as const,
     showOptionalFields: false,

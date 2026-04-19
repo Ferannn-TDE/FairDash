@@ -1,7 +1,174 @@
 # FairSynq — Master Execution Plan V4
 **Supersedes:** PLAN_V3_MAR22.md (deleted)
 **Sources:** Codebase audit (April 2026) + Operations Playbook V4.0 + Sales Guide
-**Last Updated:** April 2026
+**Last Updated:** April 2026 *(audit updated April 13 2026)*
+
+---
+
+## Codebase Reconciliation — Multi-Fair Architecture
+
+**Goal:** Merge the single-fair SPA (`src/`) into the multi-fair App Router (`app/`). The App Router is the architectural source of truth. The SPA is the feature-completeness source. Every feature gets ported to `app/fair/[fairSlug]/` and the SPA is deleted on completion.
+
+### Architectural Decisions (Confirmed)
+
+| # | Decision | Answer |
+|---|---|---|
+| 1 | How to handle Clerk in ported App Router pages? | **a** — `@clerk/nextjs` server components for App Router pages; SPA keeps `@clerk/clerk-react` until fully replaced |
+| 2 | Cart state during transition? | **b** — `FairCartContext` stays as the cart authority; remove `syncToSpaCart()` bridge only after native checkout is live |
+| 3 | Vendor portal routing? | **b** — `/vendor/[fairSlug]/dashboard` (per-fair scoped, matches multi-fair model) |
+| 4 | Size filter scope? | Available on drink items; also surfaced during vendor onboarding menu-builder when creating drink items |
+
+### Execution Phases
+
+| Phase | Name | Status |
+|---|---|---|
+| A | Foundations — shared utils, global providers, loading skeletons, delete stale routes | ✅ Complete |
+| B | Checkout — port `Checkout.jsx` → `app/fair/[fairSlug]/checkout/page.tsx` | ✅ Complete |
+| C | Order Tracking — port `TrackOrder.jsx` → `app/fair/[fairSlug]/order/[orderId]/page.tsx` | ✅ Complete |
+| D | Vendor Discovery — port `Vendors.jsx` + `VendorDetail.jsx` → `app/fair/[fairSlug]/vendors/` | ✅ Complete |
+| E | Vendor Portal — port `VendorDashboard.jsx` + orders/menu/earnings → `app/vendor/[fairSlug]/` | ✅ Complete |
+| F | Menu & Cart — native menu browsing with real DB, remove SPA cart bridge | ✅ Complete |
+| G | Auth & Account — port account, history, favorites pages to App Router | ✅ Complete |
+| H | Driver / Runner App — BecomeDriver wizard + runner order flow | ✅ Complete |
+| I | Analytics — EarningsChart, vendor stats, admin analytics wired to real data | 🔴 Not started |
+| J | Cleanup — delete `src/views/`, `src/App.jsx`; update catch-all to 404 | 🔴 Not started |
+
+### Phase A — Foundations (Detail)
+
+1. Add `<Toaster />` from react-hot-toast to `app/layout.tsx`
+2. Create `lib/firebase-client.ts` (port of `src/lib/firebase.js` — singleton with graceful no-config fallback)
+3. Create `lib/stripe-client.ts` (port of `src/lib/stripe.js` — singleton `getStripe()`)
+4. Port `AddressAutocomplete` → `app/_components/AddressAutocomplete.tsx`
+5. Port `SignOutModal` → `app/_components/SignOutModal.tsx`
+6. Create `app/fair/[fairSlug]/vendors/loading.tsx` (from `VendorCardSkeleton.jsx`)
+7. Create `app/fair/[fairSlug]/vendor/[vendorSlug]/loading.tsx` (from `VendorDetailSkeleton.jsx`)
+8. Delete `app/(event)/[eventSlug]/` — stale route group with wrong naming convention
+
+### Phase B — Checkout (Detail)
+
+Current state: `app/fair/[fairSlug]/checkout/page.tsx` is a one-liner shim that calls `syncToSpaCart()` then `window.location.replace('/checkout')`. Source of truth is `src/views/Checkout.jsx`.
+
+1. Read `src/views/Checkout.jsx` in full before writing — note the three fulfillment-type branches (BOOTH_PICKUP, CURBSIDE, HOME_DELIVERY), the Stripe `<Elements>` wrapper configuration, and the two-step API flow (`GET /api/events/{eventId}` → `POST /api/orders`).
+2. Replace `app/fair/[fairSlug]/checkout/page.tsx` shim with a full implementation. The page is `'use client'`. Read cart items from `useFairCart()` (not localStorage directly — `FairCartContext` is the authority per decision 2). Read `fairSlug` from `useParams()`.
+3. Fetch event config on mount: call `GET /api/events/{fairSlug}` (slug-based lookup) to read `serviceChargeEnabled`, `serviceChargeAmount`, `fulfillmentConfig`. Re-scope from `Checkout.jsx`'s `cartEventId` (global SPA state) to `fairSlug` from route params.
+4. Wrap the payment form in `<Elements>` from `@stripe/react-stripe-js` using `getStripe()` from `lib/stripe-client.ts`. Use the same dark-theme Stripe appearance from `Checkout.jsx` (`theme: 'night'`, `variables.colorPrimary: '#FF0077'`).
+5. Port `AddressAutocomplete` usage for HOME_DELIVERY — use `app/_components/AddressAutocomplete.tsx` (Phase A), not `src/components/AddressAutocomplete.jsx`. Wrap the page in `<APIProvider apiKey={...}>` from `@vis.gl/react-google-maps` so the Places library loads; confirm the fair layout (`app/fair/[fairSlug]/layout.tsx`) doesn't already provide one.
+6. Port the vehicle info fields for CURBSIDE (make, color, plate) exactly as in `Checkout.jsx` step 2.
+7. Create `app/fair/[fairSlug]/checkout/loading.tsx` — skeleton: a form-width column of shimmering blocks matching the two-column form layout (customer info left, order summary right).
+8. Update `app/fair/[fairSlug]/cart/page.tsx`: change the `handleCheckout` button to `router.push('/fair/${fairSlug}/checkout')` — remove the `syncToSpaCart()` call and `window.location.href` from this button. (Keep `syncToSpaCart()` in the context itself until Phase F when the bridge is fully removed.)
+9. After the new checkout page is confirmed working, delete the old shim content. Do not delete `syncToSpaCart()` from `FairCartContext.tsx` yet — that is Phase F.
+
+### Phase C — Order Tracking (Detail)
+
+Current state: `app/fair/[fairSlug]/order/[orderId]/page.tsx` is a stub card with a link to `/track?orderId=...`. Source of truth is `src/views/TrackOrder.jsx`.
+
+1. Read `src/views/TrackOrder.jsx` in full — note the `STEPS` array, `STATUS_TO_STEP` mapping, the `onValue()` Firebase RTDB listener path, the map embed URL builder, and `TrackOrderSkeleton` import.
+2. Replace the stub `app/fair/[fairSlug]/order/[orderId]/page.tsx` with a full implementation. Mark `'use client'`. Read `orderId` from `useParams()`, read `fairSlug` for back-navigation.
+3. Fetch initial order state from `GET /api/orders/{orderId}` on mount. Re-scope from the SPA's `?orderId=` query string to the App Router `[orderId]` param.
+4. Wire real-time Firebase listener using `getFirebaseApp()` from `lib/firebase-client.ts` (Phase A). The RTDB path in the SPA is under a flat `/orders/{orderId}` key — confirm this matches the Firebase write in `app/api/orders/route.ts`; update the listener path if the actual write key differs.
+5. Port the `STEPS` stepper array and `STATUS_TO_STEP` map as module-level constants in the same file.
+6. Port the Google Maps embed URL builder from `TrackOrder.jsx`. The embed needs the delivery address (HOME_DELIVERY) or fair lat/lng (BOOTH_PICKUP/CURBSIDE) — pass the fair's coordinates via `useFair()` context or include them in the initial order fetch response.
+7. Create `app/fair/[fairSlug]/order/[orderId]/loading.tsx` — port `src/components/skeletons/TrackOrderSkeleton.jsx` verbatim, converting JSX to TSX (no prop changes needed).
+8. Update `app/fair/[fairSlug]/orders/page.tsx` (currently empty-state): fetch `GET /api/orders?fairId={fair.id}&userId={userId}` using `currentUser()` from `@clerk/nextjs/server` and render a list of orders, each linking to `/fair/${fairSlug}/order/${orderId}`. Show the `TrackOrderSkeleton` while loading.
+9. Remove the `/track?orderId=...` fallback link from the old stub once the new page is confirmed working. The SPA `/track` route can remain until Phase J cleanup.
+
+### Phase D — Vendor Discovery (Detail)
+
+Current state: `app/fair/[fairSlug]/vendors/page.tsx` and `app/fair/[fairSlug]/vendor/[vendorSlug]/page.tsx` both exist but use mock data from `useFair()` / `getVendorBySlug()`. They lack the search bar, cuisine filter, image card layout, and reviews section present in the SPA. No `menu/page.tsx` exists yet.
+
+1. Add client-side search to `app/fair/[fairSlug]/vendors/page.tsx`: port the search input and `useMemo` filter logic from `src/views/Vendors.jsx`. The search should match vendor name, cuisine type, and item names (same fields as the SPA).
+2. Add cuisine filter pills below the search bar: port the filter chip row from `src/views/Vendors.jsx`. Extract available cuisine types from the vendors array. Keep the "All" default.
+3. Enhance `VendorCard` in the vendors page to match the SPA's card layout: add the vendor logo/image (`vendor.logoUrl ?? null`), rating stars, prep-time badge, and popular-items preview row. The current App Router card is a compact info card; the SPA card is image-first.
+4. Create `app/fair/[fairSlug]/menu/page.tsx` — port `src/views/Menu.jsx`. This is the cross-vendor menu browse (`/:eventSlug/menu` in the SPA). Wire to `GET /api/menu?eventId={fair.id}`. Add category tabs and search input. Link each item's "Add" button through `useFairCart().addItem()`.
+5. Port `SizeSelectionModal` from `src/components/SizeSelectionModal.jsx` → `app/_components/SizeSelectionModal.tsx`. Convert to TypeScript. Per decision 4, this modal is shown when the user taps "Add" on a drink-category item. Export a `useSizeSelection` hook or an inline `<SizeSelectionModal>` that `MenuItemCard` can mount.
+6. Integrate `SizeSelectionModal` into `MenuItemCard` in `app/fair/[fairSlug]/vendor/[vendorSlug]/page.tsx`: check `item.category === 'Drinks & Beverages'` (or a `hasSizes` flag on the item) before calling `addItem()`; if true, open the modal first.
+7. Enhance `app/fair/[fairSlug]/vendor/[vendorSlug]/page.tsx` header: port the ratings row (star count, review count) and the description block from `src/views/VendorDetail.jsx`. The current App Router page already renders these fields if present in mock data — confirm the DB schema includes `rating`, `reviewCount`, `description` on `Vendor`.
+8. Add a reviews section to `app/fair/[fairSlug]/vendor/[vendorSlug]/page.tsx` if `src/views/VendorDetail.jsx` renders one. ⚠️ Check whether VendorDetail.jsx actually renders user-submitted reviews or just the aggregate rating — if it's only aggregate, step 7 already covers it.
+9. Add `app/fair/[fairSlug]/menu/loading.tsx` — port `src/components/skeletons/FoodCardSkeleton.jsx` into a grid skeleton matching the menu page layout (category tabs + 8-item grid).
+
+### Phase E — Vendor Portal (Detail)
+
+Current state: No `app/vendor/` directory exists. The vendor portal lives entirely in the SPA at `/vendor/dashboard` (implemented in `src/views/vendor/VendorDashboard.jsx`). All other SPA vendor routes (`/vendor/orders`, `/vendor/menu`, etc.) render `<ComingSoon />`. Per decision 3, the App Router vendor portal is scoped per-fair at `/vendor/[fairSlug]/`.
+
+1. Create `app/vendor/[fairSlug]/layout.tsx` — server component that calls `requireVendorAuth()` from `lib/auth.ts` and wraps children in a vendor shell (sidebar: Dashboard, Orders, Menu, Analytics, Settings; mobile bottom nav). Vendor auth: current user must have a `Vendor` record in DB with `status = ACTIVE` for this fair's `eventId`.
+2. Create `app/vendor/[fairSlug]/dashboard/page.tsx` — `'use client'` page. Port the overall structure from `src/views/vendor/VendorDashboard.jsx`: stat cards row at top, earnings chart below, live order queue at bottom.
+3. Port `StatCard` from `VendorDashboard.jsx` → local component (or `app/_components/VendorStatCard.tsx` if reused across portal). Fields: orders today, revenue today, completion rate, avg rating. Each card has a trend indicator (up/down arrow + delta %).
+4. Port `EarningsChart` from `VendorDashboard.jsx` → `app/_components/EarningsChart.tsx`. The chart uses `recharts` (already in `package.json`). Keep the 7d/30d/90d period toggle. Wire to `GET /api/vendors/{id}/stats?period=7d` from the dashboard page.
+5. Port the live order queue: use `getFirebaseApp()` from `lib/firebase-client.ts` (Phase A) to attach `onChildAdded` and `onChildChanged` RTDB listeners on the vendor's order path. The SPA listens at a path under the vendor's ID — confirm the exact RTDB path from `app/api/orders/route.ts`'s Firebase write.
+6. Port `ORDER_NEXT_STATUS` state machine: `PLACED → ACCEPTED → PREPARING → READY → COMPLETED`. Each order card shows a single action button ("Accept", "Start Order", "Ready", "Complete") that calls `PATCH /api/orders/{id}/status`. Import `VENDOR_ACCEPT_TIMEOUT_MS` from `lib/constants.ts` for the 2-minute accept countdown display.
+7. Create `app/vendor/[fairSlug]/orders/page.tsx` — full order history table (was `<ComingSoon />` in SPA). Fetch from `GET /api/vendors/{id}/orders?fairId={fairId}`. Columns: order ID, customer, items, total, status, timestamp. Include status filter tabs.
+8. Create `app/vendor/[fairSlug]/menu/page.tsx` — menu management (was `<ComingSoon />` in SPA). Display vendor's menu items from `GET /api/menu?vendorId={vendorId}`. Allow toggling item availability (`PATCH /api/menu/{id}`). Add/edit items via a slide-out form panel. Per decision 4, drink-category items must expose a size-options array in their edit form.
+9. Port vendor heartbeat writer: `setInterval(() => writeToFirebase(heartbeatPath, { ts: Date.now() }), ADMIN_HEARTBEAT_INTERVAL_MS)` using `lib/constants.ts` (not `src/utils/constants.js`). Add this to the dashboard page `useEffect` and clear it on unmount.
+10. Create `app/vendor/[fairSlug]/settings/page.tsx` — vendor profile editor: business name, cuisine type, description, booth number (read-only), Stripe Connect status/link. Was `<ComingSoon />` in SPA.
+
+### Phase F — Menu & Cart (Detail)
+
+Current state: All fair data flows through `FairContext` and `FairCartContext`, both of which currently read from `lib/mock/fairs.ts`. The SPA cart bridge (`syncToSpaCart()`) is still in place. Menu items are served by `GET /api/menu` but the fair pages don't call it yet.
+
+1. Update `app/_contexts/FairContext.tsx`: replace the `getFairBySlug()` mock call with a client-side `fetch('/api/events/${fairSlug}')` on mount. Loading state should set `fair` to `null` and render a skeleton (the `layout.tsx` already shows `notFound()` on miss — adjust to allow a loading state).
+2. Update `app/fair/[fairSlug]/layout.tsx`: it currently calls `getFairBySlug()` server-side (synchronous mock). Change to `await db.event.findUnique({ where: { slug: fairSlug } })` via Prisma directly in the server layout (no intermediate API call needed for the layout — it's a server component). Keep using `notFound()` on miss.
+3. Update `app/_contexts/FairCartContext.tsx`: the `CartItem` type uses `menuItemId` and `vendorId` as strings. These are already DB-compatible — no type change needed, but confirm the mock IDs used during Phase D development match real DB `cuid()` IDs once real data flows. Add a `clearCart()` action to the context (missing from current implementation, needed after successful order creation in Phase B).
+4. Replace `getVendorBySlug()` mock call in `app/fair/[fairSlug]/vendor/[vendorSlug]/page.tsx`: fetch `GET /api/vendors/{vendorSlug}?fairId={fair.id}` (or change the route to accept slug). Update `app/api/vendors/[id]/route.ts` to also support slug-based lookup via a `?slug=` query param if it doesn't already.
+5. Replace mock `vendors` array in `FairContext` with the result of `GET /api/vendors?eventId={fair.id}&status=ACTIVE`. The context should expose a `vendorsLoading` boolean.
+6. Remove `syncToSpaCart()` from `app/fair/[fairSlug]/cart/page.tsx` — this was already updated in Phase B step 8 to not call it on checkout nav, but ensure it's fully removed from the cart page's imports and JSX.
+7. Remove `syncToSpaCart()` from `app/fair/[fairSlug]/vendor/[vendorSlug]/page.tsx` — it's currently called on the desktop sidebar "View Cart" button (`handleCheckout`). Remove it; navigate to `/fair/${fairSlug}/cart` directly.
+8. Remove `syncToSpaCart()` and the related `fairsynq-cart` localStorage write from `app/_contexts/FairCartContext.tsx`. Delete the function entirely. This is the last SPA cart bridge removal.
+9. Verify `GET /api/menu?eventId=...` returns items in the shape expected by `MenuItemCard` in the vendor menu page (Phase D). Specifically: `id`, `name`, `price`, `description`, `imageUrl`, `category`, `available`, `popular`, `prepTime`, `sizes` (for drink items per decision 4).
+10. Add `sizes` field support: update `lib/mock/fairs.ts` item shape to include `sizes?: { label: string; priceDelta: number }[]` for drink items, so Phase D's `SizeSelectionModal` has test data before real DB is wired. Then add the `sizes` column to the `MenuItem` Prisma model in a new migration.
+
+### Phase G — Auth & Account (Detail)
+
+Current state: `app/account/page.tsx` exists as a minimal link hub (Order History, Past Fairs, Favorites). `app/account/orders/page.tsx` exists but shows an empty state. `src/views/ManageAccount.jsx` is the feature-complete account settings page in the SPA. `src/views/Favorites.jsx` and `src/views/History.jsx` do not exist in the SPA — those SPA routes render `<ComingSoon />`.
+
+1. Create `app/account/layout.tsx` — server component that calls `requireAuth()` from `lib/auth.ts`. Redirect unauthenticated users to the sign-in page. This protects all `/account/*` routes uniformly without repeating auth checks in each page.
+2. Port `src/views/ManageAccount.jsx` → `app/account/settings/page.tsx`. The SPA component manages: display name, email, phone number, notification preferences. It uses Clerk's `useUser()` hook to read and update profile. Mark the page `'use client'`. Import `useUser` from `@clerk/clerk-react` (consistent with the SPA's package — see Clerk dual-package note in memory).
+3. Add a "Settings" link card to `app/account/page.tsx` pointing to `/account/settings`, alongside the existing Order History and Favorites cards.
+4. Wire `app/account/orders/page.tsx` to real data: fetch `GET /api/orders?userId={userId}` using `currentUser()` from `@clerk/nextjs/server` (this is a server component). Render a table of orders grouped by fair, each linking to `/fair/${fairSlug}/order/${orderId}`. Show fair name, date, item count, total, status.
+5. Create `app/account/favorites/page.tsx` — the SPA route is `<ComingSoon />` so there is no source to port. Implement from scratch: favorites stored in a new `Favorite` table (userId + menuItemId) or as a `favorites` JSON column on `User`. ⚠️ Decision needed: DB-backed favorites (persistent across devices, requires migration) vs localStorage-backed (fast to ship, no migration). Pick one before implementing.
+6. Create `app/account/orders/[orderId]/page.tsx` — order detail view. Fetch `GET /api/orders/{orderId}`. Show itemized receipt (name, qty, price), fulfillment type, status timeline, and a "Track Order" button linking to `/fair/${fairSlug}/order/${orderId}` if the order is active.
+7. Port `SignOutModal` usage into `app/_components/MarketplaceNavbar.tsx` and `app/_components/FairNavbar.tsx` — replace any current inline sign-out logic with the ported `app/_components/SignOutModal.tsx` (Phase A). Use `useClerk().signOut()` from `@clerk/clerk-react` as the `onConfirm` callback.
+8. Remove `src/views/ManageAccount.jsx` and `src/components/ManageAccountPanel.jsx` after `app/account/settings/page.tsx` is confirmed working. Remove `src/components/MobileAccountPanel.jsx` if its functionality is covered by the new account layout.
+
+### Phase H — Driver / Runner App (Detail)
+
+Current state: `src/views/BecomeDriver.jsx` is a complete 3-step wizard (Personal Info, Vehicle Info, Terms + background-check consent). `app/api/drivers/route.ts` exists (GET list endpoint). No runner dashboard exists anywhere. No `app/runner/` or `app/become-driver/` directory exists.
+
+1. Create `app/become-driver/page.tsx` — port `src/views/BecomeDriver.jsx` as a `'use client'` component. This is a global route (not per-fair) because driver applications are not event-scoped. Keep all three steps identical: Personal Info (firstName, lastName, email, phone, dob, city), Vehicle Info (make, model, year, color, plate, type), Terms (full `DRIVER_TERMS` text + `agreed` + `bgConsent` checkboxes).
+2. Add `POST` handler to `app/api/drivers/route.ts` — receive the application payload, create a `Runner` record in DB with `status = OFFLINE`, send confirmation email via a BullMQ job or direct email call. The current file only has `GET`.
+3. ⚠️ Decision needed: Should the runner dashboard be per-fair (`/runner/[fairSlug]/dashboard`) or global (`/runner/dashboard` with a fair-selector)? Runners are assigned per event (per admin portal's runner roster), which favors per-fair scoping. However a runner may work multiple events in a season, suggesting a global view with fair context. Resolve before creating the layout.
+4. Create `app/runner/[fairSlug]/layout.tsx` (or `app/runner/layout.tsx` if global) — server component that calls `requireAuth()` and checks `runner.status !== null` (user has a Runner record). Wrap children in a runner shell: minimal nav (Dashboard, Active Delivery).
+5. Create `app/runner/[fairSlug]/dashboard/page.tsx` — `'use client'`. Show: current status toggle (ACTIVE / OFFLINE), inbound delivery assignments from Firebase (same RTDB path as admin runner roster), and a list of today's completed deliveries from `GET /api/admin/events/{id}/runners`.
+6. Create `app/runner/[fairSlug]/delivery/[orderId]/page.tsx` — per-delivery view. Show: vendor name + booth number, order items, customer fulfillment info (curbside: vehicle description; delivery: address + map link). Action button: "Mark Picked Up" → `PATCH /api/orders/{id}/status` to `READY`; "Mark Delivered" → requires photo upload first (per Playbook).
+7. Implement mandatory photo upload before Delivered: create a file input that calls `POST /api/storage/upload` (`app/api/storage/upload/route.ts` already exists). Only enable the "Mark Delivered" button after a photo URL is returned.
+8. Implement GPS delivery confirmation in `PATCH /api/orders/{id}/status` route when transitioning to `COMPLETED`: read runner's coordinates from request body, run server-side haversine check against the order's delivery address lat/lng. Reject with `400 DELIVERY_TOO_FAR` if distance > `HOME_DELIVERY_GPS_RADIUS_M` (100m) from `lib/constants.ts`. This is backend-only work, no new pages.
+9. Delete `src/views/BecomeDriver.jsx` after `app/become-driver/page.tsx` is confirmed working end-to-end.
+
+### Phase I — Analytics (Detail)
+
+Current state: `EarningsChart` lives inside `src/views/vendor/VendorDashboard.jsx` and is not extracted. `app/api/vendors/[id]/stats/route.ts` and `app/api/vendors/[id]/revenue/route.ts` exist as new stub files (created alongside the vendor API routes). `app/admin/[eventSlug]/dashboard/page.tsx` and `app/organizer/fair/[fairId]/analytics/page.tsx` both use mock data from `lib/mock/admin.ts`.
+
+1. Extract `EarningsChart` from `src/views/vendor/VendorDashboard.jsx` → `app/_components/EarningsChart.tsx`. Props: `data: { date: string; revenue: number }[]`, `period: '7d' | '30d' | '90d'`, `onPeriodChange: (p) => void`. Use `recharts` `BarChart` + `ResponsiveContainer` (already installed). Apply the design system: `#FF0077` bars, `#111` background, `#555` grid lines, `font-inter` tick labels.
+2. Implement `app/api/vendors/[id]/stats/route.ts` — `GET` with `?period=7d|30d|90d`. Query Prisma: aggregate `Order` records for this vendor in the period, group by date, return `{ date, revenue, orderCount }[]`. Require vendor auth (`requireVendorAuth()`) or admin auth.
+3. Implement `app/api/vendors/[id]/revenue/route.ts` — `GET`. Return lifetime totals: `{ totalRevenue, totalOrders, avgOrderValue, completionRate }`. These feed the stat cards in the vendor dashboard.
+4. Create `app/vendor/[fairSlug]/analytics/page.tsx` — full analytics page (was `<ComingSoon />` in SPA). Use `EarningsChart` (step 1) with the period toggle. Below the chart: a stats summary row (total revenue, total orders, avg order value, completion rate) using `VendorStatCard` from Phase E. Wire to `GET /api/vendors/{id}/stats` and `GET /api/vendors/{id}/revenue`.
+5. Wire `app/admin/[eventSlug]/dashboard/page.tsx` stats cards to real data: replace `mockAdminDashboard` with a call to `GET /api/admin/events/{id}/dashboard` (the route already exists — it was created in Phase 1.7 but the UI still reads from mock). The API returns: `todayOrders`, `liveOrders`, `todayRevenue`, `vendorHeartbeats`.
+6. Wire `app/organizer/fair/[fairId]/analytics/page.tsx` to real data: call `GET /api/admin/events/{id}/dashboard` (organizers share the same aggregate stats endpoint as admins for now). Replace mock charts with `EarningsChart` component using a `period` toggle.
+7. ⚠️ Decision needed: Should vendor analytics aggregate across all fairs a vendor has participated in (global `/vendor/analytics`) or remain per-fair (`/vendor/[fairSlug]/analytics`)? Per-fair is consistent with the portal's scope but loses cross-event comparison. Resolve before implementing step 4.
+
+### Phase J — Cleanup (Detail)
+
+Prerequisite: All phases B–I must be complete and confirmed working before any deletions. Delete in dependency order — UI components before contexts, contexts before utilities.
+
+1. Delete `src/views/` — remove all ported files in reverse dependency order: first `VendorDashboard.jsx`, `Checkout.jsx`, `TrackOrder.jsx`, `Vendors.jsx`, `VendorDetail.jsx`, `Menu.jsx`, `ManageAccount.jsx`, `BecomeVendor.jsx`, `BecomeDriver.jsx`, then `Home.jsx`, `Landing.jsx`, `Location.jsx`, `Contact.jsx`, `RefundPolicy.jsx`. Do not delete `Home.jsx` until a replacement landing/home page under `app/` is built (it is not covered by any phase B–I). ⚠️ Flag: `src/views/Home.jsx` is the authenticated home dashboard — no App Router equivalent has been planned yet.
+2. Delete `src/components/` — remove ported components after their App Router equivalents are confirmed: `AddressAutocomplete.jsx` (Phase A done), `SignOutModal.jsx` (Phase A done), `SizeSelectionModal.jsx` (Phase D), `FoodCard.jsx` (Phase D), `Cart.jsx` (Phase F). Delete `src/components/skeletons/` after all loading.tsx files are created. Delete `src/components/ui/skeleton.tsx` last (check it has no remaining importers).
+3. Remove `src/context/CartContext.jsx` (or wherever the SPA's global cart context lives) after confirming `FairCartContext` is the only cart in use and `syncToSpaCart()` has been deleted (Phase F step 8).
+4. Delete `src/utils/constants.js` — replaced by `lib/constants.ts`. First grep all importers: `grep -r "src/utils/constants" src/` — confirm zero results after other src/ deletions.
+5. Delete `src/utils/vendorData.js`, `src/utils/menuData.js`, `src/utils/vendorPortalData.js`, and `src/lib/firebase.js`, `src/lib/stripe.js` — all replaced by real API calls or `lib/` equivalents (Phase A, F).
+6. Delete `lib/mock/fairs.ts` and `lib/mock/admin.ts` — replace all remaining importers first. Search: `grep -r "lib/mock" app/` before deleting. These mocks feed `FairContext`, `app/admin/` pages, `app/organizer/` pages — all must be wired to real data before deletion.
+7. Update `app/[[...slug]]/page.tsx`: once all SPA views are deleted, remove the dynamic `import('../src/App')` and replace with a server-side redirect to `/fairs` (the fair discovery page). This kills the SPA catch-all entirely.
+8. Remove backward-compat redirect routes from `src/App.jsx` (`/menu` → `/{DEFAULT_EVENT_SLUG}/menu`, `/vendors` → etc.) — these are no longer needed once the SPA is gone. Then delete `src/App.jsx` itself.
+9. Remove `NEXT_PUBLIC_DEFAULT_EVENT_SLUG` from `.env.local` and any references to `DEFAULT_EVENT_SLUG` in the codebase after step 8.
+10. Run `npx tsc --noEmit` and `next build` after each deletion batch to catch broken imports early. Do not batch all deletions into one commit — delete one phase's files, verify build, commit, then continue.
 
 ---
 
@@ -10,17 +177,29 @@
 | Step | Status | Summary |
 |---|---|---|
 | 1 — Next.js Migration | ✅ Complete | Nothing outstanding |
-| 2 — DB + Core Backend | ✅ Code complete ⚠️ Infra not configured | 8 env secrets empty — configure before anything else |
-| 3 — Core Order Flow | 🟡 ~60% done | Fee wrong (7%→10%), checkout not wired, tracking page missing |
+| 2 — DB + Core Backend | ✅ Schema complete ⚠️ Infra bugs | REDIS_URL double-prefix breaks BullMQ; all keys are test/dev mode |
+| 3 — Core Order Flow | 🟡 ~65% done | Checkout wired, tracking built, 2-min accept timeout missing |
 | 4 — Fulfillment + Runner App | 🔴 Not started | Entire system |
-| 5 — Vendor System | 🟡 ~20% done | API wiring, menu manager, 10-step wizard, Stripe Connect, BecomeVendor bug |
-| 6 — Admin Portal | 🔴 Not started | All 501 stubs |
-| 7 — Customer Experience | 🔴 Not started | Landing rewrite, white-label routes, history/favorites |
+| 5 — Vendor System | 🟡 ~25% done | BecomeVendor API call added; dashboard still on mock data; 10-step wizard not started |
+| 6 — Admin Portal | 🔴 Not started | Static placeholder page; all API routes 501 |
+| 7 — Customer Experience | 🟡 ~30% done | App Router fair routes built with mock data; discovery page built with mock data |
 | 8 — Multi-Vendor Assembly | 🔴 Not started | Schema rewrite, cart update, MasterOrder |
-| 9 — Dispute & Refund | 🔴 Not started | Entire new system |
+| 9 — Dispute & Refund | 🔴 Not started | Job constants + worker shells exist; no API routes |
 | 10 — Production Ready | 🔴 Not started | Auth model, security, testing, deploy |
 
-**Completion:** ~30% code complete, ~15% functional with configured infrastructure.
+**Completion:** ~35% code written, ~15% fully functional.
+
+---
+
+## ⚠️ Critical Bugs — Fix Before Any Testing
+
+Three bugs that silently break core platform behaviour. None require more than 30 minutes combined.
+
+| # | Bug | File | Fix | Time |
+|---|---|---|---|---|
+| 1 | ~~**REDIS_URL double prefix**~~ ✅ FIXED | `.env.local` | Removed duplicate `REDIS_URL=` prefix. | 2 min |
+| 2 | ~~**JOB_UNACCEPTED never scheduled**~~ ✅ FIXED | `app/api/orders/route.ts` | Added `ordersQueue.add(JOB_UNACCEPTED, ...)` after Firebase write (step 9). Imports added. | 30 min |
+| 3 | ~~**isPaused not enforced**~~ ✅ FIXED | `app/api/orders/route.ts` | Added `isPaused` check (503 `PLATFORM_PAUSED`) after event status check (line 172). | 15 min |
 
 ---
 
@@ -74,6 +253,8 @@ export const CONSULTING_RATE_USD          = 1_500             // per day, invoic
 ---
 
 ## Section 1 — Complete Schema Migration (Run Once)
+
+**Status:** ✅ DONE — Migration `20260403005337_v4_playbook_requirements` has been run. All V4 models are in the schema.
 
 All schema changes across all phases in a single migration. All additive except `commissionRate` default correction.
 
@@ -250,6 +431,8 @@ npx prisma generate
 
 ## Section 2 — BullMQ Jobs Registry
 
+**Status:** 🟡 PARTIAL — All 8 job name constants defined. `eventId` in `JobData`. All 7 active handlers fully implemented. `handleBulkRefundEvent` implemented. `handleGeneratePostEventReport` remains a stub pending Phase 1.10 (`lib/reports/post-event-report.ts`). `JOB_UNACCEPTED` scheduling fixed (see Critical Bugs).
+
 All jobs the platform runs. Single queue `fairsynq-orders`. Job metadata always includes `eventId`.
 
 | Job Name | Constant | Delay | Trigger | Worker Action |
@@ -263,14 +446,15 @@ All jobs the platform runs. Single queue `fairsynq-orders`. Job metadata always 
 | `generate-post-event-report` | `JOB_POST_EVENT_REPORT` | 0 (async) | Close Event | Build report + email operator |
 | `bulk-refund-event` | `JOB_BULK_REFUND` | 0 (async) | Emergency Cancel | Refund all open orders |
 
-**Update `lib/queues.ts`:**
-- Add all new job name constants
-- Add `eventId: string` to `JobData` interface
-- All existing handlers in `workers/order-worker.ts` need `eventId` added to their payload
+**`lib/queues.ts`:** ✅ Complete — all job constants, `JobData` interface with `eventId`, queue singleton.
+
+**`workers/order-worker.ts`:** ✅ All active handlers implemented. `handleGeneratePostEventReport` remains a stub — depends on `lib/reports/post-event-report.ts` (Phase 1.10).
 
 ---
 
 ## Section 3 — Firebase RTDB Structure (Post-Restructure)
+
+**Status:** ✅ DONE — All paths use `fairs/{eventId}/...` namespace in `app/api/orders/route.ts`, `app/api/orders/[id]/status/route.ts`, and `src/views/TrackOrder.jsx`. Note: `TrackOrder.jsx` line 627 has a TODO about fully replacing the initial REST fetch with the Firebase subscription — verify end-to-end.
 
 All paths namespaced under `fairs/{eventId}/`. Update every Firebase read/write in the codebase.
 
@@ -303,11 +487,13 @@ fairs/
 
 ## Section 4 — Environment Variables
 
+**Status:** 🟡 PARTIAL — `REDIS_URL` double-prefix fixed. Firebase, Google Maps, Supabase DB all configured. Remaining: (1) Stripe test keys → swap for live keys before any real event; (2) `RESEND_API_KEY` missing — add before Phase 1.10; (3) Clerk phone auth deferred — requires Clerk Pro plan, will be configured last.
+
 Configure ALL of these in `.env.local` AND Vercel dashboard before any build work.
 Nothing below works until these are set.
 
 ```bash
-# Clerk
+# Clerk — currently test keys; phone auth config deferred until Clerk Pro plan activated
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
 CLERK_SECRET_KEY=sk_live_...
 CLERK_WEBHOOK_SECRET=whsec_...         # CRITICAL — user sync broken without this
@@ -338,11 +524,13 @@ RESEND_API_KEY=re_...                  # or SENDGRID_API_KEY
 NEXT_PUBLIC_APP_URL=https://fair-synq.vercel.app
 ```
 
-**Clerk dashboard configuration (phone auth — no code required):**
+**Clerk dashboard configuration (phone auth — deferred, requires Clerk Pro plan):**
 1. User & Authentication → Email, Phone, Username
 2. Enable "Phone number" as primary identifier
 3. Sign-in strategy: "Phone number + Password"
 4. Disable email as primary (make optional or disable)
+
+> Do this last. Everything else can be built and tested with current email-based Clerk auth.
 
 ---
 
@@ -351,6 +539,8 @@ NEXT_PUBLIC_APP_URL=https://fair-synq.vercel.app
 Bugs and misconfigurations in existing code. Fix today. Total time: ~2 hours.
 
 ### T0.1 — Fix Platform Fee 7% → 10% (15 min)
+
+**Status:** ✅ DONE — `vendor.commissionRate` used in fee calculation. Schema default is `0.10`. `lib/constants.ts` defines `PLATFORM_FEE_RATE = 0.10`.
 
 **`app/api/orders/route.ts:14`** — remove hardcoded constant:
 ```typescript
@@ -368,6 +558,8 @@ commissionRate Float @default(0.10)   // was 0.07
 ```
 
 ### T0.2 — Fix BecomeVendor Critical Bug (1 hour)
+
+**Status:** ✅ DONE — `POST /api/vendors` called on submit. API creates DB vendor record, sets `publicMetadata.role = 'vendor'` via Clerk Backend API, and creates the `VendorMember` owner record. Description field added to Step 1 form and sent in request body.
 
 **`src/views/BecomeVendor.jsx`** — final step submit handler. Currently only sets Clerk metadata and stops. Vendors have auth but no DB record, making every vendor API call fail silently.
 
@@ -391,9 +583,13 @@ Also update `POST /api/vendors` to set `publicMetadata.role = 'vendor'` via Cler
 
 ### T0.3 — Configure All Env Secrets (30 min)
 
-Not a code task. See Section 4. Nothing works until these are set.
+**Status:** 🟡 PARTIAL — `REDIS_URL` fixed. Remaining: add `RESEND_API_KEY` before Phase 1.10; swap Stripe test keys for live keys before first real event; Clerk phone auth deferred (see Section 4).
+
+Not a code task. See Section 4.
 
 ### T0.4 — FairDash → FairSynq Rename (30 min)
+
+**Status:** ✅ DONE — No `FairDash` occurrences found in `src/`. `app/layout.tsx` uses FairSynq branding.
 
 Files still containing "FairDash" confirmed:
 - `src/context/CartContext.jsx`
@@ -406,6 +602,8 @@ Files still containing "FairDash" confirmed:
 Global find-replace. Update `app/layout.tsx` title and meta description.
 
 ### T0.5 — Un-Hardcode EVENT_SLUG (2 hours)
+
+**Status:** ✅ DONE — Both views use `useParams()` for `eventSlug` and call `/api/menu?eventSlug=...` and `/api/vendors?eventSlug=...` respectively.
 
 **`src/views/Menu.jsx`** and **`src/views/Vendors.jsx`**:
 ```javascript
@@ -426,9 +624,9 @@ Everything in this tier is required before a single real event can go live. Orde
 ---
 
 ### Phase 1.1 — Clerk Phone Auth Configuration
-**Time:** 1 day | **Complexity:** S
+**Time:** 1 day | **Complexity:** S | **Status:** ⏸️ DEFERRED — requires Clerk Pro plan
 
-**Clerk dashboard only** (see Section 4). No code changes to API routes — `requireAuth()` in `lib/auth.ts` works the same regardless of identifier type.
+**Clerk dashboard only** (see Section 4). No code changes to API routes — `requireAuth()` in `lib/auth.ts` works the same regardless of identifier type. The entire platform can be built and tested with the current email-based auth. Do this last.
 
 **Code changes:**
 - `lib/clerk-appearance.ts` — update placeholder text to reference phone number
@@ -438,9 +636,12 @@ Everything in this tier is required before a single real event can go live. Orde
 ---
 
 ### Phase 1.2 — Checkout Wiring + Stripe Elements
-**Time:** 3 days | **Complexity:** L | **Blocks:** All revenue
+**Time:** 3 days | **Complexity:** L | **Blocks:** All revenue | **Status:** ✅ DONE
 
-**`src/views/Checkout.jsx`** — currently a UI shell with no API calls.
+**What's done:** Stripe `<Elements>` + `<PaymentElement>` integrated. `POST /api/orders` called on submit. `clientSecret` received and used. Fulfillment config loaded from `/api/events/${eventSlug}`. Delivery fee and service charge line items present. Fulfillment auto-select, curbside vehicle fields, home delivery address form, estimated ready time display, navigate to `/track?orderId=` on success. `return_url` fallback fixed to `/track?orderId=` (was `/home`).  
+**What's missing:** Nothing.
+
+**`src/views/Checkout.jsx`** — fully wired.
 
 **Step 1 — Load fulfillment config on mount:**
 ```javascript
@@ -489,7 +690,10 @@ Include `serviceCharge` in `Order` record write and in `piParams.amount`.
 ---
 
 ### Phase 1.3 — Order Timing: 2-Minute Accept Timeout + Curbside 10-Min Forfeiture
-**Time:** 2 hours | **Complexity:** S
+**Time:** 2 hours | **Complexity:** S | **Status:** 🟡 PARTIAL
+
+**What's done:** Curbside 10-min forfeiture (`JOB_UNCOLLECTED`) and home delivery 10-min timeout (`JOB_UNDELIVERABLE`) are both scheduled correctly on the → READY transition in `app/api/orders/[id]/status/route.ts:125-134`.  
+**What's missing (CRITICAL):** `JOB_UNACCEPTED` is never scheduled after order creation. Add the `ordersQueue.add(JOB_UNACCEPTED, ...)` call shown below to `app/api/orders/route.ts` after the Firebase write. This is Bug #2 in the Critical Bugs table above.
 
 **`app/api/orders/route.ts`** — after Firebase write (step 8), schedule accept timeout:
 ```typescript
@@ -519,7 +723,9 @@ No refund for curbside forfeiture (per playbook: "order forfeited, no refund"). 
 ---
 
 ### Phase 1.4 — $5 Cancellation Fee After Start Order
-**Time:** 4 hours | **Complexity:** S
+**Time:** 4 hours | **Complexity:** S | **Status:** ✅ DONE
+
+`startedAt` and `cancellationFee` set on PLACED → ACCEPTED in `app/api/orders/[id]/status/route.ts:110-111`. Cancel route charges $5 if `ACCEPTED`, full refund if `PLACED`, blocks if `PREPARING+`.
 
 **`app/api/orders/[id]/status/route.ts`** — on PLACED → ACCEPTED transition:
 ```typescript
@@ -559,7 +765,10 @@ Customer-facing message in `TrackOrder.jsx`: *"Cancellations after a vendor has 
 ---
 
 ### Phase 1.5 — Customer Order Tracking Page
-**Time:** 2 days | **Complexity:** M
+**Time:** 2 days | **Complexity:** M | **Status:** ✅ DONE
+
+**What's done:** Full UI built. Firebase real-time listener on `fairs/{eventId}/customerOrders/{customerId}/{orderId}` subscribes after initial REST fetch supplies `eventId`/`customerId`. Polling every 15 s is a fallback when Firebase unavailable. Cancel button with modal (correct messaging for PLACED vs ACCEPTED). Status timeline. Runner location map for HOME_DELIVERY. Recent orders list when no orderId in URL. Stale TODO comment removed.  
+**What's missing:** Nothing.
 
 **`src/views/TrackOrder.jsx`** — currently "Coming Soon".
 
@@ -603,7 +812,9 @@ Each step shows timestamp and relevant info:
 ---
 
 ### Phase 1.6 — Vendor Dashboard: Live API + Real-Time Orders
-**Time:** 3-4 days | **Complexity:** L
+**Time:** 3-4 days | **Complexity:** L | **Status:** ✅ DONE
+
+All `vendorPortalData` mock imports removed. Full live wiring implemented:
 
 **`src/views/vendor/VendorDashboard.jsx`** — replace all `utils/vendorPortalData.js` imports with real API calls.
 
@@ -672,7 +883,9 @@ useEffect(() => {
 ---
 
 ### Phase 1.7 — Admin Portal MVP
-**Time:** 4-5 days | **Complexity:** L | **Blocks:** Event operators going live
+**Time:** 4-5 days | **Complexity:** L | **Blocks:** Event operators going live | **Status:** 🔴 NOT STARTED
+
+`app/admin/page.tsx` is a static "Restricted" placeholder. All admin API routes (`/api/admin/route.ts`, `/api/admin/dashboard/route.ts`) return 501. `isPaused` is not enforced in `POST /api/orders` (see Critical Bugs #3 above).
 
 **New route tree:**
 ```
@@ -745,7 +958,9 @@ if (event.isPaused) {
 ---
 
 ### Phase 1.8 — Runner App
-**Time:** 4-5 days | **Complexity:** L
+**Time:** 4-5 days | **Complexity:** L | **Status:** 🔴 NOT STARTED
+
+Only `src/views/BecomeDriver.jsx` (the signup form) and the old `/api/drivers/` stubs exist. No runner dashboard, no `requireRunnerAuth()`, no `/api/runners/` routes, no incident report routes, no GPS delivery endpoint.
 
 **Auth:** Add `requireRunnerAuth()` to `lib/auth.ts` — checks `publicMetadata.role = 'runner'`.  
 **Route:** `/runner/dashboard` — `RunnerRoute` wrapper in `src/App.jsx`.  
@@ -841,7 +1056,9 @@ PATCH /api/admin/incidents/[id]/resolve — operator resolves incident (admin au
 ---
 
 ### Phase 1.9 — Firebase Restructure
-**Time:** 4 hours | **Complexity:** M | **Breaking if data exists in old paths**
+**Time:** 4 hours | **Complexity:** M | **Breaking if data exists in old paths** | **Status:** ✅ DONE
+
+All Firebase paths already use `fairs/{eventId}/...` namespace. See Section 3 status note.
 
 Update all Firebase read/write paths from flat to `fairs/{eventId}/...` (see Section 3).
 
@@ -857,7 +1074,9 @@ Deploy updated Firebase security rules (see Section 3 above).
 ---
 
 ### Phase 1.10 — Post-Event Report Auto-Generation
-**Time:** 2 days | **Complexity:** M
+**Time:** 2 days | **Complexity:** M | **Status:** 🔴 NOT STARTED
+
+`handleGeneratePostEventReport` in `workers/order-worker.ts` is a stub with a TODO comment. `lib/reports/post-event-report.ts` does not exist. `resend` package not installed. `RESEND_API_KEY` not in `.env.local`.
 
 **Triggered when:** Admin clicks Close Event → `PATCH /api/admin/events/[id]/status` → INACTIVE.
 
@@ -939,7 +1158,9 @@ Transforms the single-fair SPA into the full marketplace. Can be built in parall
 ---
 
 ### Phase 2.1 — FairContext Provider
-**Time:** 1 day | **Files:** New `src/context/FairContext.jsx`
+**Time:** 1 day | **Files:** New `src/context/FairContext.jsx` | **Status:** ✅ DONE
+
+`app/_contexts/FairContext.tsx` exists and is used throughout `app/fair/[fairSlug]/`. Currently backed by `lib/mock/` data — wire to live `GET /api/events/${fairSlug}` when mock data is swapped out.
 
 ```javascript
 export function FairProvider({ eventSlug, children }) {
@@ -969,24 +1190,31 @@ export const useFair = () => useContext(FairContext)
 ---
 
 ### Phase 2.2 — App Router Event Routes
-**Time:** 2-3 days | **Files:** New `app/[eventSlug]/` tree
+**Time:** 2-3 days | **Files:** `app/fair/[fairSlug]/` tree | **Status:** 🟡 PARTIAL
+
+**What's done:** Full route tree built at `app/fair/[fairSlug]/` — `page.tsx` (vendor grid), `vendors/`, `vendor/[vendorSlug]/`, `cart/`, `checkout/`, `orders/`, `order/[orderId]/`, `info/`, `layout.tsx`. FairContext wired. Branding applied.  
+**What's missing:** All pages use `lib/mock/` data instead of live API calls. `checkout/page.tsx` is a redirect shim to the legacy SPA checkout — not a real checkout page. `orders/page.tsx` shows an empty-state placeholder. Swap mock data for real `GET /api/events/${fairSlug}`, `GET /api/vendors`, `GET /api/menu` calls.
+
+> **Route path note:** This project uses `app/fair/[fairSlug]/` (not `app/[eventSlug]/`) to avoid top-level route conflicts. All references below use the actual path.
 
 ```
-app/[eventSlug]/
+app/fair/[fairSlug]/
 ├── layout.tsx           — loads event, sets branding, wraps in FairProvider
-├── page.tsx             — vendor grid (Server Component, SEO-friendly)
-├── menu/page.tsx        — full menu browse
+├── page.tsx             — vendor grid
+├── info/page.tsx        — event info
 ├── vendors/
-│   └── [vendorId]/
+│   └── [vendorSlug]/
 │       └── page.tsx    — vendor detail
-└── checkout/
-    └── page.tsx        — checkout scoped to eventSlug
+├── cart/page.tsx
+├── checkout/page.tsx    — currently a redirect shim to SPA checkout
+├── orders/page.tsx      — placeholder, requires auth + live API
+└── order/[orderId]/page.tsx
 ```
 
-`app/[eventSlug]/layout.tsx`:
+`app/fair/[fairSlug]/layout.tsx`:
 ```typescript
 export default async function EventLayout({ params, children }) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/events/${params.eventSlug}`)
+  const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/events/${params.fairSlug}`)
   const { data: event } = await res.json()
   if (!event) notFound()
 
@@ -1002,9 +1230,12 @@ export default async function EventLayout({ params, children }) {
 ---
 
 ### Phase 2.3 — Fair Discovery Landing Page
-**Time:** 2 days | **Files:** New `app/page.tsx`, new `src/components/FairCard.jsx`
+**Time:** 2 days | **Files:** `app/fairs/page.tsx`, `app/_components/FairCard.tsx` | **Status:** 🟡 PARTIAL
 
-**`app/page.tsx`** — Next.js Server Component:
+**What's done:** `/fairs` page renders a FairCard grid grouped by status. `FairCard` component built with status badge, date range, vendor count. Route exists at `app/fairs/page.tsx`.  
+**What's missing:** Uses `mockFairs` from `lib/mock/` — not wired to `GET /api/events`. No geo-filtering, no text search. Root `app/page.tsx` still serves the old SPA (SPA catch-all) — it is not the discovery landing page.
+
+**`app/fairs/page.tsx`** — currently uses mock data, needs to become a Next.js Server Component:
 ```typescript
 // Fetches ACTIVE + UPCOMING events server-side (SEO-friendly)
 // Client-side: geolocation API to get user coords → re-fetch with lat/lng for distance sorting
@@ -1026,7 +1257,9 @@ export default async function EventLayout({ params, children }) {
 ---
 
 ### Phase 2.4 — QR Code Generation
-**Time:** 2 hours | **Files:** `lib/qr.ts`, `app/api/admin/events/[id]/qr/route.ts`
+**Time:** 2 hours | **Files:** `lib/qr.ts`, `app/api/admin/events/[id]/qr/route.ts` | **Status:** 🔴 NOT STARTED
+
+`lib/qr.ts` does not exist. `qrcode` package not installed. No QR API route.
 
 ```bash
 npm install qrcode
@@ -1047,7 +1280,9 @@ Admin portal: QR displayed with download button (PNG export via `<a download hre
 ---
 
 ### Phase 2.5 — 10-Step Vendor Onboarding Wizard
-**Time:** 3 days | **Files:** `src/views/BecomeVendor.jsx` expansion, new Stripe Connect routes
+**Time:** 3 days | **Files:** `src/views/BecomeVendor.jsx` expansion, new Stripe Connect routes | **Status:** 🔴 NOT STARTED
+
+Current wizard is 4 steps. Steps 5–10 (document uploads, Stripe Connect, digital agreement) not built. No Stripe Connect API routes (`/api/stripe/connect/onboard`, `/api/stripe/connect/return`). No Supabase Storage presigned upload route (`/api/storage/upload`).
 
 Event slug from URL param `?event=springfield-fair-2026` (set in organizer-generated invite link).
 
@@ -1089,26 +1324,37 @@ if (account.charges_enabled) {
 ---
 
 ### Phase 2.6 — Fair Organizer Dashboard
-**Time:** 3-4 days | **Files:** New `app/organizer/[eventSlug]/` route tree
+**Time:** 3-4 days | **Files:** `app/organizer/fair/[fairId]/` route tree | **Status:** 🟡 PARTIAL
+
+**What's done:** Full portal shell built at `app/organizer/` — layout with auth check, analytics, orders, vendors, disputes, settings pages all exist. Analytics page has mock Recharts charts. Vendors page has tab/filter UI. Orders page has filter UI. Create fair form UI exists at `app/organizer/fairs/new/`.  
+**What's missing:** All pages import from `lib/mock/organizer` — none wired to real API. Disputes page is a blank placeholder ("No disputes to review"). Create fair form wiring to `POST /api/events` unverified. No `reports/page.tsx` for post-event report history. `FairOrganizer`/`OrgMember` provisioning flow not built.
+
+> **Route path note:** This project uses `app/organizer/fair/[fairId]/` (not `app/organizer/[eventSlug]/`). Update all references accordingly.
 
 For event operators who manage an event from setup through close, separate from the super-admin portal.
 
 ```
 app/organizer/
-├── layout.tsx                   — requires role: event_operator
-└── [eventSlug]/
-    ├── dashboard/page.tsx       — same as admin portal but organizer-scoped
-    ├── vendors/page.tsx
-    ├── fulfillment/page.tsx
-    ├── runners/page.tsx
-    └── reports/page.tsx         — post-event reports history
+├── layout.tsx                        — requires role: event_operator
+├── fairs/
+│   ├── page.tsx                      — list organizer's fairs
+│   └── new/page.tsx                  — create fair form (UI exists, API wiring unverified)
+└── fair/[fairId]/
+    ├── layout.tsx
+    ├── page.tsx
+    ├── analytics/page.tsx            — mock charts built, needs live API
+    ├── orders/page.tsx               — mock orders built, needs live API
+    ├── vendors/page.tsx              — mock vendors built, needs live API
+    ├── disputes/page.tsx             — blank placeholder
+    ├── settings/page.tsx
+    └── reports/page.tsx              — NOT BUILT — post-event reports history
 ```
 
 **Organizer provisioning flow:**
 1. Super-admin creates `FairOrganizer` record
 2. Super-admin creates `OrgMember` linking organizer's User to the org
 3. Super-admin sets Clerk `publicMetadata.role = 'event_operator'`
-4. Organizer can now access `/organizer/[their-event-slug]/dashboard`
+4. Organizer can now access `/organizer/fair/[fairId]/analytics`
 
 ---
 
@@ -1119,7 +1365,9 @@ Build after Tier 1 is proven stable with at least one live event.
 ---
 
 ### Phase 3.1 — Multi-Vendor Cart (5-Vendor Cap)
-**Time:** 2 days | **Files:** `src/context/CartContext.jsx`, `src/components/Cart.jsx`
+**Time:** 2 days | **Files:** `src/context/CartContext.jsx`, `src/components/Cart.jsx` | **Status:** 🔴 NOT STARTED
+
+`CartContext.jsx` still uses a single-vendor model. No multi-vendor grouping or cap enforcement.
 
 ```javascript
 // CartContext.jsx — replace cartVendorId (single FK) with:
@@ -1147,7 +1395,9 @@ const addToCart = (item) => {
 ---
 
 ### Phase 3.2 — MasterOrder / SubOrder Schema
-**Time:** 1 day schema + 3 days implementation | **Complexity:** XL | **Breaking change**
+**Time:** 1 day schema + 3 days implementation | **Complexity:** XL | **Breaking change** | **Status:** 🔴 NOT STARTED
+
+`MasterOrder`, `SubOrder`, `SubOrderItem` models not in schema. Migration not run. Do not start until Tier 1 is proven stable at a live event.
 
 ⚠️ **Do not deploy until zero active orders exist on affected events.**
 
@@ -1220,7 +1470,7 @@ enum SubOrderStatus    { PLACED ACCEPTED PREPARING READY RUNNER_COLLECTED DELIVE
 ---
 
 ### Phase 3.3 — Multi-Vendor Order Creation API
-**Time:** 2 days | **Files:** `app/api/orders/route.ts` — full rewrite of POST handler
+**Time:** 2 days | **Files:** `app/api/orders/route.ts` — full rewrite of POST handler | **Status:** 🔴 NOT STARTED
 
 New request body:
 ```typescript
@@ -1252,7 +1502,7 @@ Flow:
 ---
 
 ### Phase 3.4 — Multi-Vendor State Machine
-**Time:** 2-3 days | **Files:** New `app/api/sub-orders/[id]/status/route.ts`
+**Time:** 2-3 days | **Files:** New `app/api/sub-orders/[id]/status/route.ts` | **Status:** 🔴 NOT STARTED
 
 - Each vendor advances their own SubOrder independently
 - `MasterOrder.status` is derived:
@@ -1266,7 +1516,9 @@ Flow:
 ---
 
 ### Phase 3.5 — Payout Reconciliation Engine
-**Time:** 3 days | **Files:** New `lib/reconciliation.ts`, `app/api/admin/events/[id]/close/route.ts`
+**Time:** 3 days | **Files:** New `lib/reconciliation.ts`, `app/api/admin/events/[id]/close/route.ts` | **Status:** 🔴 NOT STARTED
+
+`handleBulkRefundEvent` in `workers/order-worker.ts` is a stub with a TODO. `lib/reconciliation.ts` does not exist. No close or emergency-cancel API routes.
 
 Five checks before Close Event is allowed. All must pass:
 
@@ -1304,7 +1556,9 @@ If all pass: `generate-post-event-report` job queued → `EventStatus.INACTIVE` 
 ---
 
 ### Phase 3.6 — Dispute System
-**Time:** 2-3 days | **Files:** `app/api/disputes/`, `app/api/admin/disputes/`
+**Time:** 2-3 days | **Files:** `app/api/disputes/`, `app/api/admin/disputes/` | **Status:** 🔴 NOT STARTED
+
+`JOB_ESCALATE_DISPUTE` constant defined and worker handler shell exists. `Dispute` model in schema. No `/api/disputes/` routes built. Vendor dashboard disputes tab is a blank placeholder.
 
 ```
 POST /api/disputes                — vendor auth, submit dispute within 7-day window
@@ -1328,6 +1582,8 @@ Build after the platform is proven at multiple live events in 2026.
 
 ### Phase 4.1 — Licensing Fee Billing System
 
+**Status:** 🔴 NOT STARTED
+
 ```prisma
 // Add to Event:
 licensingFee       Float?
@@ -1342,6 +1598,8 @@ licensingStripePaymentId String?
 
 ### Phase 4.2 — PWA + Offline Buffering
 
+**Status:** 🔴 NOT STARTED
+
 Per playbook: *"Vendor dashboards keep working when connectivity drops. Orders queue locally and sync when connection returns."*
 
 ```bash
@@ -1355,6 +1613,8 @@ npm install next-pwa
 
 ### Phase 4.3 — Advanced Analytics
 
+**Status:** 🔴 NOT STARTED — Recharts installed. Organizer analytics page has mock chart UI built (ahead of schedule, not connected to real data).
+
 - Recharts already installed
 - Peak order window chart (30-min buckets)
 - Year-over-year comparison across events (PostEventReport data)
@@ -1363,10 +1623,40 @@ npm install next-pwa
 
 ### Phase 4.4 — Ratings + Favorites
 
+**Status:** 🔴 NOT STARTED — `FavoriteItem` model in schema. SPA routes for `/favorites` and `/history` are stubs.
+
 - `FavoriteItem` model already in schema (Phase 1 migration)
 - Heart toggle on `FoodCard.jsx` → `POST /api/favorites` with `{ menuItemId }`
 - `/favorites` route — currently "Coming Soon" stub
 - `/history` route — `GET /api/orders` already exists with cursor pagination; wire it up
+
+---
+
+## Progress Summary (April 13 2026 Audit)
+
+| Tier | Items | ✅ Done | 🟡 Partial | 🔴 Not Started | ⚠️ Broken |
+|---|---|---|---|---|---|
+| Tier 0 — Immediate Fixes | 5 | 3 | 1 | 0 | 1 |
+| Schema + Infra (Sections 1–4) | 3 | 2 | 1 | 0 | 1 |
+| Tier 1 — First Live Event | 10 | 3 | 3 | 4 | 0 |
+| Tier 2 — Multi-Fair Experience | 6 | 1 | 3 | 2 | 0 |
+| Tier 3 — Multi-Vendor + Finance | 6 | 0 | 0 | 6 | 0 |
+| Tier 4 — 2027 Readiness | 4 | 0 | 0 | 4 | 0 |
+| **Total** | **34** | **9** | **8** | **16** | **2** |
+
+**Overall:** ~35% code written, ~15% fully functional (blocked by infra bugs and missing Tier 1 items).
+
+---
+
+## Items Built But Not In Plan
+
+Work that exists in the codebase but was not tracked in this plan. Noted here so it is not accidentally discarded or rebuilt.
+
+- **`app/fair/[fairSlug]/` full route tree** — All pages built with `lib/mock/` data as UI scaffolding. Ahead of Phase 2.2. Swap mock data for live API calls to complete the phase.
+- **`app/fairs/page.tsx` + `app/_components/FairCard.tsx`** — Discovery page and FairCard component built with mock data. Ahead of Phase 2.3. Wire to `GET /api/events` to complete.
+- **`app/organizer/` full portal shell** — Analytics, orders, vendors, disputes, settings pages built with mock data. Layout and auth check in place. Ahead of Phase 2.6. Wire all pages to real API to complete.
+- **`lib/mock/` directory** — `fairs.ts`, `vendors.ts`, `organizer.ts`, `index.ts` — all mock data driving the above UI scaffolding. Delete file-by-file as each page is wired to live API.
+- **`app/_contexts/FairCartContext.tsx`** — Fair-scoped cart context for App Router pages. Bridges `app/fair/[fairSlug]/cart/` to the legacy SPA cart via `syncToSpaCart()`. Not needed once Phase 3.1 (multi-vendor cart) replaces the SPA cart.
 
 ---
 
@@ -1412,47 +1702,49 @@ Stripe distributes:
 ## Master Build Sequence
 
 ```
-TODAY (no code):
-  T0.3  Configure all env secrets in .env.local + Vercel
+✅ DONE — T0.1, T0.4, T0.5, Schema migration, 1.4, 1.9, 2.1
 
-WEEK 1:
-  T0.1  Fix fee 7%→10% (15 min)
-  T0.2  Fix BecomeVendor API call (1 hr)
-  T0.4  FairDash→FairSynq rename (30 min)
-  T0.5  Un-hardcode EVENT_SLUG (2 hrs)
-        Schema migration: npx prisma migrate dev
+TODAY (bugs — fix before writing any new code):
+  BUG   Fix REDIS_URL double-prefix in .env.local (2 min)
+  BUG   Add JOB_UNACCEPTED scheduling to POST /api/orders (30 min)
+  BUG   Add isPaused check to POST /api/orders (15 min)
+  T0.2  Update POST /api/vendors to set publicMetadata.role = 'vendor' (30 min)
+  T0.3  Add RESEND_API_KEY to .env.local + Vercel (5 min)
+
+WEEK 1 (remaining Tier 1 critical path):
+  1.1   Clerk phone+password config in dashboard (1 day)
+  1.2   Verify post-payment nav + add estimated ready time display (0.5 day)
+  1.5   Verify Firebase subscription in TrackOrder.jsx (0.5 day, line 627 TODO)
 
 WEEK 2:
-  1.1   Clerk phone+password config (1 day)
-  1.3   2-min accept timeout + 10-min curbside forfeiture (2 hrs, parallel)
-  1.4   $5 cancellation fee logic (4 hrs, parallel)
-  1.2   Checkout wiring + Stripe Elements (3 days)
+  1.6   Vendor dashboard: live API + real-time orders + heartbeat (3-4 days)
+        — Build: /api/vendors/[id]/stats, /api/vendors/[id]/revenue
+        — Wire Firebase order listener + heartbeat ping
+        — Build vendor menu manager tab + /api/storage/upload
 
 WEEK 3:
-  1.5   Customer order tracking page (2 days)
-  1.9   Firebase restructure (4 hrs, do first in week)
+  1.7   Admin portal MVP (4-5 days)
+        — Build full app/admin/[eventSlug]/ route tree
+        — All admin API endpoints (dashboard, vendor approval, fulfillment, pause)
+        — Go Live checklist + Platform Pause button
 
 WEEK 4:
-  1.6   Vendor dashboard: live API + real-time orders + heartbeat (3-4 days)
-
-WEEK 5:
-  1.7   Admin portal MVP (4-5 days)
-
-WEEK 6:
   1.8   Runner app (4-5 days)
   1.10  Post-event report (2 days, parallel with runner app)
+        — npm install resend
+        — lib/reports/post-event-report.ts
+        — Implement handleGeneratePostEventReport worker handler
 
-── FIRST EVENT CAN GO LIVE AFTER WEEK 6 ──────────────────────
+── FIRST EVENT CAN GO LIVE AFTER WEEK 4 ──────────────────────
 
-WEEKS 7–9 (multi-fair public experience — can overlap with Tier 1):
-  2.1   FairContext provider (1 day)
-  2.2   App Router [eventSlug] routes (2-3 days)
-  2.3   Fair discovery landing page (2 days)
+WEEKS 5–7 (multi-fair public experience — UI scaffolding already built):
+  2.2   Wire app/fair/[fairSlug]/ pages to live API (swap lib/mock/ data)
+  2.3   Wire app/fairs/page.tsx to GET /api/events + add geo/search filters
   2.4   QR code generation (2 hrs)
-  2.5   10-step vendor onboarding (3 days)
-  2.6   Fair organizer dashboard (3-4 days)
+  2.5   10-step vendor onboarding wizard (3 days)
+  2.6   Wire app/organizer/ pages to live API + build reports tab
 
-WEEKS 10–14 (multi-vendor + financial accountability):
+WEEKS 8–12 (multi-vendor + financial accountability):
   3.1   Multi-vendor cart (2 days)
   3.2   MasterOrder/SubOrder schema (1 day schema + 3 days wiring)
   3.3   Multi-vendor order creation API (2 days)
@@ -1460,7 +1752,7 @@ WEEKS 10–14 (multi-vendor + financial accountability):
   3.5   Payout reconciliation engine (3 days)
   3.6   Dispute system (2-3 days)
 
-WEEKS 15+ (2027 readiness):
+WEEKS 13+ (2027 readiness):
   4.1   Licensing billing system
   4.2   PWA + offline buffering
   4.3   Advanced analytics

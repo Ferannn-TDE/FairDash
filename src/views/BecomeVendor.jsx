@@ -69,6 +69,7 @@ const BecomeVendor = () => {
   const [business, setBusiness] = useState({
     name: "",
     type: "",
+    description: "",
     location: "",
     email: "",
     phone: "",
@@ -130,6 +131,7 @@ const BecomeVendor = () => {
         body: JSON.stringify({
           eventSlug,
           name: business.name,
+          description: business.description || undefined,
           cuisineType: business.type,
           boothNumber: business.location || undefined,
         }),
@@ -237,6 +239,18 @@ const BecomeVendor = () => {
                     <option value="other">Other</option>
                   </select>
                 </div>
+              </div>
+              <div>
+                <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
+                  Business Description
+                </label>
+                <textarea
+                  value={business.description}
+                  onChange={(e) => setBusiness((b) => ({ ...b, description: e.target.value }))}
+                  rows={3}
+                  className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40 resize-none"
+                  placeholder="Tell customers what makes your food special..."
+                />
               </div>
               <div>
                 <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">

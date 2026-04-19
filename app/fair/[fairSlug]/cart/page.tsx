@@ -1,18 +1,19 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ChevronLeftIcon, MinusIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 
 export default function FairCartPage() {
+  const router = useRouter()
   const { fair } = useFair()
-  const { items, itemCount, subtotal, updateQty, removeItem, syncToSpaCart } = useFairCart()
+  const { items, itemCount, subtotal, updateQty, removeItem } = useFairCart()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
   const handleCheckout = () => {
-    syncToSpaCart()
-    window.location.href = '/checkout'
+    router.push(`/fair/${fair.slug}/checkout`)
   }
 
   if (itemCount === 0) {

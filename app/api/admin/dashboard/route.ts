@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server'
 
-// GET /api/admin/dashboard
-// Returns live event stats: active orders, revenue, vendor statuses, driver GPS.
-// Requires super-admin or event-operator role.
-// Implementation: Part 5 (Admin portal)
+// GET /api/admin/dashboard — legacy stub, use /api/admin/events/[id]/dashboard instead
 export async function GET() {
   return NextResponse.json(
-    { error: 'Not implemented — coming in Part 5 (Admin portal)' },
-    { status: 501 }
+    { error: 'Use /api/admin/events/[id]/dashboard for event-specific stats' },
+    { status: 301 }
   )
 }

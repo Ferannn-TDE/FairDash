@@ -40,7 +40,7 @@ const PaymentStep = ({ orderId, summary, onBack, onSuccess }) => {
     try {
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
-        confirmParams: { return_url: window.location.origin + '/home' },
+        confirmParams: { return_url: window.location.origin + '/track?orderId=' + orderId },
         redirect: 'if_required',
       });
 

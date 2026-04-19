@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server'
 
-// GET /api/admin   — top-level admin info (redirect to /api/admin/dashboard)
-// Implementation: Part 5 (Admin portal)
+// GET /api/admin — redirects to /api/admin/events for convenience
 export async function GET() {
-  return NextResponse.json(
-    { error: 'Not implemented — coming in Part 5 (Admin portal)' },
-    { status: 501 }
-  )
+  return NextResponse.json({ message: 'Admin API — use /api/admin/events/[id]/dashboard for event stats' })
 }

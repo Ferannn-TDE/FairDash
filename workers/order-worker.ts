@@ -403,14 +403,96 @@ async function handleGeneratePostEventReport(job: Job<JobData>) {
 /**
  * bulk-refund-event
  * Fires immediately (delay: 0) on Emergency Cancel.
- * Full implementation in Phase 3.5 — stub logs intent and returns.
+ * Refunds all open orders for the event and marks them CANCELLED.
+ * Terminal states (COMPLETED, CANCELLED, UNCOLLECTED, UNDELIVERABLE) are skipped.
  */
 async function handleBulkRefundEvent(job: Job<JobData>) {
   const { eventId } = job.data
+  if (!eventId) return
   console.log(`[Worker] bulk-refund-event → event ${eventId}`)
-  // TODO Phase 3.5: fetch all PLACED/ACCEPTED/PREPARING/READY orders for event
-  // Issue Stripe refunds for each, update statuses, notify customers
-  console.log(`[Worker] Bulk refund not yet implemented — Phase 3.5`)
+
+  const openStatuses = [
+    OrderStatus.PLACED,
+    OrderStatus.ACCEPTED,
+    OrderStatus.PREPARING,
+    OrderStatus.READY,
+  ] as const
+
+  const orders = await prisma.order.findMany({
+    where: { eventId, status: { in: [...openStatuses] } },
+  })
+
+  if (orders.length === 0) {
+    console.log(`[Worker] bulk-refund-event: no open orders for event ${eventId}`)
+    return
+  }
+
+  console.log(`[Worker] bulk-refund-event: refunding ${orders.length} orders`)
+
+  const results = await Promise.allSettled(
+    orders.map(async order => {
+      // Issue Stripe refund (best-effort — log failures but continue)
+      if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
+        try {
+          await stripe.refunds.create({
+            payment_intent: order.stripePaymentIntentId,
+            metadata: { reason: 'emergency_event_cancel', eventId },
+          })
+        } catch (err) {
+          console.error(`[Worker] bulk-refund: Stripe refund failed for order ${order.id}:`, err)
+          // Don't skip the DB update — partial refund failure is better than leaving the order open
+        }
+      }
+
+      // Cancel the order and write audit records atomically
+      await prisma.$transaction([
+        prisma.order.update({
+          where: { id: order.id },
+          data: {
+            status: OrderStatus.CANCELLED,
+            cancelledAt: new Date(),
+            cancelledBy: 'system',
+            cancellationReason: 'Event cancelled by operator',
+          },
+        }),
+        prisma.cancellation.upsert({
+          where: { orderId: order.id },
+          create: {
+            orderId: order.id,
+            vendorId: order.vendorId,
+            reason: 'Event cancelled by operator',
+            refundIssued: true,
+            refundAmount: order.total,
+          },
+          update: { refundIssued: true, refundAmount: order.total },
+        }),
+        prisma.orderEvent.create({
+          data: {
+            orderId: order.id,
+            eventType: 'cancelled',
+            actorRole: 'system',
+            metadata: { reason: 'emergency_event_cancel', eventId, refundAmount: order.total },
+          },
+        }),
+      ])
+
+      // Update Firebase for both vendor dashboard and customer tracking
+      await updateOrderInFirebase(eventId, order.vendorId, order.id, order.customerId, {
+        status: 'CANCELLED',
+        cancellationReason: 'Event cancelled by operator',
+      })
+    })
+  )
+
+  const failed = results.filter(r => r.status === 'rejected')
+  if (failed.length > 0) {
+    console.error(`[Worker] bulk-refund-event: ${failed.length}/${orders.length} orders failed`)
+    failed.forEach(r => console.error((r as PromiseRejectedResult).reason))
+    // Throw so BullMQ marks the job as failed and retries
+    throw new Error(`Bulk refund partially failed: ${failed.length} orders errored`)
+  }
+
+  console.log(`[Worker] bulk-refund-event: ${orders.length} orders cancelled and refunded`)
 }
 
 // ─── Worker ───────────────────────────────────────────────────────────────────

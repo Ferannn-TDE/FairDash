@@ -1,19 +1,19 @@
 import type { Metadata } from 'next'
+import { Toaster } from 'react-hot-toast'
+import ClerkClientProvider from './_providers/ClerkClientProvider'
 import '../src/index.css'
 
 // ---------------------------------------------------------------------------
-// Root layout — HTML shell only.
+// Root layout — single ClerkProvider for the entire tree.
 //
-// ClerkProvider is intentionally NOT here. Reason:
-//   @clerk/nextjs@5.7.5 depends on @clerk/shared@2.9.2
-//   @clerk/clerk-react@5.60.1 depends on @clerk/shared@3.47.0
-// These are different major versions with different React context instances.
-// Wrapping the SPA with @clerk/nextjs ClerkProvider causes useUser / useAuth
-// to fail because they look for the v3 context object, not the v2 one.
+// ClerkClientProvider uses @clerk/clerk-react (Core 3) so that client
+// components (MarketplaceNavbar, FairNavbar, etc.) can call useClerk /
+// useUser. We use @clerk/clerk-react here rather than @clerk/nextjs because
+// the two packages ship different @clerk/shared major versions — mixing them
+// causes hook lookup failures.
 //
-// The ClerkProvider lives in app/[[...slug]]/page.tsx, imported directly from
-// @clerk/clerk-react so provider and hooks share the same context.
-// @clerk/nextjs is still used server-side in lib/auth.ts and middleware.ts.
+// @clerk/nextjs/server is used for server-side auth only (lib/auth.ts,
+// middleware.ts, and server layouts). There is ONE ClerkProvider in the tree.
 // ---------------------------------------------------------------------------
 
 export const metadata: Metadata = {
@@ -21,15 +21,35 @@ export const metadata: Metadata = {
   description:
     'FairSynq - Get your favorite fair foods delivered in 30 minutes. Fresh. Fast. Fair.',
   icons: {
-    icon: '/images/logo/fairdash-icon.png',
-    apple: '/images/logo/fairdash-icon.png',
+    icon: '/images/logo/icon.png',
+    apple: '/images/logo/icon.png',
   },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ClerkClientProvider>
+          {children}
+          <Toaster
+            position="bottom-center"
+            toastOptions={{
+              style: {
+                background: '#1a1a1a',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '12px',
+                fontFamily: 'Inter, sans-serif',
+                fontSize: '14px',
+              },
+              success: {
+                iconTheme: { primary: '#FF0077', secondary: '#fff' },
+              },
+            }}
+          />
+        </ClerkClientProvider>
+      </body>
     </html>
   )
 }

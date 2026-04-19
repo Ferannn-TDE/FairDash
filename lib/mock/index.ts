@@ -1,5 +1,5 @@
 export type { Fair, FairStatus } from './fairs'
-export type { MockVendor, MenuItem } from './vendors'
+export type { MockVendor, MenuItem, MenuItemSize } from './vendors'
 export { mockFairs } from './fairs'
 export { mockVendors } from './vendors'
 

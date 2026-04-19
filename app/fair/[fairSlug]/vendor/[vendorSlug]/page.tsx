@@ -1,33 +1,63 @@
 'use client'
 
-import { useParams } from 'next/navigation'
-import { notFound } from 'next/navigation'
-import { StarIcon } from '@heroicons/react/24/solid'
+import { useState, useEffect } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import { PlusIcon, MinusIcon, ShoppingBagIcon, ClockIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { useFair } from '../../../../_contexts/FairContext'
 import { useFairCart } from '../../../../_contexts/FairCartContext'
-import { getVendorBySlug, type MenuItem, type MockVendor } from '@/lib/mock'
 
-// ── Fix 3: Card layout with image support ─────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface DisplayMenuItem {
+  id: string
+  name: string
+  description: string | null
+  price: number
+  category: string
+  imageUrl: string | null
+  prepTime: number | null
+  available: boolean
+}
+
+interface VendorDetail {
+  id: string
+  name: string
+  cuisineType: string
+  description: string | null
+  boothNumber: string | null
+  logoUrl: string | null
+  isBusy: boolean
+  menu: DisplayMenuItem[]
+}
+
+// ── Card layout with image support ────────────────────────────────────────────
 
 function MenuItemCard({
   item,
   vendor,
   accentColor,
 }: {
-  item: MenuItem
-  vendor: MockVendor
+  item: DisplayMenuItem
+  vendor: VendorDetail
   accentColor: string
 }) {
   const { addItem, items, updateQty } = useFairCart()
   const cartItem = items.find((i) => i.menuItemId === item.id)
   const qty = cartItem?.quantity ?? 0
 
+  const handleAdd = () => {
+    addItem(
+      { id: item.id, name: item.name, price: item.price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
+      { id: vendor.id, name: vendor.name },
+    )
+    toast.success(`${item.name} added`)
+  }
+
   return (
     <div className={`bg-bg-card border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors duration-200 flex flex-col ${!item.available ? 'opacity-50' : ''}`}>
 
-      {/* Image area — aspect-[4/3] gradient placeholder when no imageUrl */}
+      {/* Image area */}
       {item.imageUrl ? (
         <div className="aspect-[4/3] overflow-hidden">
           <img
@@ -47,22 +77,12 @@ function MenuItemCard({
 
       {/* Card body */}
       <div className="p-3 flex flex-col flex-1">
-        {/* Name */}
         <h3 className="font-semibold text-white text-xs sm:text-sm leading-snug line-clamp-2">{item.name}</h3>
 
-        {/* Popular badge */}
-        {item.popular && (
-          <span className="inline-block mt-1 px-1.5 py-0.5 bg-yellow-400/15 text-yellow-400 text-[0.55rem] font-semibold uppercase tracking-wide rounded w-fit">
-            Popular
-          </span>
-        )}
-
-        {/* Price */}
         <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
           ${item.price.toFixed(2)}
         </p>
 
-        {/* Description */}
         {item.description && (
           <p className="text-text-gray text-[0.65rem] mt-1 leading-relaxed line-clamp-2 flex-1">{item.description}</p>
         )}
@@ -80,10 +100,7 @@ function MenuItemCard({
           {item.available && (
             qty === 0 ? (
               <button
-                onClick={() => {
-                  addItem(item, vendor)
-                  toast.success(`${item.name} added`)
-                }}
+                onClick={handleAdd}
                 className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[0.65rem] font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0"
                 style={{ background: accentColor }}
               >
@@ -100,7 +117,7 @@ function MenuItemCard({
                 </button>
                 <span className="text-white font-semibold w-5 text-center text-xs tabular-nums bg-white/5">{qty}</span>
                 <button
-                  onClick={() => addItem(item, vendor)}
+                  onClick={handleAdd}
                   className="w-6 h-6 flex items-center justify-center hover:opacity-80 transition-opacity"
                   style={{ background: accentColor }}
                 >
@@ -115,26 +132,112 @@ function MenuItemCard({
   )
 }
 
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+
+function PageSkeleton({ accentColor }: { accentColor: string }) {
+  return (
+    <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 animate-pulse">
+      <div className="flex items-start gap-4 mb-8">
+        <div className="w-16 h-16 rounded-2xl" style={{ background: `${accentColor}22` }} />
+        <div className="flex-1 space-y-2">
+          <div className="h-8 bg-white/10 rounded w-48" />
+          <div className="h-4 bg-white/5 rounded w-32" />
+          <div className="h-4 bg-white/5 rounded w-64" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="bg-bg-card rounded-xl overflow-hidden">
+            <div className="aspect-[4/3] bg-white/5" />
+            <div className="p-3 space-y-2">
+              <div className="h-4 bg-white/10 rounded w-3/4" />
+              <div className="h-3 bg-white/5 rounded w-1/2" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function VendorMenuPage() {
   const params = useParams<{ fairSlug: string; vendorSlug: string }>()
+  const router = useRouter()
   const { fair } = useFair()
-  const { itemCount, subtotal, syncToSpaCart } = useFairCart()
+  const { itemCount, subtotal } = useFairCart()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
-  const vendor = getVendorBySlug(params.fairSlug, params.vendorSlug)
-  if (!vendor) notFound()
+  const [vendor, setVendor] = useState<VendorDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => {
+    if (!params.vendorSlug) return
+    setLoading(true)
+
+    fetch(`/api/vendors/${params.vendorSlug}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!json.success) {
+          setNotFound(true)
+          setLoading(false)
+          return
+        }
+        const raw = json.data
+        const normalized: VendorDetail = {
+          id: raw.id,
+          name: raw.name,
+          cuisineType: raw.cuisineType,
+          description: raw.description ?? null,
+          boothNumber: raw.boothNumber ?? null,
+          logoUrl: raw.logoUrl ?? null,
+          isBusy: raw.isBusy ?? false,
+          menu: (raw.menuItems ?? []).map((item: any): DisplayMenuItem => ({
+            id: item.id,
+            name: item.name,
+            description: item.description ?? null,
+            price: item.price,
+            category: item.category,
+            imageUrl: item.imageUrl ?? null,
+            prepTime: item.prepTime ?? null,
+            available: item.isAvailable ?? true,
+          })),
+        }
+        setVendor(normalized)
+        setLoading(false)
+      })
+      .catch(() => { setNotFound(true); setLoading(false) })
+  }, [params.vendorSlug])
+
+  if (loading) {
+    return <PageSkeleton accentColor={accentColor} />
+  }
+
+  if (notFound || !vendor) {
+    return (
+      <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-20 text-center text-white">
+        <div className="text-[6rem] mb-5 opacity-30">🍽️</div>
+        <h2 className="font-bebas text-3xl tracking-wide mb-2">Vendor not found</h2>
+        <p className="text-text-gray mb-6">This vendor may no longer be available at this fair.</p>
+        <button
+          onClick={() => router.push(`/fair/${fair.slug}/vendors`)}
+          className="px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:opacity-90 transition-opacity"
+        >
+          Browse Vendors
+        </button>
+      </div>
+    )
+  }
 
   const categories = Array.from(new Set(vendor.menu.map((m) => m.category)))
 
   const handleCheckout = () => {
-    syncToSpaCart()
-    window.location.href = `/fair/${fair.slug}/cart`
+    router.push(`/fair/${fair.slug}/cart`)
   }
 
   return (
-    // Fix 2: NO back link here — the FairNavbar handles all back navigation contextually.
     <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 text-white">
       <div className="flex flex-col lg:flex-row gap-8">
 
@@ -144,18 +247,24 @@ export default function VendorMenuPage() {
           {/* Vendor header */}
           <div className="flex items-start gap-3 sm:gap-4 mb-6 sm:mb-8">
             <div
-              className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 font-bebas text-2xl sm:text-3xl"
+              className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 font-bebas text-2xl sm:text-3xl overflow-hidden"
               style={{ background: `${accentColor}22`, border: `1px solid ${accentColor}44`, color: accentColor }}
             >
-              {vendor.name.charAt(0)}
+              {vendor.logoUrl ? (
+                <img src={vendor.logoUrl} alt={vendor.name} className="w-full h-full object-cover" />
+              ) : (
+                vendor.name.charAt(0)
+              )}
             </div>
             <div className="min-w-0">
               <h1 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-tight">{vendor.name}</h1>
-              <p className="text-text-gray text-xs sm:text-sm">{vendor.cuisineType} · Booth {vendor.boothNumber}</p>
-              {vendor.rating && (
-                <span className="flex items-center gap-1 text-yellow-400 text-xs sm:text-sm font-semibold mt-1">
-                  <StarIcon className="w-3.5 h-3.5 shrink-0" /> {vendor.rating.toFixed(1)}
-                  <span className="text-text-gray font-normal text-xs">({vendor.reviewCount} reviews)</span>
+              <p className="text-text-gray text-xs sm:text-sm">
+                {vendor.cuisineType}
+                {vendor.boothNumber && ` · Booth ${vendor.boothNumber}`}
+              </p>
+              {vendor.isBusy && (
+                <span className="inline-block mt-1 px-2 py-0.5 bg-yellow-500/15 text-yellow-400 text-xs font-semibold rounded-full">
+                  Currently Busy
                 </span>
               )}
               {vendor.description && (
@@ -164,27 +273,33 @@ export default function VendorMenuPage() {
             </div>
           </div>
 
-          {/* Fix 3: Category grid — 2 cols on sm+ */}
-          {categories.map((category, i) => (
-            <section key={category} className={i === 0 ? 'mb-8' : 'mt-10 mb-8'}>
-              <div className="flex items-center gap-3 mb-4">
-                <h2 className="font-bebas text-xs sm:text-sm text-white uppercase tracking-widest whitespace-nowrap">
-                  {category}
-                </h2>
-                <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
-              </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {vendor.menu
-                  .filter((m) => m.category === category)
-                  .map((item) => (
-                    <MenuItemCard key={item.id} item={item} vendor={vendor} accentColor={accentColor} />
-                  ))}
-              </div>
-            </section>
-          ))}
+          {vendor.menu.length === 0 ? (
+            <div className="text-center py-16 text-text-gray">
+              <div className="text-[4rem] mb-4 opacity-20">🍽️</div>
+              <p>No menu items available right now.</p>
+            </div>
+          ) : (
+            categories.map((category, i) => (
+              <section key={category} className={i === 0 ? 'mb-8' : 'mt-10 mb-8'}>
+                <div className="flex items-center gap-3 mb-4">
+                  <h2 className="font-bebas text-xs sm:text-sm text-white uppercase tracking-widest whitespace-nowrap">
+                    {category}
+                  </h2>
+                  <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                  {vendor.menu
+                    .filter((m) => m.category === category)
+                    .map((item) => (
+                      <MenuItemCard key={item.id} item={item} vendor={vendor} accentColor={accentColor} />
+                    ))}
+                </div>
+              </section>
+            ))
+          )}
         </div>
 
-        {/* Sidebar: cart summary (desktop only — mobile uses bottom nav Cart tab) */}
+        {/* Sidebar: cart summary (desktop only) */}
         {itemCount > 0 && (
           <div className="hidden lg:block lg:w-72 shrink-0">
             <div className="bg-bg-card border border-white/10 rounded-2xl p-5 sticky top-20">

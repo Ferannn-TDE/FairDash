@@ -33,7 +33,6 @@ import Contact from "./views/Contact";
 import RefundPolicy from "./views/RefundPolicy";
 import ManageAccount from "./views/ManageAccount";
 import BecomeVendor from "./views/BecomeVendor";
-import BecomeDriver from "./views/BecomeDriver";
 import Checkout from "./views/Checkout";
 import VendorDashboard from "./views/vendor/VendorDashboard";
 import TrackOrder from "./views/TrackOrder";
@@ -153,7 +152,7 @@ const AppLayout = () => {
           }
         />
         <Route path="/become-vendor" element={<BecomeVendor />} />
-        <Route path="/become-driver" element={<BecomeDriver />} />
+        {/* /become-driver is now handled by app/become-driver/page.tsx */}
 
         {/* ── Vendor Portal (vendor role required) ── */}
         <Route

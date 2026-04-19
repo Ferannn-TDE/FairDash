@@ -623,10 +623,7 @@ const TrackOrder = () => {
     }
   }, [orderId]);
 
-  // Poll every 15 seconds while order is active
-  // TODO: Replace with Firebase RTDB subscription at fairs/{eventId}/customerOrders/{customerId}/{orderId}
-  //       when NEXT_PUBLIC_FIREBASE_DATABASE_URL and related vars are configured.
-  //       Phase 1.5 — see PLAN_V4.md §3
+  // Poll every 15 seconds as a fallback while Firebase is unavailable or order is active
   useEffect(() => {
     if (!orderId) return;
     fetchOrder();
