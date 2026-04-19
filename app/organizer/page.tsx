@@ -85,21 +85,21 @@ export default function OrganizerDashboard() {
         <h2 className="font-bebas text-xl text-white tracking-wide mb-4">Recent Orders</h2>
         <div className="bg-[#111111] rounded-xl border border-white/5 divide-y divide-white/5">
           {mockOrdersForFair.map(order => (
-            <div key={order.id} className="flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
+            <div key={order.id} className="flex items-center justify-between gap-3 p-4 hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-inter font-medium text-white">#{order.shortId}</span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${STATUS_STYLES[order.status] ?? ''}`}>
                       {order.status}
                     </span>
                   </div>
-                  <p className="text-xs text-[#666] font-inter mt-0.5">{order.customerName} · {order.timeAgo}</p>
+                  <p className="text-xs text-[#666] font-inter mt-0.5 truncate">{order.customerName} · {order.timeAgo}</p>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <p className="text-sm font-semibold text-white tabular-nums">${order.total.toFixed(2)}</p>
-                <p className="text-xs text-[#666] font-inter">{order.vendorName}</p>
+                <p className="text-xs text-[#666] font-inter truncate max-w-[100px]">{order.vendorName}</p>
               </div>
             </div>
           ))}

@@ -39,7 +39,7 @@ export async function PATCH(
   try {
     await requireVendorAuth()
     const body = await req.json()
-    const { isBusy, isOffline, boothNumber, description } = body
+    const { isBusy, isOffline, boothNumber, description, name, cuisineType } = body
 
     const vendor = await db.vendor.update({
       where: { id: params.id },
@@ -51,6 +51,8 @@ export async function PATCH(
         ...(isOffline !== undefined && { isOffline: Boolean(isOffline) }),
         ...(boothNumber !== undefined && { boothNumber }),
         ...(description !== undefined && { description }),
+        ...(name !== undefined && { name: String(name) }),
+        ...(cuisineType !== undefined && { cuisineType: String(cuisineType) }),
       },
     })
 

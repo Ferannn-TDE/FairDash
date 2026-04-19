@@ -1,51 +1,40 @@
 import { auth, currentUser } from '@clerk/nextjs/server'
+import { db } from './db'
 import { ApiError } from './api-error'
+import type { User } from '@prisma/client'
 
-/**
- * Require a signed-in user. Throws 401 if not authenticated.
- * Use in any protected API route.
- *
- * @example
- * export async function GET() {
- *   const userId = await requireAuth()
- *   // userId is the Clerk user ID string
- * }
- */
 export async function requireAuth(): Promise<string> {
   const { userId } = await auth()
-  if (!userId) {
-    throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
-  }
+  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
   return userId
 }
 
-/**
- * Get the authenticated user ID without throwing.
- * Returns null for unauthenticated requests.
- */
 export async function getOptionalUserId(): Promise<string | null> {
   const { userId } = await auth()
   return userId
 }
 
-/**
- * Require vendor role. Checks Clerk publicMetadata.role === 'vendor'.
- * Will be upgraded in Part 2 to also verify against the DB vendor record.
- *
- * @example
- * export async function POST() {
- *   const userId = await requireVendorAuth()
- * }
- */
+// ── DB user helpers ──────────────────────────────────────────────────────────
+
+export async function getDbUser(clerkId: string): Promise<User | null> {
+  return db.user.findUnique({ where: { clerkId } })
+}
+
+/** Require auth + a matching DB User row. Throws 404 if not yet synced. */
+export async function requireDbUser(): Promise<User> {
+  const clerkId = await requireAuth()
+  const user = await db.user.findUnique({ where: { clerkId } })
+  if (!user) throw new ApiError('User record not found', 404, 'NOT_FOUND')
+  return user
+}
+
+/** Require auth + vendor role (checks Clerk metadata). Returns Clerk userId. */
 export async function requireVendorAuth(): Promise<string> {
   const { userId } = await auth()
   if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
   const user = await currentUser()
   const role = user?.publicMetadata?.role as string | undefined
-
-  // During Phase 1, also accept the legacy isVendor unsafeMetadata flag
-  // set by the current BecomeVendor wizard. Phase 2 will migrate to DB roles.
   const isVendorLegacy = user?.unsafeMetadata?.isVendor === true
 
   if (role !== 'vendor' && !isVendorLegacy) {
@@ -55,14 +44,37 @@ export async function requireVendorAuth(): Promise<string> {
   return userId
 }
 
-/**
- * Require admin role. Checks Clerk publicMetadata.role === 'admin'.
- *
- * @example
- * export async function GET() {
- *   const userId = await requireAdminAuth()
- * }
- */
+/** Require auth + organizer role. Returns Clerk userId. */
+export async function requireOrganizerAuth(): Promise<string> {
+  const { userId } = await auth()
+  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+
+  const user = await currentUser()
+  const role = user?.publicMetadata?.role as string | undefined
+
+  if (role !== 'organizer') {
+    throw new ApiError('Forbidden — organizer access required', 403, 'FORBIDDEN')
+  }
+
+  return userId
+}
+
+/** Require auth + runner role. Returns Clerk userId. */
+export async function requireRunnerAuth(): Promise<string> {
+  const { userId } = await auth()
+  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+
+  const user = await currentUser()
+  const role = user?.publicMetadata?.role as string | undefined
+
+  if (role !== 'runner') {
+    throw new ApiError('Forbidden — runner access required', 403, 'FORBIDDEN')
+  }
+
+  return userId
+}
+
+/** Require auth + admin role. Returns Clerk userId. */
 export async function requireAdminAuth(): Promise<string> {
   const { userId } = await auth()
   if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')

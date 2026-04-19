@@ -8,6 +8,8 @@ import { getRealtimeDb } from '@/lib/firebase-admin'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { getOrderQueue, JOB_UNACCEPTED } from '@/lib/queues'
+import { VENDOR_ACCEPT_TIMEOUT_MS } from '@/lib/constants'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -165,6 +167,14 @@ export async function POST(req: NextRequest) {
 
     if (event.status !== EventStatus.ACTIVE) {
       throw new ApiError('This event is not currently active', 409, 'EVENT_INACTIVE')
+    }
+
+    if (event.isPaused) {
+      throw new ApiError(
+        'Ordering is temporarily paused — please try again shortly',
+        503,
+        'PLATFORM_PAUSED'
+      )
     }
 
     const config = event.fulfillmentConfig
@@ -423,7 +433,21 @@ export async function POST(req: NextRequest) {
         .catch(err => console.error('[Orders] Firebase RTDB write failed:', err))
     }
 
-    // ── 9. Return to frontend ──────────────────────────────────────────────
+    // ── 9. Schedule 2-minute accept timeout ───────────────────────────────
+    // If the vendor does not accept within VENDOR_ACCEPT_TIMEOUT_MS, the worker
+    // auto-cancels the order and issues a full refund.
+    const ordersQueue = getOrderQueue()
+    if (ordersQueue) {
+      ordersQueue
+        .add(
+          JOB_UNACCEPTED,
+          { orderId: order.id, vendorId, eventId },
+          { delay: VENDOR_ACCEPT_TIMEOUT_MS }
+        )
+        .catch(err => console.error('[Orders] Failed to schedule JOB_UNACCEPTED:', err))
+    }
+
+    // ── 10. Return to frontend ─────────────────────────────────────────────
     return success(
       {
         orderId: order.id,

@@ -125,6 +125,11 @@ model User {
 
   fcmToken String? // Firebase Cloud Messaging push token
 
+  role         String   @default("customer") // customer | vendor | organizer | runner
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  lastSignInAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -11,9 +11,9 @@ import {
   ChevronRightIcon,
   StarIcon,
 } from '@heroicons/react/24/outline'
-import { StarIcon as StarSolid } from '@heroicons/react/24/solid'
+
 import { useFair } from '../../_contexts/FairContext'
-import type { MockVendor } from '@/lib/mock'
+import type { VendorData } from '../../_contexts/FairContext'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -172,20 +172,20 @@ function FairEnded({ accentColor, gradientFrom, gradientTo }: {
 // ── VendorCard ────────────────────────────────────────────────────────────────
 
 function VendorCard({ vendor, fairSlug, accentColor }: {
-  vendor: MockVendor
+  vendor: VendorData
   fairSlug: string
   accentColor: string
 }) {
   return (
     <Link
-      href={`/fair/${fairSlug}/vendor/${vendor.slug}`}
+      href={`/fair/${fairSlug}/vendor/${vendor.id}`}
       className="group bg-bg-card border border-white/10 rounded-xl overflow-hidden hover:border-white/20 hover:-translate-y-0.5 transition-all duration-200"
     >
       {/* Image / placeholder */}
-      {vendor.imageUrl ? (
+      {vendor.logoUrl ? (
         <div className="aspect-[4/3] overflow-hidden">
           <img
-            src={vendor.imageUrl}
+            src={vendor.logoUrl}
             alt={vendor.name}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
@@ -207,14 +207,9 @@ function VendorCard({ vendor, fairSlug, accentColor }: {
       {/* Info */}
       <div className="p-3">
         <h3 className="font-semibold text-white text-sm leading-snug truncate">{vendor.name}</h3>
-        <p className="text-text-gray text-xs mt-0.5 truncate">{vendor.cuisineType} · Booth {vendor.boothNumber}</p>
-        {vendor.rating && (
-          <div className="flex items-center gap-1 mt-1.5">
-            <StarSolid className="w-3 h-3 text-yellow-400 shrink-0" />
-            <span className="text-yellow-400 text-xs font-semibold">{vendor.rating.toFixed(1)}</span>
-            <span className="text-text-gray text-[0.6rem]">({vendor.reviewCount})</span>
-          </div>
-        )}
+        <p className="text-text-gray text-xs mt-0.5 truncate">
+          {vendor.cuisineType}{vendor.boothNumber ? ` · Booth ${vendor.boothNumber}` : ''}
+        </p>
       </div>
     </Link>
   )

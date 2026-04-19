@@ -1,5 +1,10 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface MenuItemSize {
+  name: string
+  price: number
+}
+
 export interface MenuItem {
   id: string
   name: string
@@ -10,6 +15,7 @@ export interface MenuItem {
   prepTime?: number   // minutes
   popular?: boolean
   available: boolean
+  sizes?: MenuItemSize[]  // optional — when present, user must choose a size
 }
 
 export interface MockVendor {
@@ -25,6 +31,7 @@ export interface MockVendor {
   rating?: number
   reviewCount?: number
   prepTimeMin?: number  // average prep time in minutes
+  isBusy?: boolean
   menu: MenuItem[]
 }
 

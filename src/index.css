@@ -87,13 +87,13 @@
    Clerk component overrides — FairSynq × Spotify style
    ───────────────────────────────────────── */
 
-/* Root & card — pure black */
+/* Root & card — transparent so host container color shows through */
 .cl-rootBox {
-  background-color: #000000 !important;
+  background-color: transparent !important;
 }
 
 .cl-card {
-  background-color: #000000 !important;
+  background-color: transparent !important;
   box-shadow: none !important;
   border: none !important;
 }
@@ -115,39 +115,53 @@
   margin-bottom: 1.5rem !important;
 }
 
+/* Each button: fixed height, zero margin — gap on parent is the only spacing */
 .cl-socialButtonsBlockButton {
   position: relative !important;
+  height: 3rem !important;        /* 48px — never expands for badge content */
+  margin: 0 !important;
   justify-content: center !important;
   text-align: center !important;
 }
 
-/* Badge wrapper — no margin so it doesn't push layout */
+/* Wrapper: relative so badge can be absolutely positioned inside it.
+   Zero margin/padding so it doesn't add any height of its own. */
 .cl-socialButtonsBlockButtonBox {
   position: relative !important;
   margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;   /* allow badge to protrude above the border */
 }
 
 .cl-socialButtonsProviderIcon {
   margin-right: 0.5rem !important;
 }
 
-/* "Last used" badge — float above button, no layout impact */
+/* "Last used" badge — absolutely positioned, fully out of document flow.
+   top: 0 + translateY(-50%) straddles the button's top border — the badge
+   centre sits exactly on the border line, overlapping it without pushing
+   anything down. The container height is determined solely by the button. */
 .cl-badge,
 .cl-formFieldLabelRow__badge,
 .cl-internal-badge {
   position: absolute !important;
-  top: -0.5rem !important;
-  right: 1rem !important;
-  background-color: transparent !important;
-  color: #b3b3b3 !important;
-  font-size: 0.75rem !important;
+  top: 0 !important;
+  right: 0.75rem !important;
+  transform: translateY(-50%) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #9ca3af !important;
+  font-size: 9px !important;
   font-weight: 500 !important;
-  padding: 0 !important;
-  border: none !important;
+  padding: 2px 7px !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   box-shadow: none !important;
   z-index: 10 !important;
   margin: 0 !important;
-  line-height: 1 !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+  pointer-events: none !important;
+  font-family: 'Inter', sans-serif !important;
 }
 
 /* Logo — bigger */

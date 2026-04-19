@@ -1,27 +1,23 @@
-import MarketplaceNavbar from '../_components/MarketplaceNavbar'
-import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { mockAdminEvents } from '@/lib/mock/admin'
 
 export const metadata = { title: 'Admin — FairSynq' }
 
-export default function AdminPage() {
+export default function AdminIndexPage() {
+  // Redirect to the first active event's dashboard, or the first event
+  const firstActive = mockAdminEvents.find(e => e.status === 'ACTIVE') ?? mockAdminEvents[0]
+  if (firstActive) {
+    redirect(`/admin/${firstActive.slug}/dashboard`)
+  }
+
+  // Fallback: no events yet
   return (
-    <>
-      <MarketplaceNavbar />
-      <div className="pt-16 min-h-screen bg-bg-dark text-white flex items-center justify-center px-4">
-        <div className="text-center max-w-lg">
-          <p className="text-text-gray text-sm font-semibold uppercase tracking-widest mb-3">Restricted</p>
-          <h1 className="font-bebas text-5xl text-white tracking-wide mb-4">Admin Dashboard</h1>
-          <p className="text-text-gray mb-8">
-            Platform administration tools. This area is restricted to FairSynq staff.
-          </p>
-          <Link
-            href="/"
-            className="inline-flex items-center px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-colors"
-          >
-            ← Back to home
-          </Link>
-        </div>
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="text-center">
+        <p className="text-[#555] text-sm font-inter uppercase tracking-widest mb-3">No Events</p>
+        <h1 className="font-bebas text-4xl text-white tracking-wide mb-4">No events configured</h1>
+        <p className="text-[#666] text-sm font-inter">Contact a super admin to create your first event.</p>
       </div>
-    </>
+    </div>
   )
 }

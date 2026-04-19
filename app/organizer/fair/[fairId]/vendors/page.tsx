@@ -35,18 +35,18 @@ export default function VendorManagementPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
           <h1 className="font-bebas text-3xl text-white tracking-wide">Vendors</h1>
           <p className="text-sm text-[#666] font-inter mt-1">{counts.active} of 50 vendor slots filled</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors">
+        <button className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors whitespace-nowrap">
           <PlusIcon className="w-4 h-4" /> Invite Vendor
         </button>
       </div>
 
       {/* Status tabs */}
-      <div className="flex items-center gap-1 mb-6 bg-white/5 rounded-lg p-1 w-fit overflow-x-auto">
+      <div className="flex items-center gap-1 mb-6 bg-white/5 rounded-lg p-1 max-w-full overflow-x-auto scrollbar-none">
         {TABS.map(({ key, label }) => (
           <button key={key} onClick={() => setActiveTab(key)}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold font-inter whitespace-nowrap transition-colors

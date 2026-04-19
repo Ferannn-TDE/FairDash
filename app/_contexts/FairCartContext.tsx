@@ -3,11 +3,9 @@
 /**
  * Fair-scoped cart context.
  *
- * Items are stored in localStorage under the key `fairsynq-cart-{fairId}` so
- * each fair has an independent cart. The existing SPA checkout reads its own
- * localStorage key (`fairsynq-cart`) — when the user proceeds to checkout from
- * a fair page we copy the active fair's cart into that key so no SPA changes
- * are needed.
+ * Items are stored in localStorage under `fairsynq-cart-{fairSlug}` so each
+ * fair has an independent cart. The fairSlug (URL param) is used as the stable
+ * key — this avoids key changes when the DB fair ID resolves asynchronously.
  */
 
 import {
@@ -19,8 +17,6 @@ import {
   useMemo,
   type ReactNode,
 } from 'react'
-import { useFair } from './FairContext'
-import type { MenuItem, MockVendor } from '@/lib/mock'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,7 +28,22 @@ export interface CartItem {
   price: number
   quantity: number
   prepTime?: number
-  imageUrl?: string
+  imageUrl?: string | null
+}
+
+/** Minimal vendor shape accepted by addItem */
+export interface AddableVendor {
+  id: string
+  name: string
+}
+
+/** Minimal menu item shape accepted by addItem */
+export interface AddableMenuItem {
+  id: string
+  name: string
+  price: number
+  prepTime?: number
+  imageUrl?: string | null
 }
 
 interface FairCartState {
@@ -53,12 +64,10 @@ interface FairCartContextValue {
   vendorId: string | null
   itemCount: number
   subtotal: number
-  addItem: (item: MenuItem, vendor: MockVendor) => void
+  addItem: (item: AddableMenuItem, vendor: AddableVendor) => void
   removeItem: (menuItemId: string) => void
   updateQty: (menuItemId: string, quantity: number) => void
   clearCart: () => void
-  /** Copy this fair's cart into the legacy SPA cart key before navigating to checkout */
-  syncToSpaCart: () => void
 }
 
 // ─── Reducer ──────────────────────────────────────────────────────────────────
@@ -70,7 +79,6 @@ function reducer(state: FairCartState, action: CartAction): FairCartState {
 
     case 'ADD_ITEM': {
       const { item } = action
-      // Switching vendors clears the cart
       if (state.vendorId && state.vendorId !== item.vendorId) {
         return { ...state, vendorId: item.vendorId, items: [{ ...item, quantity: 1 }] }
       }
@@ -123,12 +131,16 @@ const FairCartContext = createContext<FairCartContextValue | null>(null)
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-export function FairCartProvider({ children }: { children: ReactNode }) {
-  const { fair } = useFair()
-  const storageKey = `fairsynq-cart-${fair.id}`
+interface FairCartProviderProps {
+  fairSlug: string
+  children: ReactNode
+}
+
+export function FairCartProvider({ fairSlug, children }: FairCartProviderProps) {
+  const storageKey = `fairsynq-cart-${fairSlug}`
 
   const [state, dispatch] = useReducer(reducer, {
-    fairId: fair.id,
+    fairId: fairSlug,
     vendorId: null,
     items: [],
   })
@@ -139,14 +151,14 @@ export function FairCartProvider({ children }: { children: ReactNode }) {
       const stored = localStorage.getItem(storageKey)
       if (stored) {
         const parsed = JSON.parse(stored) as FairCartState
-        if (parsed.fairId === fair.id) {
+        if (parsed.fairId === fairSlug) {
           dispatch({ type: 'HYDRATE', state: parsed })
         }
       }
     } catch {
       // ignore malformed data
     }
-  }, [storageKey, fair.id])
+  }, [storageKey, fairSlug])
 
   // Persist to localStorage whenever state changes
   useEffect(() => {
@@ -154,7 +166,7 @@ export function FairCartProvider({ children }: { children: ReactNode }) {
   }, [state, storageKey])
 
   const addItem = useCallback(
-    (menuItem: MenuItem, vendor: MockVendor) => {
+    (menuItem: AddableMenuItem, vendor: AddableVendor) => {
       dispatch({
         type: 'ADD_ITEM',
         item: {
@@ -169,7 +181,7 @@ export function FairCartProvider({ children }: { children: ReactNode }) {
         },
       })
     },
-    []
+    [],
   )
 
   const removeItem = useCallback((menuItemId: string) => {
@@ -184,29 +196,14 @@ export function FairCartProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'CLEAR' })
   }, [])
 
-  const syncToSpaCart = useCallback(() => {
-    // The legacy SPA cart items have a slightly different shape — map across
-    const spaItems = state.items.map((i) => ({
-      id: i.menuItemId,
-      vendorId: i.vendorId,
-      vendorName: i.vendorName,
-      name: i.name,
-      price: i.price,
-      quantity: i.quantity,
-      prepTime: i.prepTime,
-      imageUrl: i.imageUrl,
-    }))
-    localStorage.setItem('fairsynq-cart', JSON.stringify(spaItems))
-  }, [state.items])
-
   const itemCount = useMemo(
     () => state.items.reduce((sum, i) => sum + i.quantity, 0),
-    [state.items]
+    [state.items],
   )
 
   const subtotal = useMemo(
     () => parseFloat(state.items.reduce((sum, i) => sum + i.price * i.quantity, 0).toFixed(2)),
-    [state.items]
+    [state.items],
   )
 
   const value = useMemo<FairCartContextValue>(
@@ -219,9 +216,8 @@ export function FairCartProvider({ children }: { children: ReactNode }) {
       removeItem,
       updateQty,
       clearCart,
-      syncToSpaCart,
     }),
-    [state.items, state.vendorId, itemCount, subtotal, addItem, removeItem, updateQty, clearCart, syncToSpaCart]
+    [state.items, state.vendorId, itemCount, subtotal, addItem, removeItem, updateQty, clearCart],
   )
 
   return <FairCartContext.Provider value={value}>{children}</FairCartContext.Provider>

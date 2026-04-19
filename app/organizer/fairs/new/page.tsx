@@ -82,7 +82,7 @@ function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
   const set = (k: keyof FairDraft, v: string) => onChange({ ...data, [k]: v })
   return (
     <div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormInput label="Start Date" name="startDate" value={data.startDate} onChange={e => set('startDate', e.target.value)} type="date" required />
         <FormInput label="End Date" name="endDate" value={data.endDate} onChange={e => set('endDate', e.target.value)} type="date" required />
       </div>
@@ -91,7 +91,7 @@ function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
         <div className="col-span-2"><FormInput label="City" name="city" value={data.city} onChange={e => set('city', e.target.value)} placeholder="Springfield" required /></div>
         <FormInput label="State" name="state" value={data.state} onChange={e => set('state', e.target.value)} placeholder="IL" />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormInput label="Open Time" name="openTime" value={data.openTime} onChange={e => set('openTime', e.target.value)} type="time" />
         <FormInput label="Close Time" name="closeTime" value={data.closeTime} onChange={e => set('closeTime', e.target.value)} type="time" />
       </div>

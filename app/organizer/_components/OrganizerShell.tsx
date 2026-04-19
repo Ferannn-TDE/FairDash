@@ -110,7 +110,7 @@ export default function OrganizerShell({ children, userName, userInitials, userE
   const currentFairId = fairIdMatch?.[1] ?? null
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex">
+    <div className="min-h-screen bg-[#0a0a0a] flex overflow-x-hidden">
 
       {/* Mobile overlay */}
       {sidebarOpen && (

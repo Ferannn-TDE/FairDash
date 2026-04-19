@@ -32,7 +32,7 @@ export default function FairOrdersPage() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex items-center gap-1 mb-6 bg-white/5 rounded-lg p-1 w-fit overflow-x-auto">
+      <div className="flex items-center gap-1 mb-6 bg-white/5 rounded-lg p-1 max-w-full overflow-x-auto scrollbar-none">
         {FILTERS.map(f => (
           <button key={f} onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold font-inter whitespace-nowrap transition-colors

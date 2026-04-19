@@ -30,6 +30,7 @@ export default {
         'float': 'float 3s ease-in-out infinite',
         'float-slow': 'float 8s ease-in-out infinite',
         'skeleton': 'skeleton-loading 1.5s infinite',
+        'shimmer': 'shimmer 1.8s ease-in-out infinite',
         'spin-slow': 'spin 2s linear infinite',
       },
       keyframes: {
@@ -56,6 +57,10 @@ export default {
         'skeleton-loading': {
           '0%': { backgroundPosition: '200% 0' },
           '100%': { backgroundPosition: '-200% 0' },
+        },
+        shimmer: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
         },
       },
       backdropBlur: {

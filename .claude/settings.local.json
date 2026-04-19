@@ -15,7 +15,17 @@
       "Read(//Users/feran/Desktop/fairdash-app/**)",
       "Bash(done)",
       "Bash(grep -r \"springfield\\\\|hardcoded\\\\|DEFAULT_EVENT\\\\|SINGLE_EVENT\" /Users/feran/Desktop/fairdash-app/app /Users/feran/Desktop/fairdash-app/lib /Users/feran/Desktop/fairdash-app/src --include=*.ts --include=*.tsx --include=*.js --include=*.jsx)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(grep -n \"501\\\\|Not Implemented\\\\|TODO\" /Users/feran/Desktop/fairdash-app/app/api/orders/[id]/status/route.ts)",
+      "Bash(mkdir -p /Users/feran/Desktop/fairdash-app/app/admin/\\\\[eventSlug\\\\]/dashboard)",
+      "Bash(mkdir -p /Users/feran/Desktop/fairdash-app/app/admin/\\\\[eventSlug\\\\]/vendors)",
+      "Bash(mkdir -p /Users/feran/Desktop/fairdash-app/app/admin/\\\\[eventSlug\\\\]/fulfillment)",
+      "Bash(mkdir -p /Users/feran/Desktop/fairdash-app/app/admin/\\\\[eventSlug\\\\]/runners)",
+      "Bash(mkdir -p /Users/feran/Desktop/fairdash-app/app/admin/\\\\[eventSlug\\\\]/settings)",
+      "Bash(node -e \"require\\('lucide-react'\\); console.log\\('ok'\\)\")",
+      "Bash(node *)",
+      "Bash(xargs cat *)",
+      "Bash(npx prisma *)"
     ]
   }
 }
