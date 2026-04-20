@@ -110,32 +110,34 @@ function RoleSection() {
 
 // ── Quick actions for authenticated users ─────────────────────────────────────
 
+const FAIR_SLUG = 'springfield-state-fair-2026'
+
 const QUICK_ACTIONS_BY_ROLE = {
   vendor: [
-    { label: 'My Dashboard', href: '/vendor/dashboard' },
-    { label: 'Menu Manager', href: '/vendor/menu' },
-    { label: 'Earnings', href: '/vendor/earnings' },
+    { label: 'My Dashboard', href: `/vendor/${FAIR_SLUG}/dashboard` },
+    { label: 'Menu Manager', href: `/vendor/${FAIR_SLUG}/menu` },
+    { label: 'Analytics',    href: `/vendor/${FAIR_SLUG}/analytics` },
   ],
   organizer: [
-    { label: 'My Events', href: '/organizer' },
-    { label: 'Vendors', href: '/organizer/vendors' },
-    { label: 'Analytics', href: '/organizer/analytics' },
+    { label: 'My Events',  href: '/organizer' },
+    { label: 'All Fairs',  href: '/organizer/fairs' },
+    { label: 'Settings',   href: '/organizer/settings' },
   ],
-  driver: [
-    { label: 'Go Online', href: '/driver/dashboard' },
-    { label: 'My Deliveries', href: '/driver/deliveries' },
-    { label: 'Earnings', href: '/driver/earnings' },
+  runner: [
+    { label: 'Go Online', href: `/runner/${FAIR_SLUG}/dashboard` },
+    { label: 'Earnings',  href: `/runner/${FAIR_SLUG}/earnings` },
+    { label: 'Settings',  href: `/runner/${FAIR_SLUG}/settings` },
   ],
   customer: [
     { label: 'Find a Fair', href: '/fairs' },
-    { label: 'My Orders', href: '/account/orders' },
-    { label: 'Favorites', href: '/account/favorites' },
+    { label: 'My Orders',   href: '/account/orders' },
+    { label: 'Favorites',   href: '/account/favorites' },
   ],
 } as const
 
 function QuickActionsSection() {
   const { isSignedIn, user } = useUser()
-  const { isVendor, isOrganizer, isDriver } = useRole()
+  const { isVendor, isOrganizer, isRunner } = useRole()
 
   if (!isSignedIn) return null
 
@@ -143,7 +145,7 @@ function QuickActionsSection() {
   const actions =
     isVendor    ? QUICK_ACTIONS_BY_ROLE.vendor :
     isOrganizer ? QUICK_ACTIONS_BY_ROLE.organizer :
-    isDriver    ? QUICK_ACTIONS_BY_ROLE.driver :
+    isRunner    ? QUICK_ACTIONS_BY_ROLE.runner :
     QUICK_ACTIONS_BY_ROLE.customer
 
   return (

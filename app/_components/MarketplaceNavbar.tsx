@@ -23,7 +23,7 @@ export default function MarketplaceNavbar() {
   const pathname = usePathname()
   const { signOut } = useClerk()
   const { isSignedIn, user } = useUser()
-  const { isVendor, isOrganizer, isDriver } = useRole()
+  const { isVendor, isOrganizer, isRunner } = useRole()
   const [showSignOut, setShowSignOut] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -31,20 +31,22 @@ export default function MarketplaceNavbar() {
   const displayName = user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] ?? 'Account'
   const initial = (user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0] ?? 'U').toUpperCase()
 
+  const FAIR_SLUG = 'springfield-state-fair-2026'
+
   const signedInLinks = [
     { label: 'Discover', href: '/fairs' },
-    ...(isVendor ? [{ label: 'Vendor Dashboard', href: '/vendor/dashboard' }] : []),
+    ...(isVendor    ? [{ label: 'Vendor Dashboard', href: `/vendor/${FAIR_SLUG}/dashboard` }] : []),
     ...(isOrganizer ? [{ label: 'Organizer Portal', href: '/organizer' }] : []),
-    ...(isDriver ? [{ label: 'Driver Dashboard', href: '/driver/dashboard' }] : []),
+    ...(isRunner    ? [{ label: 'Runner Dashboard', href: `/runner/${FAIR_SLUG}/dashboard` }] : []),
   ]
 
   const dropdownItems = [
     { href: '/account',           label: 'My Account',  icon: UserIcon },
     { href: '/account/orders',    label: 'My Orders',   icon: ClipboardDocumentListIcon },
     { href: '/account/favorites', label: 'Favorites',   icon: HeartIcon },
-    ...(isVendor    ? [{ href: '/vendor/dashboard',    label: 'Vendor Dashboard', icon: BuildingStorefrontIcon }] : []),
-    ...(isOrganizer ? [{ href: '/organizer',            label: 'Organizer Portal', icon: CalendarDaysIcon }]      : []),
-    ...(isDriver    ? [{ href: '/driver/dashboard',    label: 'Driver Dashboard', icon: TruckIcon }]             : []),
+    ...(isVendor    ? [{ href: `/vendor/${FAIR_SLUG}/dashboard`,  label: 'Vendor Dashboard', icon: BuildingStorefrontIcon }] : []),
+    ...(isOrganizer ? [{ href: '/organizer',                      label: 'Organizer Portal', icon: CalendarDaysIcon }]      : []),
+    ...(isRunner    ? [{ href: `/runner/${FAIR_SLUG}/dashboard`,  label: 'Runner Dashboard', icon: TruckIcon }]             : []),
   ]
 
   useEffect(() => {

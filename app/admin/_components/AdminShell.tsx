@@ -14,6 +14,8 @@ import {
   BoltIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClipboardDocumentListIcon,
+  ChartBarIcon,
 } from '@heroicons/react/24/outline'
 import { mockAdminEvents } from '@/lib/mock/admin'
 
@@ -76,6 +78,8 @@ function EventNav({ slug, onClose }: { slug: string; onClose?: () => void }) {
           <SidebarLink href={`/admin/${slug}/vendors`} icon={BuildingStorefrontIcon} label="Vendors" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/fulfillment`} icon={BoltIcon} label="Fulfillment" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/runners`} icon={TruckIcon} label="Runners" indent onClick={onClose} />
+          <SidebarLink href={`/admin/${slug}/orders`} icon={ClipboardDocumentListIcon} label="Orders" indent onClick={onClose} />
+          <SidebarLink href={`/admin/${slug}/reports`} icon={ChartBarIcon} label="Reports" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/settings`} icon={Cog6ToothIcon} label="Settings" indent onClick={onClose} />
         </div>
       )}
