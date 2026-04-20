@@ -195,6 +195,57 @@ export const mockAdminRunners = [
   },
 ]
 
+export type AdminOrderStatus = 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'REFUNDED'
+export type AdminFulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
+
+export interface MockAdminOrder {
+  id: string
+  status: AdminOrderStatus
+  fulfillmentType: AdminFulfillmentType
+  customerName: string
+  vendorName: string
+  total: number
+  placedAt: string
+  items: { name: string; quantity: number }[]
+  cancellationReason?: string
+}
+
+const now = Date.now()
+const mins = (m: number) => new Date(now - m * 60_000).toISOString()
+
+export const mockAdminOrders: MockAdminOrder[] = [
+  { id: 'ord_4a7f3c1e', status: 'PREPARING',  fulfillmentType: 'BOOTH_PICKUP',  customerName: 'James O.',   vendorName: "Smoky Joe's BBQ",   total: 42.96, placedAt: mins(7),  items: [{ name: 'Brisket Plate', quantity: 1 }, { name: 'Ribs Half Rack', quantity: 2 }] },
+  { id: 'ord_9d3e8a2f', status: 'READY',       fulfillmentType: 'CURBSIDE',      customerName: 'Tomas H.',   vendorName: "Elena's Tacos",     total: 28.97, placedAt: mins(14), items: [{ name: 'BBQ Combo Platter', quantity: 2 }] },
+  { id: 'ord_7b2c9f1a', status: 'PLACED',      fulfillmentType: 'BOOTH_PICKUP',  customerName: 'Marcus L.',  vendorName: "Smoky Joe's BBQ",   total: 31.97, placedAt: mins(1),  items: [{ name: 'Pulled Pork Sandwich', quantity: 2 }, { name: 'Mac & Cheese', quantity: 1 }] },
+  { id: 'ord_a3d8e2b7', status: 'PLACED',      fulfillmentType: 'CURBSIDE',      customerName: 'Sofia R.',   vendorName: "Smoky Joe's BBQ",   total: 18.99, placedAt: mins(1),  items: [{ name: 'Brisket Plate', quantity: 1 }] },
+  { id: 'ord_c9e1f5d3', status: 'ACCEPTED',    fulfillmentType: 'HOME_DELIVERY', customerName: 'Aisha M.',   vendorName: "Smoky Joe's BBQ",   total: 24.98, placedAt: mins(4),  items: [{ name: 'Pulled Pork Sandwich', quantity: 1 }, { name: 'Lemonade', quantity: 1 }] },
+  { id: 'ord_1e2a3b4c', status: 'COMPLETED',   fulfillmentType: 'BOOTH_PICKUP',  customerName: 'Riley K.',   vendorName: "Elena's Tacos",     total: 12.99, placedAt: mins(45), items: [{ name: 'Jerk Chicken Tacos', quantity: 1 }] },
+  { id: 'ord_5f6g7h8i', status: 'COMPLETED',   fulfillmentType: 'CURBSIDE',      customerName: 'Devon A.',   vendorName: 'Ramen House',       total: 22.98, placedAt: mins(52), items: [{ name: 'Tonkotsu Ramen', quantity: 1 }] },
+  { id: 'ord_9j0k1l2m', status: 'COMPLETED',   fulfillmentType: 'BOOTH_PICKUP',  customerName: 'Priya S.',   vendorName: "Smoky Joe's BBQ",   total: 18.99, placedAt: mins(61), items: [{ name: 'Ribs Half Rack', quantity: 1 }] },
+  { id: 'ord_3n4o5p6q', status: 'COMPLETED',   fulfillmentType: 'HOME_DELIVERY', customerName: 'Carlos M.',  vendorName: "Elena's Tacos",     total: 31.97, placedAt: mins(78), items: [{ name: 'BBQ Combo Platter', quantity: 2 }] },
+  { id: 'ord_2f1a8c9d', status: 'CANCELLED',   fulfillmentType: 'BOOTH_PICKUP',  customerName: 'Sam T.',     vendorName: 'Funnel Cake Factory', total: 12.99, placedAt: mins(30), items: [{ name: 'Funnel Cake', quantity: 1 }], cancellationReason: 'Vendor timeout (2 min)' },
+  { id: 'ord_8c4b2e1f', status: 'CANCELLED',   fulfillmentType: 'CURBSIDE',      customerName: 'Jordan P.', vendorName: 'Ramen House',        total: 8.99,  placedAt: mins(25), items: [{ name: 'Gyoza (6pc)', quantity: 1 }], cancellationReason: 'Customer cancelled' },
+  { id: 'ord_1e7d3a2b', status: 'REFUNDED',    fulfillmentType: 'HOME_DELIVERY', customerName: 'Taylor W.', vendorName: "Smoky Joe's BBQ",   total: 22.50, placedAt: mins(90), items: [{ name: 'Brisket Sandwich', quantity: 1 }], cancellationReason: 'Runner no-show' },
+]
+
+export const mockAdminReportSummary = {
+  totalRevenue: 2841.50,
+  platformFee: 284.15,
+  vendorPayouts: 2557.35,
+  totalOrders: 147,
+  completedOrders: 138,
+  cancelledOrders: 6,
+  refundedOrders: 3,
+  avgOrderValue: 19.33,
+}
+
+export const mockAdminVendorBreakdown = [
+  { vendorName: "Smoky Joe's BBQ", orders: 42, revenue: 812.30, payout: 731.07, avgPrepTime: 12, cancellations: 2 },
+  { vendorName: "Elena's Tacos",   orders: 58, revenue: 1090.20, payout: 981.18, avgPrepTime: 8, cancellations: 1 },
+  { vendorName: 'Funnel Cake Factory', orders: 21, revenue: 387.00, payout: 348.30, avgPrepTime: 6, cancellations: 2 },
+  { vendorName: 'Ramen House',     orders: 26, revenue: 552.00, payout: 496.80, avgPrepTime: 14, cancellations: 1 },
+]
+
 // Go Live checklist — computed from event + vendors + fulfillment config
 export function computeGoLiveChecklist(
   eventLat: number | null,

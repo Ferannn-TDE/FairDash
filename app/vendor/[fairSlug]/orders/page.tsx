@@ -1,283 +1,300 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import toast from 'react-hot-toast'
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import { useState, useMemo } from 'react'
+import {
+  ChevronDown, ChevronUp, Clock, User, Phone,
+  ShoppingBag, Car, MapPin, CheckCircle, XCircle,
+  Package, ArrowUpDown,
+} from 'lucide-react'
+import {
+  mockIncomingOrders, mockActiveOrders, mockReadyOrders, mockCompletedOrders,
+  type MockVendorOrder, type OrderStatus,
+} from '@/lib/mock/vendor-dashboard'
 
-interface VendorOrder {
-  id: string
-  customer: string
-  items: string
-  total: number
-  status: string
-  time: string
-  fulfillmentType: string
+// ─── Types & constants ──────────────────────────────────────────────────────
+
+const STATUS_META: Record<OrderStatus, { label: string; cls: string }> = {
+  PLACED:    { label: 'New',       cls: 'bg-neon-pink/10 text-neon-pink border-neon-pink/20' },
+  ACCEPTED:  { label: 'Accepted',  cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  PREPARING: { label: 'Preparing', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  READY:     { label: 'Ready',     cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  COMPLETED: { label: 'Completed', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  CANCELLED: { label: 'Cancelled', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
 }
 
-const ORDER_NEXT_STATUS: Record<string, string> = {
-  PLACED:    'ACCEPTED',
-  ACCEPTED:  'PREPARING',
-  PREPARING: 'READY',
-  READY:     'COMPLETED',
+const FULFILLMENT_LABEL: Record<string, string> = {
+  BOOTH_PICKUP: 'Booth Pickup',
+  CURBSIDE: 'Curbside',
+  HOME_DELIVERY: 'Home Delivery',
 }
 
-const ORDER_ACTION_LABEL: Record<string, string> = {
-  PLACED:    'Accept',
-  ACCEPTED:  'Start Preparing',
-  PREPARING: 'Mark Ready',
-  READY:     'Mark Completed',
-}
+const ALL_ORDERS: MockVendorOrder[] = [
+  ...mockIncomingOrders,
+  ...mockActiveOrders,
+  ...mockReadyOrders,
+  ...mockCompletedOrders,
+]
 
-const STATUS_STYLES: Record<string, string> = {
-  PLACED:      'bg-neon-pink/10 text-neon-pink border-neon-pink/20',
-  ACCEPTED:    'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  PREPARING:   'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  READY:       'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  COMPLETED:   'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  DELIVERED:   'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  CANCELLED:   'bg-red-500/10 text-red-400 border-red-500/20',
-  UNCOLLECTED: 'bg-red-500/10 text-red-400 border-red-500/20',
-}
+const FILTER_TABS = [
+  { value: 'all',       label: 'All' },
+  { value: 'PLACED',    label: 'Incoming' },
+  { value: 'PREPARING', label: 'Preparing' },
+  { value: 'READY',     label: 'Ready' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+] as const
 
-const STATUS_LABELS: Record<string, string> = {
-  PLACED: 'New', ACCEPTED: 'Accepted', PREPARING: 'Preparing',
-  READY: 'Ready', COMPLETED: 'Completed', DELIVERED: 'Delivered',
-  CANCELLED: 'Cancelled', UNCOLLECTED: 'Uncollected',
-}
+// ─── Sub-components ─────────────────────────────────────────────────────────
 
-function normalizeOrder(o: any): VendorOrder {
-  return {
-    id: o.id,
-    customer: o.customerName ?? '—',
-    items: o.orderItems
-      ? o.orderItems.map((i: any) => `${i.menuItem?.name ?? 'Item'} ×${i.quantity}`).join(', ')
-      : '—',
-    total: o.total ?? 0,
-    status: o.status,
-    time: new Date(o.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    fulfillmentType: o.fulfillmentType,
-  }
-}
-
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }: { status: OrderStatus }) {
+  const meta = STATUS_META[status] ?? { label: status, cls: 'bg-white/5 text-text-gray border-white/10' }
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${STATUS_STYLES[status] ?? 'bg-white/5 text-text-gray border-white/10'}`}>
-      {STATUS_LABELS[status] ?? status}
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${meta.cls}`}>
+      {meta.label}
     </span>
   )
 }
 
-export default function VendorOrdersPage() {
-  const [vendorId, setVendorId] = useState<string | null>(null)
-  const [orders, setOrders] = useState<VendorOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set())
-  const [filter, setFilter] = useState('all')
-  const [since, setSince] = useState<string>(() => {
-    const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d.toISOString()
-  })
+function FulfillmentIcon({ type }: { type: string }) {
+  if (type === 'CURBSIDE') return <Car className="w-3.5 h-3.5" />
+  if (type === 'HOME_DELIVERY') return <MapPin className="w-3.5 h-3.5" />
+  return <ShoppingBag className="w-3.5 h-3.5" />
+}
 
-  useEffect(() => {
-    fetch('/api/vendors/me')
-      .then((r) => r.json())
-      .then((json) => {
-        if (!json.success) { setLoading(false); return }
-        const id = json.data.vendor.id as string
-        setVendorId(id)
-        return fetch(`/api/vendors/${id}/orders?limit=200&since=${since}`)
-      })
-      .then((r) => r?.json())
-      .then((json) => {
-        if (json?.success) setOrders(json.data.orders.map(normalizeOrder))
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [since])
+function OrderCard({ order }: { order: MockVendorOrder }) {
+  const [expanded, setExpanded] = useState(false)
 
-  const handleUpdateStatus = useCallback(async (orderId: string, newStatus: string) => {
-    setUpdatingIds((prev) => new Set(prev).add(orderId))
-    try {
-      const res = await fetch(`/api/orders/${orderId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      })
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message || 'Update failed')
-      setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status: newStatus } : o))
-      toast.success(`Order updated to ${STATUS_LABELS[newStatus] ?? newStatus}`)
-    } catch (err: any) {
-      toast.error(err.message || 'Could not update order')
-    } finally {
-      setUpdatingIds((prev) => { const s = new Set(prev); s.delete(orderId); return s })
-    }
-  }, [])
-
-  const filtered = filter === 'all' ? orders : orders.filter((o) => o.status === filter)
-
-  const filterOptions = [
-    { value: 'all',       label: `All (${orders.length})` },
-    { value: 'PLACED',    label: 'New' },
-    { value: 'PREPARING', label: 'Preparing' },
-    { value: 'READY',     label: 'Ready' },
-    { value: 'COMPLETED', label: 'Completed' },
-    { value: 'CANCELLED', label: 'Cancelled' },
-  ]
-
-  const dateOptions = [
-    { label: 'Today',      value: (() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d.toISOString() })() },
-    { label: 'Last 7 days', value: (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() - 7); d.setUTCHours(0, 0, 0, 0); return d.toISOString() })() },
-    { label: 'Last 30 days', value: (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() - 30); d.setUTCHours(0, 0, 0, 0); return d.toISOString() })() },
-  ]
+  const placedTime = new Date(order.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const shortId = order.id.slice(-8).toUpperCase()
 
   return (
-    <div className="p-6 md:p-4 sm:p-3 max-w-[78rem] mx-auto">
-      <div className="flex items-start justify-between mb-8 gap-4 flex-wrap">
-        <div>
-          <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight mb-1">
-            Order <span className="text-neon-pink">History</span>
-          </h1>
-          <p className="text-text-gray text-sm">{orders.length} orders in selected period</p>
-        </div>
-        {/* Period selector */}
-        <div className="flex gap-1.5 flex-wrap">
-          {dateOptions.map((d) => (
-            <button
-              key={d.label}
-              onClick={() => setSince(d.value)}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-all duration-200 ${
-                since === d.value
-                  ? 'bg-neon-pink border-neon-pink text-white'
-                  : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
-              }`}
-            >
-              {d.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-bg-card border border-white/10 rounded-2xl overflow-hidden">
-        {/* Filter tabs */}
-        <div className="p-5 border-b border-white/10 flex gap-1.5 flex-wrap">
-          {filterOptions.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value)}
-              className={`px-3 py-1 rounded-full text-[0.6875rem] font-semibold border cursor-pointer transition-all duration-200 ${
-                filter === f.value
-                  ? 'bg-neon-pink border-neon-pink text-white'
-                  : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+    <div className={`border border-white/10 rounded-2xl overflow-hidden transition-all duration-200 ${
+      order.status === 'PLACED' ? 'border-neon-pink/30 bg-neon-pink/[0.03]' : 'bg-bg-card'
+    }`}>
+      {/* Header row — always visible */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-4 p-4 sm:p-5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer"
+      >
+        {/* Order ID + time */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-white text-sm">#{shortId}</span>
+            <StatusBadge status={order.status} />
+          </div>
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
+            <span className="flex items-center gap-1 text-xs text-text-gray">
+              <User className="w-3 h-3" />
+              {order.customerName}
+            </span>
+            <span className="flex items-center gap-1 text-xs text-text-gray">
+              <Clock className="w-3 h-3" />
+              {placedTime}
+            </span>
+            <span className="flex items-center gap-1 text-xs text-text-gray">
+              <FulfillmentIcon type={order.fulfillmentType} />
+              {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
+            </span>
+          </div>
         </div>
 
-        {loading ? (
-          <div className="p-8 space-y-3 animate-pulse">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="flex items-center gap-4">
-                <div className="h-4 bg-white/10 rounded w-24" />
-                <div className="h-4 bg-white/5 rounded w-32" />
-                <div className="h-4 bg-white/5 rounded flex-1" />
-                <div className="h-4 bg-white/10 rounded w-16" />
-                <div className="h-6 bg-white/10 rounded-full w-20" />
-                <div className="h-4 bg-white/5 rounded w-12" />
-              </div>
-            ))}
+        {/* Items summary */}
+        <div className="hidden sm:block flex-1 min-w-0">
+          <p className="text-white/60 text-xs truncate">
+            {order.orderItems.map((i) => `${i.quantity}× ${i.menuItem.name}`).join(', ')}
+          </p>
+        </div>
+
+        {/* Total + chevron */}
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="font-bold text-neon-pink text-sm">${order.total.toFixed(2)}</span>
+          {expanded
+            ? <ChevronUp className="w-4 h-4 text-text-gray" />
+            : <ChevronDown className="w-4 h-4 text-text-gray" />}
+        </div>
+      </button>
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="border-t border-white/10 p-4 sm:p-5 space-y-4">
+          {/* Items list */}
+          <div>
+            <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Items</p>
+            <div className="space-y-1.5">
+              {order.orderItems.map((item, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <span className="text-sm text-white">
+                    <span className="text-neon-pink font-semibold">{item.quantity}×</span>{' '}
+                    {item.menuItem.name}
+                  </span>
+                  <span className="text-sm text-text-gray">${(item.unitPrice * item.quantity).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 pt-2 border-t border-white/5 flex justify-between">
+              <span className="text-xs text-text-gray">Subtotal</span>
+              <span className="text-xs font-semibold text-white">${order.subtotal.toFixed(2)}</span>
+            </div>
           </div>
-        ) : !vendorId ? (
-          <div className="py-20 text-center px-6">
-            <ExclamationTriangleIcon className="w-10 h-10 text-amber-400/60 mx-auto mb-3" />
-            <p className="text-white font-semibold text-sm">No vendor found</p>
-          </div>
-        ) : (
-          <>
-            {/* Desktop table */}
-            <div className="hidden md:block overflow-x-auto">
-              {filtered.length === 0 ? (
-                <div className="py-16 text-center text-text-gray text-sm">No orders match this filter.</div>
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/5">
-                      {['Order ID', 'Customer', 'Items', 'Total', 'Status', 'Time', 'Fulfillment', 'Action'].map((h) => (
-                        <th key={h} className="text-left text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold px-6 py-3 whitespace-nowrap">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((order) => {
-                      const isUpdating = updatingIds.has(order.id)
-                      return (
-                        <tr key={order.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors duration-150">
-                          <td className="px-6 py-4 text-sm font-bold text-white whitespace-nowrap">#{order.id.slice(-8).toUpperCase()}</td>
-                          <td className="px-6 py-4 text-sm text-text-gray whitespace-nowrap">{order.customer}</td>
-                          <td className="px-6 py-4 text-sm text-white/70 max-w-[180px] truncate">{order.items}</td>
-                          <td className="px-6 py-4 text-sm font-bold text-neon-pink whitespace-nowrap">${order.total.toFixed(2)}</td>
-                          <td className="px-6 py-4 whitespace-nowrap"><StatusBadge status={order.status} /></td>
-                          <td className="px-6 py-4 text-xs text-text-gray whitespace-nowrap">{order.time}</td>
-                          <td className="px-6 py-4 text-xs text-text-gray whitespace-nowrap capitalize">
-                            {order.fulfillmentType?.toLowerCase().replace(/_/g, ' ') ?? '—'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {ORDER_NEXT_STATUS[order.status] ? (
-                              <button
-                                disabled={isUpdating}
-                                onClick={() => handleUpdateStatus(order.id, ORDER_NEXT_STATUS[order.status])}
-                                className="px-3 py-1.5 bg-white/5 border border-white/10 text-white rounded-lg text-xs font-semibold cursor-pointer hover:bg-neon-pink/10 hover:border-neon-pink/30 hover:text-neon-pink transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {isUpdating ? '…' : ORDER_ACTION_LABEL[order.status]}
-                              </button>
-                            ) : <span className="text-text-gray/40 text-xs">—</span>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+
+          {/* Customer info */}
+          <div>
+            <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Customer</p>
+            <div className="flex flex-wrap gap-4">
+              <span className="flex items-center gap-1.5 text-sm text-white">
+                <User className="w-3.5 h-3.5 text-text-gray" />
+                {order.customerName}
+              </span>
+              {order.customerPhone && (
+                <span className="flex items-center gap-1.5 text-sm text-white">
+                  <Phone className="w-3.5 h-3.5 text-text-gray" />
+                  {order.customerPhone}
+                </span>
               )}
             </div>
+          </div>
 
-            {/* Mobile card list */}
-            <div className="md:hidden divide-y divide-white/5">
-              {filtered.length === 0 ? (
-                <div className="py-12 text-center text-text-gray text-sm">No orders match this filter.</div>
-              ) : filtered.map((order) => {
-                const isUpdating = updatingIds.has(order.id)
-                return (
-                  <div key={order.id} className="p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-bold text-white text-sm">#{order.id.slice(-8).toUpperCase()}</p>
-                        <p className="text-text-gray text-xs">{order.customer} · {order.time}</p>
-                      </div>
-                      <StatusBadge status={order.status} />
-                    </div>
-                    <p className="text-white/60 text-xs mb-3 line-clamp-2">{order.items}</p>
-                    <div className="flex items-center justify-between">
-                      <span className="text-neon-pink font-bold text-sm">${order.total.toFixed(2)}</span>
-                      {ORDER_NEXT_STATUS[order.status] && (
-                        <button
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(order.id, ORDER_NEXT_STATUS[order.status])}
-                          className="px-3 py-1.5 bg-white/5 border border-white/10 text-white rounded-lg text-xs font-semibold cursor-pointer hover:bg-neon-pink/10 hover:border-neon-pink/30 hover:text-neon-pink transition-all duration-200 disabled:opacity-50"
-                        >
-                          {isUpdating ? '…' : ORDER_ACTION_LABEL[order.status]}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+          {/* Fulfillment details */}
+          <div>
+            <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Fulfillment</p>
+            <div className="flex items-start gap-2">
+              <FulfillmentIcon type={order.fulfillmentType} />
+              <div className="text-sm text-white space-y-0.5">
+                <p className="font-semibold">{FULFILLMENT_LABEL[order.fulfillmentType]}</p>
+                {order.fulfillmentType === 'CURBSIDE' && (
+                  <p className="text-text-gray text-xs">
+                    {order.vehicleColor} {order.vehicleMake} · {order.vehiclePlate}
+                  </p>
+                )}
+                {order.fulfillmentType === 'HOME_DELIVERY' && (
+                  <p className="text-text-gray text-xs">{order.deliveryStreet}, {order.deliveryCity}</p>
+                )}
+              </div>
             </div>
-          </>
-        )}
+          </div>
+
+          {/* Timestamps */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white/[0.03] rounded-xl p-3">
+              <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-0.5">Placed</p>
+              <p className="text-sm text-white">{placedTime}</p>
+            </div>
+            <div className="bg-white/[0.03] rounded-xl p-3">
+              <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-0.5">Est. Ready</p>
+              <p className="text-sm text-white">
+                {new Date(order.estimatedReadyAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          </div>
+
+          {/* Status indicator */}
+          <div className="flex items-center gap-2">
+            {order.status === 'COMPLETED'
+              ? <CheckCircle className="w-4 h-4 text-emerald-400" />
+              : order.status === 'CANCELLED'
+              ? <XCircle className="w-4 h-4 text-red-400" />
+              : <Package className="w-4 h-4 text-neon-pink" />}
+            <span className="text-xs text-text-gray">
+              {order.status === 'COMPLETED'
+                ? 'Order fulfilled successfully'
+                : order.status === 'CANCELLED'
+                ? 'Order was cancelled'
+                : 'Order in progress'}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main page ───────────────────────────────────────────────────────────────
+
+export default function VendorOrdersPage() {
+  const [filter, setFilter] = useState<string>('all')
+  const [sortNewest, setSortNewest] = useState(true)
+
+  const tabCounts = useMemo(() => ({
+    all: ALL_ORDERS.length,
+    PLACED:    ALL_ORDERS.filter((o) => o.status === 'PLACED').length,
+    PREPARING: ALL_ORDERS.filter((o) => o.status === 'ACCEPTED' || o.status === 'PREPARING').length,
+    READY:     ALL_ORDERS.filter((o) => o.status === 'READY').length,
+    COMPLETED: ALL_ORDERS.filter((o) => o.status === 'COMPLETED').length,
+    CANCELLED: ALL_ORDERS.filter((o) => o.status === 'CANCELLED').length,
+  }), [])
+
+  const filtered = useMemo(() => {
+    let list = ALL_ORDERS
+    if (filter !== 'all') {
+      if (filter === 'PREPARING') {
+        list = list.filter((o) => o.status === 'ACCEPTED' || o.status === 'PREPARING')
+      } else {
+        list = list.filter((o) => o.status === filter)
+      }
+    }
+    return [...list].sort((a, b) => {
+      const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
+      return sortNewest ? diff : -diff
+    })
+  }, [filter, sortNewest])
+
+  return (
+    <div className="p-6 md:p-4 sm:p-3 max-w-[56rem] mx-auto">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
+        <div>
+          <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
+            Order <span className="text-neon-pink">History</span>
+          </h1>
+          <p className="text-text-gray text-sm mt-0.5">{ALL_ORDERS.length} orders today</p>
+        </div>
+        <button
+          onClick={() => setSortNewest((v) => !v)}
+          className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-semibold text-text-gray hover:text-white hover:border-white/20 transition-all duration-200 cursor-pointer"
+        >
+          <ArrowUpDown className="w-3.5 h-3.5" />
+          {sortNewest ? 'Newest First' : 'Oldest First'}
+        </button>
       </div>
+
+      {/* Filter tabs */}
+      <div className="flex gap-1.5 flex-wrap mb-6">
+        {FILTER_TABS.map((tab) => {
+          const count = tabCounts[tab.value as keyof typeof tabCounts] ?? 0
+          const isActive = filter === tab.value
+          return (
+            <button
+              key={tab.value}
+              onClick={() => setFilter(tab.value)}
+              className={`px-3.5 py-1.5 rounded-full text-[0.6875rem] font-semibold border transition-all duration-200 cursor-pointer ${
+                isActive
+                  ? 'bg-neon-pink border-neon-pink text-white'
+                  : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
+              }`}
+            >
+              {tab.label}
+              <span className={`ml-1.5 text-[0.625rem] ${isActive ? 'text-white/70' : 'text-white/30'}`}>
+                {count}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Order list */}
+      {filtered.length === 0 ? (
+        <div className="bg-bg-card border border-white/10 rounded-2xl py-16 text-center">
+          <Package className="w-10 h-10 text-white/10 mx-auto mb-3" />
+          <p className="text-white font-semibold text-sm mb-1">No orders found</p>
+          <p className="text-text-gray text-xs">No orders match the selected filter.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((order) => (
+            <OrderCard key={order.id} order={order} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
