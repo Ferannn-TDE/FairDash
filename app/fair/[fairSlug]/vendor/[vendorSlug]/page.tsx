@@ -2,10 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { PlusIcon, MinusIcon, ShoppingBagIcon, ClockIcon } from '@heroicons/react/24/outline'
+import Link from 'next/link'
+import { ShoppingBagIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { useFair } from '../../../../_contexts/FairContext'
 import { useFairCart } from '../../../../_contexts/FairCartContext'
+import { getVendorBySlug } from '@/lib/mock'
+import Breadcrumb from '../../_components/Breadcrumb'
+import FoodCard from '@/components/ui/FoodCard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,20 +35,11 @@ interface VendorDetail {
   menu: DisplayMenuItem[]
 }
 
-// ── Card layout with image support ────────────────────────────────────────────
+// ── Wrapper connecting FoodCard to cart context ────────────────────────────────
 
-function MenuItemCard({
-  item,
-  vendor,
-  accentColor,
-}: {
-  item: DisplayMenuItem
-  vendor: VendorDetail
-  accentColor: string
-}) {
+function MenuItemCard({ item, vendor, accentColor }: { item: DisplayMenuItem; vendor: VendorDetail; accentColor: string }) {
   const { addItem, items, updateQty } = useFairCart()
-  const cartItem = items.find((i) => i.menuItemId === item.id)
-  const qty = cartItem?.quantity ?? 0
+  const qty = items.find((i) => i.menuItemId === item.id)?.quantity ?? 0
 
   const handleAdd = () => {
     addItem(
@@ -55,80 +50,20 @@ function MenuItemCard({
   }
 
   return (
-    <div className={`bg-bg-card border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors duration-200 flex flex-col ${!item.available ? 'opacity-50' : ''}`}>
-
-      {/* Image area */}
-      {item.imageUrl ? (
-        <div className="aspect-[4/3] overflow-hidden">
-          <img
-            src={item.imageUrl}
-            alt={item.name}
-            className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-          />
-        </div>
-      ) : (
-        <div
-          className="aspect-[4/3] flex items-center justify-center"
-          style={{ background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}06)` }}
-        >
-          <span className="text-2xl opacity-20">🍽️</span>
-        </div>
-      )}
-
-      {/* Card body */}
-      <div className="p-3 flex flex-col flex-1">
-        <h3 className="font-semibold text-white text-xs sm:text-sm leading-snug line-clamp-2">{item.name}</h3>
-
-        <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
-          ${item.price.toFixed(2)}
-        </p>
-
-        {item.description && (
-          <p className="text-text-gray text-[0.65rem] mt-1 leading-relaxed line-clamp-2 flex-1">{item.description}</p>
-        )}
-
-        {/* Bottom row: prep time + add/qty */}
-        <div className="mt-2 flex items-center justify-between gap-1">
-          {item.prepTime ? (
-            <span className="flex items-center gap-0.5 text-text-gray text-[0.6rem]">
-              <ClockIcon className="w-2.5 h-2.5 shrink-0" /> {item.prepTime}m
-            </span>
-          ) : (
-            <span />
-          )}
-
-          {item.available && (
-            qty === 0 ? (
-              <button
-                onClick={handleAdd}
-                className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[0.65rem] font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0"
-                style={{ background: accentColor }}
-              >
-                <PlusIcon className="w-3 h-3" />
-                Add
-              </button>
-            ) : (
-              <div className="flex items-center shrink-0 rounded-lg overflow-hidden border border-white/10">
-                <button
-                  onClick={() => updateQty(item.id, qty - 1)}
-                  className="w-6 h-6 bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
-                >
-                  <MinusIcon className="w-3 h-3 text-white" />
-                </button>
-                <span className="text-white font-semibold w-5 text-center text-xs tabular-nums bg-white/5">{qty}</span>
-                <button
-                  onClick={handleAdd}
-                  className="w-6 h-6 flex items-center justify-center hover:opacity-80 transition-opacity"
-                  style={{ background: accentColor }}
-                >
-                  <PlusIcon className="w-3 h-3 text-white" />
-                </button>
-              </div>
-            )
-          )}
-        </div>
-      </div>
-    </div>
+    <FoodCard
+      variant="menu-item"
+      id={item.id}
+      name={item.name}
+      description={item.description}
+      price={item.price}
+      imageUrl={item.imageUrl}
+      prepTime={item.prepTime}
+      available={item.available}
+      accentColor={accentColor}
+      qty={qty}
+      onAdd={handleAdd}
+      onDecrement={() => updateQty(item.id, qty - 1)}
+    />
   )
 }
 
@@ -174,19 +109,42 @@ export default function VendorMenuPage() {
   const [notFound, setNotFound] = useState(false)
 
   useEffect(() => {
-    if (!params.vendorSlug) return
+    if (!params.vendorSlug || !params.fairSlug) return
     setLoading(true)
 
+    // Look up from mock data (slug-based). Falls through to API when backend is ready.
+    const mockV = getVendorBySlug(params.fairSlug, params.vendorSlug)
+    if (mockV) {
+      setVendor({
+        id: mockV.id,
+        name: mockV.name,
+        cuisineType: mockV.cuisineType,
+        description: mockV.description ?? null,
+        boothNumber: mockV.boothNumber ?? null,
+        logoUrl: mockV.logoUrl ?? null,
+        isBusy: mockV.isBusy ?? false,
+        menu: mockV.menu.map((item): DisplayMenuItem => ({
+          id: item.id,
+          name: item.name,
+          description: item.description ?? null,
+          price: item.price,
+          category: item.category,
+          imageUrl: item.imageUrl ?? null,
+          prepTime: item.prepTime ?? null,
+          available: item.available ?? true,
+        })),
+      })
+      setLoading(false)
+      return
+    }
+
+    // API upgrade path — used when real backend is available
     fetch(`/api/vendors/${params.vendorSlug}`)
       .then((r) => r.json())
       .then((json) => {
-        if (!json.success) {
-          setNotFound(true)
-          setLoading(false)
-          return
-        }
+        if (!json.success) { setNotFound(true); setLoading(false); return }
         const raw = json.data
-        const normalized: VendorDetail = {
+        setVendor({
           id: raw.id,
           name: raw.name,
           cuisineType: raw.cuisineType,
@@ -204,12 +162,11 @@ export default function VendorMenuPage() {
             prepTime: item.prepTime ?? null,
             available: item.isAvailable ?? true,
           })),
-        }
-        setVendor(normalized)
+        })
         setLoading(false)
       })
       .catch(() => { setNotFound(true); setLoading(false) })
-  }, [params.vendorSlug])
+  }, [params.vendorSlug, params.fairSlug])
 
   if (loading) {
     return <PageSkeleton accentColor={accentColor} />
@@ -233,92 +190,82 @@ export default function VendorMenuPage() {
 
   const categories = Array.from(new Set(vendor.menu.map((m) => m.category)))
 
-  const handleCheckout = () => {
-    router.push(`/fair/${fair.slug}/cart`)
-  }
-
   return (
     <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 text-white">
-      <div className="flex flex-col lg:flex-row gap-8">
+      <Breadcrumb crumbs={[
+        { label: 'Vendors', href: `/fair/${fair.slug}/vendors` },
+        { label: vendor.name },
+      ]} />
 
-        {/* Main: vendor info + menu */}
-        <div className="flex-1">
-
-          {/* Vendor header */}
-          <div className="flex items-start gap-3 sm:gap-4 mb-6 sm:mb-8">
-            <div
-              className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 font-bebas text-2xl sm:text-3xl overflow-hidden"
-              style={{ background: `${accentColor}22`, border: `1px solid ${accentColor}44`, color: accentColor }}
-            >
-              {vendor.logoUrl ? (
-                <img src={vendor.logoUrl} alt={vendor.name} className="w-full h-full object-cover" />
-              ) : (
-                vendor.name.charAt(0)
-              )}
-            </div>
-            <div className="min-w-0">
-              <h1 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-tight">{vendor.name}</h1>
-              <p className="text-text-gray text-xs sm:text-sm">
-                {vendor.cuisineType}
-                {vendor.boothNumber && ` · Booth ${vendor.boothNumber}`}
-              </p>
-              {vendor.isBusy && (
-                <span className="inline-block mt-1 px-2 py-0.5 bg-yellow-500/15 text-yellow-400 text-xs font-semibold rounded-full">
-                  Currently Busy
-                </span>
-              )}
-              {vendor.description && (
-                <p className="text-text-gray text-xs sm:text-sm mt-1.5 max-w-xl leading-relaxed">{vendor.description}</p>
-              )}
-            </div>
-          </div>
-
-          {vendor.menu.length === 0 ? (
-            <div className="text-center py-16 text-text-gray">
-              <div className="text-[4rem] mb-4 opacity-20">🍽️</div>
-              <p>No menu items available right now.</p>
-            </div>
+      {/* Vendor header */}
+      <div className="flex items-start gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div
+          className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 font-bebas text-2xl sm:text-3xl overflow-hidden"
+          style={{ background: `${accentColor}22`, border: `1px solid ${accentColor}44`, color: accentColor }}
+        >
+          {vendor.logoUrl ? (
+            <img src={vendor.logoUrl} alt={vendor.name} className="w-full h-full object-cover" />
           ) : (
-            categories.map((category, i) => (
-              <section key={category} className={i === 0 ? 'mb-8' : 'mt-10 mb-8'}>
-                <div className="flex items-center gap-3 mb-4">
-                  <h2 className="font-bebas text-xs sm:text-sm text-white uppercase tracking-widest whitespace-nowrap">
-                    {category}
-                  </h2>
-                  <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
-                </div>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                  {vendor.menu
-                    .filter((m) => m.category === category)
-                    .map((item) => (
-                      <MenuItemCard key={item.id} item={item} vendor={vendor} accentColor={accentColor} />
-                    ))}
-                </div>
-              </section>
-            ))
+            vendor.name.charAt(0)
           )}
         </div>
-
-        {/* Sidebar: cart summary (desktop only) */}
-        {itemCount > 0 && (
-          <div className="hidden lg:block lg:w-72 shrink-0">
-            <div className="bg-bg-card border border-white/10 rounded-2xl p-5 sticky top-20">
-              <h2 className="font-bebas text-xl text-white tracking-wide mb-1">Your Order</h2>
-              <p className="text-text-gray text-sm mb-4">
-                {itemCount} item{itemCount !== 1 ? 's' : ''} · ${subtotal.toFixed(2)}
-              </p>
-              <button
-                onClick={handleCheckout}
-                className="w-full py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
-                style={{ background: accentColor }}
-              >
-                <ShoppingBagIcon className="w-4 h-4" />
-                View Cart
-              </button>
-            </div>
-          </div>
-        )}
+        <div className="min-w-0">
+          <h1 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-tight">{vendor.name}</h1>
+          <p className="text-text-gray text-xs sm:text-sm">
+            {vendor.cuisineType}
+            {vendor.boothNumber && ` · Booth ${vendor.boothNumber}`}
+          </p>
+          {vendor.isBusy && (
+            <span className="inline-block mt-1 px-2 py-0.5 bg-yellow-500/15 text-yellow-400 text-xs font-semibold rounded-full">
+              Currently Busy
+            </span>
+          )}
+          {vendor.description && (
+            <p className="text-text-gray text-xs sm:text-sm mt-1.5 max-w-xl leading-relaxed">{vendor.description}</p>
+          )}
+        </div>
       </div>
+
+      {/* Menu — always full-width, never affected by cart state */}
+      {vendor.menu.length === 0 ? (
+        <div className="text-center py-16 text-text-gray">
+          <div className="text-[4rem] mb-4 opacity-20">🍽️</div>
+          <p>No menu items available right now.</p>
+        </div>
+      ) : (
+        categories.map((category, i) => (
+          <section key={category} className={i === 0 ? 'mb-8' : 'mt-10 mb-8'}>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="font-bebas text-xs sm:text-sm text-white uppercase tracking-widest whitespace-nowrap">
+                {category}
+              </h2>
+              <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              {vendor.menu
+                .filter((m) => m.category === category)
+                .map((item) => (
+                  <MenuItemCard key={item.id} item={item} vendor={vendor} accentColor={accentColor} />
+                ))}
+            </div>
+          </section>
+        ))
+      )}
+
+      {/* Floating cart bar — fixed position, never affects page flow */}
+      {itemCount > 0 && (
+        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-40">
+          <Link
+            href={`/fair/${fair.slug}/cart`}
+            className="flex items-center gap-3 px-5 py-3 bg-[#FF0077] text-white rounded-full shadow-[0_4px_20px_rgba(255,0,119,0.4)] hover:shadow-[0_4px_30px_rgba(255,0,119,0.5)] hover:bg-[#FF0077]/90 active:scale-[0.97] transition-all duration-200 whitespace-nowrap"
+          >
+            <ShoppingBagIcon className="w-4 h-4 shrink-0" />
+            <span className="text-sm font-semibold">
+              View Cart · {itemCount} {itemCount === 1 ? 'item' : 'items'} · ${subtotal.toFixed(2)}
+            </span>
+          </Link>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useFair } from '../../../_contexts/FairContext'
+import Breadcrumb from '../_components/Breadcrumb'
 
 interface OrderSummary {
   id: string
@@ -82,9 +83,8 @@ export default function FairOrdersPage() {
 
   return (
     <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 text-white">
-      <h1 className="font-bebas text-3xl sm:text-4xl tracking-wide mb-6 sm:mb-8">
-        My Orders — {fair.name}
-      </h1>
+      <Breadcrumb crumbs={[{ label: 'My Orders' }]} />
+      <h1 className="font-bebas text-3xl sm:text-4xl tracking-wide mb-6 sm:mb-8">My Orders</h1>
 
       {orders.length === 0 ? (
         <div className="bg-[#1A1A1A] border border-white/10 rounded-2xl p-12 text-center">

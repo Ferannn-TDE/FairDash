@@ -35,18 +35,18 @@ export default function MarketplaceNavbar() {
 
   const signedInLinks = [
     { label: 'Discover', href: '/fairs' },
-    ...(isVendor    ? [{ label: 'Vendor Dashboard', href: `/vendor/${FAIR_SLUG}/dashboard` }] : []),
-    ...(isOrganizer ? [{ label: 'Organizer Portal', href: '/organizer' }] : []),
-    ...(isRunner    ? [{ label: 'Runner Dashboard', href: `/runner/${FAIR_SLUG}/dashboard` }] : []),
+    ...(isVendor    ? [{ label: 'Vendor Dashboard', href: '/vendor' }]                          : []),
+    ...(isOrganizer ? [{ label: 'Organizer Portal', href: '/organizer' }]                       : []),
+    ...(isRunner    ? [{ label: 'Runner Dashboard', href: `/runner/${FAIR_SLUG}/dashboard` }]   : []),
   ]
 
   const dropdownItems = [
     { href: '/account',           label: 'My Account',  icon: UserIcon },
     { href: '/account/orders',    label: 'My Orders',   icon: ClipboardDocumentListIcon },
     { href: '/account/favorites', label: 'Favorites',   icon: HeartIcon },
-    ...(isVendor    ? [{ href: `/vendor/${FAIR_SLUG}/dashboard`,  label: 'Vendor Dashboard', icon: BuildingStorefrontIcon }] : []),
-    ...(isOrganizer ? [{ href: '/organizer',                      label: 'Organizer Portal', icon: CalendarDaysIcon }]      : []),
-    ...(isRunner    ? [{ href: `/runner/${FAIR_SLUG}/dashboard`,  label: 'Runner Dashboard', icon: TruckIcon }]             : []),
+    ...(isVendor    ? [{ href: '/vendor',                         label: 'Vendor Dashboard', icon: BuildingStorefrontIcon }] : []),
+    ...(isOrganizer ? [{ href: '/organizer',                      label: 'Organizer Portal', icon: CalendarDaysIcon }]       : []),
+    ...(isRunner    ? [{ href: `/runner/${FAIR_SLUG}/dashboard`,  label: 'Runner Dashboard', icon: TruckIcon }]              : []),
   ]
 
   useEffect(() => {

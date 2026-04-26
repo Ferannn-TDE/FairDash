@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useClerk } from '@clerk/clerk-react'
-import { ChevronLeftIcon, ShoppingBagIcon, ArrowRightStartOnRectangleIcon } from '@heroicons/react/24/outline'
+import { useClerk, SignedIn } from '@clerk/clerk-react'
+import { ShoppingBagIcon, ArrowRightStartOnRectangleIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../_contexts/FairContext'
 import { useFairCart } from '../_contexts/FairCartContext'
 import SignOutModal from './SignOutModal'
@@ -25,40 +25,15 @@ export default function FairNavbar() {
     { label: 'Info',    href: `${base}/info` },
   ]
 
-  const getBackDest = (): { href: string; label: string } => {
-    if (pathname.includes('/vendor/')) {
-      return { href: `${base}/vendors`, label: fair.name }
-    }
-    if (
-      pathname.endsWith('/cart') ||
-      pathname.includes('/checkout') ||
-      pathname.includes('/orders') ||
-      /\/order\/[^/]+$/.test(pathname)
-    ) {
-      return { href: base, label: fair.name }
-    }
-    return { href: '/fairs', label: fair.name }
-  }
-
-  const back = getBackDest()
-
   return (
     <>
       <nav className="fixed top-0 left-0 right-0 z-50 h-14 sm:h-16 bg-bg-dark/80 backdrop-blur-md border-b border-white/10">
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 h-full flex items-center justify-between gap-4">
 
-          {/* Left: contextual back */}
-          <Link
-            href={back.href}
-            className="flex items-center gap-1.5 min-w-0 group"
-          >
-            <ChevronLeftIcon className="w-3.5 h-3.5 shrink-0 text-text-gray group-hover:text-white transition-colors" />
-            <span
-              className="font-bebas text-base sm:text-lg tracking-wide truncate leading-none group-hover:opacity-80 transition-opacity"
-              style={{ color: accentColor }}
-            >
-              {back.label || '…'}
-            </span>
+          {/* Left: logo */}
+          <Link href="/" className="group flex items-center shrink-0">
+            <span className="font-bebas text-lg text-white transition-colors duration-200 group-hover:text-[#FF0077] leading-none">FAIR</span>
+            <span className="font-bebas text-lg text-[#FF0077] transition-colors duration-200 group-hover:text-white leading-none">SYNQ</span>
           </Link>
 
           {/* Center: nav links (desktop) */}
@@ -97,13 +72,15 @@ export default function FairNavbar() {
               )}
             </Link>
 
-            <button
-              onClick={() => setShowSignOut(true)}
-              className="hidden md:flex items-center gap-1 p-1.5 rounded-xl text-text-gray hover:text-white hover:bg-white/5 transition-colors cursor-pointer bg-transparent border-0"
-              title="Sign out"
-            >
-              <ArrowRightStartOnRectangleIcon className="w-4 h-4" />
-            </button>
+            <SignedIn>
+              <button
+                onClick={() => setShowSignOut(true)}
+                className="hidden md:flex items-center gap-1 p-1.5 rounded-xl text-text-gray hover:text-white hover:bg-white/5 transition-colors cursor-pointer bg-transparent border-0"
+                title="Sign out"
+              >
+                <ArrowRightStartOnRectangleIcon className="w-4 h-4" />
+              </button>
+            </SignedIn>
           </div>
         </div>
       </nav>

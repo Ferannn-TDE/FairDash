@@ -1,5 +1,6 @@
 import MarketplaceNavbar from '../_components/MarketplaceNavbar'
 import FairCard from '../_components/FairCard'
+import WelcomeBanner from '../_components/WelcomeBanner'
 import { mockFairs } from '@/lib/mock'
 import type { FairStatus } from '@/lib/mock'
 
@@ -26,6 +27,7 @@ export default function FairsPage() {
     <>
       <MarketplaceNavbar />
       <div className="pt-16 min-h-screen bg-bg-dark text-white">
+        <WelcomeBanner />
         <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 py-12">
 
           {/* Header */}

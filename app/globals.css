@@ -4,6 +4,57 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────
+   Unified hover system — design tokens
+   ───────────────────────────────────────── */
+
+@layer components {
+  /* Cards */
+  .card-hover {
+    @apply border border-white/[0.06] hover:border-[#FF0077]/20
+           hover:shadow-[0_0_25px_rgba(255,0,119,0.06)]
+           active:scale-[0.98] transition-all duration-300;
+  }
+
+  /* Primary (pink) buttons */
+  .btn-primary {
+    @apply bg-[#FF0077] text-white
+           hover:bg-[#FF0077]/85 hover:shadow-[0_4px_20px_rgba(255,0,119,0.3)]
+           active:scale-[0.97] transition-all duration-200;
+  }
+
+  /* Secondary (outlined) buttons */
+  .btn-secondary {
+    @apply bg-transparent border border-white/[0.08] text-gray-300
+           hover:bg-white/[0.05] hover:border-white/[0.15] hover:text-white
+           active:scale-[0.97] transition-all duration-200;
+  }
+
+  /* Icon buttons */
+  .btn-icon {
+    @apply bg-white/[0.04] border border-white/[0.06] text-gray-500
+           hover:bg-white/[0.08] hover:border-white/[0.1] hover:text-white
+           active:scale-[0.95] transition-all duration-200;
+  }
+
+  /* Destructive buttons */
+  .btn-destructive {
+    @apply bg-transparent border border-red-500/20 text-red-400
+           hover:bg-red-500/10 hover:border-red-500/30
+           active:scale-[0.97] transition-all duration-200;
+  }
+
+  /* Ghost / nav links */
+  .link-ghost {
+    @apply text-gray-400 hover:text-white transition-colors duration-200;
+  }
+
+  /* Interactive pink text */
+  .link-pink {
+    @apply text-[#FF0077] hover:text-white transition-colors duration-200;
+  }
+}
+
 @keyframes pulse-border {
   0%, 100% {
     border-color: rgba(255, 0, 119, 0.2);
@@ -123,7 +174,14 @@
   gap: 0.75rem !important;
   width: 100% !important;
   margin-top: 0 !important;
-  margin-bottom: 1.5rem !important;
+  margin-bottom: 0 !important;
+}
+
+div[class*="cl-socialButtons"] {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.75rem !important;
+  margin-bottom: 0 !important;
 }
 
 /* Each button: fixed height, zero margin — gap on parent is the only spacing */

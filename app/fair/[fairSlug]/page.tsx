@@ -12,8 +12,10 @@ import {
   StarIcon,
 } from '@heroicons/react/24/outline'
 
+import { SignedIn } from '@clerk/clerk-react'
 import { useFair } from '../../_contexts/FairContext'
 import type { VendorData } from '../../_contexts/FairContext'
+import FoodCard from '@/components/ui/FoodCard'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,52 +171,6 @@ function FairEnded({ accentColor, gradientFrom, gradientTo }: {
   )
 }
 
-// ── VendorCard ────────────────────────────────────────────────────────────────
-
-function VendorCard({ vendor, fairSlug, accentColor }: {
-  vendor: VendorData
-  fairSlug: string
-  accentColor: string
-}) {
-  return (
-    <Link
-      href={`/fair/${fairSlug}/vendor/${vendor.id}`}
-      className="group bg-bg-card border border-white/10 rounded-xl overflow-hidden hover:border-white/20 hover:-translate-y-0.5 transition-all duration-200"
-    >
-      {/* Image / placeholder */}
-      {vendor.logoUrl ? (
-        <div className="aspect-[4/3] overflow-hidden">
-          <img
-            src={vendor.logoUrl}
-            alt={vendor.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        </div>
-      ) : (
-        <div
-          className="aspect-[4/3] flex items-center justify-center"
-          style={{ background: `linear-gradient(135deg, ${accentColor}14, ${accentColor}06)` }}
-        >
-          <span
-            className="font-bebas text-5xl sm:text-6xl opacity-25"
-            style={{ color: accentColor }}
-          >
-            {vendor.name.charAt(0)}
-          </span>
-        </div>
-      )}
-
-      {/* Info */}
-      <div className="p-3">
-        <h3 className="font-semibold text-white text-sm leading-snug truncate">{vendor.name}</h3>
-        <p className="text-text-gray text-xs mt-0.5 truncate">
-          {vendor.cuisineType}{vendor.boothNumber ? ` · Booth ${vendor.boothNumber}` : ''}
-        </p>
-      </div>
-    </Link>
-  )
-}
-
 // ── CuisineChips ─────────────────────────────────────────────────────────────
 
 function CuisineChips({
@@ -360,7 +316,7 @@ export default function FairHomePage() {
           <div className="flex items-center gap-3 py-3 overflow-x-auto scrollbar-none">
             <Link
               href={`/fair/${fair.slug}/vendors`}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white transition-opacity hover:opacity-80"
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white active:scale-[0.97] transition-all duration-200 hover:opacity-85"
               style={{ background: accentColor, boxShadow: `0 2px 12px ${accentColor}40` }}
             >
               Browse Vendors
@@ -368,17 +324,19 @@ export default function FairHomePage() {
             </Link>
             <Link
               href={`/fair/${fair.slug}/info`}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white/80 bg-white/6 border border-white/10 hover:bg-white/10 transition-colors"
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold btn-secondary"
             >
               <MapPinIcon className="w-3.5 h-3.5" />
               Fair Info
             </Link>
-            <Link
-              href={`/fair/${fair.slug}/orders`}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white/80 bg-white/6 border border-white/10 hover:bg-white/10 transition-colors"
-            >
-              My Orders
-            </Link>
+            <SignedIn>
+              <Link
+                href={`/fair/${fair.slug}/orders`}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold btn-secondary"
+              >
+                My Orders
+              </Link>
+            </SignedIn>
           </div>
         </div>
       </div>
@@ -419,10 +377,17 @@ export default function FairHomePage() {
         {filteredVendors.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {filteredVendors.map((v) => (
-              <VendorCard
+              <FoodCard
                 key={v.id}
-                vendor={v}
-                fairSlug={fair.slug}
+                variant="vendor"
+                href={`/fair/${fair.slug}/vendor/${v.slug}`}
+                name={v.name}
+                description={v.description}
+                cuisineType={v.cuisineType}
+                boothNumber={v.boothNumber}
+                logoUrl={v.logoUrl}
+                itemCount={v._count?.menuItems ?? 0}
+                isBusy={v.isBusy}
                 accentColor={accentColor}
               />
             ))}

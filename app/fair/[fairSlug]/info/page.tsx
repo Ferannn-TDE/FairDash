@@ -3,6 +3,7 @@
 import { MapPinIcon, ClockIcon, CalendarIcon, EnvelopeIcon, GlobeAltIcon, TicketIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import StatusBadge from '../../../_components/StatusBadge'
+import Breadcrumb from '../_components/Breadcrumb'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
@@ -14,8 +15,9 @@ export default function FairInfoPage() {
 
   return (
     <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 py-10 text-white">
+      <Breadcrumb crumbs={[{ label: 'Info' }]} />
       <div className="flex items-center gap-3 mb-8">
-        <h1 className="font-bebas text-4xl text-white tracking-wide">{fair.name}</h1>
+        <h1 className="font-bebas text-4xl text-white tracking-wide">Fair Info</h1>
         <StatusBadge status={fair.status} />
       </div>
 
