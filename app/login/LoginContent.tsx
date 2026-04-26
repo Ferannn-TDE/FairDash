@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { SignIn, SignUp } from '@clerk/clerk-react'
-import { ShoppingBag, Store, CalendarDays, Truck, type LucideIcon } from 'lucide-react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { SignIn, SignUp, useUser } from '@clerk/clerk-react'
+import { ShoppingBag, Store, CalendarDays, Truck, X, type LucideIcon } from 'lucide-react'
 
 type LoginRole = 'customer' | 'vendor' | 'organizer' | 'runner'
 
@@ -33,7 +33,7 @@ const ROLES: RoleConfig[] = [
     title: "I'm a Vendor",
     shortLabel: 'Vendor',
     description: 'Manage your booth, menu, and orders.',
-    redirectTo: '/vendor/dashboard',
+    redirectTo: '/vendor',
     color: '#FF6B35',
   },
   {
@@ -90,6 +90,8 @@ const clerkElements = {
 
 export default function LoginContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const { isSignedIn } = useUser()
   const rawRole = searchParams.get('role') as LoginRole | null
   const redirectPath = searchParams.get('redirect') ?? ''
   const initialRole = rawRole && VALID_ROLES.includes(rawRole) ? rawRole : 'customer'
@@ -106,6 +108,11 @@ export default function LoginContent() {
   const afterSignUp = redirectPath
     ? `/onboarding?role=${selectedRole}&redirect=${encodeURIComponent(redirectPath)}`
     : `/onboarding?role=${selectedRole}`
+
+  // forceRedirectUrl guarantees redirect; useEffect is a belt-and-suspenders fallback
+  useEffect(() => {
+    if (isSignedIn) router.push(afterSignIn)
+  }, [isSignedIn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen flex">
@@ -229,6 +236,17 @@ export default function LoginContent() {
         {/* Top accent line */}
         <div className="h-px w-full bg-gradient-to-r from-transparent via-[#FF0077]/30 to-transparent" />
 
+        {/* Close button */}
+        <div className="flex justify-end px-5 pt-5 sm:px-8 sm:pt-6 lg:px-12">
+          <a
+            href="/"
+            aria-label="Close"
+            className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.08] hover:border-white/[0.1] transition-all duration-200 group"
+          >
+            <X className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
+          </a>
+        </div>
+
         {/* Mobile: Logo + role pills */}
         <div className="lg:hidden px-6 pt-8 pb-2">
           <a href="/" className="flex items-center mb-8">
@@ -293,13 +311,13 @@ export default function LoginContent() {
             {mode === 'sign-in' ? (
               <SignIn
                 routing="hash"
-                afterSignInUrl={afterSignIn}
+                forceRedirectUrl={afterSignIn}
                 appearance={{ elements: clerkElements }}
               />
             ) : (
               <SignUp
                 routing="hash"
-                afterSignUpUrl={afterSignUp}
+                forceRedirectUrl={afterSignUp}
                 appearance={{ elements: clerkElements }}
               />
             )}

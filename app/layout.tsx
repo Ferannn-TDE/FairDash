@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { Toaster } from 'react-hot-toast'
 import ClerkClientProvider from './_providers/ClerkClientProvider'
-import '../src/index.css'
+import './globals.css'
 
 // ---------------------------------------------------------------------------
 // Root layout — single ClerkProvider for the entire tree.

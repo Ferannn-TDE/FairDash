@@ -9,7 +9,7 @@ import MarketplaceNavbar from './_components/MarketplaceNavbar'
 import FairCard from './_components/FairCard'
 import HowItWorksSection from './_components/HowItWorksSection'
 import { mockFairs, getActiveFairs } from '@/lib/mock'
-import { useUser } from '@clerk/clerk-react'
+import { useUser, SignedIn, SignedOut } from '@clerk/clerk-react'
 import { useRole } from './_contexts/RoleContext'
 
 // ── Facebook icon (heroicons has no social icons) ─────────────────────────────
@@ -256,17 +256,19 @@ function FinalCTABanner() {
           >
             <Link
               href="/fairs"
-              className="flex items-center justify-center w-full px-8 py-3.5 bg-neon-pink text-white text-sm font-inter font-semibold rounded-xl hover:bg-[#e0006b] shadow-[0_4px_20px_rgba(255,0,119,0.3)] hover:shadow-[0_4px_30px_rgba(255,0,119,0.4)] transition-all duration-200"
+              className="flex items-center justify-center w-full px-8 py-3.5 text-sm font-inter font-semibold rounded-xl shadow-[0_4px_20px_rgba(255,0,119,0.3)] btn-primary"
             >
               Browse Fairs Near You
             </Link>
           </motion.div>
-          <Link
-            href="/login"
-            className="flex items-center justify-center w-full sm:w-auto px-8 py-3.5 bg-transparent text-white text-sm font-inter font-medium rounded-xl border border-white/10 hover:border-white/20 hover:bg-white/[0.03] transition-all duration-200"
-          >
-            Create an Account
-          </Link>
+          <SignedOut>
+            <Link
+              href="/login"
+              className="flex items-center justify-center w-full sm:w-auto px-8 py-3.5 text-sm font-inter font-medium rounded-xl btn-secondary"
+            >
+              Create an Account
+            </Link>
+          </SignedOut>
         </div>
       </Reveal>
     </section>
@@ -317,7 +319,9 @@ function SiteFooter() {
               <p className="text-[10px] font-inter text-gray-600 uppercase tracking-[0.15em] mb-4">Platform</p>
               <div className="flex flex-col gap-2.5">
                 <Link href="/fairs" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Discover Fairs</Link>
-                <Link href="/login" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Sign In</Link>
+                <SignedOut>
+                  <Link href="/login" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Sign In</Link>
+                </SignedOut>
               </div>
             </div>
             <div>
@@ -450,9 +454,6 @@ export default function MarketplaceLanding() {
             ))}
           </Stagger>
         </section>
-
-        {/* ── Quick actions for signed-in users ── */}
-        <QuickActionsSection />
 
         {/* ── Role cards — how will you FairSynq? ── */}
         <RoleSection />

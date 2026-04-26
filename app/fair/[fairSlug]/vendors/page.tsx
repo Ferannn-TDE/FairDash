@@ -1,77 +1,11 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import Link from 'next/link'
 import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import type { VendorData } from '../../../_contexts/FairContext'
-
-// ── VendorCard ─────────────────────────────────────────────────────────────────
-
-function VendorCard({ vendor, fairSlug, accentColor }: { vendor: VendorData; fairSlug: string; accentColor: string }) {
-  const itemCount = vendor._count?.menuItems ?? 0
-
-  return (
-    <Link
-      href={`/fair/${fairSlug}/vendor/${vendor.id}`}
-      className="bg-bg-card rounded-xl md:rounded-2xl border border-white/5 overflow-hidden transition-all duration-300 hover:border-neon-pink/30 hover:scale-[1.02] hover:shadow-glow no-underline group flex flex-col h-full"
-    >
-      {/* Image / emoji hero */}
-      <div className="relative w-full aspect-square bg-gradient-to-br from-[#252525] to-bg-card flex items-center justify-center overflow-hidden flex-shrink-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,119,0.08),transparent_70%)]" />
-        {vendor.logoUrl ? (
-          <img
-            src={vendor.logoUrl}
-            alt={vendor.name}
-            className="w-full h-full object-cover relative z-10"
-          />
-        ) : (
-          <span className="text-[2.5rem] md:text-[4rem] relative z-10 transition-transform duration-300 group-hover:scale-110">
-            🍽️
-          </span>
-        )}
-        {/* Item count badge */}
-        <div
-          className="absolute top-2 right-2 md:top-3 md:right-3 bg-black/70 px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-[0.5625rem] md:text-[0.6875rem] font-bold border"
-          style={{ color: accentColor, borderColor: `${accentColor}4D` }}
-        >
-          {itemCount} {itemCount === 1 ? 'item' : 'items'}
-        </div>
-        {/* Busy badge */}
-        {vendor.isBusy && (
-          <div className="absolute top-2 left-2 md:top-3 md:left-3 bg-yellow-500/90 px-2 py-0.5 rounded-full text-[0.5625rem] font-bold text-black">
-            Busy
-          </div>
-        )}
-      </div>
-
-      {/* Info */}
-      <div className="p-3 md:p-5 flex flex-col flex-1">
-        <h3 className="font-bebas text-base md:text-xl tracking-wide text-white mb-1 line-clamp-2 min-h-[2rem] md:min-h-[3rem] leading-tight">
-          {vendor.name}
-        </h3>
-        <p className="text-text-gray text-[0.6875rem] md:text-sm leading-relaxed mb-2 md:mb-3 line-clamp-2 min-h-[2rem] md:min-h-[2.5rem]">
-          {vendor.description || vendor.cuisineType}
-        </p>
-        <div className="flex items-center flex-wrap gap-1.5 md:gap-3 text-[0.625rem] md:text-xs text-text-gray mb-3 md:mb-4">
-          <span>{vendor.cuisineType}</span>
-          {vendor.boothNumber && (
-            <>
-              <span className="hidden md:inline">·</span>
-              <span>Booth {vendor.boothNumber}</span>
-            </>
-          )}
-        </div>
-        <div
-          className="mt-auto text-center py-2 md:py-2.5 rounded-lg md:rounded-xl bg-white/5 border border-white/10 text-[0.625rem] md:text-sm font-semibold text-white uppercase tracking-wide transition-all duration-300 group-hover:border-neon-pink group-hover:shadow-glow"
-        >
-          <span className="group-hover:hidden">View Menu</span>
-          <span className="hidden group-hover:inline" style={{ color: accentColor }}>View Menu →</span>
-        </div>
-      </div>
-    </Link>
-  )
-}
+import Breadcrumb from '../_components/Breadcrumb'
+import FoodCard from '@/components/ui/FoodCard'
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
@@ -123,6 +57,7 @@ export default function FairVendorsPage() {
       {/* Header with search */}
       <div className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-10 border-b border-white/10">
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8">
+          <div className="mb-2"><Breadcrumb crumbs={[{ label: 'Vendors' }]} /></div>
           <h1 className="font-bebas text-[clamp(2rem,6vw,3.5rem)] text-center mb-2 tracking-[0.125rem]">
             <span style={{ color: accentColor }}>{fair.name || '…'}</span> Vendors
           </h1>
@@ -232,7 +167,19 @@ export default function FairVendorsPage() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3 sm:gap-5">
               {filtered.map((vendor) => (
-                <VendorCard key={vendor.id} vendor={vendor} fairSlug={fair.slug} accentColor={accentColor} />
+                <FoodCard
+                  key={vendor.id}
+                  variant="vendor"
+                  href={`/fair/${fair.slug}/vendor/${vendor.slug}`}
+                  name={vendor.name}
+                  description={vendor.description}
+                  cuisineType={vendor.cuisineType}
+                  boothNumber={vendor.boothNumber}
+                  logoUrl={vendor.logoUrl}
+                  itemCount={vendor._count?.menuItems ?? 0}
+                  isBusy={vendor.isBusy}
+                  accentColor={accentColor}
+                />
               ))}
             </div>
           )}

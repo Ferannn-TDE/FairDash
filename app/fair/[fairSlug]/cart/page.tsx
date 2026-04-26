@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ChevronLeftIcon, MinusIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { MinusIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
+import Breadcrumb from '../_components/Breadcrumb'
 
 export default function FairCartPage() {
   const router = useRouter()
@@ -40,16 +41,7 @@ export default function FairCartPage() {
 
   return (
     <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 text-white">
-
-      {/* Fix 7: back link — one level up to vendors */}
-      <Link
-        href={`/fair/${fair.slug}/vendors`}
-        className="inline-flex items-center gap-1 text-text-gray hover:text-white transition-colors text-sm mb-5 sm:mb-6"
-      >
-        <ChevronLeftIcon className="w-4 h-4" />
-        Continue Browsing
-      </Link>
-
+      <Breadcrumb crumbs={[{ label: 'Cart' }]} />
       <h1 className="font-bebas text-3xl sm:text-4xl tracking-wide mb-6 sm:mb-8">Your Cart</h1>
 
       <div className="flex flex-col lg:flex-row gap-6 sm:gap-8">

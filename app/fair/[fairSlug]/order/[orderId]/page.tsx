@@ -9,7 +9,6 @@ import {
   MapPinIcon,
   XMarkIcon,
   ExclamationTriangleIcon,
-  ArrowLeftIcon,
   ChatBubbleLeftEllipsisIcon,
   ReceiptPercentIcon,
   BuildingStorefrontIcon,
@@ -20,6 +19,7 @@ import toast from 'react-hot-toast'
 import { getDatabase, ref, onValue, off } from 'firebase/database'
 import { getFirebaseApp } from '@/lib/firebase-client'
 import { useFair } from '../../../../_contexts/FairContext'
+import Breadcrumb from '../../_components/Breadcrumb'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -590,13 +590,10 @@ export default function OrderTrackingPage() {
         {/* Page header */}
         <div className="bg-[radial-gradient(circle_at_top_center,rgba(255,0,119,0.1),transparent_50%),#1a1a1a] py-8 md:py-6 border-b border-white/10">
           <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8">
-            <Link
-              href={`/fair/${params.fairSlug}/orders`}
-              className="inline-flex items-center gap-2 text-[#A1A1A1] text-sm font-medium no-underline hover:text-[#FF0077] transition-colors mb-4"
-            >
-              <ArrowLeftIcon className="w-4 h-4" />
-              My Orders
-            </Link>
+            <Breadcrumb crumbs={[
+              { label: 'My Orders', href: `/fair/${params.fairSlug}/orders` },
+              { label: `Order #${order.id.slice(-8).toUpperCase()}` },
+            ]} />
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h1 className="font-bebas text-[clamp(1.75rem,4vw,2.5rem)] tracking-[0.125rem] leading-none mb-1">
