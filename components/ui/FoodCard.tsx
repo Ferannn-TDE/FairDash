@@ -34,6 +34,7 @@ interface MenuItemCardProps {
   qty: number
   onAdd: () => void
   onDecrement: () => void
+  subtitle?: string | null
 }
 
 type FoodCardProps = VendorCardProps | MenuItemCardProps
@@ -103,7 +104,7 @@ export default function FoodCard(props: FoodCardProps) {
   }
 
   // menu-item variant
-  const { name, description, price, imageUrl, prepTime, available = true, accentColor, qty, onAdd, onDecrement } = props
+  const { name, description, price, imageUrl, prepTime, available = true, accentColor, qty, onAdd, onDecrement, subtitle } = props
 
   return (
     <div className={`bg-bg-card rounded-xl overflow-hidden card-hover flex flex-col ${!available ? 'opacity-50' : ''}`}>
@@ -122,6 +123,9 @@ export default function FoodCard(props: FoodCardProps) {
 
       <div className="p-3 flex flex-col flex-1">
         <h3 className="font-semibold text-white text-xs sm:text-sm leading-snug line-clamp-2">{name}</h3>
+        {subtitle && (
+          <p className="mt-0.5 text-xs text-text-gray">{subtitle}</p>
+        )}
         <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
           ${price.toFixed(2)}
         </p>

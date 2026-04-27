@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -16,8 +16,6 @@ import {
 } from '@heroicons/react/24/outline'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import toast from 'react-hot-toast'
-import { getDatabase, ref, onValue, off } from 'firebase/database'
-import { getFirebaseApp } from '@/lib/firebase-client'
 import { useFair } from '../../../../_contexts/FairContext'
 import Breadcrumb from '../../_components/Breadcrumb'
 
@@ -460,99 +458,53 @@ export default function OrderTrackingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`/api/orders/${params.orderId}`)
+      .then(r => r.json())
+      .then(json => {
+        if (json?.success) {
+          setOrder(json.data)
+        } else {
+          setError(json?.error?.message ?? 'Order not found')
+        }
+      })
+      .catch(() => setError('Failed to load order — please refresh'))
+      .finally(() => setLoading(false))
+  }, [params.orderId])
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [showSupportModal, setShowSupportModal] = useState(false)
-  const [runnerLocation, setRunnerLocation] = useState<{ lat: number; lng: number } | null>(null)
-
-  // ── Fetch order ──────────────────────────────────────────────────────────
-  const fetchOrder = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/orders/${params.orderId}`)
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message ?? 'Failed to load order')
-      setOrder(json.data)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setLoading(false)
-    }
-  }, [params.orderId])
-
-  // Initial fetch + 15-second polling fallback for non-terminal orders
-  useEffect(() => {
-    fetchOrder()
-    const isActive = !order || (!TERMINAL_STATUSES.includes(order.status) && order.status !== 'COMPLETED')
-    if (!isActive) return
-    const interval = setInterval(fetchOrder, 15_000)
-    return () => clearInterval(interval)
-  }, [fetchOrder, order?.status])
-
-  // ── Firebase RTDB — real-time customer status listener ───────────────────
-  // Path: fairs/{eventId}/customerOrders/{customerId}/{orderId}
-  // The status update route writes here so customers get push updates.
-  useEffect(() => {
-    if (!order?.eventId || !order?.customerId) return
-    const app = getFirebaseApp()
-    if (!app) return
-
-    const db = getDatabase(app)
-    const orderRef = ref(db, `fairs/${order.eventId}/customerOrders/${order.customerId}/${params.orderId}`)
-
-    onValue(orderRef, snap => {
-      const data = snap.val()
-      if (data?.status) {
-        setOrder(prev => prev ? { ...prev, status: data.status, updatedAt: data.updatedAt } : prev)
-      }
-    })
-
-    return () => off(orderRef)
-  }, [order?.eventId, order?.customerId, params.orderId])
-
-  // ── Firebase RTDB — runner live location (HOME_DELIVERY READY only) ──────
-  useEffect(() => {
-    if (!order?.eventId || !order?.runnerId) return
-    if (order.status !== 'READY') return
-    if (order.fulfillmentType !== 'HOME_DELIVERY') return
-
-    const app = getFirebaseApp()
-    if (!app) return
-
-    const db = getDatabase(app)
-    const locRef = ref(db, `fairs/${order.eventId}/runnerLocation/${order.runnerId}`)
-
-    onValue(locRef, snap => {
-      const loc = snap.val()
-      if (loc?.lat && loc?.lng) setRunnerLocation({ lat: loc.lat, lng: loc.lng })
-    })
-
-    return () => off(locRef)
-  }, [order?.eventId, order?.runnerId, order?.status, order?.fulfillmentType])
+  const runnerLocation: { lat: number; lng: number } | null = null
 
   // ── Cancel handler ────────────────────────────────────────────────────────
   const handleCancel = async () => {
     setCancelling(true)
     try {
-      const res = await fetch(`/api/orders/${params.orderId}/cancel`, { method: 'PATCH' })
+      const res = await fetch(`/api/orders/${params.orderId}/cancel`, { method: 'POST' })
       const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message ?? 'Cancellation failed')
-      setShowCancelModal(false)
-      const fee = json.data?.cancellationFee
-      toast.success(
-        fee > 0
-          ? `Order cancelled. Refund issued minus $${fee.toFixed(2)} cancellation fee.`
-          : 'Order cancelled. Full refund is on the way.'
-      )
-      fetchOrder()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not cancel order. Please contact support.')
+      if (res.ok) {
+        setOrder(prev => prev ? { ...prev, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : prev)
+        setShowCancelModal(false)
+        toast.success('Order cancelled. Refund is on the way.')
+      } else {
+        toast.error(json?.error?.message ?? 'Could not cancel — please contact support')
+      }
+    } catch {
+      toast.error('Network error — please try again')
     } finally {
       setCancelling(false)
     }
   }
 
   // ── Loading / error / empty states ────────────────────────────────────────
-  if (loading) return null // loading.tsx handles skeleton
+  if (loading) return (
+    <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-10 space-y-4 animate-pulse">
+      <div className="h-8 bg-white/5 rounded-xl w-48" />
+      <div className="h-32 bg-white/5 rounded-2xl" />
+      <div className="h-48 bg-white/5 rounded-2xl" />
+    </div>
+  )
 
   if (error) {
     return (
@@ -627,8 +579,8 @@ export default function OrderTrackingPage() {
                   <div className="relative w-full h-64 md:h-48">
                     <iframe
                       title="Order location"
-                      src={runnerLocation
-                        ? `https://maps.google.com/maps?q=${runnerLocation.lat},${runnerLocation.lng}&output=embed&hl=en&z=16`
+                      src={runnerLocation != null
+                        ? `https://maps.google.com/maps?q=${(runnerLocation as {lat:number;lng:number}).lat},${(runnerLocation as {lat:number;lng:number}).lng}&output=embed&hl=en&z=16`
                         : mapSrc}
                       className="w-full h-full border-0"
                       loading="lazy"

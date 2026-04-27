@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import { MagnifyingGlassIcon, BuildingStorefrontIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import type { VendorData } from '../../../_contexts/FairContext'
@@ -61,7 +62,7 @@ export default function FairVendorsPage() {
           <h1 className="font-bebas text-[clamp(2rem,6vw,3.5rem)] text-center mb-2 tracking-[0.125rem]">
             <span style={{ color: accentColor }}>{fair.name || '…'}</span> Vendors
           </h1>
-          <p className="text-center text-text-gray text-sm sm:text-base mb-8">
+          <p className="text-center text-text-gray text-sm sm:text-base mb-4">
             Browse all vendors and discover their menus
           </p>
 

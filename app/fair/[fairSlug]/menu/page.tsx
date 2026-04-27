@@ -153,6 +153,9 @@ function FoodCardSkeleton() {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
+// Cart version — bump this when the cart schema or ID format changes to bust stale caches
+const CART_VERSION = 'v2-real-ids'
+
 export default function FairMenuPage() {
   const params = useParams<{ fairSlug: string }>()
   const { fair, vendors } = useFair()
@@ -160,46 +163,52 @@ export default function FairMenuPage() {
 
   const [allItems, setAllItems] = useState<FlatMenuItem[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Bust any stale localStorage cart that has mock IDs from before the real API was wired up
+  useEffect(() => {
+    const versionKey = `fairsynq-cart-version-${params.fairSlug}`
+    if (localStorage.getItem(versionKey) !== CART_VERSION) {
+      localStorage.removeItem(`fairsynq-cart-${params.fairSlug}`)
+      localStorage.setItem(versionKey, CART_VERSION)
+    }
+  }, [params.fairSlug])
+
+  // Fetch all menu items from the real DB
+  useEffect(() => {
+    setLoading(true)
+    fetch(`/api/menu?eventSlug=${params.fairSlug}&limit=200`)
+      .then(r => r.json())
+      .then(json => {
+        if (json?.data) {
+          setAllItems(
+            json.data.map((item: any): FlatMenuItem => ({
+              id: item.id,
+              name: item.name,
+              description: item.description ?? null,
+              price: item.price,
+              category: item.category,
+              imageUrl: item.imageUrl ?? null,
+              prepTime: item.prepTime ?? null,
+              available: item.isAvailable,
+              vendorId: item.vendorId,
+              vendorName: item.vendor?.name ?? '',
+            }))
+          )
+        }
+      })
+      .catch(() => {/* keep empty state, show no items */})
+      .finally(() => setLoading(false))
+  }, [params.fairSlug])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all')
   const [showFilters, setShowFilters] = useState(false)
 
-  useEffect(() => {
-    const fairSlug = params.fairSlug
-    if (!fairSlug) return
-    setLoading(true)
-
-    fetch(`/api/menu?eventSlug=${fairSlug}&limit=100`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success && Array.isArray(json.data)) {
-          const items: FlatMenuItem[] = json.data.map((item: any) => ({
-            id: item.id,
-            name: item.name,
-            description: item.description ?? null,
-            price: item.price,
-            category: item.category,
-            imageUrl: item.imageUrl ?? null,
-            prepTime: item.prepTime ?? null,
-            available: item.isAvailable ?? true,
-            vendorId: item.vendor?.id ?? item.vendorId,
-            vendorName: item.vendor?.name ?? '',
-          }))
-          setAllItems(items)
-        }
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [params.fairSlug])
-
   const isSearching = searchQuery.trim().length > 0
   const clearSearch = () => setSearchQuery('')
 
-  // Unique vendor options from fetched items (stable dedup)
+  // Unique vendor options — derive from real menu items so pills only show
+  // vendors that actually have items available
   const vendorOptions = useMemo<VendorOption[]>(() => {
-    // Prefer context vendors list (already fetched with count) for pills,
-    // fall back to what's embedded in menu items
-    if (vendors.length > 0) return vendors.map((v) => ({ id: v.id, name: v.name }))
     const seen = new Set<string>()
     const opts: VendorOption[] = []
     allItems.forEach((item) => {
@@ -209,7 +218,7 @@ export default function FairMenuPage() {
       }
     })
     return opts
-  }, [vendors, allItems])
+  }, [allItems])
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()

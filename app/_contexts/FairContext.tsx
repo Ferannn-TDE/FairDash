@@ -13,6 +13,14 @@ import type { Fair as MockFair, MockVendor } from '@/lib/mock'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface FulfillmentConfig {
+  boothPickupEnabled: boolean
+  curbsideEnabled: boolean
+  homeDeliveryEnabled: boolean
+  homeDeliveryFee: number | null
+  curbsideZoneDescription: string | null
+}
+
 export interface FairData {
   id: string
   name: string
@@ -29,6 +37,9 @@ export interface FairData {
     startDate: string
     endDate: string
   }
+  fulfillmentConfig: FulfillmentConfig | null
+  serviceChargeEnabled: boolean
+  serviceChargeAmount: number | null
   // Optional fields not present in DB — pages handle them with conditional rendering
   tagline?: string
   location: { address: string; city: string; state: string }
@@ -84,6 +95,9 @@ function placeholderFair(fairSlug: string): FairData {
     branding: { accentColor: '#FF0077', gradientFrom: '#FF0077', gradientTo: '#7C3AED' },
     status: 'active',
     dates: { startDate: new Date().toISOString(), endDate: new Date().toISOString() },
+    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: false, homeDeliveryEnabled: false, homeDeliveryFee: null, curbsideZoneDescription: null },
+    serviceChargeEnabled: false,
+    serviceChargeAmount: null,
     location: { address: '', city: '', state: '' },
     operatingHours: { open: '', close: '' },
     admissionFree: false,
@@ -105,6 +119,9 @@ function normalizeMockFair(f: MockFair): FairData {
     },
     status: f.status === 'draft' || f.status === 'archived' ? 'upcoming' : f.status,
     dates: { startDate: f.dates.startDate, endDate: f.dates.endDate },
+    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true, homeDeliveryFee: 2.99, curbsideZoneDescription: null },
+    serviceChargeEnabled: false,
+    serviceChargeAmount: null,
     location: f.location,
     operatingHours: f.operatingHours,
     admissionFree: f.admissionFree,
@@ -130,6 +147,7 @@ function normalizeMockVendor(v: MockVendor): VendorData {
 
 function normalizeEvent(raw: any): FairData {
   const color = raw.primaryColor ?? '#FF0077'
+  const fc = raw.fulfillmentConfig ?? null
   return {
     id: raw.id,
     name: raw.name,
@@ -146,6 +164,15 @@ function normalizeEvent(raw: any): FairData {
       startDate: raw.startDate,
       endDate: raw.endDate,
     },
+    fulfillmentConfig: fc ? {
+      boothPickupEnabled: fc.boothPickupEnabled,
+      curbsideEnabled: fc.curbsideEnabled,
+      homeDeliveryEnabled: fc.homeDeliveryEnabled,
+      homeDeliveryFee: fc.homeDeliveryFee ?? null,
+      curbsideZoneDescription: fc.curbsideZoneDescription ?? null,
+    } : null,
+    serviceChargeEnabled: raw.serviceChargeEnabled ?? false,
+    serviceChargeAmount: raw.serviceChargeAmount ?? null,
     location: { address: '', city: '', state: '' },
     operatingHours: { open: '', close: '' },
     admissionFree: false,
@@ -175,43 +202,49 @@ interface FairProviderProps {
 }
 
 export function FairProvider({ fairSlug, children }: FairProviderProps) {
-  // Seed immediately from mock data so the page renders with real content
-  // before (or instead of) the API responding.
-  const mockFair = getFairBySlug(fairSlug)
-  const mockVendorList = getVendorsByFairSlug(fairSlug)
+  const [fair, setFair] = useState<FairData>(() => placeholderFair(fairSlug))
+  const [vendors, setVendors] = useState<VendorData[]>([])
+  const [fairLoading, setFairLoading] = useState(true)
+  const [vendorsLoading, setVendorsLoading] = useState(true)
 
-  const [fair, setFair] = useState<FairData>(() =>
-    mockFair ? normalizeMockFair(mockFair) : placeholderFair(fairSlug)
-  )
-  const [vendors, setVendors] = useState<VendorData[]>(() =>
-    mockVendorList.map(normalizeMockVendor)
-  )
-  const [fairLoading, setFairLoading] = useState(false)
-  const [vendorsLoading, setVendorsLoading] = useState(false)
+  // Fetch real event + vendors from the DB. Falls back to mock data if the API
+  // is unavailable or the event isn't in the DB yet.
+  useEffect(() => {
+    setFairLoading(true)
+    fetch(`/api/events/${fairSlug}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        if (json?.data) {
+          setFair(normalizeEvent(json.data))
+        } else {
+          const mockFair = getFairBySlug(fairSlug)
+          if (mockFair) setFair(normalizeMockFair(mockFair))
+        }
+      })
+      .catch(() => {
+        const mockFair = getFairBySlug(fairSlug)
+        if (mockFair) setFair(normalizeMockFair(mockFair))
+      })
+      .finally(() => setFairLoading(false))
+  }, [fairSlug])
 
   useEffect(() => {
-    let cancelled = false
-
-    // Try the real API; upgrade state if it returns data.
-    // If API is not yet built (501/error), mock data already loaded above.
-    fetch(`/api/events/${fairSlug}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (cancelled) return
-        if (json.success && json.data) setFair(normalizeEvent(json.data))
-      })
-      .catch(() => {})
-
+    setVendorsLoading(true)
     fetch(`/api/vendors?eventSlug=${fairSlug}&limit=100`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (cancelled) return
-        if (json.success && Array.isArray(json.data) && json.data.length > 0)
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        if (json?.data?.length) {
           setVendors(json.data.map(normalizeVendor))
+        } else {
+          const mockVendorList = getVendorsByFairSlug(fairSlug)
+          setVendors(mockVendorList.map(normalizeMockVendor))
+        }
       })
-      .catch(() => {})
-
-    return () => { cancelled = true }
+      .catch(() => {
+        const mockVendorList = getVendorsByFairSlug(fairSlug)
+        setVendors(mockVendorList.map(normalizeMockVendor))
+      })
+      .finally(() => setVendorsLoading(false))
   }, [fairSlug])
 
   const value = useMemo<FairContextValue>(

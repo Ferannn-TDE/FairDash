@@ -21,6 +21,7 @@ export default function FairNavbar() {
 
   const navLinks = [
     { label: 'Home',    href: base },
+    { label: 'Menu',    href: `${base}/browse` },
     { label: 'Vendors', href: `${base}/vendors` },
     { label: 'Info',    href: `${base}/info` },
   ]
