@@ -1,12 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   CurrencyDollarIcon,
   ShoppingBagIcon,
   BanknotesIcon,
   CheckCircleIcon,
-  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import EarningsChart, { type ChartDataPoint, type ChartPeriod } from '@/app/_components/EarningsChart'
 
@@ -19,9 +18,28 @@ interface VendorStats {
   pendingOrders: number
 }
 
-interface Vendor {
-  id: string
-  name: string
+const MOCK_VENDOR = { id: 'vendor_001', name: 'Smoky Barrel BBQ' }
+
+const MOCK_STATS: VendorStats = {
+  todayRevenue: 487.50,
+  todayOrders: 23,
+  avgOrderValue: 21.20,
+  acceptanceRate: 0.97,
+  cancellationRate: 0.03,
+  pendingOrders: 2,
+}
+
+function buildChartData(period: ChartPeriod): ChartDataPoint[] {
+  const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+  return Array.from({ length: days }, (_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (days - 1 - i))
+    return {
+      date: d.toISOString().slice(0, 10),
+      revenue: Math.round(300 + Math.random() * 400),
+      orders: Math.round(10 + Math.random() * 20),
+    }
+  })
 }
 
 function StatCard({
@@ -62,69 +80,13 @@ function StatCard({
 }
 
 export default function VendorAnalyticsPage() {
-  const [vendor, setVendor] = useState<Vendor | null>(null)
-  const [stats, setStats] = useState<VendorStats | null>(null)
-  const [chartData, setChartData] = useState<ChartDataPoint[]>([])
+  const vendor = MOCK_VENDOR
+  const stats = MOCK_STATS
   const [period, setPeriod] = useState<ChartPeriod>('7d')
-  const [vendorLoading, setVendorLoading] = useState(true)
-  const [chartLoading, setChartLoading] = useState(false)
-
-  // 1. Fetch vendor on mount
-  useEffect(() => {
-    fetch('/api/vendors/me')
-      .then((r) => r.json())
-      .then((json) => {
-        if (!json.success) return
-        setVendor(json.data.vendor)
-      })
-      .catch(() => {})
-      .finally(() => setVendorLoading(false))
-  }, [])
-
-  // 2. Fetch KPIs when vendor is known
-  useEffect(() => {
-    if (!vendor) return
-    fetch(`/api/vendors/${vendor.id}/stats`)
-      .then((r) => r.json())
-      .then((json) => { if (json.success) setStats(json.data) })
-      .catch(() => {})
-  }, [vendor?.id])
-
-  // 3. Fetch chart data when vendor or period changes
-  useEffect(() => {
-    if (!vendor) return
-    setChartLoading(true)
-    fetch(`/api/vendors/${vendor.id}/revenue?period=${period}`)
-      .then((r) => r.json())
-      .then((json) => { if (json.success) setChartData(json.data.data) })
-      .catch(() => {})
-      .finally(() => setChartLoading(false))
-  }, [vendor?.id, period])
-
-  if (vendorLoading) {
-    return (
-      <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center">
-        <div className="w-10 h-10 rounded-full border-2 border-neon-pink border-t-transparent animate-spin" />
-      </div>
-    )
-  }
-
-  if (!vendor) {
-    return (
-      <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center p-6">
-        <div className="text-center max-w-sm">
-          <ExclamationTriangleIcon className="w-12 h-12 text-amber-400/60 mx-auto mb-4" />
-          <h2 className="font-bebas text-2xl tracking-wide text-white mb-2">No vendor found</h2>
-          <p className="text-text-gray text-sm">Your account is not linked to a vendor profile.</p>
-        </div>
-      </div>
-    )
-  }
+  const chartData = buildChartData(period)
 
   const periodRevenue = chartData.reduce((s, d) => s + d.revenue, 0)
-  const completionRate = stats
-    ? ((1 - (stats.cancellationRate ?? 0)) * 100).toFixed(1) + '%'
-    : '—'
+  const completionRate = ((1 - stats.cancellationRate) * 100).toFixed(1) + '%'
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[78rem] mx-auto">

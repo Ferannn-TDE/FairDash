@@ -54,10 +54,13 @@ export default function FairOrdersPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/orders?limit=20')
+    setLoading(true)
+    fetch('/api/orders?limit=50')
       .then(r => r.json())
-      .then(json => setOrders(json.data?.orders ?? []))
-      .catch(() => {})
+      .then(json => {
+        if (json?.success) setOrders(json.data.orders ?? [])
+      })
+      .catch(() => {/* show empty state */})
       .finally(() => setLoading(false))
   }, [])
 

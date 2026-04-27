@@ -88,7 +88,7 @@ function PaymentStep({
     <div className="space-y-6">
       <div className={sectionClass}>
         <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Payment</h2>
-        <PaymentElement options={{ layout: 'tabs', fields: { billingDetails: { address: 'never' } } }} />
+        <PaymentElement options={{ layout: 'tabs' }} />
       </div>
 
       <div className={sectionClass}>
@@ -153,62 +153,24 @@ function PaymentStep({
 export default function CheckoutPage() {
   const router = useRouter()
   const params = useParams<{ fairSlug: string }>()
-  const { fair } = useFair()
+  const { fair, fairLoading } = useFair()
   const { items, vendorId, itemCount, subtotal, clearCart } = useFairCart()
   const { user } = useUser()
 
-  // ── Event config ────────────────────────────────────────────────────────────
-  const [eventConfig, setEventConfig] = useState<Record<string, unknown> | null>(null)
-
-  useEffect(() => {
-    fetch(`/api/events/${params.fairSlug}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.data) {
-          setEventConfig(data.data)
-          const fc = (data.data as { fulfillmentConfig?: Record<string, unknown> }).fulfillmentConfig
-          if (fc) {
-            const enabled = ALL_FULFILLMENT_OPTIONS.filter(opt => {
-              if (opt.value === 'BOOTH_PICKUP')  return fc.boothPickupEnabled
-              if (opt.value === 'CURBSIDE')      return fc.curbsideEnabled
-              if (opt.value === 'HOME_DELIVERY') return fc.homeDeliveryEnabled
-              return true
-            })
-            if (enabled.length === 1) setFulfillmentType(enabled[0].value as FulfillmentType)
-          }
-        }
-      })
-      .catch(() => { /* use defaults */ })
-  }, [params.fairSlug])
-
-  // ── Derived config ──────────────────────────────────────────────────────────
+  // ── Derived config from real event data ────────────────────────────────────
   type FulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
 
-  const cfg = eventConfig as {
-    fulfillmentConfig?: {
-      boothPickupEnabled?: boolean
-      curbsideEnabled?: boolean
-      homeDeliveryEnabled?: boolean
-      homeDeliveryFee?: number
-    }
-    serviceChargeEnabled?: boolean
-    serviceChargeAmount?: number
-  } | null
+  const fc = fair.fulfillmentConfig
+  const fulfillmentOptions = ALL_FULFILLMENT_OPTIONS.filter(opt => {
+    if (opt.value === 'CURBSIDE' && fc && !fc.curbsideEnabled) return false
+    if (opt.value === 'HOME_DELIVERY' && fc && !fc.homeDeliveryEnabled) return false
+    return true
+  })
 
-  const fulfillmentOptions = useMemo(() => {
-    const fc = cfg?.fulfillmentConfig
-    if (!fc) return ALL_FULFILLMENT_OPTIONS
-    return ALL_FULFILLMENT_OPTIONS.filter(opt => {
-      if (opt.value === 'BOOTH_PICKUP')  return fc.boothPickupEnabled !== false
-      if (opt.value === 'CURBSIDE')      return fc.curbsideEnabled !== false
-      if (opt.value === 'HOME_DELIVERY') return fc.homeDeliveryEnabled !== false
-      return true
-    })
-  }, [cfg])
-
-  const configDeliveryFee = cfg?.fulfillmentConfig?.homeDeliveryFee ?? 2.99
-  const serviceChargeAmount =
-    cfg?.serviceChargeEnabled && cfg?.serviceChargeAmount ? cfg.serviceChargeAmount : 0
+  const configDeliveryFee = fc?.homeDeliveryFee ?? 2.99
+  const serviceChargeAmount = fair.serviceChargeEnabled && fair.serviceChargeAmount
+    ? fair.serviceChargeAmount
+    : 0
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>('BOOTH_PICKUP')
@@ -263,6 +225,10 @@ export default function CheckoutPage() {
   const validate = () => {
     if (!form.name.trim() || !form.phone.trim()) {
       toast.error('Name and phone number are required')
+      return false
+    }
+    if (fairLoading) {
+      toast.error('Still loading event data — please wait a moment')
       return false
     }
     if (!vendorId || !fair.id) {
@@ -320,13 +286,14 @@ export default function CheckoutPage() {
       const json = await res.json()
 
       if (!res.ok) {
-        toast.error(json.error?.message ?? 'Failed to create order')
+        toast.error(json?.error?.message ?? json?.error ?? 'Failed to create order — please try again')
         return
       }
 
-      setClientSecret(json.data.clientSecret)
-      setOrderId(json.data.orderId)
-      setSummary(json.data.summary)
+      const { orderId: newOrderId, clientSecret: secret, summary: orderSummary } = json.data
+      setOrderId(newOrderId)
+      setClientSecret(secret)
+      setSummary(orderSummary)
     } catch {
       toast.error('Network error — please try again')
     } finally {
