@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import Link from 'next/link'
-import { useSearchParams, useRouter } from 'next/navigation'
 import {
   MapPinIcon,
   ClockIcon,
@@ -14,7 +13,6 @@ import {
 
 import { SignedIn } from '@clerk/clerk-react'
 import { useFair } from '../../_contexts/FairContext'
-import type { VendorData } from '../../_contexts/FairContext'
 import FoodCard from '@/components/ui/FoodCard'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -171,78 +169,26 @@ function FairEnded({ accentColor, gradientFrom, gradientTo }: {
   )
 }
 
-// ── CuisineChips ─────────────────────────────────────────────────────────────
-
-function CuisineChips({
-  cuisines,
-  active,
-  accentColor,
-  onSelect,
-}: {
-  cuisines: string[]
-  active: string | null
-  accentColor: string
-  onSelect: (c: string | null) => void
-}) {
-  return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-      <button
-        onClick={() => onSelect(null)}
-        className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
-        style={
-          active === null
-            ? { background: accentColor, color: '#fff' }
-            : { background: 'rgba(255,255,255,0.06)', color: '#a1a1a1', border: '1px solid rgba(255,255,255,0.08)' }
-        }
-      >
-        All
-      </button>
-      {cuisines.map((c) => (
-        <button
-          key={c}
-          onClick={() => onSelect(active === c ? null : c)}
-          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap"
-          style={
-            active === c
-              ? { background: accentColor, color: '#fff' }
-              : { background: 'rgba(255,255,255,0.06)', color: '#a1a1a1', border: '1px solid rgba(255,255,255,0.08)' }
-          }
-        >
-          {c}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function FairHomePage() {
   const { fair, vendors } = useFair()
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const cuisineParam = searchParams.get('cuisine')
 
   const accentColor  = fair.branding?.accentColor  ?? '#FF0077'
   const gradientFrom = fair.branding?.gradientFrom ?? '#FF0077'
   const gradientTo   = fair.branding?.gradientTo   ?? '#7C3AED'
 
+  // Featured vendors — fall back to first 4 alphabetically when DB data has no featured flag
+  const displayFeatured = useMemo(() => {
+    const flagged = vendors.filter(v => v.featured)
+    if (flagged.length > 0) return flagged
+    return [...vendors].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 4)
+  }, [vendors])
+
   const cuisines = useMemo(
-    () => Array.from(new Set(vendors.map((v) => v.cuisineType).filter(Boolean))).sort(),
+    () => Array.from(new Set(vendors.map(v => v.cuisineType).filter(Boolean))).sort(),
     [vendors]
   )
-
-  const filteredVendors = useMemo(
-    () => (cuisineParam ? vendors.filter((v) => v.cuisineType === cuisineParam) : vendors),
-    [vendors, cuisineParam]
-  )
-
-  const handleCuisineSelect = (c: string | null) => {
-    const params = new URLSearchParams(searchParams.toString())
-    if (c) params.set('cuisine', c)
-    else params.delete('cuisine')
-    router.replace(`?${params.toString()}`, { scroll: false })
-  }
 
   // Delegate to status-specific views
   if (fair.status === 'upcoming') {
@@ -341,42 +287,31 @@ export default function FairHomePage() {
         </div>
       </div>
 
-      {/* ── Vendor grid ── */}
-      <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-8">
+      {/* ── Body ── */}
+      <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10">
 
-        {/* Section header */}
-        <div className="flex items-center justify-between mb-4 sm:mb-5">
-          <h2 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide">
-            Vendors
-            <span className="ml-2 text-base font-inter font-normal text-text-gray">
-              ({filteredVendors.length})
-            </span>
-          </h2>
-          <Link
-            href={`/fair/${fair.slug}/vendors`}
-            className="text-xs sm:text-sm font-semibold hover:underline shrink-0"
-            style={{ color: accentColor }}
-          >
-            See all →
-          </Link>
-        </div>
-
-        {/* Cuisine chips */}
-        {cuisines.length > 1 && (
-          <div className="mb-5">
-            <CuisineChips
-              cuisines={cuisines}
-              active={cuisineParam}
-              accentColor={accentColor}
-              onSelect={handleCuisineSelect}
-            />
+        {/* Featured Today */}
+        <section className="mb-10 sm:mb-14">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-none">
+                Featured <span style={{ color: accentColor }}>Today</span>
+              </h2>
+              <p className="text-xs text-text-gray font-inter mt-1">
+                Hand-picked vendors at {fair.name}
+              </p>
+            </div>
+            <Link
+              href={`/fair/${fair.slug}/vendors`}
+              className="text-xs font-inter hover:text-white transition-colors shrink-0"
+              style={{ color: accentColor }}
+            >
+              See all {vendors.length} →
+            </Link>
           </div>
-        )}
 
-        {/* Grid */}
-        {filteredVendors.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-            {filteredVendors.map((v) => (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {displayFeatured.map(v => (
               <FoodCard
                 key={v.id}
                 variant="vendor"
@@ -389,25 +324,36 @@ export default function FairHomePage() {
                 itemCount={v._count?.menuItems ?? 0}
                 isBusy={v.isBusy}
                 accentColor={accentColor}
+                featuredTag={v.featuredReason}
               />
             ))}
           </div>
-        ) : (
-          <div className="py-16 text-center">
-            <p className="text-text-gray text-sm">No vendors found for "{cuisineParam}".</p>
-            <button
-              onClick={() => handleCuisineSelect(null)}
-              className="mt-3 text-xs font-semibold hover:underline"
-              style={{ color: accentColor }}
-            >
-              Clear filter
-            </button>
-          </div>
+        </section>
+
+        {/* Browse by category */}
+        {cuisines.length > 1 && (
+          <section className="mb-10">
+            <h2 className="text-xs font-inter text-text-gray uppercase tracking-wider mb-3">
+              Browse by Category
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {cuisines.map(cat => (
+                <Link
+                  key={cat}
+                  href={`/fair/${fair.slug}/vendors`}
+                  className="px-4 py-2 bg-bg-card border border-white/[0.06] text-sm text-text-gray font-inter
+                             rounded-full hover:border-white/20 hover:text-white transition-all"
+                >
+                  {cat}
+                </Link>
+              ))}
+            </div>
+          </section>
         )}
 
-        {/* About section */}
+        {/* About */}
         {fair.description && (
-          <div className="mt-10 bg-bg-card border border-white/10 rounded-2xl p-5 sm:p-6">
+          <div className="bg-bg-card border border-white/10 rounded-2xl p-5 sm:p-6">
             <h2 className="font-bebas text-xl text-white tracking-wide mb-2">About This Fair</h2>
             <p className="text-text-gray text-sm leading-relaxed">{fair.description}</p>
           </div>

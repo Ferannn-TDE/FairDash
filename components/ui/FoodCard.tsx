@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { PlusIcon, MinusIcon, ClockIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 
@@ -17,9 +18,16 @@ interface VendorCardProps {
   isBusy?: boolean
   rating?: number | null
   accentColor: string
+  featuredTag?: string
 }
 
 // ── Menu item card variant ─────────────────────────────────────────────────────
+
+export interface MenuItemVariant {
+  id: string
+  label: string
+  price: number
+}
 
 interface MenuItemCardProps {
   variant: 'menu-item'
@@ -32,7 +40,8 @@ interface MenuItemCardProps {
   available?: boolean
   accentColor: string
   qty: number
-  onAdd: () => void
+  variants?: MenuItemVariant[]
+  onAdd: (opts?: { price: number; label: string }) => void
   onDecrement: () => void
   subtitle?: string | null
 }
@@ -43,7 +52,7 @@ type FoodCardProps = VendorCardProps | MenuItemCardProps
 
 export default function FoodCard(props: FoodCardProps) {
   if (props.variant === 'vendor') {
-    const { href, name, description, cuisineType, boothNumber, logoUrl, itemCount = 0, isBusy, rating, accentColor } = props
+    const { href, name, description, cuisineType, boothNumber, logoUrl, itemCount = 0, isBusy, rating, accentColor, featuredTag } = props
 
     const subtitle = [cuisineType, boothNumber ? `Booth ${boothNumber}` : null].filter(Boolean).join(' · ')
 
@@ -61,7 +70,13 @@ export default function FoodCard(props: FoodCardProps) {
               <span className="font-bebas text-5xl sm:text-6xl" style={{ color: `${accentColor}30` }}>{name[0]}</span>
             </div>
           )}
-          {isBusy && (
+          {featuredTag && (
+            <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[0.5625rem] font-bold text-white uppercase tracking-wider shadow-[0_2px_10px_rgba(255,0,119,0.35)]"
+                 style={{ background: accentColor }}>
+              {featuredTag}
+            </div>
+          )}
+          {isBusy && !featuredTag && (
             <div className="absolute top-2 left-2 bg-yellow-500/90 px-2 py-0.5 rounded-full text-[0.5625rem] font-bold text-black">
               Busy
             </div>
@@ -104,7 +119,19 @@ export default function FoodCard(props: FoodCardProps) {
   }
 
   // menu-item variant
-  const { name, description, price, imageUrl, prepTime, available = true, accentColor, qty, onAdd, onDecrement, subtitle } = props
+  const { name, description, price, imageUrl, prepTime, available = true, accentColor, qty, variants, onAdd, onDecrement, subtitle } = props
+
+  const [selectedVariantId, setSelectedVariantId] = useState<string>(variants?.[0]?.id ?? '')
+  const activeVariant = variants?.find(v => v.id === selectedVariantId) ?? variants?.[0]
+  const displayPrice = activeVariant?.price ?? price
+
+  const handleAdd = () => {
+    if (activeVariant) {
+      onAdd({ price: activeVariant.price, label: activeVariant.label })
+    } else {
+      onAdd()
+    }
+  }
 
   return (
     <div className={`bg-bg-card rounded-xl overflow-hidden card-hover flex flex-col ${!available ? 'opacity-50' : ''}`}>
@@ -126,9 +153,29 @@ export default function FoodCard(props: FoodCardProps) {
         {subtitle && (
           <p className="mt-0.5 text-xs text-text-gray">{subtitle}</p>
         )}
-        <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
-          ${price.toFixed(2)}
-        </p>
+
+        {variants && variants.length > 0 ? (
+          <div className="mt-1.5 flex gap-1 flex-wrap">
+            {variants.map(v => (
+              <button
+                key={v.id}
+                onClick={e => { e.preventDefault(); setSelectedVariantId(v.id) }}
+                className={`px-2 py-0.5 rounded text-[0.6rem] font-semibold font-inter transition-all border-0 cursor-pointer
+                  ${selectedVariantId === v.id
+                    ? 'text-white'
+                    : 'bg-white/[0.04] text-gray-400 hover:bg-white/[0.08]'}`}
+                style={selectedVariantId === v.id ? { background: accentColor } : {}}
+              >
+                {v.label} · ${v.price.toFixed(2)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
+            ${displayPrice.toFixed(2)}
+          </p>
+        )}
+
         {description && (
           <p className="text-text-gray text-[0.65rem] mt-1 leading-relaxed line-clamp-2 flex-1">{description}</p>
         )}
@@ -156,7 +203,7 @@ export default function FoodCard(props: FoodCardProps) {
                     {qty}
                   </span>
                   <button
-                    onClick={onAdd}
+                    onClick={handleAdd}
                     className="w-7 h-full flex items-center justify-center hover:opacity-80 transition-opacity shrink-0"
                     style={{ background: accentColor }}
                   >
@@ -165,7 +212,7 @@ export default function FoodCard(props: FoodCardProps) {
                 </div>
               ) : (
                 <button
-                  onClick={onAdd}
+                  onClick={handleAdd}
                   className="w-full h-full rounded-lg text-[0.65rem] font-semibold text-white hover:opacity-80 transition-opacity"
                   style={{ background: accentColor }}
                 >

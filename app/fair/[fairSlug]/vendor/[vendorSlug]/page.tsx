@@ -13,6 +13,12 @@ import FoodCard from '@/components/ui/FoodCard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface DisplayMenuItemVariant {
+  id: string
+  label: string
+  price: number
+}
+
 interface DisplayMenuItem {
   id: string
   name: string
@@ -22,6 +28,7 @@ interface DisplayMenuItem {
   imageUrl: string | null
   prepTime: number | null
   available: boolean
+  variants?: DisplayMenuItemVariant[]
 }
 
 interface VendorDetail {
@@ -41,12 +48,14 @@ function MenuItemCard({ item, vendor, accentColor }: { item: DisplayMenuItem; ve
   const { addItem, items, updateQty } = useFairCart()
   const qty = items.find((i) => i.menuItemId === item.id)?.quantity ?? 0
 
-  const handleAdd = () => {
+  const handleAdd = (opts?: { price: number; label: string }) => {
+    const price = opts?.price ?? item.price
+    const name = opts?.label ? `${item.name} (${opts.label})` : item.name
     addItem(
-      { id: item.id, name: item.name, price: item.price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
+      { id: item.id, name, price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
       { id: vendor.id, name: vendor.name },
     )
-    toast.success(`${item.name} added`)
+    toast.success(`${name} added`)
   }
 
   return (
@@ -61,6 +70,7 @@ function MenuItemCard({ item, vendor, accentColor }: { item: DisplayMenuItem; ve
       available={item.available}
       accentColor={accentColor}
       qty={qty}
+      variants={item.variants}
       onAdd={handleAdd}
       onDecrement={() => updateQty(item.id, qty - 1)}
     />
@@ -132,6 +142,7 @@ export default function VendorMenuPage() {
           imageUrl: item.imageUrl ?? null,
           prepTime: item.prepTime ?? null,
           available: item.available ?? true,
+          variants: item.variants,
         })),
       })
       setLoading(false)

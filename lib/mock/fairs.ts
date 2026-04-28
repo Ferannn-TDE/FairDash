@@ -22,6 +22,9 @@ export interface Fair {
     open: string  // "10:00"
     close: string // "22:00"
   }
+  hours?: Array<{ day: string; open: string; close: string }>
+  admission?: { required: boolean; pricing: string }
+  contact?: { email?: string; phone?: string; website?: string }
   branding?: {
     bannerUrl?: string
     logoUrl?: string
@@ -42,26 +45,33 @@ export const mockFairs: Fair[] = [
   {
     id: 'fair_001',
     slug: 'springfield-state-fair-2026',
-    name: 'Springfield State Fair',
-    tagline: 'Illinois\' biggest annual celebration',
+    name: 'Italian Fest 2026',
+    tagline: 'Celebrating Italian heritage in southern Illinois',
     location: {
-      city: 'Springfield',
+      city: 'Collinsville',
       state: 'IL',
-      address: '801 Sangamon Ave, Springfield, IL 62702',
-      coordinates: { lat: 39.7817, lng: -89.6501 },
+      address: '200 W Main Street, Collinsville, IL 62234',
+      coordinates: { lat: 38.6706, lng: -89.9845 },
     },
-    dates: { startDate: '2026-06-15', endDate: '2026-06-22' },
+    dates: { startDate: '2026-09-25', endDate: '2026-09-27' },
     status: 'active',
-    operatingHours: { open: '10:00', close: '22:00' },
+    operatingHours: { open: '11:00', close: '23:00' },
     branding: {
       accentColor: '#FF0077',
       gradientFrom: '#FF0077',
       gradientTo: '#7C3AED',
     },
-    vendorCount: 12,
+    vendorCount: 17,
     admissionFree: false,
-    description: 'The Springfield State Fair is Illinois\' premier annual event, featuring world-class food vendors, live entertainment, and family-friendly activities. Order ahead and skip the lines!',
-    contactEmail: 'info@springfieldfair.com',
+    description: 'Italian Fest is the largest Italian heritage festival in southern Illinois, celebrating Italian culture, food, music, and family for over 35 years. Featuring authentic cuisine from local Italian-American organizations, live entertainment, bocce tournaments, and a children\'s area.',
+    contactEmail: 'info@italianfestcollinsville.com',
+    hours: [
+      { day: 'Friday', open: '17:00', close: '23:00' },
+      { day: 'Saturday', open: '11:00', close: '23:00' },
+      { day: 'Sunday', open: '11:00', close: '21:00' },
+    ],
+    admission: { required: true, pricing: '$5 per person · Kids under 12 free' },
+    contact: { email: 'info@italianfestcollinsville.com', phone: '(618) 344-2884', website: 'italianfestcollinsville.com' },
   },
   {
     id: 'fair_002',

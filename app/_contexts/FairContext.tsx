@@ -44,6 +44,9 @@ export interface FairData {
   tagline?: string
   location: { address: string; city: string; state: string }
   operatingHours: { open: string; close: string }
+  hours?: Array<{ day: string; open: string; close: string }>
+  admission?: { required: boolean; pricing: string }
+  contact?: { email?: string; phone?: string; website?: string }
   admissionFree: boolean
   contactEmail?: string
   website?: string
@@ -59,6 +62,8 @@ export interface VendorData {
   logoUrl: string | null
   isBusy: boolean
   isOffline: boolean
+  featured?: boolean
+  featuredReason?: string
   _count: { menuItems: number }
 }
 
@@ -124,6 +129,9 @@ function normalizeMockFair(f: MockFair): FairData {
     serviceChargeAmount: null,
     location: f.location,
     operatingHours: f.operatingHours,
+    hours: f.hours,
+    admission: f.admission,
+    contact: f.contact,
     admissionFree: f.admissionFree,
     contactEmail: f.contactEmail,
     website: f.website,
@@ -141,6 +149,8 @@ function normalizeMockVendor(v: MockVendor): VendorData {
     logoUrl: v.logoUrl ?? null,
     isBusy: v.isBusy ?? false,
     isOffline: false,
+    featured: v.featured,
+    featuredReason: v.featuredReason,
     _count: { menuItems: v.menu?.length ?? 0 },
   }
 }
@@ -173,9 +183,16 @@ function normalizeEvent(raw: any): FairData {
     } : null,
     serviceChargeEnabled: raw.serviceChargeEnabled ?? false,
     serviceChargeAmount: raw.serviceChargeAmount ?? null,
-    location: { address: '', city: '', state: '' },
-    operatingHours: { open: '', close: '' },
-    admissionFree: false,
+    location: {
+      address: raw.address ?? raw.location ?? '',
+      city: raw.city ?? '',
+      state: raw.state ?? '',
+    },
+    operatingHours: {
+      open: raw.openTime ?? raw.operatingHoursOpen ?? '',
+      close: raw.closeTime ?? raw.operatingHoursClose ?? '',
+    },
+    admissionFree: raw.admissionFree ?? false,
   }
 }
 
