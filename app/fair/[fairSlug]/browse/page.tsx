@@ -109,27 +109,26 @@ export default function BrowsePage() {
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase()
     return allItems.filter(item => {
-      const matchesSearch = !q ||
-        item.name.toLowerCase().includes(q) ||
-        item.vendorName.toLowerCase().includes(q) ||
-        (item.description ?? '').toLowerCase().includes(q)
+      const matchesSearch = !q || item.name.toLowerCase().includes(q)
       const matchesVendor = !selectedVendorId || item.vendorId === selectedVendorId
       return matchesSearch && matchesVendor
     })
   }, [allItems, search, selectedVendorId])
 
-  const handleAdd = useCallback((item: FlatItem) => {
+  const handleAdd = useCallback((item: FlatItem, opts?: { price: number; label: string }) => {
     const vendor = vendors.find(v => v.id === item.vendorId)
     if (!vendor) return
+    const price = opts?.price ?? item.price
+    const name = opts?.label ? `${item.name} (${opts.label})` : item.name
     addItem(
-      { id: item.id, name: item.name, price: item.price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
+      { id: item.id, name, price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
       { id: vendor.id, name: vendor.name }
     )
-    toast.success(`${item.name} added`, { duration: 1200 })
+    toast.success(`${name} added`, { duration: 1200 })
   }, [addItem, vendors])
 
   return (
-    <div className="min-h-screen text-white">
+    <div className="min-h-screen bg-[#111] text-white">
 
       {/* Page header */}
       <div className="bg-[#111] border-b border-white/[0.06] py-6 sm:py-8">
@@ -146,7 +145,7 @@ export default function BrowsePage() {
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A1A1A1] pointer-events-none" />
             <input
               type="text"
-              placeholder="Search items or vendors…"
+              placeholder="Search menu items…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full h-11 pl-11 pr-10 bg-[#1a1a1a] border border-white/[0.06] text-white text-sm
@@ -231,7 +230,7 @@ export default function BrowsePage() {
                 accentColor={accentColor}
                 qty={cartQtyMap.get(item.id) ?? 0}
                 subtitle={item.vendorName}
-                onAdd={() => handleAdd(item)}
+                onAdd={(opts) => handleAdd(item, opts)}
                 onDecrement={() => updateQty(item.id, (cartQtyMap.get(item.id) ?? 1) - 1)}
               />
             ))}

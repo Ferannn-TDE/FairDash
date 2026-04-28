@@ -35,7 +35,7 @@ function buildChartData(period: ChartPeriod): ChartDataPoint[] {
     const d = new Date()
     d.setDate(d.getDate() - (days - 1 - i))
     return {
-      date: d.toISOString().slice(0, 10),
+      day: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       revenue: Math.round(300 + Math.random() * 400),
       orders: Math.round(10 + Math.random() * 20),
     }
@@ -105,7 +105,7 @@ export default function VendorAnalyticsPage() {
           data={chartData}
           period={period}
           onPeriodChange={setPeriod}
-          loading={chartLoading}
+          loading={false}
           title="Revenue Overview"
         />
       </div>
@@ -114,10 +114,10 @@ export default function VendorAnalyticsPage() {
       <div className="grid grid-cols-2 desktop:grid-cols-4 gap-4 mb-8 animate-fadeIn [animation-delay:0.1s]">
         <StatCard
           label={`${period} Revenue`}
-          value={chartLoading ? '—' : `$${periodRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          value={`$${periodRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           icon={CurrencyDollarIcon}
           accentColor="pink"
-          loading={chartLoading}
+          loading={false}
         />
         <StatCard
           label="Today's Orders"

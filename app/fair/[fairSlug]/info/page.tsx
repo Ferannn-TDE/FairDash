@@ -1,12 +1,39 @@
 'use client'
 
-import { MapPinIcon, ClockIcon, CalendarIcon, EnvelopeIcon, GlobeAltIcon, TicketIcon } from '@heroicons/react/24/outline'
+import { MapPinIcon, ClockIcon, CalendarIcon, EnvelopeIcon, TicketIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import StatusBadge from '../../../_components/StatusBadge'
 import Breadcrumb from '../_components/Breadcrumb'
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  if (!iso) return '—'
+  const d = new Date(iso + 'T00:00:00')
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+function formatTime(t: string) {
+  const [h, m] = t.split(':').map(Number)
+  const period = h >= 12 ? 'PM' : 'AM'
+  const hour = h % 12 || 12
+  return `${hour}:${m.toString().padStart(2, '0')} ${period}`
+}
+
+function InfoCard({ icon: Icon, label, accentColor, children }: {
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>
+  label: string
+  accentColor: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="bg-bg-card border border-white/10 rounded-2xl p-5 flex gap-4">
+      <Icon className="w-5 h-5 shrink-0 mt-0.5" style={{ color: accentColor }} />
+      <div className="min-w-0 flex-1">
+        <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>
+        <div className="text-white text-sm">{children}</div>
+      </div>
+    </div>
+  )
 }
 
 export default function FairInfoPage() {
@@ -26,24 +53,66 @@ export default function FairInfoPage() {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        {[
-          { icon: MapPinIcon, label: 'Address', value: fair.location.address },
-          { icon: CalendarIcon, label: 'Start Date', value: formatDate(fair.dates.startDate) },
-          { icon: CalendarIcon, label: 'End Date', value: formatDate(fair.dates.endDate) },
-          { icon: ClockIcon, label: 'Hours', value: `Opens ${fair.operatingHours.open} · Closes ${fair.operatingHours.close}` },
-          { icon: TicketIcon, label: 'Admission', value: fair.admissionFree ? 'Free — no ticket required' : 'Paid admission required' },
-          ...(fair.contactEmail ? [{ icon: EnvelopeIcon, label: 'Contact', value: fair.contactEmail }] : []),
-          ...(fair.website ? [{ icon: GlobeAltIcon, label: 'Website', value: fair.website }] : []),
-        ].map(({ icon: Icon, label, value }) => (
-          <div key={label} className="bg-bg-card border border-white/10 rounded-2xl p-5 flex gap-4">
-            <Icon className="w-5 h-5 shrink-0 mt-0.5" style={{ color: accentColor }} />
-            <div>
-              <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>
-              <p className="text-white text-sm">{value}</p>
+        {/* Address */}
+        <InfoCard icon={MapPinIcon} label="Address" accentColor={accentColor}>
+          {fair.location.address ||
+            (fair.location.city || fair.location.state
+              ? `${fair.location.city}${fair.location.state ? `, ${fair.location.state}` : ''}`
+              : '—')}
+        </InfoCard>
+
+        {/* Dates */}
+        <InfoCard icon={CalendarIcon} label="Dates" accentColor={accentColor}>
+          {formatDate(fair.dates.startDate)}
+          {fair.dates.endDate !== fair.dates.startDate && (
+            <> – {formatDate(fair.dates.endDate)}</>
+          )}
+        </InfoCard>
+
+        {/* Admission */}
+        <InfoCard icon={TicketIcon} label="Admission" accentColor={accentColor}>
+          {fair.admission
+            ? (fair.admission.required ? fair.admission.pricing : 'Free — no ticket required')
+            : (fair.admissionFree ? 'Free — no ticket required' : 'Paid admission required')}
+        </InfoCard>
+
+        {/* Contact */}
+        {(fair.contact || fair.contactEmail || fair.website) && (
+          <InfoCard icon={EnvelopeIcon} label="Contact" accentColor={accentColor}>
+            <div className="space-y-1">
+              {(fair.contact?.email ?? fair.contactEmail) && (
+                <p>{fair.contact?.email ?? fair.contactEmail}</p>
+              )}
+              {fair.contact?.phone && <p>{fair.contact.phone}</p>}
+              {(fair.contact?.website ?? fair.website) && (
+                <p style={{ color: accentColor }}>{fair.contact?.website ?? fair.website}</p>
+              )}
             </div>
-          </div>
-        ))}
+          </InfoCard>
+        )}
       </div>
+
+      {/* Per-day hours table — full width */}
+      {fair.hours && fair.hours.length > 0 ? (
+        <div className="mt-5">
+          <InfoCard icon={ClockIcon} label="Hours" accentColor={accentColor}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 mt-2">
+              {fair.hours.map(h => (
+                <div key={h.day} className="flex items-baseline gap-2 text-xs font-inter">
+                  <span className="text-text-gray w-8 shrink-0">{h.day}</span>
+                  <span className="text-white">{formatTime(h.open)} – {formatTime(h.close)}</span>
+                </div>
+              ))}
+            </div>
+          </InfoCard>
+        </div>
+      ) : (fair.operatingHours.open && (
+        <div className="mt-5">
+          <InfoCard icon={ClockIcon} label="Hours" accentColor={accentColor}>
+            Opens {fair.operatingHours.open} · Closes {fair.operatingHours.close}
+          </InfoCard>
+        </div>
+      ))}
     </div>
   )
 }
