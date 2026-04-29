@@ -570,12 +570,12 @@ export default function OrderTrackingPage() {
           <StatusBanner order={order} />
 
           {/* Two-column layout */}
-          <div className="grid grid-cols-[1fr_22rem] lg:grid-cols-1 gap-5">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_22rem] gap-5">
 
             {/* Left: map + items + actions */}
             <div className="flex flex-col gap-5">
               {!isCancelled && mapSrc && (
-                <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl overflow-hidden">
+                <div className="hidden lg:block bg-[#1A1A1A] border border-white/5 rounded-2xl overflow-hidden">
                   <div className="relative w-full h-64 md:h-48">
                     <iframe
                       title="Order location"
@@ -608,7 +608,7 @@ export default function OrderTrackingPage() {
               <OrderItemsCard order={order} />
 
               {!isCompleted && !isCancelled && (
-                <div className="flex gap-3 md:flex-col">
+                <div className="flex gap-3">
                   <button
                     onClick={() => setShowSupportModal(true)}
                     className="flex items-center justify-center gap-2 flex-1 py-3 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer active:scale-[0.97]"
@@ -629,7 +629,7 @@ export default function OrderTrackingPage() {
               )}
 
               {isCompleted && (
-                <div className="flex gap-3 md:flex-col">
+                <div className="flex gap-3">
                   <Link
                     href={`/fair/${params.fairSlug}/vendors`}
                     className="flex items-center justify-center gap-2 flex-1 py-3 bg-[#FF0077] text-white rounded-xl text-sm font-semibold no-underline hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] active:scale-[0.97]"

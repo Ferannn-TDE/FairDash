@@ -232,7 +232,23 @@ export function FairProvider({ fairSlug, children }: FairProviderProps) {
       .then(r => r.ok ? r.json() : null)
       .then(json => {
         if (json?.data) {
-          setFair(normalizeEvent(json.data))
+          const normalized = normalizeEvent(json.data)
+          // Supplement sparse DB data with mock fields (hours, admission, contact, location)
+          const mockFair = getFairBySlug(fairSlug)
+          if (mockFair) {
+            const mock = normalizeMockFair(mockFair)
+            setFair({
+              ...normalized,
+              location: normalized.location.address ? normalized.location : mock.location,
+              operatingHours: normalized.operatingHours.open ? normalized.operatingHours : mock.operatingHours,
+              hours: normalized.hours ?? mock.hours,
+              admission: normalized.admission ?? mock.admission,
+              contact: normalized.contact ?? mock.contact,
+              tagline: normalized.tagline ?? mock.tagline,
+            })
+          } else {
+            setFair(normalized)
+          }
         } else {
           const mockFair = getFairBySlug(fairSlug)
           if (mockFair) setFair(normalizeMockFair(mockFair))

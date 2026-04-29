@@ -10,14 +10,12 @@ import {
   Squares2X2Icon,
   ChartBarIcon,
   Cog6ToothIcon,
-  Bars3Icon,
   XMarkIcon,
   BellIcon,
   ArrowRightOnRectangleIcon,
   ChevronRightIcon,
   BuildingStorefrontIcon,
 } from '@heroicons/react/24/outline'
-import { ChevronLeft } from 'lucide-react'
 
 interface Props {
   children: React.ReactNode
@@ -153,35 +151,23 @@ function BackButton() {
 function SidebarContent({
   fairSlug,
   vendorName,
-  onClose,
 }: {
   fairSlug: string
   vendorName: string
-  onClose?: () => void
 }) {
   const pathname = usePathname()
 
   return (
     <div className="flex flex-col h-full p-5">
       {/* Brand */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2.5">
-          <Link href="/" className="group flex items-center leading-none">
-            <span className="font-bebas text-[1.375rem] tracking-[0.125rem] text-white transition-colors duration-200 group-hover:text-neon-pink">FAIR</span>
-            <span className="font-bebas text-[1.375rem] tracking-[0.125rem] text-neon-pink transition-colors duration-200 group-hover:text-white">SYNQ</span>
-          </Link>
-          <span className="ml-1 px-1.5 py-0.5 bg-neon-pink/10 text-neon-pink text-[9px] font-semibold rounded uppercase tracking-wider">
-            Vendor
-          </span>
-        </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
-          >
-            <XMarkIcon className="w-5 h-5 text-text-gray" />
-          </button>
-        )}
+      <div className="flex items-center gap-2.5 mb-6">
+        <Link href="/" className="group flex items-center leading-none">
+          <span className="font-bebas text-[1.375rem] tracking-[0.125rem] text-white transition-colors duration-200 group-hover:text-neon-pink">FAIR</span>
+          <span className="font-bebas text-[1.375rem] tracking-[0.125rem] text-neon-pink transition-colors duration-200 group-hover:text-white">SYNQ</span>
+        </Link>
+        <span className="ml-1 px-1.5 py-0.5 bg-neon-pink/10 text-neon-pink text-[9px] font-semibold rounded uppercase tracking-wider">
+          Vendor
+        </span>
       </div>
 
       {/* Vendor profile chip */}
@@ -209,7 +195,6 @@ function SidebarContent({
             <Link
               key={key}
               href={href}
-              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm no-underline transition-all duration-200 ${
                 active ? 'bg-neon-pink/10 text-neon-pink' : 'text-text-gray hover:bg-white/5 hover:text-white'
               }`}
@@ -259,8 +244,6 @@ export default function VendorPortalShell({
   userEmail,
   pendingCount = 0,
 }: Props) {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-
   return (
     <div className="min-h-screen bg-bg-dark">
 
@@ -269,39 +252,13 @@ export default function VendorPortalShell({
         <SidebarContent fairSlug={fairSlug} vendorName={vendorName} />
       </aside>
 
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/70 z-[90] animate-fadeIn"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Mobile sidebar drawer */}
-      <div
-        className={`lg:hidden fixed top-0 left-0 h-screen w-[17rem] bg-bg-card border-r border-white/[0.06] z-[95] transform transition-transform duration-300 ease-out overflow-y-auto ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
-      >
-        <SidebarContent
-          fairSlug={fairSlug}
-          vendorName={vendorName}
-          onClose={() => setSidebarOpen(false)}
-        />
-      </div>
-
       {/* Mobile top bar */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-bg-dark/90 backdrop-blur-md border-b border-white/[0.06]">
         <div className="flex items-center justify-between px-4 py-3.5">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0"
-          >
-            <Bars3Icon className="w-5 h-5 text-neon-pink" />
-          </button>
-          <span className="font-bebas text-[1.125rem] tracking-[0.125rem] text-white">
-            VENDOR <span className="text-neon-pink">PORTAL</span>
-          </span>
+          <Link href="/" className="group flex items-center leading-none">
+            <span className="font-bebas text-[1.125rem] tracking-[0.125rem] text-white group-hover:text-neon-pink transition-colors">FAIR</span>
+            <span className="font-bebas text-[1.125rem] tracking-[0.125rem] text-neon-pink group-hover:text-white transition-colors">SYNQ</span>
+          </Link>
           <div className="relative p-2">
             <BellIcon className="w-5 h-5 text-white" />
             {pendingCount > 0 && (

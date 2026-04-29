@@ -460,3 +460,9 @@ input[type="date"]::-moz-calendar-picker-indicator {
 .pac-icon {
   display: none !important;
 }
+
+
+/* Push Stripe dev toolbar above mobile bottom nav */
+nextjs-portal {
+  bottom: 4rem !important;
+}

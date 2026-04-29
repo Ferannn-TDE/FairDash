@@ -46,13 +46,19 @@ interface VendorDetail {
 
 function MenuItemCard({ item, vendor, accentColor }: { item: DisplayMenuItem; vendor: VendorDetail; accentColor: string }) {
   const { addItem, items, updateQty } = useFairCart()
-  const qty = items.find((i) => i.menuItemId === item.id)?.quantity ?? 0
+  const [selectedVariantId, setSelectedVariantId] = useState<string>(item.variants?.[0]?.id ?? '')
+
+  // Use itemId::variantId as the cart key so each size is a separate cart entry
+  const cartKey = item.variants?.length && selectedVariantId
+    ? `${item.id}::${selectedVariantId}`
+    : item.id
+  const qty = items.find((i) => i.menuItemId === cartKey)?.quantity ?? 0
 
   const handleAdd = (opts?: { price: number; label: string }) => {
     const price = opts?.price ?? item.price
     const name = opts?.label ? `${item.name} (${opts.label})` : item.name
     addItem(
-      { id: item.id, name, price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
+      { id: cartKey, name, price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
       { id: vendor.id, name: vendor.name },
     )
     toast.success(`${name} added`)
@@ -71,8 +77,10 @@ function MenuItemCard({ item, vendor, accentColor }: { item: DisplayMenuItem; ve
       accentColor={accentColor}
       qty={qty}
       variants={item.variants}
+      selectedVariantId={selectedVariantId}
+      onVariantChange={setSelectedVariantId}
       onAdd={handleAdd}
-      onDecrement={() => updateQty(item.id, qty - 1)}
+      onDecrement={() => updateQty(cartKey, qty - 1)}
     />
   )
 }

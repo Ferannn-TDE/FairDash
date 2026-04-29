@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import { PlusIcon, MinusIcon, ClockIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 
@@ -41,6 +40,8 @@ interface MenuItemCardProps {
   accentColor: string
   qty: number
   variants?: MenuItemVariant[]
+  selectedVariantId?: string
+  onVariantChange?: (id: string) => void
   onAdd: (opts?: { price: number; label: string }) => void
   onDecrement: () => void
   subtitle?: string | null
@@ -93,24 +94,22 @@ export default function FoodCard(props: FoodCardProps) {
             <p className="mt-1.5 text-xs text-text-gray/70 leading-relaxed line-clamp-2 flex-1">{description}</p>
           )}
 
-          {/* Bottom row — rating + item count */}
+          {/* Bottom row */}
           <div className="mt-auto pt-3 flex items-center justify-between">
-            {rating ? (
-              <div className="flex items-center gap-1">
-                <svg className="w-3 h-3 fill-yellow-500 text-yellow-500" viewBox="0 0 20 20">
-                  <path d="M10 1l2.39 4.84 5.34.78-3.87 3.77.92 5.32L10 13.27l-4.78 2.44.92-5.32L2.27 6.62l5.34-.78L10 1z" />
-                </svg>
-                <span className="text-xs text-yellow-500">{rating}</span>
-              </div>
-            ) : <span />}
-            <span className="text-xs text-text-gray">{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
-          </div>
-
-          {/* View Menu button */}
-          <div className="mt-3 pt-3 border-t border-white/[0.04]">
-            <span className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-[#FF0077] text-white text-xs font-semibold rounded-lg uppercase tracking-wider group-hover:bg-[#FF0077]/80 group-hover:shadow-[0_4px_15px_rgba(255,0,119,0.3)] transition-all duration-300">
+            <div className="flex items-center gap-2">
+              {rating ? (
+                <div className="flex items-center gap-1">
+                  <svg className="w-3 h-3 fill-yellow-500 text-yellow-500" viewBox="0 0 20 20">
+                    <path d="M10 1l2.39 4.84 5.34.78-3.87 3.77.92 5.32L10 13.27l-4.78 2.44.92-5.32L2.27 6.62l5.34-.78L10 1z" />
+                  </svg>
+                  <span className="text-xs text-yellow-500">{rating}</span>
+                </div>
+              ) : null}
+              <span className="text-xs text-text-gray">{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
+            </div>
+            <span className="flex items-center gap-1 text-xs font-semibold transition-colors duration-200" style={{ color: accentColor }}>
               View Menu
-              <ChevronRightIcon className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform duration-300" />
+              <ChevronRightIcon className="w-3 h-3 group-hover:translate-x-0.5 transition-transform duration-200" />
             </span>
           </div>
         </div>
@@ -119,9 +118,8 @@ export default function FoodCard(props: FoodCardProps) {
   }
 
   // menu-item variant
-  const { name, description, price, imageUrl, prepTime, available = true, accentColor, qty, variants, onAdd, onDecrement, subtitle } = props
+  const { name, description, price, imageUrl, prepTime, available = true, accentColor, qty, variants, selectedVariantId, onVariantChange, onAdd, onDecrement, subtitle } = props
 
-  const [selectedVariantId, setSelectedVariantId] = useState<string>(variants?.[0]?.id ?? '')
   const activeVariant = variants?.find(v => v.id === selectedVariantId) ?? variants?.[0]
   const displayPrice = activeVariant?.price ?? price
 
@@ -159,12 +157,12 @@ export default function FoodCard(props: FoodCardProps) {
             {variants.map(v => (
               <button
                 key={v.id}
-                onClick={e => { e.preventDefault(); setSelectedVariantId(v.id) }}
+                onClick={e => { e.preventDefault(); onVariantChange?.(v.id) }}
                 className={`px-2 py-0.5 rounded text-[0.6rem] font-semibold font-inter transition-all border-0 cursor-pointer
-                  ${selectedVariantId === v.id
+                  ${(selectedVariantId ?? variants[0]?.id) === v.id
                     ? 'text-white'
                     : 'bg-white/[0.04] text-gray-400 hover:bg-white/[0.08]'}`}
-                style={selectedVariantId === v.id ? { background: accentColor } : {}}
+                style={(selectedVariantId ?? variants[0]?.id) === v.id ? { background: accentColor } : {}}
               >
                 {v.label} · ${v.price.toFixed(2)}
               </button>
