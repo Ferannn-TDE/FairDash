@@ -2,12 +2,14 @@
 
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { useClerk } from '@clerk/clerk-react'
 import {
   BuildingStorefrontIcon,
   BellIcon,
   ClockIcon,
   DocumentTextIcon,
   CheckCircleIcon,
+  ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -56,6 +58,59 @@ function SectionCard({ icon: Icon, title, children }: {
         <h2 className="font-bebas text-base tracking-wide text-white">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
+    </div>
+  )
+}
+
+// ─── Account section ─────────────────────────────────────────────────────────
+
+function AccountSection() {
+  const { signOut } = useClerk()
+  const [showConfirm, setShowConfirm] = useState(false)
+
+  return (
+    <div className="bg-bg-card border border-white/[0.06] rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-2.5">
+        <ArrowRightOnRectangleIcon className="w-4 h-4 text-neon-pink" />
+        <h2 className="font-bebas text-base tracking-wide text-white">Account</h2>
+      </div>
+      <div className="p-5">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-white font-semibold text-sm mb-0.5">Sign out</p>
+            <p className="text-text-gray text-xs">You'll need to sign in again to access your vendor dashboard.</p>
+          </div>
+          <button
+            onClick={() => setShowConfirm(true)}
+            className="px-4 py-2.5 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 hover:text-red-400 hover:border-red-500/20 transition-all cursor-pointer"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+      {showConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowConfirm(false)} />
+          <div className="relative w-full max-w-md bg-[#1A1A1A] border border-white/10 rounded-2xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+            <h3 className="font-bebas text-3xl tracking-wide text-white mb-2">Sign Out?</h3>
+            <p className="text-text-gray text-sm mb-6 leading-relaxed">Are you sure you want to sign out? You'll need to sign in again to access your vendor dashboard.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="flex-1 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => signOut({ redirectUrl: '/' })}
+                className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-semibold text-sm cursor-pointer border-0"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -268,6 +323,9 @@ export default function VendorSettingsPage() {
             </div>
           )}
         </SectionCard>
+
+        {/* Account */}
+        <AccountSection />
 
         {/* Danger Zone */}
         <div className="bg-bg-card border border-red-500/20 rounded-2xl overflow-hidden">

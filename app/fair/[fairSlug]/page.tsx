@@ -185,11 +185,6 @@ export default function FairHomePage() {
     return [...vendors].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 4)
   }, [vendors])
 
-  const cuisines = useMemo(
-    () => Array.from(new Set(vendors.map(v => v.cuisineType).filter(Boolean))).sort(),
-    [vendors]
-  )
-
   // Delegate to status-specific views
   if (fair.status === 'upcoming') {
     return <FairComingSoon accentColor={accentColor} gradientFrom={gradientFrom} gradientTo={gradientTo} />
@@ -329,27 +324,6 @@ export default function FairHomePage() {
             ))}
           </div>
         </section>
-
-        {/* Browse by category */}
-        {cuisines.length > 1 && (
-          <section className="mb-10">
-            <h2 className="text-xs font-inter text-text-gray uppercase tracking-wider mb-3">
-              Browse by Category
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {cuisines.map(cat => (
-                <Link
-                  key={cat}
-                  href={`/fair/${fair.slug}/vendors`}
-                  className="px-4 py-2 bg-bg-card border border-white/[0.06] text-sm text-text-gray font-inter
-                             rounded-full hover:border-white/20 hover:text-white transition-all"
-                >
-                  {cat}
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* About */}
         {fair.description && (
