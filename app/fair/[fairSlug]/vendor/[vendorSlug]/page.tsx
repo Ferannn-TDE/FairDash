@@ -4,32 +4,13 @@ import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ShoppingBagIcon } from '@heroicons/react/24/outline'
-import toast from 'react-hot-toast'
 import { useFair } from '../../../../_contexts/FairContext'
 import { useFairCart } from '../../../../_contexts/FairCartContext'
-import { getVendorBySlug } from '@/lib/mock'
+import type { GroupedMenuItem } from '@/lib/menu/getGroupedMenuItems'
 import Breadcrumb from '../../_components/Breadcrumb'
-import FoodCard from '@/components/ui/FoodCard'
+import { GroupedFoodCard } from '@/components/menu/GroupedFoodCard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface DisplayMenuItemVariant {
-  id: string
-  label: string
-  price: number
-}
-
-interface DisplayMenuItem {
-  id: string
-  name: string
-  description: string | null
-  price: number
-  category: string
-  imageUrl: string | null
-  prepTime: number | null
-  available: boolean
-  variants?: DisplayMenuItemVariant[]
-}
 
 interface VendorDetail {
   id: string
@@ -39,50 +20,6 @@ interface VendorDetail {
   boothNumber: string | null
   logoUrl: string | null
   isBusy: boolean
-  menu: DisplayMenuItem[]
-}
-
-// ── Wrapper connecting FoodCard to cart context ────────────────────────────────
-
-function MenuItemCard({ item, vendor, accentColor }: { item: DisplayMenuItem; vendor: VendorDetail; accentColor: string }) {
-  const { addItem, items, updateQty } = useFairCart()
-  const [selectedVariantId, setSelectedVariantId] = useState<string>(item.variants?.[0]?.id ?? '')
-
-  // Use itemId::variantId as the cart key so each size is a separate cart entry
-  const cartKey = item.variants?.length && selectedVariantId
-    ? `${item.id}::${selectedVariantId}`
-    : item.id
-  const qty = items.find((i) => i.menuItemId === cartKey)?.quantity ?? 0
-
-  const handleAdd = (opts?: { price: number; label: string }) => {
-    const price = opts?.price ?? item.price
-    const name = opts?.label ? `${item.name} (${opts.label})` : item.name
-    addItem(
-      { id: cartKey, name, price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
-      { id: vendor.id, name: vendor.name },
-    )
-    toast.success(`${name} added`)
-  }
-
-  return (
-    <FoodCard
-      variant="menu-item"
-      id={item.id}
-      name={item.name}
-      description={item.description}
-      price={item.price}
-      imageUrl={item.imageUrl}
-      prepTime={item.prepTime}
-      available={item.available}
-      accentColor={accentColor}
-      qty={qty}
-      variants={item.variants}
-      selectedVariantId={selectedVariantId}
-      onVariantChange={setSelectedVariantId}
-      onAdd={handleAdd}
-      onDecrement={() => updateQty(cartKey, qty - 1)}
-    />
-  )
 }
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -123,6 +60,8 @@ export default function VendorMenuPage() {
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
   const [vendor, setVendor] = useState<VendorDetail | null>(null)
+  // Pre-grouped items — set once in useEffect, never computed in render
+  const [groupedItems, setGroupedItems] = useState<GroupedMenuItem[]>([])
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
 
@@ -130,39 +69,13 @@ export default function VendorMenuPage() {
     if (!params.vendorSlug || !params.fairSlug) return
     setLoading(true)
 
-    // Look up from mock data (slug-based). Falls through to API when backend is ready.
-    const mockV = getVendorBySlug(params.fairSlug, params.vendorSlug)
-    if (mockV) {
-      setVendor({
-        id: mockV.id,
-        name: mockV.name,
-        cuisineType: mockV.cuisineType,
-        description: mockV.description ?? null,
-        boothNumber: mockV.boothNumber ?? null,
-        logoUrl: mockV.logoUrl ?? null,
-        isBusy: mockV.isBusy ?? false,
-        menu: mockV.menu.map((item): DisplayMenuItem => ({
-          id: item.id,
-          name: item.name,
-          description: item.description ?? null,
-          price: item.price,
-          category: item.category,
-          imageUrl: item.imageUrl ?? null,
-          prepTime: item.prepTime ?? null,
-          available: item.available ?? true,
-          variants: item.variants,
-        })),
-      })
-      setLoading(false)
-      return
-    }
-
-    // API upgrade path — used when real backend is available
-    fetch(`/api/vendors/${params.vendorSlug}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (!json.success) { setNotFound(true); setLoading(false); return }
-        const raw = json.data
+    Promise.all([
+      fetch(`/api/vendors/${params.vendorSlug}`).then(r => r.json()),
+      fetch(`/api/vendors/${params.vendorSlug}/menu`).then(r => r.json()),
+    ])
+      .then(([vendorJson, menuJson]) => {
+        if (!vendorJson.success) { setNotFound(true); setLoading(false); return }
+        const raw = vendorJson.data
         setVendor({
           id: raw.id,
           name: raw.name,
@@ -171,25 +84,14 @@ export default function VendorMenuPage() {
           boothNumber: raw.boothNumber ?? null,
           logoUrl: raw.logoUrl ?? null,
           isBusy: raw.isBusy ?? false,
-          menu: (raw.menuItems ?? []).map((item: any): DisplayMenuItem => ({
-            id: item.id,
-            name: item.name,
-            description: item.description ?? null,
-            price: item.price,
-            category: item.category,
-            imageUrl: item.imageUrl ?? null,
-            prepTime: item.prepTime ?? null,
-            available: item.isAvailable ?? true,
-          })),
         })
+        setGroupedItems(menuJson.data ?? [])
         setLoading(false)
       })
       .catch(() => { setNotFound(true); setLoading(false) })
   }, [params.vendorSlug, params.fairSlug])
 
-  if (loading) {
-    return <PageSkeleton accentColor={accentColor} />
-  }
+  if (loading) return <PageSkeleton accentColor={accentColor} />
 
   if (notFound || !vendor) {
     return (
@@ -207,7 +109,8 @@ export default function VendorMenuPage() {
     )
   }
 
-  const categories = Array.from(new Set(vendor.menu.map((m) => m.category)))
+  // Categories derived from pre-grouped state — no computation in render body
+  const categories = Array.from(new Set(groupedItems.map((g) => g.category)))
 
   return (
     <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10 text-white">
@@ -245,8 +148,8 @@ export default function VendorMenuPage() {
         </div>
       </div>
 
-      {/* Menu — always full-width, never affected by cart state */}
-      {vendor.menu.length === 0 ? (
+      {/* Menu */}
+      {groupedItems.length === 0 ? (
         <div className="text-center py-16 text-text-gray">
           <div className="text-[4rem] mb-4 opacity-20">🍽️</div>
           <p>No menu items available right now.</p>
@@ -261,17 +164,21 @@ export default function VendorMenuPage() {
               <div className="flex-1 h-px" style={{ background: `${accentColor}30` }} />
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {vendor.menu
-                .filter((m) => m.category === category)
-                .map((item) => (
-                  <MenuItemCard key={item.id} item={item} vendor={vendor} accentColor={accentColor} />
+              {groupedItems
+                .filter((g) => g.category === category)
+                .map((group) => (
+                  <GroupedFoodCard
+                    key={group.groupKey}
+                    group={group}
+                    accentColor={accentColor}
+                  />
                 ))}
             </div>
           </section>
         ))
       )}
 
-      {/* Floating cart bar — fixed position, never affects page flow */}
+      {/* Floating cart bar */}
       {itemCount > 0 && (
         <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-40">
           <Link

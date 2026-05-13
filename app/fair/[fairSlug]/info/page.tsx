@@ -5,11 +5,20 @@ import { useFair } from '../../../_contexts/FairContext'
 import StatusBadge from '../../../_components/StatusBadge'
 import Breadcrumb from '../_components/Breadcrumb'
 
-function formatDate(iso: string) {
-  if (!iso) return '—'
-  const d = new Date(iso + 'T00:00:00')
-  if (isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+function formatDate(iso: string | null | undefined) {
+  if (!iso) return null
+  // Handle both full ISO datetimes and date-only strings (YYYY-MM-DD)
+  const d = iso.includes('T') ? new Date(iso) : new Date(iso + 'T00:00:00')
+  if (isNaN(d.getTime())) return null
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
+  const s = formatDate(start)
+  if (!s) return 'Dates TBA'
+  const e = formatDate(end)
+  if (!e || e === s) return s
+  return `${s} – ${e}`
 }
 
 function formatTime(t: string) {
@@ -26,12 +35,12 @@ function InfoCard({ icon: Icon, label, accentColor, children }: {
   children: React.ReactNode
 }) {
   return (
-    <div className="bg-bg-card border border-white/10 rounded-2xl p-5 flex gap-4">
-      <Icon className="w-5 h-5 shrink-0 mt-0.5" style={{ color: accentColor }} />
-      <div className="min-w-0 flex-1">
-        <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>
-        <div className="text-white text-sm">{children}</div>
+    <div className="bg-[#1c1c1c] border border-white/[0.07] rounded-xl p-5 hover:border-white/[0.14] transition-colors flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Icon className="w-4 h-4 shrink-0" style={{ color: accentColor }} />
+        <span className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">{label}</span>
       </div>
+      <div className="text-white text-sm leading-relaxed">{children}</div>
     </div>
   )
 }
@@ -49,24 +58,21 @@ export default function FairInfoPage() {
       </div>
 
       {fair.description && (
-        <p className="text-text-gray leading-relaxed mb-10 max-w-2xl">{fair.description}</p>
+        <p className="text-white/50 leading-relaxed mb-10 max-w-2xl">{fair.description}</p>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Address */}
         <InfoCard icon={MapPinIcon} label="Address" accentColor={accentColor}>
           {fair.location.address ||
             (fair.location.city || fair.location.state
               ? `${fair.location.city}${fair.location.state ? `, ${fair.location.state}` : ''}`
-              : '—')}
+              : 'Location TBA')}
         </InfoCard>
 
         {/* Dates */}
         <InfoCard icon={CalendarIcon} label="Dates" accentColor={accentColor}>
-          {formatDate(fair.dates.startDate)}
-          {fair.dates.endDate !== fair.dates.startDate && (
-            <> – {formatDate(fair.dates.endDate)}</>
-          )}
+          {formatDateRange(fair.dates.startDate, fair.dates.endDate)}
         </InfoCard>
 
         {/* Admission */}
@@ -92,22 +98,22 @@ export default function FairInfoPage() {
         )}
       </div>
 
-      {/* Per-day hours table — full width */}
+      {/* Hours — full width below the grid */}
       {fair.hours && fair.hours.length > 0 ? (
-        <div className="mt-5">
+        <div className="mt-4">
           <InfoCard icon={ClockIcon} label="Hours" accentColor={accentColor}>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 mt-2">
+            <div className="flex flex-wrap gap-6 mt-1">
               {fair.hours.map(h => (
-                <div key={h.day} className="flex items-baseline gap-2 text-xs font-inter">
-                  <span className="text-text-gray w-8 shrink-0">{h.day}</span>
-                  <span className="text-white">{formatTime(h.open)} – {formatTime(h.close)}</span>
+                <div key={h.day} className="flex flex-col gap-0.5 min-w-[100px]">
+                  <span className="text-white/40 text-xs uppercase tracking-wide">{h.day}</span>
+                  <span className="text-white text-sm">{formatTime(h.open)} – {formatTime(h.close)}</span>
                 </div>
               ))}
             </div>
           </InfoCard>
         </div>
       ) : (fair.operatingHours.open && (
-        <div className="mt-5">
+        <div className="mt-4">
           <InfoCard icon={ClockIcon} label="Hours" accentColor={accentColor}>
             Opens {fair.operatingHours.open} · Closes {fair.operatingHours.close}
           </InfoCard>

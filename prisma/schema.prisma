@@ -249,6 +249,11 @@ model MenuItem {
   imageUrl    String?
   prepTime    Int     @default(15) // Minutes to prepare — used for estimated ready time
 
+  // Variant grouping — set by vendor when the same dish comes in multiple sizes.
+  // Items sharing the same variantGroup (within a vendor) collapse into one card.
+  variantGroup String? // e.g. "Bagna Cauda"  — null means standalone item
+  variantLabel String? // e.g. "Small", "Medium" — null means standalone item
+
   isAvailable Boolean @default(true) // Sold-out toggle
 
   createdAt DateTime @default(now())
