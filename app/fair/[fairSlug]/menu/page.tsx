@@ -6,134 +6,16 @@ import {
   MagnifyingGlassIcon,
   BuildingStorefrontIcon,
   XMarkIcon,
-  PlusIcon,
-  MinusIcon,
-  ClockIcon,
 } from '@heroicons/react/24/outline'
-import toast from 'react-hot-toast'
 import { useFair } from '../../../_contexts/FairContext'
-import { useFairCart } from '../../../_contexts/FairCartContext'
+import type { GroupedMenuItem } from '@/lib/menu/getGroupedMenuItems'
+import { GroupedFoodCard } from '@/components/menu/GroupedFoodCard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface FlatMenuItem {
-  id: string
-  name: string
-  description: string | null
-  price: number
-  category: string
-  imageUrl: string | null
-  prepTime: number | null
-  available: boolean
-  vendorId: string
-  vendorName: string
-}
 
 interface VendorOption {
   id: string
   name: string
-}
-
-// ── FoodCard ───────────────────────────────────────────────────────────────────
-
-function FoodCard({
-  item,
-  accentColor,
-}: {
-  item: FlatMenuItem
-  accentColor: string
-}) {
-  const { addItem, items, updateQty } = useFairCart()
-  const cartItem = items.find((i) => i.menuItemId === item.id)
-  const qty = cartItem?.quantity ?? 0
-
-  const handleAdd = () => {
-    addItem(
-      { id: item.id, name: item.name, price: item.price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
-      { id: item.vendorId, name: item.vendorName },
-    )
-    toast.success(`${item.name} added`)
-  }
-
-  return (
-    <div
-      className={`bg-bg-card border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors duration-200 flex flex-col ${!item.available ? 'opacity-50' : ''}`}
-    >
-      {/* Image / placeholder */}
-      {item.imageUrl ? (
-        <div className="aspect-[4/3] overflow-hidden">
-          <img
-            src={item.imageUrl}
-            alt={item.name}
-            className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-          />
-        </div>
-      ) : (
-        <div
-          className="aspect-[4/3] flex items-center justify-center"
-          style={{ background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}06)` }}
-        >
-          <span className="text-2xl opacity-20">🍽️</span>
-        </div>
-      )}
-
-      {/* Card body */}
-      <div className="p-3 flex flex-col flex-1">
-        <h3 className="font-semibold text-white text-xs sm:text-sm leading-snug line-clamp-2">{item.name}</h3>
-
-        <p className="mt-0.5 text-[0.6rem] text-text-gray">{item.vendorName}</p>
-
-        <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
-          ${item.price.toFixed(2)}
-        </p>
-
-        {item.description && (
-          <p className="text-text-gray text-[0.65rem] mt-1 leading-relaxed line-clamp-2 flex-1">{item.description}</p>
-        )}
-
-        {/* Bottom row */}
-        <div className="mt-2 flex items-center justify-between gap-1">
-          {item.prepTime ? (
-            <span className="flex items-center gap-0.5 text-text-gray text-[0.6rem]">
-              <ClockIcon className="w-2.5 h-2.5 shrink-0" /> {item.prepTime}m
-            </span>
-          ) : (
-            <span />
-          )}
-
-          {item.available && (
-            qty === 0 ? (
-              <button
-                onClick={handleAdd}
-                className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[0.65rem] font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0"
-                style={{ background: accentColor }}
-              >
-                <PlusIcon className="w-3 h-3" />
-                Add
-              </button>
-            ) : (
-              <div className="flex items-center shrink-0 rounded-lg overflow-hidden border border-white/10">
-                <button
-                  onClick={() => updateQty(item.id, qty - 1)}
-                  className="w-6 h-6 bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
-                >
-                  <MinusIcon className="w-3 h-3 text-white" />
-                </button>
-                <span className="text-white font-semibold w-5 text-center text-xs tabular-nums bg-white/5">{qty}</span>
-                <button
-                  onClick={handleAdd}
-                  className="w-6 h-6 flex items-center justify-center hover:opacity-80 transition-opacity"
-                  style={{ background: accentColor }}
-                >
-                  <PlusIcon className="w-3 h-3 text-white" />
-                </button>
-              </div>
-            )
-          )}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ── Skeletons ─────────────────────────────────────────────────────────────────
@@ -161,10 +43,10 @@ export default function FairMenuPage() {
   const { fair, vendors } = useFair()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
-  const [allItems, setAllItems] = useState<FlatMenuItem[]>([])
+  const [allGrouped, setAllGrouped] = useState<GroupedMenuItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Bust any stale localStorage cart that has mock IDs from before the real API was wired up
+  // Bust stale localStorage carts with mock IDs
   useEffect(() => {
     const versionKey = `fairsynq-cart-version-${params.fairSlug}`
     if (localStorage.getItem(versionKey) !== CART_VERSION) {
@@ -173,32 +55,16 @@ export default function FairMenuPage() {
     }
   }, [params.fairSlug])
 
-  // Fetch all menu items from the real DB
+  // Fetch pre-grouped menu items from the server
   useEffect(() => {
     setLoading(true)
     fetch(`/api/menu?eventSlug=${params.fairSlug}&limit=200`)
       .then(r => r.json())
-      .then(json => {
-        if (json?.data) {
-          setAllItems(
-            json.data.map((item: any): FlatMenuItem => ({
-              id: item.id,
-              name: item.name,
-              description: item.description ?? null,
-              price: item.price,
-              category: item.category,
-              imageUrl: item.imageUrl ?? null,
-              prepTime: item.prepTime ?? null,
-              available: item.isAvailable,
-              vendorId: item.vendorId,
-              vendorName: item.vendor?.name ?? '',
-            }))
-          )
-        }
-      })
-      .catch(() => {/* keep empty state, show no items */})
+      .then(json => { if (json?.data) setAllGrouped(json.data) })
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [params.fairSlug])
+
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all')
   const [showFilters, setShowFilters] = useState(false)
@@ -206,32 +72,32 @@ export default function FairMenuPage() {
   const isSearching = searchQuery.trim().length > 0
   const clearSearch = () => setSearchQuery('')
 
-  // Unique vendor options — derive from real menu items so pills only show
-  // vendors that actually have items available
+  // Vendor pills derived from grouped items
   const vendorOptions = useMemo<VendorOption[]>(() => {
     const seen = new Set<string>()
     const opts: VendorOption[] = []
-    allItems.forEach((item) => {
-      if (!seen.has(item.vendorId)) {
-        seen.add(item.vendorId)
-        opts.push({ id: item.vendorId, name: item.vendorName })
+    allGrouped.forEach((g) => {
+      if (!seen.has(g.vendorId)) {
+        seen.add(g.vendorId)
+        opts.push({ id: g.vendorId, name: g.vendorName })
       }
     })
     return opts
-  }, [allItems])
+  }, [allGrouped])
 
-  const filteredItems = useMemo(() => {
+  // Filter pre-grouped items — no re-grouping needed
+  const groupedItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
-    return allItems.filter((item) => {
-      if (q)
-        return (
-          item.name.toLowerCase().includes(q) ||
-          (item.description ?? '').toLowerCase().includes(q) ||
-          item.vendorName.toLowerCase().includes(q)
-        )
-      return selectedVendorId === 'all' || item.vendorId === selectedVendorId
+    return allGrouped.filter((g) => {
+      if (selectedVendorId !== 'all' && g.vendorId !== selectedVendorId) return false
+      if (q) return (
+        g.baseName.toLowerCase().includes(q) ||
+        (g.description ?? '').toLowerCase().includes(q) ||
+        g.vendorName.toLowerCase().includes(q)
+      )
+      return true
     })
-  }, [allItems, selectedVendorId, searchQuery])
+  }, [allGrouped, selectedVendorId, searchQuery])
 
   const activeVendorName = vendorOptions.find((v) => v.id === selectedVendorId)?.name
 
@@ -312,7 +178,7 @@ export default function FairMenuPage() {
           </h2>
           <div className="flex items-center gap-3">
             <span className="text-text-gray text-sm">
-              {loading ? '…' : `${filteredItems.length} ${filteredItems.length === 1 ? 'item' : 'items'}`}
+              {loading ? '…' : `${groupedItems.length} ${groupedItems.length === 1 ? 'item' : 'items'}`}
             </span>
             {isSearching && (
               <button onClick={clearSearch} className="text-neon-pink text-sm font-semibold hover:opacity-80 transition-opacity">
@@ -327,7 +193,7 @@ export default function FairMenuPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
               {Array.from({ length: 8 }).map((_, i) => <FoodCardSkeleton key={i} />)}
             </div>
-          ) : filteredItems.length === 0 ? (
+          ) : groupedItems.length === 0 ? (
             <div className="text-center py-20 px-5">
               <div className="text-[6rem] mb-5 opacity-30">🔍</div>
               <h3 className="font-bebas text-3xl mb-2 tracking-wide">No items found</h3>
@@ -345,8 +211,12 @@ export default function FairMenuPage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
-              {filteredItems.map((item) => (
-                <FoodCard key={`${item.vendorId}-${item.id}`} item={item} accentColor={accentColor} />
+              {groupedItems.map((group) => (
+                <GroupedFoodCard
+                  key={group.groupKey}
+                  group={group}
+                  accentColor={accentColor}
+                />
               ))}
             </div>
           )}

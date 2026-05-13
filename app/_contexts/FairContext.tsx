@@ -216,18 +216,21 @@ function normalizeVendor(raw: any): VendorData {
 interface FairProviderProps {
   fairSlug: string
   children: ReactNode
+  initialFair?: FairData | null
+  initialVendors?: VendorData[]
 }
 
-export function FairProvider({ fairSlug, children }: FairProviderProps) {
-  const [fair, setFair] = useState<FairData>(() => placeholderFair(fairSlug))
-  const [vendors, setVendors] = useState<VendorData[]>([])
-  const [fairLoading, setFairLoading] = useState(true)
-  const [vendorsLoading, setVendorsLoading] = useState(true)
+export function FairProvider({ fairSlug, children, initialFair, initialVendors }: FairProviderProps) {
+  const [fair, setFair] = useState<FairData>(() => initialFair ?? placeholderFair(fairSlug))
+  const [vendors, setVendors] = useState<VendorData[]>(() => initialVendors ?? [])
+  // If SSR passed initial data, we're not loading — skip the spinner flash
+  const [fairLoading, setFairLoading] = useState(!initialFair)
+  const [vendorsLoading, setVendorsLoading] = useState(!initialVendors?.length)
 
-  // Fetch real event + vendors from the DB. Falls back to mock data if the API
-  // is unavailable or the event isn't in the DB yet.
+  // Hydrate from the API in the background. When SSR already provided initialFair
+  // we skip the loading state — the fetch is purely a staleness refresh.
   useEffect(() => {
-    setFairLoading(true)
+    if (!initialFair) setFairLoading(true)
     fetch(`/api/events/${fairSlug}`)
       .then(r => r.ok ? r.json() : null)
       .then(json => {
@@ -262,7 +265,7 @@ export function FairProvider({ fairSlug, children }: FairProviderProps) {
   }, [fairSlug])
 
   useEffect(() => {
-    setVendorsLoading(true)
+    if (!initialVendors?.length) setVendorsLoading(true)
     fetch(`/api/vendors?eventSlug=${fairSlug}&limit=100`)
       .then(r => r.ok ? r.json() : null)
       .then(json => {

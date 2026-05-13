@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation'
 import FairShell from '../../_components/FairShell'
-import { db } from '@/lib/db'
-import { getFairBySlug } from '@/lib/mock'
+import { getFairBySlugCached, getVendorsBySlugCached } from '@/lib/fairs'
+import { getFairBySlug, getVendorsByFairSlug } from '@/lib/mock'
+import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { Metadata } from 'next'
 
 interface Props {
@@ -11,14 +12,11 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   try {
-    const event = await db.event.findFirst({
-      where: { urlSlug: params.fairSlug },
-      select: { name: true, description: true },
-    })
-    if (event) {
+    const fair = await getFairBySlugCached(params.fairSlug)
+    if (fair) {
       return {
-        title: `${event.name} — FairSynq`,
-        description: event.description ?? `Order food ahead at ${event.name} on FairSynq.`,
+        title: `${fair.name} — FairSynq`,
+        description: fair.description ?? `Order food ahead at ${fair.name} on FairSynq.`,
       }
     }
   } catch {
@@ -29,32 +27,55 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: 'Fair not found — FairSynq' }
 }
 
-export default async function FairLayout({ params, children }: Props) {
-  console.log('[FairLayout] fetching slug:', params.fairSlug)
+function normalizeMock(slug: string, dbFair: FairData): FairData {
+  const mock = getFairBySlug(slug)
+  if (!mock) return dbFair
+  return {
+    ...dbFair,
+    tagline: dbFair.tagline ?? mock.tagline,
+    location: dbFair.location.address ? dbFair.location : mock.location,
+    operatingHours: dbFair.operatingHours.open ? dbFair.operatingHours : mock.operatingHours,
+    hours: dbFair.hours ?? mock.hours,
+    admission: dbFair.admission ?? mock.admission,
+    contact: dbFair.contact ?? mock.contact,
+    admissionFree: dbFair.admissionFree || mock.admissionFree,
+    contactEmail: dbFair.contactEmail ?? mock.contactEmail,
+    website: dbFair.website ?? mock.website,
+  }
+}
 
-  let eventExists = false
+export default async function FairLayout({ params, children }: Props) {
+  let initialFair: FairData | null = null
+  let initialVendors: VendorData[] = []
 
   try {
-    const event = await db.event.findFirst({
-      where: { urlSlug: params.fairSlug },
-      select: { id: true },
-    })
-    eventExists = !!event
+    const [dbFair, dbVendors] = await Promise.all([
+      getFairBySlugCached(params.fairSlug),
+      getVendorsBySlugCached(params.fairSlug),
+    ])
+
+    if (dbFair) {
+      initialFair = normalizeMock(params.fairSlug, dbFair)
+      initialVendors = dbVendors
+    }
   } catch (err) {
-    console.error('[FairLayout] database error for slug "%s":', params.fairSlug, err)
-    // Fall through to mock check below
+    console.error('[FairLayout] DB error for slug "%s":', params.fairSlug, err)
+    // Fall through to mock check
   }
 
-  if (!eventExists) {
+  // If DB has no data, try mock; if no mock either → 404
+  if (!initialFair) {
     const mockFair = getFairBySlug(params.fairSlug)
-    if (!mockFair) {
-      console.log('[FairLayout] fair not found for slug:', params.fairSlug)
-      notFound()
-    }
+    if (!mockFair) notFound()
+    // Layout renders — FairContext client-side will hydrate from mock
   }
 
   return (
-    <FairShell fairSlug={params.fairSlug}>
+    <FairShell
+      fairSlug={params.fairSlug}
+      initialFair={initialFair}
+      initialVendors={initialVendors.length ? initialVendors : undefined}
+    >
       {children}
     </FairShell>
   )

@@ -1,40 +1,12 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { MagnifyingGlassIcon, XMarkIcon, ShoppingBagIcon } from '@heroicons/react/24/outline'
-import toast from 'react-hot-toast'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
-import FoodCard from '@/components/ui/FoodCard'
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface MenuItem {
-  id: string
-  name: string
-  description: string | null
-  price: number
-  category: string
-  imageUrl: string | null
-  prepTime: number | null
-  isAvailable: boolean
-  vendorId: string
-}
-
-interface Vendor {
-  id: string
-  name: string
-  cuisineType: string
-  boothNumber: string | null
-  logoUrl: string | null
-  isBusy: boolean
-  isOffline: boolean
-}
-
-interface FlatItem extends MenuItem {
-  vendorName: string
-}
+import { GroupedFoodCard } from '@/components/menu/GroupedFoodCard'
+import type { GroupedMenuItem } from '@/lib/menu/getGroupedMenuItems'
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -56,11 +28,10 @@ export default function BrowsePage() {
   const params = useParams<{ fairSlug: string }>()
   const router = useRouter()
   const { fair } = useFair()
-  const { items: cartItems, vendorId: cartVendorId, itemCount, subtotal, addItem, updateQty } = useFairCart()
+  const { itemCount, subtotal } = useFairCart()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [allItems, setAllItems] = useState<FlatItem[]>([])
+  const [allGrouped, setAllGrouped] = useState<GroupedMenuItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null)
@@ -76,56 +47,38 @@ export default function BrowsePage() {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
-      fetch(`/api/vendors?eventSlug=${params.fairSlug}&limit=100`).then(r => r.json()),
-      fetch(`/api/menu?eventSlug=${params.fairSlug}&limit=200`).then(r => r.json()),
-    ])
-      .then(([vJson, mJson]) => {
-        const fetchedVendors: Vendor[] = vJson?.data ?? []
-        const menuItems: MenuItem[] = mJson?.data ?? []
-
-        const vendorMap = new Map(fetchedVendors.map(v => [v.id, v]))
-
-        const flat: FlatItem[] = menuItems
-          .filter(i => i.isAvailable)
-          .map(i => ({
-            ...i,
-            vendorName: vendorMap.get(i.vendorId)?.name ?? '',
-          }))
-
-        setVendors(fetchedVendors.filter(v => menuItems.some(i => i.vendorId === v.id)))
-        setAllItems(flat)
-      })
+    fetch(`/api/menu?eventSlug=${params.fairSlug}&limit=200`)
+      .then(r => r.json())
+      .then(json => { if (json?.data) setAllGrouped(json.data) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [params.fairSlug])
 
-  const cartQtyMap = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const item of cartItems) m.set(item.menuItemId, item.quantity)
-    return m
-  }, [cartItems])
+  // Vendor options derived from grouped data — no separate vendors fetch needed
+  const vendorOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const opts: { id: string; name: string }[] = []
+    allGrouped.forEach(g => {
+      if (!seen.has(g.vendorId)) {
+        seen.add(g.vendorId)
+        opts.push({ id: g.vendorId, name: g.vendorName })
+      }
+    })
+    return opts
+  }, [allGrouped])
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return allItems.filter(item => {
-      const matchesSearch = !q || item.name.toLowerCase().includes(q)
-      const matchesVendor = !selectedVendorId || item.vendorId === selectedVendorId
-      return matchesSearch && matchesVendor
+    return allGrouped.filter(g => {
+      if (selectedVendorId && g.vendorId !== selectedVendorId) return false
+      if (q) return (
+        g.baseName.toLowerCase().includes(q) ||
+        (g.description ?? '').toLowerCase().includes(q) ||
+        g.vendorName.toLowerCase().includes(q)
+      )
+      return true
     })
-  }, [allItems, search, selectedVendorId])
-
-  const handleAdd = useCallback((item: FlatItem, opts?: { price: number; label: string }) => {
-    const vendor = vendors.find(v => v.id === item.vendorId)
-    if (!vendor) return
-    const price = opts?.price ?? item.price
-    const name = opts?.label ? `${item.name} (${opts.label})` : item.name
-    addItem(
-      { id: item.id, name, price, prepTime: item.prepTime ?? undefined, imageUrl: item.imageUrl },
-      { id: vendor.id, name: vendor.name }
-    )
-    toast.success(`${name} added`, { duration: 1200 })
-  }, [addItem, vendors])
+  }, [allGrouped, search, selectedVendorId])
 
   return (
     <div className="min-h-screen bg-[#111] text-white">
@@ -168,7 +121,7 @@ export default function BrowsePage() {
       <div className="max-w-6xl mx-auto px-5 sm:px-8 py-6">
 
         {/* Vendor filter pills */}
-        {!loading && vendors.length > 1 && (
+        {!loading && vendorOptions.length > 1 && (
           <div className="flex gap-2 overflow-x-auto pb-2 mb-6 scrollbar-hide">
             <button
               onClick={() => setSelectedVendorId(null)}
@@ -180,7 +133,7 @@ export default function BrowsePage() {
             >
               All
             </button>
-            {vendors.map(v => (
+            {vendorOptions.map(v => (
               <button
                 key={v.id}
                 onClick={() => setSelectedVendorId(v.id)}
@@ -216,22 +169,11 @@ export default function BrowsePage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {filteredItems.map(item => (
-              <FoodCard
-                key={item.id}
-                variant="menu-item"
-                id={item.id}
-                name={item.name}
-                description={item.description}
-                price={item.price}
-                imageUrl={item.imageUrl}
-                prepTime={item.prepTime}
-                available={item.isAvailable}
+            {filteredItems.map(group => (
+              <GroupedFoodCard
+                key={group.groupKey}
+                group={group}
                 accentColor={accentColor}
-                qty={cartQtyMap.get(item.id) ?? 0}
-                subtitle={item.vendorName}
-                onAdd={(opts) => handleAdd(item, opts)}
-                onDecrement={() => updateQty(item.id, (cartQtyMap.get(item.id) ?? 1) - 1)}
               />
             ))}
           </div>
