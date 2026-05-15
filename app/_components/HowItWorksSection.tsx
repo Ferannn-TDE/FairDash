@@ -3,25 +3,26 @@
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Reveal, TIMING } from '@/components/animations/motion'
+import { MapPinIcon, BuildingStorefrontIcon, ShoppingBagIcon } from '@heroicons/react/24/outline'
 
 const STEPS = [
   {
     number: '01',
     title: 'Find a Fair',
     description: 'Discover events happening near you. Live, upcoming, and more.',
-    icon: '📍',
+    Icon: MapPinIcon,
   },
   {
     number: '02',
     title: 'Browse Vendors',
     description: "Explore every food vendor's full menu before you even arrive.",
-    icon: '🍔',
+    Icon: BuildingStorefrontIcon,
   },
   {
     number: '03',
     title: 'Order & Enjoy',
     description: 'Pay ahead, skip the line, and pick up your order fresh.',
-    icon: '✨',
+    Icon: ShoppingBagIcon,
   },
 ]
 
@@ -107,7 +108,7 @@ export default function HowItWorksSection() {
                 </div>
                 {/* Card */}
                 <div className="mt-4 bg-bg-card border border-white/10 rounded-2xl p-6 flex flex-col items-center text-center">
-                  <span className="text-2xl mb-3">{step.icon}</span>
+                  <step.Icon className="w-6 h-6 mb-3 text-neon-pink" />
                   <p className="font-bebas text-3xl mb-1" style={{ color: 'rgba(255,0,119,0.35)' }}>
                     {step.number}
                   </p>
@@ -144,10 +145,7 @@ export default function HowItWorksSection() {
                                 min-h-[240px] md:min-h-[260px]
                                 hover:border-[#FF0077]/30 hover:shadow-[0_0_40px_rgba(255,0,119,0.08)]
                                 transition-all duration-300">
-                  {/* Fix 1B: emoji scales on hover */}
-                  <span className="text-3xl md:text-4xl mb-3 group-hover:scale-110 transition-transform duration-300">
-                    {step.icon}
-                  </span>
+                  <step.Icon className="w-8 h-8 md:w-10 md:h-10 mb-3 text-neon-pink group-hover:scale-110 transition-transform duration-300" />
                   <p className="font-bebas text-4xl md:text-5xl mb-2" style={{ color: 'rgba(255,0,119,0.3)' }}>
                     {step.number}
                   </p>

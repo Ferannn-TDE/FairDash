@@ -162,7 +162,7 @@ export default function FairMenuPage() {
                   className={`px-4 py-2 text-xs border rounded-full font-medium cursor-pointer transition-all duration-200 ${selectedVendorId === vendor.id ? 'bg-neon-pink border-neon-pink text-white shadow-glow' : 'bg-white/[0.03] border-white/10 text-text-gray hover:bg-white/5 hover:border-white/20'}`}
                   onClick={() => { setSelectedVendorId(vendor.id); setShowFilters(false) }}
                 >
-                  🍽️ {vendor.name}
+                  <BuildingStorefrontIcon className="w-3.5 h-3.5 inline mr-1" />{vendor.name}
                 </button>
               ))}
             </div>
@@ -195,7 +195,7 @@ export default function FairMenuPage() {
             </div>
           ) : groupedItems.length === 0 ? (
             <div className="text-center py-20 px-5">
-              <div className="text-[6rem] mb-5 opacity-30">🔍</div>
+              <MagnifyingGlassIcon className="w-16 h-16 mb-5 mx-auto opacity-20 text-white" />
               <h3 className="font-bebas text-3xl mb-2 tracking-wide">No items found</h3>
               <p className="text-text-gray">
                 {isSearching ? `No results for "${searchQuery}"` : 'Try a different vendor or search term'}

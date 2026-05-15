@@ -12,7 +12,7 @@ import { EventStatus } from '@prisma/client'
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
@@ -23,7 +23,7 @@ export async function PATCH(
       throw new ApiError('isPaused must be a boolean', 400, 'VALIDATION_ERROR')
     }
 
-    const event = await db.event.findUnique({ where: { id: params.id } })
+    const event = await db.event.findUnique({ where: { id: (await params).id } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
     if (event.status !== EventStatus.ACTIVE) {
@@ -31,7 +31,7 @@ export async function PATCH(
     }
 
     const updated = await db.event.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: { isPaused },
       select: { id: true, name: true, status: true, isPaused: true },
     })

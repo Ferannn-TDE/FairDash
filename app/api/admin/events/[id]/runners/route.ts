@@ -9,16 +9,16 @@ import { requireAdminAuth } from '@/lib/auth'
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
 
-    const event = await db.event.findUnique({ where: { id: params.id } })
+    const event = await db.event.findUnique({ where: { id: (await params).id } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
     const runners = await db.runner.findMany({
-      where: { eventId: params.id },
+      where: { eventId: (await params).id },
       orderBy: { createdAt: 'asc' },
       include: {
         user: { select: { name: true, email: true } },

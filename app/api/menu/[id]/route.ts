@@ -1,3 +1,5 @@
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { revalidateTag } = require('next/cache') as { revalidateTag: (tag: string) => void }
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
@@ -6,11 +8,11 @@ import { requireVendorAuth } from '@/lib/auth'
 // GET /api/menu/:id
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const item = await db.menuItem.findUnique({
-      where: { id: params.id },
+      where: { id: (await params).id },
       include: { vendor: { select: { id: true, name: true, boothNumber: true } } },
     })
     if (!item) return apiError('Menu item not found', 404, 'NOT_FOUND')
@@ -24,7 +26,7 @@ export async function GET(
 // Update availability (sold-out toggle) or item details. Vendor auth required.
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireVendorAuth()
@@ -32,7 +34,7 @@ export async function PATCH(
     const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
 
     const item = await db.menuItem.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
@@ -44,6 +46,7 @@ export async function PATCH(
       },
     })
 
+    revalidateTag(`vendor-menu-${item.vendorId}`)
     return success(item)
   } catch (err) {
     return handleApiError(err)
@@ -54,11 +57,14 @@ export async function PATCH(
 // Vendor auth required.
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireVendorAuth()
-    await db.menuItem.delete({ where: { id: params.id } })
+    const id = (await params).id
+    const item = await db.menuItem.findUnique({ where: { id }, select: { vendorId: true } })
+    await db.menuItem.delete({ where: { id } })
+    if (item) revalidateTag(`vendor-menu-${item.vendorId}`)
     return success({ deleted: true })
   } catch (err) {
     return handleApiError(err)

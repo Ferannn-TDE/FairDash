@@ -21,13 +21,13 @@ function getRouteRole(pathname: string): string {
   return 'customer'
 }
 
-const clerkHandler = clerkMiddleware((auth, req) => {
+const clerkHandler = clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) {
     const role = getRouteRole(req.nextUrl.pathname)
     const loginUrl = new URL('/login', req.nextUrl.origin)
     loginUrl.searchParams.set('role', role)
     loginUrl.searchParams.set('redirect', req.nextUrl.pathname)
-    auth().protect({ unauthenticatedUrl: loginUrl.toString() })
+    await auth.protect({ unauthenticatedUrl: loginUrl.toString() })
   }
 })
 

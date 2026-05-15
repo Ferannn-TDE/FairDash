@@ -8,18 +8,18 @@ import { getGroupedMenuItemsByVendor } from '@/lib/menu/getGroupedMenuItems'
 // Grouping is done server-side using variantGroup/variantLabel fields.
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const vendor = await db.vendor.findUnique({
-      where: { id: params.id },
+      where: { id: (await params).id },
       select: { id: true, isOffline: true },
     })
 
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
     if (vendor.isOffline) return apiError('Vendor is currently offline', 503, 'VENDOR_OFFLINE')
 
-    const grouped = await getGroupedMenuItemsByVendor(params.id)
+    const grouped = await getGroupedMenuItemsByVendor((await params).id)
     return success(grouped)
   } catch (err) {
     return handleApiError(err)

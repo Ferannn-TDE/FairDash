@@ -18,7 +18,7 @@ import { EventStatus, VendorStatus } from '@prisma/client'
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
@@ -30,7 +30,7 @@ export async function PATCH(
     }
 
     const event = await db.event.findUnique({
-      where: { id: params.id },
+      where: { id: (await params).id },
       include: {
         vendors: { where: { status: VendorStatus.ACTIVE } },
         fulfillmentConfig: true,
@@ -66,7 +66,7 @@ export async function PATCH(
     }
 
     const updated = await db.event.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: { status: targetStatus },
       select: { id: true, name: true, status: true, isPaused: true },
     })

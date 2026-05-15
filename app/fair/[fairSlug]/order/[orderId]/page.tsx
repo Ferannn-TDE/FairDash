@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useState, useEffect, useCallback } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   CheckIcon,
@@ -10,6 +10,7 @@ import {
   XMarkIcon,
   ExclamationTriangleIcon,
   ChatBubbleLeftEllipsisIcon,
+  EnvelopeIcon,
   ReceiptPercentIcon,
   BuildingStorefrontIcon,
   TruckIcon,
@@ -17,17 +18,19 @@ import {
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import toast from 'react-hot-toast'
 import { useFair } from '../../../../_contexts/FairContext'
+import { useFairCart } from '../../../../_contexts/FairCartContext'
 import Breadcrumb from '../../_components/Breadcrumb'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface OrderItem {
   id: string
+  menuItemId: string
   quantity: number
   unitPrice: number
   subtotal: number
   specialInstructions?: string | null
-  menuItem: { name: string; imageUrl?: string | null }
+  menuItem: { name: string; imageUrl?: string | null; prepTime?: number | null }
 }
 
 interface Order {
@@ -207,7 +210,9 @@ function OrderItemsCard({ order }: { order: Order }) {
             {item.menuItem.imageUrl ? (
               <img src={item.menuItem.imageUrl} alt={item.menuItem.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-white/5" />
             ) : (
-              <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0 text-base">🍽️</div>
+              <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                <BuildingStorefrontIcon className="w-5 h-5 text-white/30" />
+              </div>
             )}
             <div className="flex-1 min-w-0">
               <p className="text-white text-sm font-medium truncate">{item.menuItem.name}</p>
@@ -272,7 +277,14 @@ function OrderMetaCard({ order }: { order: Order }) {
         <div>
           <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-1">Fulfillment</p>
           <p className="text-white text-sm">
-            {isDelivery ? '🚶 Home Delivery' : isCurbside ? '🚗 Curbside' : '🏬 Booth Pickup'}
+            <span className="flex items-center gap-1.5">
+              {isDelivery
+                ? <><MapPinIcon className="w-4 h-4 inline" /> Home Delivery</>
+                : isCurbside
+                ? <><TruckIcon className="w-4 h-4 inline" /> Curbside</>
+                : <><BuildingStorefrontIcon className="w-4 h-4 inline" /> Booth Pickup</>
+              }
+            </span>
           </p>
         </div>
         {isCurbside && order.vehicleMake && (
@@ -416,8 +428,19 @@ function CancelModal({
   )
 }
 
-function SupportModal({ isOpen, onClose, orderId }: { isOpen: boolean; onClose: () => void; orderId: string }) {
+function SupportModal({ isOpen, onClose, order }: {
+  isOpen: boolean
+  onClose: () => void
+  order: Order
+}) {
   if (!isOpen) return null
+
+  const shortId = order.id.slice(-8).toUpperCase()
+  const subject = encodeURIComponent(`Order #${shortId} — Support Request`)
+  const body = encodeURIComponent(
+    `Hi FairSynq Support,\n\nI need help with Order #${shortId} from ${order.vendor.name}.\n\nOrder ID: ${order.id}\nStatus: ${order.status}\nTotal: $${order.total.toFixed(2)}\n\nDescription of issue:\n`
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
@@ -431,16 +454,39 @@ function SupportModal({ isOpen, onClose, orderId }: { isOpen: boolean; onClose: 
           </div>
           <div>
             <h3 className="font-bebas text-xl tracking-wide text-white">Contact Support</h3>
-            <p className="text-[#A1A1A1] text-xs">Order #{orderId.slice(-8).toUpperCase()}</p>
+            <p className="text-[#A1A1A1] text-xs">Order #{shortId}</p>
           </div>
         </div>
-        <div className="space-y-3">
+
+        {/* Order context */}
+        <div className="bg-white/[0.04] border border-white/[0.06] rounded-xl p-3.5 mb-5 space-y-1.5">
+          {[
+            { label: 'Order', value: `#${shortId}` },
+            { label: 'Vendor', value: order.vendor.name },
+            { label: 'Status', value: order.status.charAt(0) + order.status.slice(1).toLowerCase() },
+            { label: 'Total', value: `$${order.total.toFixed(2)}`, pink: true },
+          ].map(({ label, value, pink }) => (
+            <div key={label} className="flex justify-between text-sm">
+              <span className="text-[#A1A1A1]">{label}</span>
+              <span className={pink ? 'text-[#FF0077] font-semibold' : 'text-white'}>{value}</span>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[#A1A1A1] text-xs leading-relaxed mb-4">
+          Our team typically responds within a few hours. Your order ID is pre-filled in the email for faster support.
+        </p>
+
+        <div className="space-y-2">
           <a
-            href="mailto:support@fairsynq.com?subject=Order Support"
-            className="flex items-center gap-3 p-3.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm font-medium no-underline hover:bg-white/10 hover:border-[#FF0077]/30 transition-all"
+            href={`mailto:support@fairsynq.com?subject=${subject}&body=${body}`}
+            className="flex items-center gap-3 w-full p-3.5 bg-white/5 border border-white/10 rounded-xl no-underline hover:bg-white/10 hover:border-[#FF0077]/30 transition-all"
           >
-            <span className="text-lg">✉️</span>
-            Email support
+            <EnvelopeIcon className="w-4 h-4 text-[#FF0077] shrink-0" />
+            <div className="text-left">
+              <p className="text-white text-sm font-medium">Email Support</p>
+              <p className="text-[#A1A1A1] text-xs">support@fairsynq.com</p>
+            </div>
           </a>
         </div>
       </div>
@@ -452,13 +498,16 @@ function SupportModal({ isOpen, onClose, orderId }: { isOpen: boolean; onClose: 
 
 export default function OrderTrackingPage() {
   const params = useParams<{ fairSlug: string; orderId: string }>()
+  const router = useRouter()
   const { fair } = useFair()
+  const { addItem, clearCart } = useFairCart()
 
   const [order, setOrder] = useState<Order | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
+  // Initial fetch
   useEffect(() => {
     setLoading(true)
     fetch(`/api/orders/${params.orderId}`)
@@ -473,6 +522,54 @@ export default function OrderTrackingPage() {
       .catch(() => setError('Failed to load order — please refresh'))
       .finally(() => setLoading(false))
   }, [params.orderId])
+
+  // Firebase RTDB listener — updates status in real time when vendor advances the order.
+  // Falls back to 10-second polling when Firebase is not configured.
+  useEffect(() => {
+    if (!order?.eventId || !order?.customerId) return
+    const { eventId, customerId } = order
+    const orderId = params.orderId
+    const TERMINAL = new Set(['COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE'])
+
+    // Firebase path written by PATCH /api/orders/:id/status
+    const { getFirebaseApp } = require('@/lib/firebase-client')
+    const app = getFirebaseApp()
+
+    if (app) {
+      let off: (() => void) | null = null
+      import('firebase/database').then(({ getDatabase, ref, onValue, off: firebaseOff }) => {
+        const db = getDatabase(app)
+        const statusRef = ref(db, `fairs/${eventId}/customerOrders/${customerId}/${orderId}`)
+        const handler = onValue(statusRef, snap => {
+          const data = snap.val() as { status: string } | null
+          if (data?.status) {
+            setOrder(prev => prev ? { ...prev, status: data.status } : prev)
+          }
+        })
+        off = () => firebaseOff(statusRef, 'value', handler)
+      }).catch(() => {})
+      return () => { off?.() }
+    }
+
+    // Polling fallback — every 10 seconds until terminal state
+    const interval = setInterval(() => {
+      setOrder(prev => {
+        if (prev && TERMINAL.has(prev.status)) {
+          clearInterval(interval)
+          return prev
+        }
+        return prev
+      })
+      fetch(`/api/orders/${orderId}`)
+        .then(r => r.json())
+        .then(json => {
+          if (json?.success) setOrder(json.data)
+        })
+        .catch(() => {})
+    }, 10_000)
+
+    return () => clearInterval(interval)
+  }, [order?.eventId, order?.customerId, params.orderId])
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [showSupportModal, setShowSupportModal] = useState(false)
   const runnerLocation: { lat: number; lng: number } | null = null
@@ -481,7 +578,7 @@ export default function OrderTrackingPage() {
   const handleCancel = async () => {
     setCancelling(true)
     try {
-      const res = await fetch(`/api/orders/${params.orderId}/cancel`, { method: 'POST' })
+      const res = await fetch(`/api/orders/${params.orderId}/cancel`, { method: 'PATCH' })
       const json = await res.json()
       if (res.ok) {
         setOrder(prev => prev ? { ...prev, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : prev)
@@ -496,6 +593,25 @@ export default function OrderTrackingPage() {
       setCancelling(false)
     }
   }
+
+  // ── Order Again ───────────────────────────────────────────────────────────
+  const handleOrderAgain = useCallback(() => {
+    if (!order) return
+    clearCart()
+    order.orderItems.forEach(item => {
+      addItem(
+        {
+          id: item.menuItemId,
+          name: item.menuItem.name,
+          price: item.unitPrice,
+          prepTime: item.menuItem.prepTime ?? undefined,
+          imageUrl: item.menuItem.imageUrl,
+        },
+        { id: order.vendorId, name: order.vendor.name }
+      )
+    })
+    router.push(`/fair/${params.fairSlug}/checkout`)
+  }, [order, clearCart, addItem, router, params.fairSlug])
 
   // ── Loading / error / empty states ────────────────────────────────────────
   if (loading) return (
@@ -630,12 +746,12 @@ export default function OrderTrackingPage() {
 
               {isCompleted && (
                 <div className="flex gap-3">
-                  <Link
-                    href={`/fair/${params.fairSlug}/vendors`}
-                    className="flex items-center justify-center gap-2 flex-1 py-3 bg-[#FF0077] text-white rounded-xl text-sm font-semibold no-underline hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] active:scale-[0.97]"
+                  <button
+                    onClick={handleOrderAgain}
+                    className="flex items-center justify-center gap-2 flex-1 py-3 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] active:scale-[0.97] cursor-pointer"
                   >
                     Order Again
-                  </Link>
+                  </button>
                   <button
                     onClick={() => setShowSupportModal(true)}
                     className="flex items-center justify-center gap-2 flex-1 py-3 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer active:scale-[0.97]"
@@ -663,7 +779,7 @@ export default function OrderTrackingPage() {
       <SupportModal
         isOpen={showSupportModal}
         onClose={() => setShowSupportModal(false)}
-        orderId={params.orderId}
+        order={order}
       />
     </>
   )

@@ -490,7 +490,7 @@ function StepReview({
                 </span>
               ) : (
                 <span className="text-xs text-red-400/70 flex items-center gap-1">
-                  {required ? '⚠ Required' : '— Optional'}
+                  {required ? <><AlertCircle className="w-3 h-3 inline mr-0.5" />Required</> : '— Optional'}
                   {required && (
                     <button onClick={() => onEdit(1)} className="text-[#FF0077] hover:text-white transition-colors ml-1">Upload</button>
                   )}

@@ -7,11 +7,11 @@ import { requireVendorAuth } from '@/lib/auth'
 // Returns a single vendor with their active menu items.
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const vendor = await db.vendor.findUnique({
-      where: { id: params.id },
+      where: { id: (await params).id },
       include: {
         menuItems: {
           where: { isAvailable: true },
@@ -34,7 +34,7 @@ export async function GET(
 // Vendor auth required.
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireVendorAuth()
@@ -42,7 +42,7 @@ export async function PATCH(
     const { isBusy, isOffline, boothNumber, description, name, cuisineType } = body
 
     const vendor = await db.vendor.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: {
         ...(isBusy !== undefined && {
           isBusy: Boolean(isBusy),

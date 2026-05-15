@@ -12,14 +12,14 @@ import { OrderStatus } from '@prisma/client'
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
 
     // Accept both UUID and urlSlug so admin/organizer pages can pass either
     const event = await db.event.findFirst({
-      where: { OR: [{ id: params.id }, { urlSlug: params.id }] },
+      where: { OR: [{ id: (await params).id }, { urlSlug: (await params).id }] },
       select: {
         id: true, name: true, urlSlug: true, status: true, isPaused: true,
         eventLat: true, eventLng: true, startDate: true, endDate: true,
@@ -41,20 +41,20 @@ export async function GET(
 
     const [todayOrders, liveOrders, totalRevenue, platformFee] = await Promise.all([
       db.order.count({
-        where: { eventId: params.id, placedAt: { gte: todayStart } },
+        where: { eventId: (await params).id, placedAt: { gte: todayStart } },
       }),
       db.order.count({
         where: {
-          eventId: params.id,
+          eventId: (await params).id,
           status: { in: [OrderStatus.PLACED, OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY] },
         },
       }),
       db.order.aggregate({
-        where: { eventId: params.id, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+        where: { eventId: (await params).id, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
         _sum: { total: true },
       }),
       db.order.aggregate({
-        where: { eventId: params.id, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+        where: { eventId: (await params).id, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
         _sum: { fairSynqFee: true },
       }),
     ])
@@ -65,7 +65,7 @@ export async function GET(
 
     if (rtdb) {
       try {
-        const snap = await rtdb.ref(`fairs/${params.id}/heartbeats`).get()
+        const snap = await rtdb.ref(`fairs/${(await params).id}/heartbeats`).get()
         if (snap.exists()) {
           const data = snap.val() as Record<string, number>
           Object.assign(heartbeats, data)
@@ -85,7 +85,7 @@ export async function GET(
 
     const activeVendors = event.vendors.filter(v => v.status === 'ACTIVE' && !v.isOffline).length
     const activeRunners = await db.runner.count({
-      where: { eventId: params.id, status: 'ACTIVE' },
+      where: { eventId: (await params).id, status: 'ACTIVE' },
     })
 
     return success({

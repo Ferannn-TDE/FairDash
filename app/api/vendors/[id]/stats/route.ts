@@ -8,7 +8,7 @@ import { requireVendorAuth } from '@/lib/auth'
 // Scoped to today (midnight UTC) for today metrics, all-time for rates.
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireVendorAuth()
@@ -18,11 +18,11 @@ export async function GET(
 
     const [allOrders, todayOrders] = await Promise.all([
       db.order.findMany({
-        where: { vendorId: params.id },
+        where: { vendorId: (await params).id },
         select: { status: true, subtotal: true },
       }),
       db.order.findMany({
-        where: { vendorId: params.id, placedAt: { gte: todayStart } },
+        where: { vendorId: (await params).id, placedAt: { gte: todayStart } },
         select: { status: true, subtotal: true },
       }),
     ])

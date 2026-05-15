@@ -10,7 +10,7 @@ import { requireAuth } from '@/lib/auth'
 // Caller must be a VendorMember of this vendor.
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const clerkId = await requireAuth()
@@ -19,7 +19,7 @@ export async function GET(
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
     const isMember = await db.vendorMember.findFirst({
-      where: { vendorId: params.id, userId: dbUser.id },
+      where: { vendorId: (await params).id, userId: dbUser.id },
     })
     if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
@@ -33,7 +33,7 @@ export async function GET(
       : (() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d })()
 
     const orders = await db.order.findMany({
-      where: { vendorId: params.id, placedAt: { gte: since } },
+      where: { vendorId: (await params).id, placedAt: { gte: since } },
       orderBy: { placedAt: 'desc' },
       take: limit,
       include: {

@@ -9,6 +9,7 @@ import {
   TruckIcon,
   HomeIcon,
   ClockIcon,
+  ShoppingCartIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { useUser } from '@clerk/clerk-react'
@@ -25,6 +26,29 @@ const inputClass =
   'w-full p-3 bg-[#0F0F0F] border border-white/10 rounded-xl text-white placeholder:text-[#A1A1A1] focus:border-[#FF0077] focus:outline-none transition-colors duration-200 text-sm'
 const labelClass = 'block text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-1.5'
 const sectionClass = 'bg-[#1A1A1A] border border-white/10 rounded-2xl p-6'
+
+// ─── Vehicle data ─────────────────────────────────────────────────────────────
+
+const CAR_MAKES = [
+  'Acura','Alfa Romeo','Aston Martin','Audi','Bentley','BMW','Buick',
+  'Cadillac','Chevrolet','Chrysler','Dodge','Ferrari','Fiat','Ford',
+  'Genesis','GMC','Honda','Hyundai','Infiniti','Jaguar','Jeep','Kia',
+  'Lamborghini','Land Rover','Lexus','Lincoln','Maserati','Mazda',
+  'McLaren','Mercedes-Benz','MINI','Mitsubishi','Nissan','Polestar',
+  'Porsche','Ram','Rivian','Rolls-Royce','Subaru','Tesla','Toyota',
+  'Volkswagen','Volvo','Other',
+]
+
+const CAR_COLORS = [
+  'Black','White','Silver','Gray','Red','Blue','Green','Yellow',
+  'Orange','Brown','Beige','Gold','Purple','Pink','Burgundy','Other',
+]
+
+const validatePlate = (plate: string) => {
+  if (!plate) return true
+  const cleaned = plate.replace(/[\s-]/g, '')
+  return /^[A-Z0-9]{2,8}$/i.test(cleaned)
+}
 
 // ─── Fulfillment options ──────────────────────────────────────────────────────
 
@@ -110,13 +134,17 @@ function PaymentStep({
               <span className="text-white">${summary.serviceCharge.toFixed(2)}</span>
             </div>
           )}
-          <div className="flex justify-between">
-            <span className="text-[#A1A1A1]">Platform Fee</span>
-            <span className="text-white">${summary.fairSynqFee.toFixed(2)}</span>
-          </div>
+          {summary.fairSynqFee > 0 && (
+            <div className="flex justify-between">
+              <span className="text-[#A1A1A1]">Platform Fee</span>
+              <span className="text-white">${summary.fairSynqFee.toFixed(2)}</span>
+            </div>
+          )}
           <div className="flex justify-between pt-3 border-t border-white/10">
             <span className="text-white font-bold">Total</span>
-            <span className="text-[#FF0077] font-bold text-xl">${summary.total.toFixed(2)}</span>
+            <span className="text-[#FF0077] font-bold text-xl">
+              ${(summary.total + summary.fairSynqFee).toFixed(2)}
+            </span>
           </div>
         </div>
       </div>
@@ -140,7 +168,7 @@ function PaymentStep({
               Processing…
             </>
           ) : (
-            `Pay $${summary.total.toFixed(2)}`
+            `Pay $${(summary.total + summary.fairSynqFee).toFixed(2)}`
           )}
         </button>
       </div>
@@ -195,13 +223,16 @@ export default function CheckoutPage() {
     }
   }, [user])
 
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
 
+  const PLATFORM_FEE_RATE = 0.10  // matches vendor.commissionRate default in schema
   const estimatedDeliveryFee = fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee : 0
-  const estimatedTotal = parseFloat((subtotal + estimatedDeliveryFee + serviceChargeAmount).toFixed(2))
+  const estimatedPlatformFee = Math.round(subtotal * PLATFORM_FEE_RATE * 100) / 100
+  const estimatedTotal = parseFloat((subtotal + estimatedDeliveryFee + serviceChargeAmount + estimatedPlatformFee).toFixed(2))
 
   const estimatedReadyMin = useMemo(() => {
     const times = items.map(i => i.prepTime).filter((t): t is number => t != null)
@@ -236,11 +267,18 @@ export default function CheckoutPage() {
       return false
     }
     if (fulfillmentType === 'CURBSIDE') {
-      if (!form.vehicleMake.trim() || !form.vehicleColor.trim()) {
-        toast.error('Vehicle make and color are required for curbside pickup')
+      const errs: Partial<Record<string, string>> = {}
+      if (!form.vehicleMake) errs.vehicleMake = 'Please select your vehicle make'
+      if (!form.vehicleColor) errs.vehicleColor = 'Please select your vehicle color'
+      if (form.vehiclePlate && !validatePlate(form.vehiclePlate)) {
+        errs.vehiclePlate = 'Enter a valid plate (2–8 letters/numbers)'
+      }
+      if (Object.keys(errs).length > 0) {
+        setFieldErrors(errs)
         return false
       }
     }
+    setFieldErrors({})
     if (fulfillmentType === 'HOME_DELIVERY') {
       if (!form.deliveryStreet.trim()) {
         toast.error('Delivery address is required')
@@ -311,7 +349,7 @@ export default function CheckoutPage() {
   if (itemCount === 0 && !clientSecret) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center px-4">
-        <div className="text-5xl mb-4">🛒</div>
+        <ShoppingCartIcon className="w-16 h-16 mb-4 mx-auto text-white/20" />
         <h2 className="font-bebas text-3xl text-white mb-2">Your cart is empty</h2>
         <p className="text-[#A1A1A1] mb-6">Add some fair food before checking out.</p>
         <button
@@ -430,11 +468,27 @@ export default function CheckoutPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <label className={labelClass}>Vehicle Make *</label>
-                          <input type="text" name="vehicleMake" value={form.vehicleMake} onChange={handleChange} className={inputClass} placeholder="Toyota" />
+                          <select
+                            name="vehicleMake" value={form.vehicleMake}
+                            onChange={e => { setForm(prev => ({ ...prev, vehicleMake: e.target.value })); setFieldErrors(prev => ({ ...prev, vehicleMake: undefined })) }}
+                            className={`${inputClass} appearance-none ${fieldErrors.vehicleMake ? 'border-red-500 focus:border-red-500' : ''}`}
+                          >
+                            <option value="">Select make…</option>
+                            {CAR_MAKES.map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                          {fieldErrors.vehicleMake && <p className="mt-1 text-xs text-red-400">{fieldErrors.vehicleMake}</p>}
                         </div>
                         <div>
                           <label className={labelClass}>Vehicle Color *</label>
-                          <input type="text" name="vehicleColor" value={form.vehicleColor} onChange={handleChange} className={inputClass} placeholder="Silver" />
+                          <select
+                            name="vehicleColor" value={form.vehicleColor}
+                            onChange={e => { setForm(prev => ({ ...prev, vehicleColor: e.target.value })); setFieldErrors(prev => ({ ...prev, vehicleColor: undefined })) }}
+                            className={`${inputClass} appearance-none ${fieldErrors.vehicleColor ? 'border-red-500 focus:border-red-500' : ''}`}
+                          >
+                            <option value="">Select color…</option>
+                            {CAR_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          {fieldErrors.vehicleColor && <p className="mt-1 text-xs text-red-400">{fieldErrors.vehicleColor}</p>}
                         </div>
                       </div>
                       <div>
@@ -442,7 +496,19 @@ export default function CheckoutPage() {
                           License Plate{' '}
                           <span className="text-[#A1A1A1] font-normal normal-case">(optional)</span>
                         </label>
-                        <input type="text" name="vehiclePlate" value={form.vehiclePlate} onChange={handleChange} className={inputClass} placeholder="ABC 1234" />
+                        <input
+                          type="text" name="vehiclePlate"
+                          value={form.vehiclePlate}
+                          onChange={e => {
+                            const val = e.target.value.toUpperCase().replace(/[^A-Z0-9\s-]/g, '')
+                            setForm(prev => ({ ...prev, vehiclePlate: val }))
+                            setFieldErrors(prev => ({ ...prev, vehiclePlate: undefined }))
+                          }}
+                          maxLength={10}
+                          className={`${inputClass} ${fieldErrors.vehiclePlate ? 'border-red-500 focus:border-red-500' : ''}`}
+                          placeholder="ABC 1234"
+                        />
+                        {fieldErrors.vehiclePlate && <p className="mt-1 text-xs text-red-400">{fieldErrors.vehiclePlate}</p>}
                       </div>
                     </div>
                   </div>
@@ -500,8 +566,8 @@ export default function CheckoutPage() {
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.name} className="w-14 h-14 object-cover rounded-lg flex-shrink-0" />
                     ) : (
-                      <div className="w-14 h-14 rounded-lg bg-[#0F0F0F] flex items-center justify-center flex-shrink-0 text-2xl">
-                        🍽️
+                      <div className="w-14 h-14 rounded-lg bg-[#0F0F0F] flex items-center justify-center flex-shrink-0">
+                        <BuildingStorefrontIcon className="w-6 h-6 text-white/20" />
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
@@ -543,6 +609,14 @@ export default function CheckoutPage() {
                     <span className="text-white">${serviceChargeAmount.toFixed(2)}</span>
                   </div>
                 )}
+                <div className="flex justify-between">
+                  <span className="text-[#A1A1A1]">Platform Fee</span>
+                  <span className="text-white">
+                    ${clientSecret
+                      ? (summary?.fairSynqFee ?? estimatedPlatformFee).toFixed(2)
+                      : estimatedPlatformFee.toFixed(2)}
+                  </span>
+                </div>
               </div>
 
               <div className="flex justify-between py-4">
@@ -550,13 +624,12 @@ export default function CheckoutPage() {
                   {clientSecret ? 'Total' : 'Est. Total'}
                 </span>
                 <span className="text-[#FF0077] font-bold text-xl">
-                  ${clientSecret ? (summary?.total ?? estimatedTotal).toFixed(2) : estimatedTotal.toFixed(2)}
+                  ${clientSecret
+                    ? ((summary?.total ?? 0) + (summary?.fairSynqFee ?? 0)).toFixed(2)
+                    : estimatedTotal.toFixed(2)}
                 </span>
               </div>
 
-              {!clientSecret && (
-                <p className="text-[#A1A1A1] text-xs text-center">Platform fee added at payment step</p>
-              )}
             </div>
           </div>
 

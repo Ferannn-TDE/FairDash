@@ -45,7 +45,7 @@ function FavoriteCard({ fav, onRemove }: { fav: FavoriteItem; onRemove: (menuIte
         </div>
       ) : (
         <div className="aspect-[16/9] bg-gradient-to-br from-neon-pink/8 to-[#1a1a1a] flex items-center justify-center">
-          <span className="text-4xl opacity-20">🍽️</span>
+          <HeartIcon className="w-10 h-10 opacity-20 text-white" />
         </div>
       )}
 

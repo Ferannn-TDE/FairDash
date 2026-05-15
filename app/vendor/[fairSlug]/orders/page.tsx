@@ -1,19 +1,44 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, Clock, User, Phone,
   ShoppingBag, Car, MapPin, CheckCircle, XCircle,
   Package, ArrowUpDown,
 } from 'lucide-react'
-import {
-  mockIncomingOrders, mockActiveOrders, mockReadyOrders, mockCompletedOrders,
-  type MockVendorOrder, type OrderStatus,
-} from '@/lib/mock/vendor-dashboard'
+import { useVendorMeta } from '@/lib/contexts/VendorContext'
 
-// ─── Types & constants ──────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<OrderStatus, { label: string; cls: string }> = {
+type OrderStatus = 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | string
+
+interface OrderItem {
+  menuItem: { name: string }
+  quantity: number
+  unitPrice: number
+}
+
+interface Order {
+  id: string
+  status: OrderStatus
+  fulfillmentType: 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY' | string
+  customerName: string
+  customerPhone?: string | null
+  total: number
+  subtotal: number
+  orderItems: OrderItem[]
+  placedAt: string
+  estimatedReadyAt?: string | null
+  vehicleColor?: string | null
+  vehicleMake?: string | null
+  vehiclePlate?: string | null
+  deliveryStreet?: string | null
+  deliveryCity?: string | null
+}
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const STATUS_META: Record<string, { label: string; cls: string }> = {
   PLACED:    { label: 'New',       cls: 'bg-neon-pink/10 text-neon-pink border-neon-pink/20' },
   ACCEPTED:  { label: 'Accepted',  cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   PREPARING: { label: 'Preparing', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
@@ -28,13 +53,6 @@ const FULFILLMENT_LABEL: Record<string, string> = {
   HOME_DELIVERY: 'Home Delivery',
 }
 
-const ALL_ORDERS: MockVendorOrder[] = [
-  ...mockIncomingOrders,
-  ...mockActiveOrders,
-  ...mockReadyOrders,
-  ...mockCompletedOrders,
-]
-
 const FILTER_TABS = [
   { value: 'all',       label: 'All' },
   { value: 'PLACED',    label: 'Incoming' },
@@ -46,7 +64,7 @@ const FILTER_TABS = [
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: OrderStatus }) {
+function StatusBadge({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { label: status, cls: 'bg-white/5 text-text-gray border-white/10' }
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${meta.cls}`}>
@@ -61,25 +79,22 @@ function FulfillmentIcon({ type }: { type: string }) {
   return <ShoppingBag className="w-3.5 h-3.5" />
 }
 
-function OrderCard({ order }: { order: MockVendorOrder }) {
+function OrderCard({ order }: { order: Order }) {
   const [expanded, setExpanded] = useState(false)
-
   const placedTime = new Date(order.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const shortId = order.id.slice(-8).toUpperCase()
+  const shortId = '#' + order.id.slice(-8).toUpperCase()
 
   return (
     <div className={`border border-white/10 rounded-2xl overflow-hidden transition-all duration-200 ${
       order.status === 'PLACED' ? 'border-neon-pink/30 bg-neon-pink/[0.03]' : 'bg-bg-card'
     }`}>
-      {/* Header row — always visible */}
       <button
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(v => !v)}
         className="w-full flex items-center gap-4 p-4 sm:p-5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer"
       >
-        {/* Order ID + time */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-white text-sm">#{shortId}</span>
+            <span className="font-bold text-white text-sm">{shortId}</span>
             <StatusBadge status={order.status} />
           </div>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
@@ -97,27 +112,19 @@ function OrderCard({ order }: { order: MockVendorOrder }) {
             </span>
           </div>
         </div>
-
-        {/* Items summary */}
         <div className="hidden sm:block flex-1 min-w-0">
           <p className="text-white/60 text-xs truncate">
-            {order.orderItems.map((i) => `${i.quantity}× ${i.menuItem.name}`).join(', ')}
+            {order.orderItems.map(i => `${i.quantity}× ${i.menuItem.name}`).join(', ')}
           </p>
         </div>
-
-        {/* Total + chevron */}
         <div className="flex items-center gap-3 shrink-0">
           <span className="font-bold text-neon-pink text-sm">${order.total.toFixed(2)}</span>
-          {expanded
-            ? <ChevronUp className="w-4 h-4 text-text-gray" />
-            : <ChevronDown className="w-4 h-4 text-text-gray" />}
+          {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
         </div>
       </button>
 
-      {/* Expanded details */}
       {expanded && (
         <div className="border-t border-white/10 p-4 sm:p-5 space-y-4">
-          {/* Items list */}
           <div>
             <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Items</p>
             <div className="space-y-1.5">
@@ -137,7 +144,6 @@ function OrderCard({ order }: { order: MockVendorOrder }) {
             </div>
           </div>
 
-          {/* Customer info */}
           <div>
             <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Customer</p>
             <div className="flex flex-wrap gap-4">
@@ -154,16 +160,15 @@ function OrderCard({ order }: { order: MockVendorOrder }) {
             </div>
           </div>
 
-          {/* Fulfillment details */}
           <div>
             <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Fulfillment</p>
             <div className="flex items-start gap-2">
               <FulfillmentIcon type={order.fulfillmentType} />
               <div className="text-sm text-white space-y-0.5">
-                <p className="font-semibold">{FULFILLMENT_LABEL[order.fulfillmentType]}</p>
+                <p className="font-semibold">{FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}</p>
                 {order.fulfillmentType === 'CURBSIDE' && (
                   <p className="text-text-gray text-xs">
-                    {order.vehicleColor} {order.vehicleMake} · {order.vehiclePlate}
+                    {order.vehicleColor} {order.vehicleMake}{order.vehiclePlate ? ` · ${order.vehiclePlate}` : ''}
                   </p>
                 )}
                 {order.fulfillmentType === 'HOME_DELIVERY' && (
@@ -173,21 +178,21 @@ function OrderCard({ order }: { order: MockVendorOrder }) {
             </div>
           </div>
 
-          {/* Timestamps */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white/[0.03] rounded-xl p-3">
               <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-0.5">Placed</p>
               <p className="text-sm text-white">{placedTime}</p>
             </div>
-            <div className="bg-white/[0.03] rounded-xl p-3">
-              <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-0.5">Est. Ready</p>
-              <p className="text-sm text-white">
-                {new Date(order.estimatedReadyAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </p>
-            </div>
+            {order.estimatedReadyAt && (
+              <div className="bg-white/[0.03] rounded-xl p-3">
+                <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-0.5">Est. Ready</p>
+                <p className="text-sm text-white">
+                  {new Date(order.estimatedReadyAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Status indicator */}
           <div className="flex items-center gap-2">
             {order.status === 'COMPLETED'
               ? <CheckCircle className="w-4 h-4 text-emerald-400" />
@@ -195,10 +200,8 @@ function OrderCard({ order }: { order: MockVendorOrder }) {
               ? <XCircle className="w-4 h-4 text-red-400" />
               : <Package className="w-4 h-4 text-neon-pink" />}
             <span className="text-xs text-text-gray">
-              {order.status === 'COMPLETED'
-                ? 'Order fulfilled successfully'
-                : order.status === 'CANCELLED'
-                ? 'Order was cancelled'
+              {order.status === 'COMPLETED' ? 'Order fulfilled successfully'
+                : order.status === 'CANCELLED' ? 'Order was cancelled'
                 : 'Order in progress'}
             </span>
           </div>
@@ -211,45 +214,60 @@ function OrderCard({ order }: { order: MockVendorOrder }) {
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function VendorOrdersPage() {
+  const { vendorId } = useVendorMeta()
+  const [orders, setOrders] = useState<Order[]>([])
+  const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>('all')
   const [sortNewest, setSortNewest] = useState(true)
 
+  useEffect(() => {
+    if (!vendorId) return
+    fetch(`/api/vendors/${vendorId}/orders`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.success) setOrders(json.data?.orders ?? [])
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [vendorId])
+
   const tabCounts = useMemo(() => ({
-    all: ALL_ORDERS.length,
-    PLACED:    ALL_ORDERS.filter((o) => o.status === 'PLACED').length,
-    PREPARING: ALL_ORDERS.filter((o) => o.status === 'ACCEPTED' || o.status === 'PREPARING').length,
-    READY:     ALL_ORDERS.filter((o) => o.status === 'READY').length,
-    COMPLETED: ALL_ORDERS.filter((o) => o.status === 'COMPLETED').length,
-    CANCELLED: ALL_ORDERS.filter((o) => o.status === 'CANCELLED').length,
-  }), [])
+    all:       orders.length,
+    PLACED:    orders.filter(o => o.status === 'PLACED').length,
+    PREPARING: orders.filter(o => o.status === 'ACCEPTED' || o.status === 'PREPARING').length,
+    READY:     orders.filter(o => o.status === 'READY').length,
+    COMPLETED: orders.filter(o => o.status === 'COMPLETED').length,
+    CANCELLED: orders.filter(o => o.status === 'CANCELLED').length,
+  }), [orders])
 
   const filtered = useMemo(() => {
-    let list = ALL_ORDERS
+    let list = orders
     if (filter !== 'all') {
       if (filter === 'PREPARING') {
-        list = list.filter((o) => o.status === 'ACCEPTED' || o.status === 'PREPARING')
+        list = list.filter(o => o.status === 'ACCEPTED' || o.status === 'PREPARING')
       } else {
-        list = list.filter((o) => o.status === filter)
+        list = list.filter(o => o.status === filter)
       }
     }
     return [...list].sort((a, b) => {
       const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
       return sortNewest ? diff : -diff
     })
-  }, [filter, sortNewest])
+  }, [orders, filter, sortNewest])
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[56rem] mx-auto">
-      {/* Header */}
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
           <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
             Order <span className="text-neon-pink">History</span>
           </h1>
-          <p className="text-text-gray text-sm mt-0.5">{ALL_ORDERS.length} orders today</p>
+          <p className="text-text-gray text-sm mt-0.5">
+            {loading ? 'Loading…' : `${orders.length} orders today`}
+          </p>
         </div>
         <button
-          onClick={() => setSortNewest((v) => !v)}
+          onClick={() => setSortNewest(v => !v)}
           className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-semibold text-text-gray hover:text-white hover:border-white/20 transition-all duration-200 cursor-pointer"
         >
           <ArrowUpDown className="w-3.5 h-3.5" />
@@ -257,9 +275,8 @@ export default function VendorOrdersPage() {
         </button>
       </div>
 
-      {/* Filter tabs */}
       <div className="flex gap-1.5 flex-wrap mb-6">
-        {FILTER_TABS.map((tab) => {
+        {FILTER_TABS.map(tab => {
           const count = tabCounts[tab.value as keyof typeof tabCounts] ?? 0
           const isActive = filter === tab.value
           return (
@@ -281,8 +298,13 @@ export default function VendorOrdersPage() {
         })}
       </div>
 
-      {/* Order list */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="space-y-3">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-20 bg-white/5 rounded-2xl animate-pulse" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-bg-card border border-white/10 rounded-2xl py-16 text-center">
           <Package className="w-10 h-10 text-white/10 mx-auto mb-3" />
           <p className="text-white font-semibold text-sm mb-1">No orders found</p>
@@ -290,7 +312,7 @@ export default function VendorOrdersPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((order) => (
+          {filtered.map(order => (
             <OrderCard key={order.id} order={order} />
           ))}
         </div>

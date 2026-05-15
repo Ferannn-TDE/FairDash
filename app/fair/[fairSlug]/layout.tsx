@@ -6,13 +6,14 @@ import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { Metadata } from 'next'
 
 interface Props {
-  params: { fairSlug: string }
+  params: Promise<{ fairSlug: string }>
   children: React.ReactNode
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { fairSlug } = await params
   try {
-    const fair = await getFairBySlugCached(params.fairSlug)
+    const fair = await getFairBySlugCached(fairSlug)
     if (fair) {
       return {
         title: `${fair.name} — FairSynq`,
@@ -22,7 +23,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   } catch {
     // DB unavailable — fall through to mock
   }
-  const mockFair = getFairBySlug(params.fairSlug)
+  const mockFair = getFairBySlug(fairSlug)
   if (mockFair) return { title: `${mockFair.name} — FairSynq` }
   return { title: 'Fair not found — FairSynq' }
 }
@@ -45,34 +46,35 @@ function normalizeMock(slug: string, dbFair: FairData): FairData {
 }
 
 export default async function FairLayout({ params, children }: Props) {
+  const { fairSlug } = await params
   let initialFair: FairData | null = null
   let initialVendors: VendorData[] = []
 
   try {
     const [dbFair, dbVendors] = await Promise.all([
-      getFairBySlugCached(params.fairSlug),
-      getVendorsBySlugCached(params.fairSlug),
+      getFairBySlugCached(fairSlug),
+      getVendorsBySlugCached(fairSlug),
     ])
 
     if (dbFair) {
-      initialFair = normalizeMock(params.fairSlug, dbFair)
+      initialFair = normalizeMock(fairSlug, dbFair)
       initialVendors = dbVendors
     }
   } catch (err) {
-    console.error('[FairLayout] DB error for slug "%s":', params.fairSlug, err)
+    console.error('[FairLayout] DB error for slug "%s":', fairSlug, err)
     // Fall through to mock check
   }
 
   // If DB has no data, try mock; if no mock either → 404
   if (!initialFair) {
-    const mockFair = getFairBySlug(params.fairSlug)
+    const mockFair = getFairBySlug(fairSlug)
     if (!mockFair) notFound()
     // Layout renders — FairContext client-side will hydrate from mock
   }
 
   return (
     <FairShell
-      fairSlug={params.fairSlug}
+      fairSlug={fairSlug}
       initialFair={initialFair}
       initialVendors={initialVendors.length ? initialVendors : undefined}
     >

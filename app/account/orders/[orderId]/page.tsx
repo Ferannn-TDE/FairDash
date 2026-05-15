@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { notFound } from 'next/navigation'
 import MarketplaceNavbar from '../../../_components/MarketplaceNavbar'
 import Link from 'next/link'
-import { MapPinIcon } from '@heroicons/react/24/outline'
+import { MapPinIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
 
 export const metadata = { title: 'Order Detail — FairSynq' }
 
@@ -27,10 +27,11 @@ const STATUS_LABELS: Record<string, string> = {
 const TIMELINE = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COMPLETED']
 
 interface Props {
-  params: { orderId: string }
+  params: Promise<{ orderId: string }>
 }
 
 export default async function OrderDetailPage({ params }: Props) {
+  const { orderId } = await params
   const { userId: clerkId } = await auth()
   if (!clerkId) notFound()
 
@@ -38,7 +39,7 @@ export default async function OrderDetailPage({ params }: Props) {
   if (!dbUser) notFound()
 
   const order = await db.order.findFirst({
-    where: { id: params.orderId, customerId: dbUser.id },
+    where: { id: orderId, customerId: dbUser.id },
     include: {
       vendor: { select: { name: true, boothNumber: true } },
       event:  { select: { urlSlug: true, name: true } },
@@ -130,7 +131,7 @@ export default async function OrderDetailPage({ params }: Props) {
                       <img src={item.menuItem.imageUrl} alt={item.menuItem.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
                     ) : (
                       <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
-                        <span className="text-lg">🍽️</span>
+                        <BuildingStorefrontIcon className="w-5 h-5 text-white/30" />
                       </div>
                     )}
                     <div>

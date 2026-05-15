@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ShoppingBagIcon } from '@heroicons/react/24/outline'
+import { ShoppingBagIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../../_contexts/FairContext'
 import { useFairCart } from '../../../../_contexts/FairCartContext'
 import type { GroupedMenuItem } from '@/lib/menu/getGroupedMenuItems'
@@ -96,7 +96,7 @@ export default function VendorMenuPage() {
   if (notFound || !vendor) {
     return (
       <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-20 text-center text-white">
-        <div className="text-[6rem] mb-5 opacity-30">🍽️</div>
+        <BuildingStorefrontIcon className="w-16 h-16 mb-5 mx-auto opacity-20 text-white" />
         <h2 className="font-bebas text-3xl tracking-wide mb-2">Vendor not found</h2>
         <p className="text-text-gray mb-6">This vendor may no longer be available at this fair.</p>
         <button
@@ -151,7 +151,7 @@ export default function VendorMenuPage() {
       {/* Menu */}
       {groupedItems.length === 0 ? (
         <div className="text-center py-16 text-text-gray">
-          <div className="text-[4rem] mb-4 opacity-20">🍽️</div>
+          <BuildingStorefrontIcon className="w-14 h-14 mb-4 mx-auto opacity-20 text-white" />
           <p>No menu items available right now.</p>
         </div>
       ) : (

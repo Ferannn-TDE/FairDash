@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { mockOrganizerFairs } from '@/lib/mock/organizer'
 
-export default function FairOverviewPage({ params }: { params: { fairId: string } }) {
-  const fair = mockOrganizerFairs.find(f => f.id === params.fairId) ?? mockOrganizerFairs[0]
+export default async function FairOverviewPage({ params }: { params: Promise<{ fairId: string }> }) {
+  const { fairId } = await params
+  const fair = mockOrganizerFairs.find(f => f.id === fairId) ?? mockOrganizerFairs[0]
 
   return (
     <div>
