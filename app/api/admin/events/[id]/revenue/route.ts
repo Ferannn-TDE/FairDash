@@ -10,7 +10,7 @@ import { OrderStatus } from '@prisma/client'
 // Accepts event UUID or urlSlug as [id]. Used by organizer analytics chart.
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
@@ -26,7 +26,7 @@ export async function GET(
 
     // Accept both UUID and urlSlug
     const event = await db.event.findFirst({
-      where: { OR: [{ id: params.id }, { urlSlug: params.id }] },
+      where: { OR: [{ id: (await params).id }, { urlSlug: (await params).id }] },
       select: { id: true },
     })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')

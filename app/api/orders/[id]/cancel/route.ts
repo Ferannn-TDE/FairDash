@@ -15,12 +15,12 @@ import { ORDER_CANCELLATION_FEE_USD } from '@/lib/constants'
 
 export async function PATCH(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const clerkId = await requireAuth()
 
-    const order = await db.order.findUnique({ where: { id: params.id } })
+    const order = await db.order.findUnique({ where: { id: (await params).id } })
     if (!order) return apiError('Order not found', 404, 'ORDER_NOT_FOUND')
 
     // Verify caller is the order's customer

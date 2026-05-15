@@ -101,7 +101,7 @@ export default function FairVendorsPage() {
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-20 px-5">
-              <div className="text-[6rem] mb-5 opacity-30">🔍</div>
+              <MagnifyingGlassIcon className="w-16 h-16 mb-5 mx-auto opacity-20 text-white" />
               <h3 className="font-bebas text-3xl mb-2 tracking-wide">No vendors found</h3>
               <p className="text-text-gray">
                 {isSearching ? `No results for "${searchQuery}"` : 'Check back soon'}

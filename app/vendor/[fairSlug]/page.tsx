@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 
-export default function VendorRootPage({ params }: { params: { fairSlug: string } }) {
-  redirect(`/vendor/${params.fairSlug}/dashboard`)
+export default async function VendorRootPage({ params }: { params: Promise<{ fairSlug: string }> }) {
+  const { fairSlug } = await params
+  redirect(`/vendor/${fairSlug}/dashboard`)
 }

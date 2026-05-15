@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   CurrencyDollarIcon,
   ShoppingBagIcon,
@@ -8,38 +8,17 @@ import {
   CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 import EarningsChart, { type ChartDataPoint, type ChartPeriod } from '@/app/_components/EarningsChart'
+import { useVendorMeta } from '@/lib/contexts/VendorContext'
 
-interface VendorStats {
+interface AnalyticsData {
+  chartData: ChartDataPoint[]
+  totalRevenue: number
+  totalOrders: number
+  avgOrderValue: number
+  completionRate: number
   todayRevenue: number
   todayOrders: number
-  avgOrderValue: number
-  acceptanceRate: number
-  cancellationRate: number
   pendingOrders: number
-}
-
-const MOCK_VENDOR = { id: 'vendor_001', name: 'Smoky Barrel BBQ' }
-
-const MOCK_STATS: VendorStats = {
-  todayRevenue: 487.50,
-  todayOrders: 23,
-  avgOrderValue: 21.20,
-  acceptanceRate: 0.97,
-  cancellationRate: 0.03,
-  pendingOrders: 2,
-}
-
-function buildChartData(period: ChartPeriod): ChartDataPoint[] {
-  const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
-  return Array.from({ length: days }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - (days - 1 - i))
-    return {
-      day: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      revenue: Math.round(300 + Math.random() * 400),
-      orders: Math.round(10 + Math.random() * 20),
-    }
-  })
 }
 
 function StatCard({
@@ -80,13 +59,24 @@ function StatCard({
 }
 
 export default function VendorAnalyticsPage() {
-  const vendor = MOCK_VENDOR
-  const stats = MOCK_STATS
+  const { vendorId, vendorName } = useVendorMeta()
   const [period, setPeriod] = useState<ChartPeriod>('7d')
-  const chartData = buildChartData(period)
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  const periodRevenue = chartData.reduce((s, d) => s + d.revenue, 0)
-  const completionRate = ((1 - stats.cancellationRate) * 100).toFixed(1) + '%'
+  useEffect(() => {
+    if (!vendorId) return
+    setLoading(true)
+    const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+    fetch(`/api/vendors/${vendorId}/analytics?days=${days}`)
+      .then(r => r.json())
+      .then(json => { if (json.success) setAnalytics(json.data) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [vendorId, period])
+
+  const periodRevenue = analytics?.totalRevenue ?? 0
+  const completionRate = analytics ? `${(analytics.completionRate * 100).toFixed(1)}%` : '—'
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[78rem] mx-auto">
@@ -96,16 +86,16 @@ export default function VendorAnalyticsPage() {
         <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight mb-1">
           Revenue <span className="text-neon-pink">Analytics</span>
         </h1>
-        <p className="text-text-gray text-sm">{vendor.name}</p>
+        <p className="text-text-gray text-sm">{vendorName ?? '—'}</p>
       </div>
 
       {/* Chart — full width */}
       <div className="mb-8 animate-fadeIn">
         <EarningsChart
-          data={chartData}
+          data={analytics?.chartData ?? []}
           period={period}
           onPeriodChange={setPeriod}
-          loading={false}
+          loading={loading}
           title="Revenue Overview"
         />
       </div>
@@ -117,41 +107,41 @@ export default function VendorAnalyticsPage() {
           value={`$${periodRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           icon={CurrencyDollarIcon}
           accentColor="pink"
-          loading={false}
+          loading={loading}
         />
         <StatCard
           label="Today's Orders"
-          value={stats?.todayOrders ?? '—'}
+          value={analytics?.todayOrders ?? '—'}
           icon={ShoppingBagIcon}
           accentColor="blue"
-          loading={!stats}
+          loading={loading}
         />
         <StatCard
           label="Avg Order Value"
-          value={stats ? `$${stats.avgOrderValue.toFixed(2)}` : '—'}
+          value={analytics ? `$${analytics.avgOrderValue.toFixed(2)}` : '—'}
           icon={BanknotesIcon}
           accentColor="emerald"
-          loading={!stats}
+          loading={loading}
         />
         <StatCard
           label="Completion Rate"
           value={completionRate}
           icon={CheckCircleIcon}
           accentColor="amber"
-          loading={!stats}
+          loading={loading}
         />
       </div>
 
       {/* Today's snapshot */}
-      {stats && (
+      {analytics && (
         <div className="bg-bg-card border border-white/10 rounded-2xl p-6 animate-fadeIn [animation-delay:0.2s]">
           <h3 className="font-bebas text-xl tracking-wide text-white mb-5">Today&apos;s Snapshot</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { label: "Today's Revenue", value: `$${stats.todayRevenue.toFixed(2)}` },
-              { label: 'Today\'s Orders',  value: String(stats.todayOrders) },
-              { label: 'Pending Orders',   value: String(stats.pendingOrders) },
-              { label: 'Acceptance Rate',  value: `${(stats.acceptanceRate * 100).toFixed(1)}%` },
+              { label: "Today's Revenue", value: `$${analytics.todayRevenue.toFixed(2)}` },
+              { label: "Today's Orders",  value: String(analytics.todayOrders) },
+              { label: 'Pending Orders',  value: String(analytics.pendingOrders) },
+              { label: 'Completion Rate', value: completionRate },
             ].map(({ label, value }) => (
               <div key={label}>
                 <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>

@@ -4,16 +4,15 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   HomeIcon,
-  BuildingStorefrontIcon,
   ClipboardDocumentListIcon,
   ShoppingBagIcon,
 } from '@heroicons/react/24/outline'
 import {
   HomeIcon as HomeIconSolid,
-  BuildingStorefrontIcon as BuildingStorefrontIconSolid,
   ClipboardDocumentListIcon as ClipboardIconSolid,
   ShoppingBagIcon as ShoppingBagIconSolid,
 } from '@heroicons/react/24/solid'
+import { UtensilsCrossed } from 'lucide-react'
 import { useFair } from '../_contexts/FairContext'
 import { useFairCart } from '../_contexts/FairCartContext'
 
@@ -26,7 +25,7 @@ export default function FairBottomNav() {
 
   const tabs = [
     { label: 'Home',    href: base,              Icon: HomeIcon,                     IconActive: HomeIconSolid },
-    { label: 'Vendors', href: `${base}/vendors`, Icon: BuildingStorefrontIcon,        IconActive: BuildingStorefrontIconSolid },
+    { label: 'Menu',    href: `${base}/menu`,    Icon: UtensilsCrossed,               IconActive: UtensilsCrossed },
     { label: 'Orders',  href: `${base}/orders`,  Icon: ClipboardDocumentListIcon,     IconActive: ClipboardIconSolid },
     { label: 'Cart',    href: `${base}/cart`,    Icon: ShoppingBagIcon,               IconActive: ShoppingBagIconSolid },
   ]

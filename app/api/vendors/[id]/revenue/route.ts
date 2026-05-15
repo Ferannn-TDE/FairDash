@@ -9,7 +9,7 @@ import { requireVendorAuth } from '@/lib/auth'
 // Response: { data: [{ date: 'Mon', revenue: 342.50 }, ...] }
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireVendorAuth()
@@ -28,7 +28,7 @@ export async function GET(
 
     const orders = await db.order.findMany({
       where: {
-        vendorId: params.id,
+        vendorId: (await params).id,
         status: { in: ['COMPLETED', 'DELIVERED'] },
         placedAt: { gte: periodStart },
       },

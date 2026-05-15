@@ -10,15 +10,15 @@ import { CurbsideMethod } from '@prisma/client'
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
 
-    const event = await db.event.findUnique({ where: { id: params.id } })
+    const event = await db.event.findUnique({ where: { id: (await params).id } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
-    const config = await db.fulfillmentConfig.findUnique({ where: { eventId: params.id } })
+    const config = await db.fulfillmentConfig.findUnique({ where: { eventId: (await params).id } })
     return success({ config })
   } catch (err) {
     return handleApiError(err)
@@ -44,19 +44,19 @@ interface FulfillmentBody {
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
 
-    const event = await db.event.findUnique({ where: { id: params.id } })
+    const event = await db.event.findUnique({ where: { id: (await params).id } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
     const body: FulfillmentBody = await req.json()
 
     // Validation: if enabling curbside, coords + description are required
     if (body.curbsideEnabled === true) {
-      const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: params.id } })
+      const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: (await params).id } })
       const lat = body.curbsideZoneLat ?? existing?.curbsideZoneLat
       const lng = body.curbsideZoneLng ?? existing?.curbsideZoneLng
       const desc = body.curbsideZoneDescription ?? existing?.curbsideZoneDescription
@@ -71,9 +71,9 @@ export async function PATCH(
     }
 
     const config = await db.fulfillmentConfig.upsert({
-      where: { eventId: params.id },
+      where: { eventId: (await params).id },
       create: {
-        eventId: params.id,
+        eventId: (await params).id,
         boothPickupEnabled: body.boothPickupEnabled ?? true,
         curbsideEnabled: body.curbsideEnabled ?? false,
         homeDeliveryEnabled: body.homeDeliveryEnabled ?? false,

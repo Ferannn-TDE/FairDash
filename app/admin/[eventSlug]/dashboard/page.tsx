@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, use } from 'react'
 import {
   CheckCircleIcon,
   XCircleIcon,
@@ -228,7 +228,8 @@ function PauseModal({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function AdminDashboardPage({ params }: { params: { eventSlug: string } }) {
+export default function AdminDashboardPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
+  const params = use(paramsPromise)
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [eventStatus, setEventStatus] = useState<EventStatus>('UPCOMING')
   const [isPaused, setIsPaused] = useState(false)

@@ -11,12 +11,12 @@ import { VendorStatus } from '@prisma/client'
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
 
-    const vendor = await db.vendor.findUnique({ where: { id: params.id } })
+    const vendor = await db.vendor.findUnique({ where: { id: (await params).id } })
     if (!vendor) throw new ApiError('Vendor not found', 404, 'VENDOR_NOT_FOUND')
 
     if (vendor.status !== VendorStatus.PENDING) {
@@ -34,7 +34,7 @@ export async function PATCH(
     }
 
     const updated = await db.vendor.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: { status: VendorStatus.REJECTED },
       select: { id: true, name: true, status: true },
     })

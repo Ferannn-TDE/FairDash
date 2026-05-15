@@ -1,5 +1,6 @@
 'use client'
 
+import { use } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Home, DollarSign, Settings, Truck } from 'lucide-react'
@@ -7,7 +8,7 @@ import { RunnerProvider, useRunner } from './_context/RunnerContext'
 
 interface Props {
   children: React.ReactNode
-  params: { fairSlug: string }
+  params: Promise<{ fairSlug: string }>
 }
 
 const NAV_ITEMS = (base: string) => [
@@ -127,10 +128,11 @@ function RunnerShell({ children, fairSlug }: { children: React.ReactNode; fairSl
   )
 }
 
-export default function RunnerLayout({ children, params }: Props) {
+export default function RunnerLayout({ children, params: paramsPromise }: Props) {
+  const { fairSlug } = use(paramsPromise)
   return (
     <RunnerProvider>
-      <RunnerShell fairSlug={params.fairSlug}>{children}</RunnerShell>
+      <RunnerShell fairSlug={fairSlug}>{children}</RunnerShell>
     </RunnerProvider>
   )
 }

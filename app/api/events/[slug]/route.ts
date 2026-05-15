@@ -6,12 +6,12 @@ import { handleApiError } from '@/lib/api-error'
 // Returns a single event by its URL slug, with active vendor count.
 export async function GET(
   _req: Request,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
     // Accept both URL slug and raw UUID so callers with only an eventId can also use this route
     const event = await db.event.findFirst({
-      where: { OR: [{ urlSlug: params.slug }, { id: params.slug }] },
+      where: { OR: [{ urlSlug: (await params).slug }, { id: (await params).slug }] },
       include: {
         fulfillmentConfig: true,
         _count: {

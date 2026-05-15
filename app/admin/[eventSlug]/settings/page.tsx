@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, use } from 'react'
 import { CheckCircleIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import { mockAdminEvents } from '@/lib/mock/admin'
 
@@ -27,7 +27,8 @@ function SectionCard({ title, children }: { title: string; children: React.React
   )
 }
 
-export default function AdminSettingsPage({ params }: { params: { eventSlug: string } }) {
+export default function AdminSettingsPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
+  const params = use(paramsPromise)
   const event = mockAdminEvents.find(e => e.slug === params.eventSlug) ?? mockAdminEvents[0]
   const [name, setName] = useState(event.name)
   const [startDate, setStartDate] = useState(event.startDate)

@@ -11,7 +11,7 @@ import { RunnerStatus } from '@prisma/client'
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
@@ -26,11 +26,11 @@ export async function PATCH(
       )
     }
 
-    const runner = await db.runner.findUnique({ where: { id: params.id } })
+    const runner = await db.runner.findUnique({ where: { id: (await params).id } })
     if (!runner) throw new ApiError('Runner not found', 404, 'RUNNER_NOT_FOUND')
 
     const updated = await db.runner.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: { status },
       include: { user: { select: { name: true, email: true } } },
     })

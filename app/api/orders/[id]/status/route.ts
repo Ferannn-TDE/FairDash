@@ -65,14 +65,14 @@ function haversineMetres(lat1: number, lng1: number, lat2: number, lng2: number)
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const clerkId = await requireAuth()
 
     // ── 1. Load order ──────────────────────────────────────────────────────
     const order = await db.order.findUnique({
-      where: { id: params.id },
+      where: { id: (await params).id },
       include: { vendor: true },
     })
 

@@ -1,3 +1,5 @@
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { unstable_cache } = require('next/cache') as { unstable_cache: typeof import('next/cache').unstable_cache }
 import { db } from '@/lib/db'
 
 export interface MenuVariant {
@@ -20,9 +22,9 @@ export interface GroupedMenuItem {
   variants: MenuVariant[]
 }
 
-export async function getGroupedMenuItemsByVendor(
+async function _getGroupedMenuItemsByVendor(
   vendorId: string,
-  { showUnavailable = false }: { showUnavailable?: boolean } = {},
+  showUnavailable: boolean,
 ): Promise<GroupedMenuItem[]> {
   const items = await db.menuItem.findMany({
     where: {
@@ -82,9 +84,20 @@ export async function getGroupedMenuItemsByVendor(
   return Array.from(groups.values())
 }
 
-export async function getGroupedMenuItemsByEvent(
-  eventSlug: string,
+export function getGroupedMenuItemsByVendor(
+  vendorId: string,
   { showUnavailable = false }: { showUnavailable?: boolean } = {},
+): Promise<GroupedMenuItem[]> {
+  return unstable_cache(
+    () => _getGroupedMenuItemsByVendor(vendorId, showUnavailable),
+    [`vendor-menu-${vendorId}-${showUnavailable}`],
+    { revalidate: 120, tags: ['vendor-menu', `vendor-menu-${vendorId}`] },
+  )()
+}
+
+async function _getGroupedMenuItemsByEvent(
+  eventSlug: string,
+  showUnavailable: boolean,
 ): Promise<GroupedMenuItem[]> {
   const event = await db.event.findUnique({
     where: { urlSlug: eventSlug },
@@ -156,4 +169,15 @@ export async function getGroupedMenuItemsByEvent(
   }
 
   return Array.from(groups.values())
+}
+
+export function getGroupedMenuItemsByEvent(
+  eventSlug: string,
+  { showUnavailable = false }: { showUnavailable?: boolean } = {},
+): Promise<GroupedMenuItem[]> {
+  return unstable_cache(
+    () => _getGroupedMenuItemsByEvent(eventSlug, showUnavailable),
+    [`event-menu-${eventSlug}-${showUnavailable}`],
+    { revalidate: 120, tags: ['vendor-menu', `event-menu-${eventSlug}`] },
+  )()
 }
