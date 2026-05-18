@@ -356,7 +356,7 @@ export async function POST(req: NextRequest) {
           eventId,
           customerId: dbUser!.id,
           vendorId,
-          status: OrderStatus.PLACED,
+          status: OrderStatus.PENDING_PAYMENT,
           fulfillmentType,
           // Pricing
           subtotal,
@@ -419,7 +419,7 @@ export async function POST(req: NextRequest) {
         .ref(`fairs/${eventId}/orders/${vendorId}/${order.id}`)
         .set({
           orderId: order.id,
-          status: 'PLACED',
+          status: 'PENDING_PAYMENT',
           fulfillmentType,
           customerName,
           customerPhone,

@@ -35,6 +35,11 @@ import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS
 
 // ─── Transition tables ────────────────────────────────────────────────────────
 
+// Customer-initiated: payment confirmation (client-side fallback for when webhook is delayed)
+const CUSTOMER_TRANSITIONS: Partial<Record<OrderStatus, OrderStatus[]>> = {
+  [OrderStatus.PENDING_PAYMENT]: [OrderStatus.PLACED],
+}
+
 const VENDOR_TRANSITIONS: Partial<Record<OrderStatus, OrderStatus[]>> = {
   [OrderStatus.PLACED]:    [OrderStatus.ACCEPTED, OrderStatus.CANCELLED],
   [OrderStatus.ACCEPTED]:  [OrderStatus.PREPARING, OrderStatus.CANCELLED],
@@ -96,6 +101,24 @@ export async function PATCH(
     }
 
     // ── 3. Determine caller role and validate transition ───────────────────
+
+    // Customer payment confirmation: PENDING_PAYMENT → PLACED
+    // Auth: caller must be the order's customer (not vendor/runner)
+    const isCustomerTransition = CUSTOMER_TRANSITIONS[order.status]?.includes(newStatus) ?? false
+    if (isCustomerTransition) {
+      if (order.customerId !== dbUser.id) {
+        return apiError('Access denied', 403, 'FORBIDDEN')
+      }
+      // Idempotent — if webhook already set PLACED, this is a no-op
+      if (order.status !== OrderStatus.PENDING_PAYMENT) {
+        return success({ orderId: order.id, status: order.status })
+      }
+      await db.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.PLACED },
+      })
+      return success({ orderId: order.id, status: OrderStatus.PLACED })
+    }
 
     const isRunnerTransition =
       newStatus === OrderStatus.RUNNER_COLLECTED ||
@@ -197,28 +220,38 @@ export async function PATCH(
 
     // 6a. READY → schedule delayed BullMQ job ──────────────────────────────
     if (newStatus === OrderStatus.READY) {
-      const queue = getOrderQueue()
-      if (queue) {
-        const jobData = { orderId: order.id, vendorId: order.vendorId, eventId: order.eventId }
+      try {
+        const queue = getOrderQueue()
+        if (queue) {
+          const jobData = { orderId: order.id, vendorId: order.vendorId, eventId: order.eventId }
 
-        if (order.fulfillmentType === FulfillmentType.HOME_DELIVERY) {
-          // HOME_DELIVERY → UNDELIVERABLE after 10 min (playbook: curbside wait time)
-          await queue.add(JOB_UNDELIVERABLE, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
-        } else {
-          // BOOTH_PICKUP + CURBSIDE → UNCOLLECTED after 10 min
-          await queue.add(JOB_UNCOLLECTED, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
+          if (order.fulfillmentType === FulfillmentType.HOME_DELIVERY) {
+            await queue.add(JOB_UNDELIVERABLE, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
+          } else {
+            await queue.add(JOB_UNCOLLECTED, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
+          }
         }
+      } catch (e) {
+        console.warn('[Status] BullMQ enqueue skipped (Redis unavailable?):', e)
       }
     }
 
     // 6b. COMPLETED or DELIVERED → Stripe transfer + Payout record ──────────
     if (newStatus === OrderStatus.COMPLETED || newStatus === OrderStatus.DELIVERED) {
-      await handleCompleted(order, updatedOrder)
+      try {
+        await handleCompleted(order, updatedOrder)
+      } catch (e) {
+        console.warn('[Status] handleCompleted side-effect failed:', e)
+      }
     }
 
     // 6c. CANCELLED → Stripe refund + Cancellation record ─────────────────
     if (newStatus === OrderStatus.CANCELLED) {
-      await handleCancelled(order, reason)
+      try {
+        await handleCancelled(order, reason)
+      } catch (e) {
+        console.warn('[Status] handleCancelled side-effect failed:', e)
+      }
     }
 
     // ── 7. Firebase RTDB writes (best-effort) ──────────────────────────────

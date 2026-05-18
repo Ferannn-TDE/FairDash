@@ -99,6 +99,13 @@ function PaymentStep({
       if (error) {
         toast.error(error.message ?? 'Payment failed — please try again')
       } else if (paymentIntent?.status === 'succeeded') {
+        // Mark order PLACED client-side — covers dev (no webhook) and ensures
+        // vendor sees the order immediately even if webhook fires late
+        await fetch(`/api/orders/${orderId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'PLACED' }),
+        }).catch(() => {}) // non-blocking — webhook will also do this in production
         onSuccess()
       }
     } catch {
@@ -228,10 +235,19 @@ export default function CheckoutPage() {
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // Vendor's actual commission rate — fetched once on mount so the estimate matches the server charge
+  const [platformFeeRate, setPlatformFeeRate] = useState(0.10)
 
-  const PLATFORM_FEE_RATE = 0.10  // matches vendor.commissionRate default in schema
+  useEffect(() => {
+    if (!vendorId) return
+    fetch(`/api/vendors/${vendorId}`)
+      .then(r => r.json())
+      .then(json => { if (json.success && json.data?.commissionRate != null) setPlatformFeeRate(json.data.commissionRate) })
+      .catch(() => {/* keep default 0.10 */})
+  }, [vendorId])
+
   const estimatedDeliveryFee = fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee : 0
-  const estimatedPlatformFee = Math.round(subtotal * PLATFORM_FEE_RATE * 100) / 100
+  const estimatedPlatformFee = Math.round(subtotal * platformFeeRate * 100) / 100
   const estimatedTotal = parseFloat((subtotal + estimatedDeliveryFee + serviceChargeAmount + estimatedPlatformFee).toFixed(2))
 
   const estimatedReadyMin = useMemo(() => {

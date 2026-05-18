@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
-import { PlusIcon, PencilIcon, TrashIcon, ClockIcon, CheckCircleIcon, XCircleIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
+import {
+  PlusIcon, PencilIcon, TrashIcon, ClockIcon,
+  CheckCircleIcon, XCircleIcon, BuildingStorefrontIcon,
+  ExclamationTriangleIcon, ClockIcon as PendingIcon,
+} from '@heroicons/react/24/outline'
 import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 
@@ -15,8 +19,15 @@ interface MenuItem {
   category: string
   imageUrl: string
   isAvailable: boolean
-  variantGroup?: string | null
-  variantLabel?: string | null
+}
+
+interface PendingRequest {
+  id: string
+  type: 'ADD' | 'EDIT' | 'DELETE'
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  name: string | null
+  menuItem: { name: string } | null
+  createdAt: string
 }
 
 const inputCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40'
@@ -65,9 +76,9 @@ function ImageUpload({ imageUrl, onChange }: { imageUrl: string; onChange: (url:
 
 // ─── Add item form ────────────────────────────────────────────────────────────
 
-function AddItemForm({ categories, onAdd, onCancel }: {
+function AddItemForm({ categories, onSubmit, onCancel }: {
   categories: string[]
-  onAdd: (item: typeof BLANK) => void
+  onSubmit: (item: typeof BLANK) => void
   onCancel: () => void
 }) {
   const [form, setForm] = useState({ ...BLANK, category: categories[0] ?? '' })
@@ -76,12 +87,13 @@ function AddItemForm({ categories, onAdd, onCancel }: {
     e.preventDefault()
     if (!form.name.trim()) { toast.error('Name is required'); return }
     if (form.price <= 0) { toast.error('Price must be greater than 0'); return }
-    onAdd(form)
+    onSubmit(form)
   }
 
   return (
     <form onSubmit={handleSubmit} className="bg-bg-card border border-neon-pink/25 rounded-2xl p-5 mb-6">
-      <h3 className="font-bebas text-lg tracking-wide text-white mb-4">New Menu Item</h3>
+      <h3 className="font-bebas text-lg tracking-wide text-white mb-1">New Menu Item</h3>
+      <p className="text-amber-400/70 text-xs mb-4">Requires organizer approval before going live.</p>
       <div className="grid grid-cols-2 sm:grid-cols-1 gap-3 mb-3">
         <div className="col-span-2 sm:col-span-1">
           <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} />
@@ -110,7 +122,7 @@ function AddItemForm({ categories, onAdd, onCancel }: {
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
-        <button type="submit" className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">Add Item</button>
+        <button type="submit" className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">Submit for Approval</button>
       </div>
     </form>
   )
@@ -126,8 +138,10 @@ function ItemRow({ item, onToggle, onEdit, onDelete }: {
 }) {
   return (
     <div className={`flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors ${!item.isAvailable ? 'opacity-60' : ''}`}>
-      <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shrink-0 text-base overflow-hidden">
-        {item.imageUrl ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" /> : '🍽️'}
+      <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shrink-0 overflow-hidden">
+        {item.imageUrl
+          ? <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
+          : <BuildingStorefrontIcon className="w-5 h-5 text-white/20" />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -151,10 +165,10 @@ function ItemRow({ item, onToggle, onEdit, onDelete }: {
           className={`p-1.5 rounded-lg transition-all cursor-pointer border-0 ${item.isAvailable ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-red-400 hover:bg-red-500/10'}`}>
           {item.isAvailable ? <CheckCircleIcon className="w-4 h-4" /> : <XCircleIcon className="w-4 h-4" />}
         </button>
-        <button onClick={() => onEdit(item.id)} className="p-1.5 text-text-gray hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer border-0">
+        <button onClick={() => onEdit(item.id)} title="Request edit (needs approval)" className="p-1.5 text-text-gray hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer border-0">
           <PencilIcon className="w-3.5 h-3.5" />
         </button>
-        <button onClick={() => onDelete(item.id)} className="p-1.5 text-text-gray hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border-0">
+        <button onClick={() => onDelete(item.id)} title="Request removal (needs approval)" className="p-1.5 text-text-gray hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border-0">
           <TrashIcon className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -164,10 +178,10 @@ function ItemRow({ item, onToggle, onEdit, onDelete }: {
 
 // ─── Edit modal ───────────────────────────────────────────────────────────────
 
-function EditItemModal({ item, categories, onSave, onClose }: {
+function EditItemModal({ item, categories, onSubmit, onClose }: {
   item: MenuItem
   categories: string[]
-  onSave: (id: string, updates: Partial<MenuItem>) => void
+  onSubmit: (id: string, updates: Partial<MenuItem>) => void
   onClose: () => void
 }) {
   const [form, setForm] = useState({
@@ -180,8 +194,9 @@ function EditItemModal({ item, categories, onSave, onClose }: {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <form className="relative bg-[#1c1c1c] border border-white/10 rounded-2xl p-6 w-full max-w-md overflow-y-auto max-h-[90vh]"
         onClick={e => e.stopPropagation()}
-        onSubmit={e => { e.preventDefault(); onSave(item.id, form); onClose() }}>
-        <h3 className="font-bebas text-xl tracking-wide text-white mb-4">Edit Item</h3>
+        onSubmit={e => { e.preventDefault(); onSubmit(item.id, form); onClose() }}>
+        <h3 className="font-bebas text-xl tracking-wide text-white mb-1">Edit Item</h3>
+        <p className="text-amber-400/70 text-xs mb-4">Change request requires organizer approval.</p>
         <div className="space-y-3">
           <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} />
           <div>
@@ -210,9 +225,40 @@ function EditItemModal({ item, categories, onSave, onClose }: {
         </div>
         <div className="flex gap-2 justify-end mt-5">
           <button type="button" onClick={onClose} className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
-          <button type="submit" className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">Save</button>
+          <button type="submit" className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">Submit for Approval</button>
         </div>
       </form>
+    </div>
+  )
+}
+
+// ─── Delete confirmation modal ────────────────────────────────────────────────
+
+function DeleteConfirmModal({ item, onConfirm, onClose }: {
+  item: MenuItem
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
+            <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
+          </div>
+          <div>
+            <h3 className="font-bebas text-xl text-white tracking-wide">Remove Item?</h3>
+            <p className="text-white/40 text-xs">{item.name}</p>
+          </div>
+        </div>
+        <p className="text-white/60 text-sm mb-6">
+          A removal request will be sent to the organizer for approval. The item stays live until they approve.
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-colors cursor-pointer">Cancel</button>
+          <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors cursor-pointer">Yes, Request Removal</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -222,19 +268,24 @@ function EditItemModal({ item, categories, onSave, onClose }: {
 export default function VendorMenuPage() {
   const { vendorId } = useVendorMeta()
   const [items, setItems] = useState<MenuItem[]>([])
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<MenuItem | null>(null)
+  const [unavailableTarget, setUnavailableTarget] = useState<MenuItem | null>(null)
 
   useEffect(() => {
     if (!vendorId) return
-    fetch(`/api/vendors/${vendorId}/menu`)
-      .then(r => r.json())
-      .then(json => {
-        if (json.success) {
-          // API returns grouped items; flatten to flat list for the manager view
+    setLoading(true)
+    Promise.all([
+      fetch(`/api/vendors/${vendorId}/menu`).then(r => r.json()),
+      fetch(`/api/menu-requests?vendorId=${vendorId}`).then(r => r.json()),
+    ])
+      .then(([menuJson, reqJson]) => {
+        if (menuJson.success) {
           const flat: MenuItem[] = []
-          for (const group of json.data ?? []) {
+          for (const group of menuJson.data ?? []) {
             for (const variant of group.variants ?? []) {
               flat.push({
                 id: variant.id,
@@ -250,6 +301,9 @@ export default function VendorMenuPage() {
           }
           setItems(flat)
         }
+        if (reqJson.success) {
+          setPendingRequests((reqJson.data as PendingRequest[]).filter(r => r.status === 'PENDING'))
+        }
       })
       .catch(() => toast.error('Failed to load menu'))
       .finally(() => setLoading(false))
@@ -260,74 +314,99 @@ export default function VendorMenuPage() {
     .map(cat => ({ cat, items: items.filter(i => i.category === cat) }))
     .filter(g => g.items.length > 0)
 
-  async function handleToggle(id: string) {
-    const item = items.find(i => i.id === id)
-    if (!item) return
+  async function handleToggleAvailability(item: MenuItem) {
     const next = !item.isAvailable
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isAvailable: next } : i))
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, isAvailable: next } : i))
     try {
-      await fetch(`/api/menu/${id}`, {
+      const res = await fetch(`/api/menu-items/${item.id}/availability`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isAvailable: next }),
       })
+      if (!res.ok) throw new Error()
       toast.success(`${item.name} marked ${next ? 'available' : 'sold out'}`)
     } catch {
-      setItems(prev => prev.map(i => i.id === id ? { ...i, isAvailable: !next } : i))
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, isAvailable: !next } : i))
       toast.error('Failed to update availability')
+    }
+  }
+
+  function handleAvailabilityClick(id: string) {
+    const item = items.find(i => i.id === id)
+    if (!item) return
+    if (item.isAvailable) {
+      setUnavailableTarget(item) // turning OFF → confirm first
+    } else {
+      handleToggleAvailability(item) // turning ON → immediate
     }
   }
 
   async function handleAdd(data: typeof BLANK) {
     if (!vendorId) return
     try {
-      const res = await fetch('/api/menu', {
+      const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, vendorId }),
+        body: JSON.stringify({ ...data, vendorId, type: 'ADD' }),
       })
       const json = await res.json()
       if (json.success) {
-        setItems(prev => [...prev, json.data])
         setShowAdd(false)
-        toast.success(`${data.name} added`)
+        setPendingRequests(prev => [{ id: json.data.id, type: 'ADD', status: 'PENDING', name: data.name, menuItem: null, createdAt: json.data.createdAt }, ...prev])
+        toast.success('Add request submitted — awaiting organizer approval')
       } else {
-        toast.error(json.error?.message ?? 'Failed to add item')
+        toast.error(json.error?.message ?? 'Failed to submit request')
       }
     } catch {
-      toast.error('Failed to add item')
+      toast.error('Failed to submit request')
     }
   }
 
   async function handleSaveEdit(id: string, updates: Partial<MenuItem>) {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i))
+    if (!vendorId) return
+    const item = items.find(i => i.id === id)
     try {
-      await fetch(`/api/menu/${id}`, {
-        method: 'PATCH',
+      const res = await fetch('/api/menu-requests', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, ...updates }),
       })
-      toast.success('Item updated')
+      const json = await res.json()
+      if (json.success) {
+        setPendingRequests(prev => [{ id: json.data.id, type: 'EDIT', status: 'PENDING', name: updates.name ?? item?.name ?? null, menuItem: { name: item?.name ?? '' }, createdAt: json.data.createdAt }, ...prev])
+        toast.success('Edit request submitted — awaiting organizer approval')
+      } else {
+        toast.error(json.error?.message ?? 'Failed to submit request')
+      }
     } catch {
-      toast.error('Failed to save changes')
+      toast.error('Failed to submit request')
     }
   }
 
-  async function handleDelete(id: string) {
-    const item = items.find(i => i.id === id)
-    if (!item || !window.confirm(`Delete "${item.name}"?`)) return
-    setItems(prev => prev.filter(i => i.id !== id))
+  async function handleDelete(item: MenuItem) {
+    if (!vendorId) return
     try {
-      await fetch(`/api/menu/${id}`, { method: 'DELETE' })
-      toast.success(`${item.name} removed`)
+      const res = await fetch('/api/menu-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorId, type: 'DELETE', menuItemId: item.id }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        setPendingRequests(prev => [{ id: json.data.id, type: 'DELETE', status: 'PENDING', name: null, menuItem: { name: item.name }, createdAt: json.data.createdAt }, ...prev])
+        toast.success('Removal request submitted — awaiting organizer approval')
+      } else {
+        toast.error(json.error?.message ?? 'Failed to submit request')
+      }
     } catch {
-      setItems(prev => [...prev, item])
-      toast.error('Failed to delete item')
+      toast.error('Failed to submit request')
     }
+    setDeleteTarget(null)
   }
 
   const soldOutCount = items.filter(i => !i.isAvailable).length
   const editingItem = editingId ? items.find(i => i.id === editingId) : null
+  const pendingCount = pendingRequests.length
 
   return (
     <div className="p-5 md:p-4 max-w-[56rem] mx-auto">
@@ -349,7 +428,18 @@ export default function VendorMenuPage() {
         </button>
       </div>
 
-      {showAdd && <AddItemForm categories={categories} onAdd={handleAdd} onCancel={() => setShowAdd(false)} />}
+      {/* Pending requests banner */}
+      {pendingCount > 0 && (
+        <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-5">
+          <PendingIcon className="w-4 h-4 text-amber-400 shrink-0" />
+          <p className="text-amber-300 text-sm">
+            <span className="font-semibold">{pendingCount} pending {pendingCount === 1 ? 'request' : 'requests'}</span>
+            {' '}awaiting organizer approval
+          </p>
+        </div>
+      )}
+
+      {showAdd && <AddItemForm categories={categories} onSubmit={handleAdd} onCancel={() => setShowAdd(false)} />}
 
       {loading ? (
         <div className="space-y-3">
@@ -371,7 +461,16 @@ export default function VendorMenuPage() {
               </div>
               <div className="bg-bg-card border border-white/[0.06] rounded-2xl overflow-hidden divide-y divide-white/[0.04]">
                 {catItems.map(item => (
-                  <ItemRow key={item.id} item={item} onToggle={handleToggle} onEdit={setEditingId} onDelete={handleDelete} />
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    onToggle={handleAvailabilityClick}
+                    onEdit={setEditingId}
+                    onDelete={id => {
+                      const found = items.find(i => i.id === id)
+                      if (found) setDeleteTarget(found)
+                    }}
+                  />
                 ))}
               </div>
             </div>
@@ -383,9 +482,46 @@ export default function VendorMenuPage() {
         <EditItemModal
           item={editingItem}
           categories={categories}
-          onSave={handleSaveEdit}
+          onSubmit={handleSaveEdit}
           onClose={() => setEditingId(null)}
         />
+      )}
+
+      {deleteTarget && (
+        <DeleteConfirmModal
+          item={deleteTarget}
+          onConfirm={() => handleDelete(deleteTarget)}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {unavailableTarget && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl w-full max-w-sm p-6">
+            <h3 className="font-bebas text-xl text-white mb-1">Mark as Sold Out?</h3>
+            <p className="text-white/50 text-sm mb-2">{unavailableTarget.name}</p>
+            <p className="text-white/40 text-sm mb-6">
+              This item will show as sold out on the customer menu and cannot be added to cart. You can re-enable it at any time.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setUnavailableTarget(null)}
+                className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleToggleAvailability(unavailableTarget)
+                  setUnavailableTarget(null)
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors cursor-pointer"
+              >
+                Mark Sold Out
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

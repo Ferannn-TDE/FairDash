@@ -26,6 +26,7 @@ interface Order {
   customerPhone?: string | null
   total: number
   subtotal: number
+  vendorPayout: number
   orderItems: OrderItem[]
   placedAt: string
   estimatedReadyAt?: string | null
@@ -118,7 +119,7 @@ function OrderCard({ order }: { order: Order }) {
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span className="font-bold text-neon-pink text-sm">${order.total.toFixed(2)}</span>
+          <span className="font-bold text-neon-pink text-sm">${order.vendorPayout.toFixed(2)}</span>
           {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
         </div>
       </button>
@@ -138,9 +139,15 @@ function OrderCard({ order }: { order: Order }) {
                 </div>
               ))}
             </div>
-            <div className="mt-2 pt-2 border-t border-white/5 flex justify-between">
-              <span className="text-xs text-text-gray">Subtotal</span>
-              <span className="text-xs font-semibold text-white">${order.subtotal.toFixed(2)}</span>
+            <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-xs text-text-gray">Subtotal</span>
+                <span className="text-xs text-white">${order.subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs text-text-gray">Your Earnings</span>
+                <span className="text-xs font-semibold text-emerald-400">${order.vendorPayout.toFixed(2)}</span>
+              </div>
             </div>
           </div>
 

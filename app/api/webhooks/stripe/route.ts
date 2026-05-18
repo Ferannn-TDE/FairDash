@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { stripe } from '@/lib/stripe'
 import { db } from '@/lib/db'
+import { getRealtimeDb } from '@/lib/firebase-admin'
 import { handleApiError } from '@/lib/api-error'
 import type Stripe from 'stripe'
 
@@ -39,10 +40,28 @@ export async function POST(req: Request) {
   try {
     if (event.type === 'payment_intent.succeeded') {
       const pi = event.data.object as Stripe.PaymentIntent
-      await db.order.updateMany({
+      const order = await db.order.findFirst({
         where: { stripePaymentIntentId: pi.id },
-        data: { stripeChargeId: (pi.latest_charge as string | null) ?? undefined },
+        select: { id: true, vendorId: true, eventId: true, customerId: true, status: true },
       })
+      if (order) {
+        await db.order.update({
+          where: { id: order.id },
+          data: {
+            status: 'PLACED',
+            stripeChargeId: (pi.latest_charge as string | null) ?? undefined,
+          },
+        })
+        // Push status update to Firebase RTDB so vendor dashboard sees PLACED
+        try {
+          const rtdb = getRealtimeDb()
+          if (rtdb) {
+            const patch = { status: 'PLACED', updatedAt: Date.now() }
+            rtdb.ref(`fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`).update(patch).catch(() => {})
+            rtdb.ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`).update(patch).catch(() => {})
+          }
+        } catch { /* Firebase not configured */ }
+      }
       console.log(`[Stripe Webhook] payment_intent.succeeded → ${pi.id}`)
 
     } else if (event.type === 'payment_intent.payment_failed') {

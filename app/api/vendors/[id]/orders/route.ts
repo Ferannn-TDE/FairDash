@@ -27,13 +27,20 @@ export async function GET(
     const sinceRaw = searchParams.get('since')
     const limit = Math.min(200, parseInt(searchParams.get('limit') ?? '100'))
 
-    // Default since = start of today UTC
-    const since = sinceRaw
+    // No since param → return all-time history (orders page is a history view)
+    // since=today → start of today UTC (used by dashboard live view)
+    const sinceFilter: Date | undefined = sinceRaw === 'today'
+      ? (() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d })()
+      : sinceRaw
       ? new Date(sinceRaw)
-      : (() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d })()
+      : undefined
 
     const orders = await db.order.findMany({
-      where: { vendorId: (await params).id, placedAt: { gte: since } },
+      where: {
+        vendorId: (await params).id,
+        status: { not: 'PENDING_PAYMENT' },
+        ...(sinceFilter ? { placedAt: { gte: sinceFilter } } : {}),
+      },
       orderBy: { placedAt: 'desc' },
       take: limit,
       include: {
