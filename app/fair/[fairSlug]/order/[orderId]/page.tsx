@@ -234,14 +234,26 @@ function OrderItemsCard({ order }: { order: Order }) {
         </div>
         {(order.deliveryFee ?? 0) > 0 && (
           <div className="flex justify-between text-sm">
-            <span className="text-[#A1A1A1]">Delivery fee</span>
+            <span className="text-[#A1A1A1]">Delivery Fee</span>
             <span className="text-white">${order.deliveryFee!.toFixed(2)}</span>
+          </div>
+        )}
+        {(order.serviceCharge ?? 0) > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-[#A1A1A1]">Event Service Charge</span>
+            <span className="text-white">${order.serviceCharge!.toFixed(2)}</span>
+          </div>
+        )}
+        {order.fairSynqFee > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-[#A1A1A1]">Platform Fee</span>
+            <span className="text-white/60">${order.fairSynqFee.toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-2">
           <span className="text-white">Total</span>
           <span className="text-[#FF0077] text-base [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
-            ${order.total.toFixed(2)}
+            ${(order.total + order.fairSynqFee).toFixed(2)}
           </span>
         </div>
       </div>
@@ -584,6 +596,13 @@ export default function OrderTrackingPage() {
         setOrder(prev => prev ? { ...prev, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : prev)
         setShowCancelModal(false)
         toast.success('Order cancelled. Refund is on the way.')
+      } else if (res.status === 409) {
+        // Order progressed past cancellable state — re-fetch to sync status
+        setShowCancelModal(false)
+        const refresh = await fetch(`/api/orders/${params.orderId}`)
+        const refreshJson = await refresh.json()
+        if (refreshJson?.success) setOrder(refreshJson.data)
+        toast.error('This order can no longer be cancelled — the vendor has started preparing it.')
       } else {
         toast.error(json?.error?.message ?? 'Could not cancel — please contact support')
       }
@@ -732,7 +751,7 @@ export default function OrderTrackingPage() {
                     <ChatBubbleLeftEllipsisIcon className="w-4 h-4" />
                     Contact Support
                   </button>
-                  {canCancel && (
+                  {canCancel ? (
                     <button
                       onClick={() => setShowCancelModal(true)}
                       className="flex items-center justify-center gap-2 flex-1 py-3 bg-transparent border-2 border-red-500/40 text-red-400 rounded-xl text-sm font-semibold hover:bg-red-500/10 hover:border-red-500/60 transition-all cursor-pointer active:scale-[0.97]"
@@ -740,6 +759,14 @@ export default function OrderTrackingPage() {
                       <XMarkIcon className="w-4 h-4" />
                       Cancel Order
                     </button>
+                  ) : (
+                    <p className="flex-1 text-white/40 text-xs text-center self-center leading-snug px-2">
+                      This order can no longer be cancelled.{' '}
+                      <button onClick={() => setShowSupportModal(true)} className="underline hover:text-white/60 transition-colors cursor-pointer bg-transparent border-0 p-0">
+                        Contact support
+                      </button>{' '}
+                      if you need help.
+                    </p>
                   )}
                 </div>
               )}

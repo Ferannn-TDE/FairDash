@@ -198,6 +198,7 @@ model Vendor {
   payouts       Payout[]
   notifications VendorNotification[]
   disputes      Dispute[]
+  menuRequests  MenuRequest[]
 
   @@index([eventId])
   @@index([status])
@@ -262,9 +263,59 @@ model MenuItem {
   // Relations
   orderItems    OrderItem[]
   favoriteItems FavoriteItem[]
+  menuRequests  MenuRequest[]
 
   @@index([vendorId])
   @@index([isAvailable])
+}
+
+// ============================================================================
+// MENU CHANGE REQUESTS (ADD / EDIT / DELETE require organizer approval)
+// ============================================================================
+
+model MenuRequest {
+  id          String            @id @default(cuid())
+  vendorId    String
+  vendor      Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  requestedBy String            // userId
+
+  type        MenuRequestType
+  status      MenuRequestStatus @default(PENDING)
+
+  // Proposed item fields (used for ADD and EDIT)
+  name        String?
+  description String?
+  price       Float?
+  category    String?
+  prepTime    Int?
+  imageUrl    String?
+
+  // For EDIT and DELETE — the existing item being modified
+  menuItemId  String?
+  menuItem    MenuItem?         @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+
+  // Review
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  reviewNote  String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+enum MenuRequestType {
+  ADD
+  EDIT
+  DELETE
+}
+
+enum MenuRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // ============================================================================
@@ -369,7 +420,8 @@ model Order {
 }
 
 enum OrderStatus {
-  PLACED           // Customer placed order, awaiting vendor acceptance
+  PENDING_PAYMENT  // Order created, awaiting Stripe payment confirmation
+  PLACED           // Payment confirmed — awaiting vendor acceptance
   ACCEPTED         // Vendor accepted (starts $5 cancellation fee window)
   PREPARING        // Vendor is preparing the order
   READY            // Ready for pickup / runner dispatched

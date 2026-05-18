@@ -11,6 +11,7 @@ import {
   ChartBarIcon,
   Cog6ToothIcon,
   ExclamationTriangleIcon,
+  QueueListIcon,
   Bars3Icon,
   XMarkIcon,
   BellIcon,
@@ -95,6 +96,7 @@ function SidebarContent({ currentFairId, onClose }: { currentFairId: string | nu
             <SidebarLink href={`/organizer/fair/${currentFair.id}/analytics`} icon={ChartBarIcon} label="Analytics" indent onClick={onClose} />
             <SidebarLink href={`/organizer/fair/${currentFair.id}/settings`} icon={Cog6ToothIcon} label="Settings" indent onClick={onClose} />
             <SidebarLink href={`/organizer/fair/${currentFair.id}/disputes`} icon={ExclamationTriangleIcon} label="Disputes" indent onClick={onClose} />
+            <SidebarLink href={`/organizer/fair/${currentFair.id}/menu-requests`} icon={QueueListIcon} label="Menu Requests" indent onClick={onClose} />
           </div>
         )}
       </nav>

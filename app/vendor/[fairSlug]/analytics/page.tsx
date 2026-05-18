@@ -27,12 +27,14 @@ function StatCard({
   icon: Icon,
   accentColor = 'pink',
   loading,
+  note,
 }: {
   label: string
   value: string | number
   icon: React.ElementType
   accentColor?: 'pink' | 'blue' | 'emerald' | 'amber'
   loading?: boolean
+  note?: string
 }) {
   const accent = {
     pink:    { bg: 'bg-neon-pink/10',    border: 'border-neon-pink/20',    text: 'text-neon-pink' },
@@ -54,6 +56,7 @@ function StatCard({
         <div className="font-bebas text-[2rem] tracking-wide text-white leading-none mb-1">{value}</div>
       )}
       <div className="text-text-gray text-[0.6875rem] uppercase tracking-wide font-semibold">{label}</div>
+      {note && <p className="text-white/30 text-xs mt-1">{note}</p>}
     </div>
   )
 }
@@ -108,6 +111,7 @@ export default function VendorAnalyticsPage() {
           icon={CurrencyDollarIcon}
           accentColor="pink"
           loading={loading}
+          note="Excludes platform fees"
         />
         <StatCard
           label="Today's Orders"
@@ -138,14 +142,15 @@ export default function VendorAnalyticsPage() {
           <h3 className="font-bebas text-xl tracking-wide text-white mb-5">Today&apos;s Snapshot</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { label: "Today's Revenue", value: `$${analytics.todayRevenue.toFixed(2)}` },
+              { label: "Today's Revenue", value: `$${analytics.todayRevenue.toFixed(2)}`, note: 'Excludes platform fees' },
               { label: "Today's Orders",  value: String(analytics.todayOrders) },
               { label: 'Pending Orders',  value: String(analytics.pendingOrders) },
               { label: 'Completion Rate', value: completionRate },
-            ].map(({ label, value }) => (
+            ].map(({ label, value, note }) => (
               <div key={label}>
                 <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>
                 <p className="font-bebas text-2xl text-white tracking-wide">{value}</p>
+                {note && <p className="text-white/30 text-xs mt-0.5">{note}</p>}
               </div>
             ))}
           </div>

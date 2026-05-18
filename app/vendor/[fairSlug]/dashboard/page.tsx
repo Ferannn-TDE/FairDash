@@ -7,6 +7,7 @@ import { UserAvatar } from '../_components/VendorPortalShell'
 import {
   Clock, CheckCircle, Bell, ChevronRight, AlertCircle,
 } from 'lucide-react'
+import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { getFirebaseApp } from '@/lib/firebase-client'
 
@@ -136,10 +137,11 @@ function LaneHeader({ label, count, pulse }: { label: string; count: number; pul
 
 // ─── Incoming Order Card ───────────────────────────────────────────────────────
 
-function IncomingCard({ order, onAccept, onDecline }: {
+function IncomingCard({ order, onAccept, onDecline, accepting }: {
   order: VendorOrder
   onAccept: (o: VendorOrder) => void
   onDecline: (o: VendorOrder) => void
+  accepting?: boolean
 }) {
   const detail = fmtDeliveryDetail(order)
 
@@ -162,15 +164,17 @@ function IncomingCard({ order, onAccept, onDecline }: {
         <div className="flex gap-1.5">
           <button
             onClick={() => onDecline(order)}
-            className="px-3 py-1.5 bg-white/5 border border-white/10 text-text-gray rounded-lg text-[0.65rem] font-semibold hover:border-red-500/30 hover:text-red-400 transition-all cursor-pointer"
+            disabled={accepting}
+            className="px-3 py-1.5 bg-white/5 border border-white/10 text-text-gray rounded-lg text-[0.65rem] font-semibold hover:border-red-500/30 hover:text-red-400 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Decline
           </button>
           <button
             onClick={() => onAccept(order)}
-            className="px-3 py-1.5 bg-neon-pink text-white rounded-lg text-[0.65rem] font-semibold hover:bg-[#e0006b] transition-all shadow-[0_2px_10px_rgba(255,0,119,0.3)] cursor-pointer"
+            disabled={accepting}
+            className="px-3 py-1.5 bg-neon-pink text-white rounded-lg text-[0.65rem] font-semibold hover:bg-[#e0006b] transition-all shadow-[0_2px_10px_rgba(255,0,119,0.3)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            ✓ Accept
+            {accepting ? 'Accepting…' : '✓ Accept'}
           </button>
         </div>
       </div>
@@ -282,10 +286,18 @@ export default function VendorDashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>('incoming')
   const [loading, setLoading] = useState(true)
 
+  const [declineTarget, setDeclineTarget] = useState<VendorOrder | null>(null)
   const [incoming,  setIncoming]  = useState<VendorOrder[]>([])
   const [active,    setActive]    = useState<VendorOrder[]>([])
   const [ready,     setReady]     = useState<VendorOrder[]>([])
   const [completed, setCompleted] = useState<VendorOrder[]>([])
+  // Guard against double-clicking Accept — stores IDs currently in-flight
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
+
+  // Stats pulled from analytics endpoint — same source as analytics page
+  const [todayOrders,  setTodayOrders]  = useState<number>(0)
+  const [todayRevenue, setTodayRevenue] = useState<number>(0)
+  const [pendingCount, setPendingCount] = useState<number>(0)
 
 
   // Track Firebase order IDs we've already fetched to avoid duplicate fetches
@@ -294,15 +306,24 @@ export default function VendorDashboardPage() {
   // ── Initial REST load ────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetch(`/api/vendors/${vendorId}/orders`)
-      .then(r => r.json())
-      .then(json => {
-        const orders: VendorOrder[] = json.data?.orders ?? []
+    if (!vendorId) return
+    Promise.all([
+      fetch(`/api/vendors/${vendorId}/orders?since=today`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/analytics?days=1`).then(r => r.json()),
+    ])
+      .then(([ordersJson, analyticsJson]) => {
+        const orders: VendorOrder[] = ordersJson.data?.orders ?? []
         orders.forEach(o => seenOrderIds.current.add(o.id))
         setIncoming( orders.filter(o => BUCKET[o.status] === 'incoming'))
         setActive(   orders.filter(o => BUCKET[o.status] === 'active'))
         setReady(    orders.filter(o => BUCKET[o.status] === 'ready'))
         setCompleted(orders.filter(o => BUCKET[o.status] === 'completed'))
+
+        if (analyticsJson.success) {
+          setTodayOrders(analyticsJson.data.todayOrders)
+          setTodayRevenue(analyticsJson.data.todayRevenue)
+          setPendingCount(analyticsJson.data.pendingOrders)
+        }
       })
       .catch(() => {/* keep empty state */})
       .finally(() => setLoading(false))
@@ -353,16 +374,26 @@ export default function VendorDashboardPage() {
 
   // ── Patching helpers ─────────────────────────────────────────────────────────
 
-  const handleAccept = useCallback((order: VendorOrder) => {
-    // Optimistic: move card immediately
-    setIncoming(prev => prev.filter(o => o.id !== order.id))
-    setActive(prev => [{ ...order, status: 'ACCEPTED' }, ...prev])
-    transitionOrder(order.id, 'ACCEPTED').catch(() => {
-      // Rollback
-      setActive(prev => prev.filter(o => o.id !== order.id))
-      setIncoming(prev => [order, ...prev])
-    })
-  }, [])
+  const handleAccept = useCallback(async (order: VendorOrder) => {
+    // Prevent double-click — if already in-flight, ignore
+    if (processingIds.has(order.id)) return
+    setProcessingIds(prev => new Set(prev).add(order.id))
+    try {
+      const res = await fetch(`/api/orders/${order.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ACCEPTED' }),
+      })
+      if (!res.ok) throw new Error(`${res.status}`)
+      // API confirmed — now move the card
+      setIncoming(prev => prev.filter(o => o.id !== order.id))
+      setActive(prev => [{ ...order, status: 'ACCEPTED' }, ...prev])
+    } catch (err) {
+      console.error('Accept failed:', err)
+    } finally {
+      setProcessingIds(prev => { const next = new Set(prev); next.delete(order.id); return next })
+    }
+  }, [processingIds])
 
   const handleDecline = useCallback((order: VendorOrder) => {
     setIncoming(prev => prev.filter(o => o.id !== order.id))
@@ -397,7 +428,11 @@ export default function VendorDashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'READY' }),
       })
-      if (!res.ok) throw new Error(`${res.status}`)
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}))
+        console.error('Mark ready rejected:', res.status, errBody)
+        throw new Error(`${res.status}`)
+      }
       setActive(prev => prev.filter(o => o.id !== order.id))
       setReady(prev => [{ ...order, status: 'READY' }, ...prev])
     } catch (err) {
@@ -413,13 +448,6 @@ export default function VendorDashboardPage() {
       setReady(prev => [order, ...prev])
     })
   }, [])
-
-  // ── Derived stats ────────────────────────────────────────────────────────────
-
-  const todayOrders  = incoming.length + active.length + ready.length + completed.length
-  const todayRevenue = [...incoming, ...active, ...ready, ...completed]
-    .filter(o => o.status !== 'CANCELLED')
-    .reduce((sum, o) => sum + o.total, 0)
 
   const tabs: { id: Tab; label: string; count: number }[] = [
     { id: 'incoming', label: 'Incoming',  count: incoming.length },
@@ -467,7 +495,7 @@ export default function VendorDashboardPage() {
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Orders Today" value={loading ? '…' : todayOrders} color="blue" />
           <StatCard label="Revenue"      value={loading ? '…' : `$${todayRevenue.toFixed(0)}`} color="pink" />
-          <StatCard label="In Queue"     value={loading ? '…' : incoming.length + active.length} color="amber" />
+          <StatCard label="In Queue"     value={loading ? '…' : pendingCount} color="amber" />
         </div>
       </div>
 
@@ -513,7 +541,8 @@ export default function VendorDashboardPage() {
                     key={order.id}
                     order={order}
                     onAccept={handleAccept}
-                    onDecline={handleDecline}
+                    onDecline={(o) => setDeclineTarget(o)}
+                    accepting={processingIds.has(order.id)}
                   />
                 ))
               )}
@@ -604,7 +633,8 @@ export default function VendorDashboardPage() {
                     key={order.id}
                     order={order}
                     onAccept={handleAccept}
-                    onDecline={handleDecline}
+                    onDecline={(o) => setDeclineTarget(o)}
+                    accepting={processingIds.has(order.id)}
                   />
                 ))
           )}
@@ -634,7 +664,40 @@ export default function VendorDashboardPage() {
         </div>
       </div>
 
-
+      {declineTarget && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
+                <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-bebas text-xl text-white tracking-wide">Decline Order?</h3>
+                <p className="text-white/40 text-xs">
+                  #{declineTarget.id.slice(-8).toUpperCase()} · {declineTarget.orderItems?.[0]?.menuItem?.name ?? ''}
+                </p>
+              </div>
+            </div>
+            <p className="text-white/60 text-sm mb-6">
+              The customer will be notified and a full refund will be issued automatically.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeclineTarget(null)}
+                className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                Keep Order
+              </button>
+              <button
+                onClick={() => { handleDecline(declineTarget); setDeclineTarget(null) }}
+                className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors cursor-pointer"
+              >
+                Yes, Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

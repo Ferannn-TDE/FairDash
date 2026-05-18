@@ -22,15 +22,9 @@ export interface GroupedMenuItem {
   variants: MenuVariant[]
 }
 
-async function _getGroupedMenuItemsByVendor(
-  vendorId: string,
-  showUnavailable: boolean,
-): Promise<GroupedMenuItem[]> {
+async function _getGroupedMenuItemsByVendor(vendorId: string): Promise<GroupedMenuItem[]> {
   const items = await db.menuItem.findMany({
-    where: {
-      vendorId,
-      ...(showUnavailable ? {} : { isAvailable: true }),
-    },
+    where: { vendorId },
     select: {
       id: true,
       name: true,
@@ -86,19 +80,16 @@ async function _getGroupedMenuItemsByVendor(
 
 export function getGroupedMenuItemsByVendor(
   vendorId: string,
-  { showUnavailable = false }: { showUnavailable?: boolean } = {},
+  _opts?: { showUnavailable?: boolean },
 ): Promise<GroupedMenuItem[]> {
   return unstable_cache(
-    () => _getGroupedMenuItemsByVendor(vendorId, showUnavailable),
-    [`vendor-menu-${vendorId}-${showUnavailable}`],
+    () => _getGroupedMenuItemsByVendor(vendorId),
+    [`vendor-menu-${vendorId}`],
     { revalidate: 120, tags: ['vendor-menu', `vendor-menu-${vendorId}`] },
   )()
 }
 
-async function _getGroupedMenuItemsByEvent(
-  eventSlug: string,
-  showUnavailable: boolean,
-): Promise<GroupedMenuItem[]> {
+async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMenuItem[]> {
   const event = await db.event.findUnique({
     where: { urlSlug: eventSlug },
     select: {
@@ -113,10 +104,7 @@ async function _getGroupedMenuItemsByEvent(
   const vendorIds = event.vendors.map((v) => v.id)
 
   const items = await db.menuItem.findMany({
-    where: {
-      vendorId: { in: vendorIds },
-      ...(showUnavailable ? {} : { isAvailable: true }),
-    },
+    where: { vendorId: { in: vendorIds } },
     select: {
       id: true,
       name: true,
@@ -173,11 +161,11 @@ async function _getGroupedMenuItemsByEvent(
 
 export function getGroupedMenuItemsByEvent(
   eventSlug: string,
-  { showUnavailable = false }: { showUnavailable?: boolean } = {},
+  _opts?: { showUnavailable?: boolean },
 ): Promise<GroupedMenuItem[]> {
   return unstable_cache(
-    () => _getGroupedMenuItemsByEvent(eventSlug, showUnavailable),
-    [`event-menu-${eventSlug}-${showUnavailable}`],
+    () => _getGroupedMenuItemsByEvent(eventSlug),
+    [`event-menu-${eventSlug}`],
     { revalidate: 120, tags: ['vendor-menu', `event-menu-${eventSlug}`] },
   )()
 }

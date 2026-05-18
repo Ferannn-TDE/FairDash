@@ -7,6 +7,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 
 // GET /api/vendors/:id/analytics?days=7|30|90
+// Revenue figures use vendorPayout (subtotal - fairSynqFee), not gross total.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -22,27 +23,31 @@ export async function GET(
       where: { vendorId: id, userId: dbUser.id },
     })
     if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+
     const days = Math.min(90, Math.max(1, parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)))
 
+    // Use UTC midnight throughout — matches orders route default (setUTCHours)
     const since = new Date()
     since.setDate(since.getDate() - (days - 1))
-    since.setHours(0, 0, 0, 0)
+    since.setUTCHours(0, 0, 0, 0)
 
     const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
+    todayStart.setUTCHours(0, 0, 0, 0)
 
+    // Exclude PENDING_PAYMENT — these haven't been paid yet and shouldn't appear in stats
+    const paidStatuses = { not: 'PENDING_PAYMENT' as const }
     const [periodOrders, todayOrders] = await Promise.all([
       db.order.findMany({
-        where: { vendorId: id, placedAt: { gte: since } },
-        select: { status: true, total: true, subtotal: true, placedAt: true },
+        where: { vendorId: id, placedAt: { gte: since }, status: paidStatuses },
+        select: { status: true, vendorPayout: true, placedAt: true },
       }),
       db.order.findMany({
-        where: { vendorId: id, placedAt: { gte: todayStart } },
-        select: { status: true, total: true },
+        where: { vendorId: id, placedAt: { gte: todayStart }, status: paidStatuses },
+        select: { status: true, vendorPayout: true },
       }),
     ])
 
-    // Build daily chart buckets
+    // Build daily chart buckets using vendorPayout (what vendor earns after fees)
     const buckets: Record<string, { revenue: number; orders: number }> = {}
     for (let i = 0; i < days; i++) {
       const d = new Date(since)
@@ -56,7 +61,7 @@ export async function GET(
       if (buckets[key]) {
         buckets[key].orders += 1
         if (o.status === 'COMPLETED' || o.status === 'DELIVERED') {
-          buckets[key].revenue += Number(o.total)
+          buckets[key].revenue += Number(o.vendorPayout)
         }
       }
     }
@@ -68,14 +73,20 @@ export async function GET(
     }))
 
     const completed = periodOrders.filter(o => o.status === 'COMPLETED' || o.status === 'DELIVERED')
-    const totalRevenue = parseFloat(completed.reduce((s, o) => s + Number(o.total), 0).toFixed(2))
-    const totalOrders = periodOrders.length
+    const cancelled = periodOrders.filter(o => o.status === 'CANCELLED')
+    const totalRevenue = parseFloat(completed.reduce((s, o) => s + Number(o.vendorPayout), 0).toFixed(2))
+    // totalOrders = all non-cancelled (active + completed) — used for display
+    const totalOrders = periodOrders.length - cancelled.length
     const avgOrderValue = completed.length > 0 ? parseFloat((totalRevenue / completed.length).toFixed(2)) : 0
-    const cancelled = periodOrders.filter(o => o.status === 'CANCELLED').length
-    const completionRate = totalOrders > 0 ? parseFloat(((totalOrders - cancelled) / totalOrders).toFixed(4)) : 1
+    // completionRate = COMPLETED / (COMPLETED + CANCELLED) — terminal orders only
+    // In-progress orders (PLACED/ACCEPTED/PREPARING/READY) don't affect the rate
+    const terminal = completed.length + cancelled.length
+    const completionRate = terminal > 0
+      ? parseFloat((completed.length / terminal).toFixed(4))
+      : 1
 
     const todayCompleted = todayOrders.filter(o => o.status === 'COMPLETED' || o.status === 'DELIVERED')
-    const todayRevenue = parseFloat(todayCompleted.reduce((s, o) => s + Number(o.total), 0).toFixed(2))
+    const todayRevenue = parseFloat(todayCompleted.reduce((s, o) => s + Number(o.vendorPayout), 0).toFixed(2))
     const pendingOrders = todayOrders.filter(o => ['PLACED', 'ACCEPTED', 'PREPARING'].includes(o.status)).length
 
     return success({
