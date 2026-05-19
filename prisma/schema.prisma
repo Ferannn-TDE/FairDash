@@ -192,13 +192,15 @@ model Vendor {
 
   // Relations
   menuItems     MenuItem[]
-  orders        Order[]
-  vendorMembers VendorMember[]
-  cancellations Cancellation[]
-  payouts       Payout[]
-  notifications VendorNotification[]
-  disputes      Dispute[]
-  menuRequests  MenuRequest[]
+  orders             Order[]
+  orderItems         OrderItem[]
+  vendorOrderStatuses VendorOrderStatus[]
+  vendorMembers      VendorMember[]
+  cancellations      Cancellation[]
+  payouts            Payout[]
+  notifications      VendorNotification[]
+  disputes           Dispute[]
+  menuRequests       MenuRequest[]
 
   @@index([eventId])
   @@index([status])
@@ -405,11 +407,12 @@ model Order {
   updatedAt DateTime @updatedAt
 
   // Relations
-  orderItems    OrderItem[]
-  cancellation  Cancellation?
-  orderEvents   OrderEvent[]
-  incidentReports IncidentReport[]
-  disputes      Dispute[]
+  orderItems          OrderItem[]
+  vendorOrderStatuses VendorOrderStatus[]
+  cancellation        Cancellation?
+  orderEvents         OrderEvent[]
+  incidentReports     IncidentReport[]
+  disputes            Dispute[]
 
   @@index([eventId])
   @@index([customerId])
@@ -444,6 +447,9 @@ model OrderItem {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
+  vendorId String
+  vendor   Vendor   @relation(fields: [vendorId], references: [id])
+
   menuItemId String
   menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
 
@@ -455,6 +461,38 @@ model OrderItem {
   createdAt DateTime @default(now())
 
   @@index([orderId])
+  @@index([vendorId])
+}
+
+// ============================================================================
+// PER-VENDOR ORDER STATUS
+// Tracks each vendor's independent acceptance/fulfilment state within a
+// multi-vendor order. The master Order.status reflects the aggregate state.
+// ============================================================================
+
+model VendorOrderStatus {
+  id       String @id @default(cuid())
+  orderId  String
+  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  // PLACED → ACCEPTED → PREPARING → READY → COMPLETED
+  // or      PLACED → DECLINED
+  status String @default("PLACED")
+
+  acceptedAt  DateTime?
+  preparingAt DateTime?
+  readyAt     DateTime?
+  completedAt DateTime?
+  declinedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, vendorId])
+  @@index([orderId])
+  @@index([vendorId])
 }
 
 // ============================================================================

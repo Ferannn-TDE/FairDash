@@ -1,0 +1,85 @@
+import { NextRequest } from 'next/server'
+import { db } from '@/lib/db'
+import { success, apiError } from '@/lib/api-response'
+import { handleApiError } from '@/lib/api-error'
+import { requireAuth } from '@/lib/auth'
+import { OrderStatus } from '@prisma/client'
+
+const ALL_PAID_STATUSES: OrderStatus[] = [
+  'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED',
+  'COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE',
+]
+
+// GET /api/organizer/fair/[fairId]/orders?status=PLACED|ACCEPTED|...
+// Returns orders for a specific fair with optional status filter
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ fairId: string }> }
+) {
+  try {
+    const clerkId = await requireAuth()
+    const { fairId } = await params
+
+    const dbUser = await db.user.findUnique({ where: { clerkId } })
+    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
+
+    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
+    if (!orgMember) return apiError('Not an organizer', 403, 'FORBIDDEN')
+
+    // Verify this organizer owns this event
+    const event = await db.event.findFirst({
+      where: { id: fairId, organizerId: orgMember.organizerId },
+    })
+    if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
+
+    const statusParam = req.nextUrl.searchParams.get('status') as OrderStatus | null
+    const statusFilter: OrderStatus[] = statusParam && ALL_PAID_STATUSES.includes(statusParam)
+      ? [statusParam]
+      : ALL_PAID_STATUSES
+
+    const orders = await db.order.findMany({
+      where: { eventId: fairId, status: { in: statusFilter } },
+      orderBy: { placedAt: 'desc' },
+      include: {
+        vendor: { select: { id: true, name: true, boothNumber: true } },
+        orderItems: {
+          select: {
+            id: true,
+            quantity: true,
+            unitPrice: true,
+            specialInstructions: true,
+            menuItem: { select: { name: true } },
+          },
+        },
+      },
+    })
+
+    const result = orders.map(o => ({
+      id: o.id,
+      status: o.status,
+      total: o.total,
+      subtotal: o.subtotal,
+      vendorPayout: o.vendorPayout,
+      fairSynqFee: o.fairSynqFee,
+      placedAt: o.placedAt,
+      customerName: o.customerName,
+      customerPhone: o.customerPhone,
+      fulfillmentType: o.fulfillmentType,
+      pickupLocation: o.pickupLocation,
+      vendorId: o.vendor.id,
+      vendorName: o.vendor.name,
+      boothNumber: o.vendor.boothNumber,
+      items: o.orderItems.map(i => ({
+        id: i.id,
+        name: i.menuItem.name,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        specialInstructions: i.specialInstructions,
+      })),
+    }))
+
+    return success({ orders: result })
+  } catch (err) {
+    return handleApiError(err)
+  }
+}

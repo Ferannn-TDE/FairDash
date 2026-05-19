@@ -7,7 +7,10 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 
 // GET /api/vendors/:id/analytics?days=7|30|90
-// Revenue figures use vendorPayout (subtotal - fairSynqFee), not gross total.
+//
+// Revenue is computed from OrderItem rows where vendorId = this vendor,
+// so multi-vendor orders are correctly split — each vendor only sees
+// revenue from their own items.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -26,28 +29,79 @@ export async function GET(
 
     const days = Math.min(90, Math.max(1, parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)))
 
-    // Use UTC midnight throughout — matches orders route default (setUTCHours)
     const since = new Date()
     since.setDate(since.getDate() - (days - 1))
-    since.setUTCHours(0, 0, 0, 0)
+    since.setHours(0, 0, 0, 0)
 
     const todayStart = new Date()
-    todayStart.setUTCHours(0, 0, 0, 0)
+    todayStart.setHours(0, 0, 0, 0)
 
-    // Exclude PENDING_PAYMENT — these haven't been paid yet and shouldn't appear in stats
-    const paidStatuses = { not: 'PENDING_PAYMENT' as const }
-    const [periodOrders, todayOrders] = await Promise.all([
-      db.order.findMany({
-        where: { vendorId: id, placedAt: { gte: since }, status: paidStatuses },
-        select: { status: true, vendorPayout: true, placedAt: true },
+    // Pull OrderItems for this vendor, joining to parent Order for status + date.
+    // This is the source of truth for revenue — not Order.vendorPayout.
+    const [periodItems, todayItems] = await Promise.all([
+      db.orderItem.findMany({
+        where: {
+          vendorId: id,
+          order: {
+            placedAt: { gte: since },
+            status: { not: 'PENDING_PAYMENT' },
+          },
+        },
+        select: {
+          unitPrice: true,
+          quantity: true,
+          order: { select: { id: true, status: true, placedAt: true } },
+        },
       }),
-      db.order.findMany({
-        where: { vendorId: id, placedAt: { gte: todayStart }, status: paidStatuses },
-        select: { status: true, vendorPayout: true },
+      db.orderItem.findMany({
+        where: {
+          vendorId: id,
+          order: {
+            placedAt: { gte: todayStart },
+            status: { not: 'PENDING_PAYMENT' },
+          },
+        },
+        select: {
+          unitPrice: true,
+          quantity: true,
+          order: {
+            select: {
+              id: true,
+              status: true,
+              vendorOrderStatuses: {
+                where: { vendorId: id },
+                select: { status: true },
+              },
+            },
+          },
+        },
       }),
     ])
 
-    // Build daily chart buckets using vendorPayout (what vendor earns after fees)
+    // Aggregate per order — each order appears once per item, so group first
+    const periodOrderMap = new Map<string, { status: string; placedAt: Date; revenue: number }>()
+    for (const item of periodItems) {
+      const o = item.order
+      if (!periodOrderMap.has(o.id)) {
+        periodOrderMap.set(o.id, { status: o.status, placedAt: o.placedAt, revenue: 0 })
+      }
+      periodOrderMap.get(o.id)!.revenue += item.unitPrice * item.quantity
+    }
+
+    const todayOrderMap = new Map<string, { status: string; vendorStatus: string; revenue: number }>()
+    for (const item of todayItems) {
+      const o = item.order
+      if (!todayOrderMap.has(o.id)) {
+        const vendorStatus = o.vendorOrderStatuses[0]?.status ?? o.status
+        todayOrderMap.set(o.id, { status: o.status, vendorStatus, revenue: 0 })
+      }
+      todayOrderMap.get(o.id)!.revenue += item.unitPrice * item.quantity
+    }
+
+    const periodOrders = [...periodOrderMap.values()]
+    const todayOrders = [...todayOrderMap.values()]
+
+    // Build daily chart buckets
     const buckets: Record<string, { revenue: number; orders: number }> = {}
     for (let i = 0; i < days; i++) {
       const d = new Date(since)
@@ -61,7 +115,7 @@ export async function GET(
       if (buckets[key]) {
         buckets[key].orders += 1
         if (o.status === 'COMPLETED' || o.status === 'DELIVERED') {
-          buckets[key].revenue += Number(o.vendorPayout)
+          buckets[key].revenue += o.revenue
         }
       }
     }
@@ -74,20 +128,18 @@ export async function GET(
 
     const completed = periodOrders.filter(o => o.status === 'COMPLETED' || o.status === 'DELIVERED')
     const cancelled = periodOrders.filter(o => o.status === 'CANCELLED')
-    const totalRevenue = parseFloat(completed.reduce((s, o) => s + Number(o.vendorPayout), 0).toFixed(2))
-    // totalOrders = all non-cancelled (active + completed) — used for display
+    const totalRevenue = parseFloat(completed.reduce((s, o) => s + o.revenue, 0).toFixed(2))
     const totalOrders = periodOrders.length - cancelled.length
     const avgOrderValue = completed.length > 0 ? parseFloat((totalRevenue / completed.length).toFixed(2)) : 0
-    // completionRate = COMPLETED / (COMPLETED + CANCELLED) — terminal orders only
-    // In-progress orders (PLACED/ACCEPTED/PREPARING/READY) don't affect the rate
     const terminal = completed.length + cancelled.length
     const completionRate = terminal > 0
       ? parseFloat((completed.length / terminal).toFixed(4))
       : 1
 
     const todayCompleted = todayOrders.filter(o => o.status === 'COMPLETED' || o.status === 'DELIVERED')
-    const todayRevenue = parseFloat(todayCompleted.reduce((s, o) => s + Number(o.vendorPayout), 0).toFixed(2))
-    const pendingOrders = todayOrders.filter(o => ['PLACED', 'ACCEPTED', 'PREPARING'].includes(o.status)).length
+    const todayRevenue = parseFloat(todayCompleted.reduce((s, o) => s + o.revenue, 0).toFixed(2))
+    // "In Queue" = orders where THIS vendor hasn't responded yet (vendor status = PLACED)
+    const pendingOrders = todayOrders.filter(o => o.vendorStatus === 'PLACED').length
 
     return success({
       chartData,

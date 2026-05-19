@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
   ArrowLeftIcon,
@@ -53,40 +53,54 @@ const validatePlate = (plate: string) => {
 // ─── Fulfillment options ──────────────────────────────────────────────────────
 
 const ALL_FULFILLMENT_OPTIONS = [
-  { value: 'BOOTH_PICKUP',  label: 'Booth Pickup',   sub: 'Walk to the vendor booth',  icon: BuildingStorefrontIcon },
-  { value: 'CURBSIDE',      label: 'Curbside',        sub: 'We bring it to your car',   icon: TruckIcon },
-  { value: 'HOME_DELIVERY', label: 'Home Delivery',   sub: 'Deliver to your address',   icon: HomeIcon },
+  { value: 'BOOTH_PICKUP',  label: 'Booth Pickup',  sub: 'Walk to the vendor booth', icon: BuildingStorefrontIcon },
+  { value: 'CURBSIDE',      label: 'Curbside',       sub: 'We bring it to your car',  icon: TruckIcon },
+  { value: 'HOME_DELIVERY', label: 'Home Delivery',  sub: 'Deliver to your address',  icon: HomeIcon },
 ]
 
-// ─── Payment step (must be rendered inside <Elements>) ────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Summary {
+interface OrderSummary {
   subtotal: number
-  deliveryFee?: number
-  serviceCharge?: number
+  deliveryFee?: number | null
+  serviceCharge?: number | null
   fairSynqFee: number
   total: number
 }
 
-function PaymentStep({
-  orderId,
-  fairSlug,
-  summary,
-  onBack,
-  onSuccess,
-}: {
+// ─── Stripe appearance ────────────────────────────────────────────────────────
+
+const stripeAppearance = {
+  theme: 'night' as const,
+  variables: {
+    colorPrimary: '#FF0077',
+    colorBackground: '#0F0F0F',
+    colorText: '#ffffff',
+    borderRadius: '12px',
+  },
+}
+
+// ─── Payment step (must be rendered inside <Elements>) ────────────────────────
+
+interface PaymentStepProps {
   orderId: string
   fairSlug: string
-  summary: Summary
+  summary: OrderSummary
   onBack: () => void
   onSuccess: () => void
-}) {
+}
+
+function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentStepProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [paying, setPaying] = useState(false)
+  const payingRef = useRef(false)
+
+  const total = summary.total + summary.fairSynqFee
 
   const handlePay = async () => {
-    if (!stripe || !elements) return
+    if (!stripe || !elements || payingRef.current) return
+    payingRef.current = true
     setPaying(true)
     try {
       const { error, paymentIntent } = await stripe.confirmPayment({
@@ -96,21 +110,25 @@ function PaymentStep({
         },
         redirect: 'if_required',
       })
+
       if (error) {
         toast.error(error.message ?? 'Payment failed — please try again')
-      } else if (paymentIntent?.status === 'succeeded') {
-        // Mark order PLACED client-side — covers dev (no webhook) and ensures
-        // vendor sees the order immediately even if webhook fires late
+        return
+      }
+
+      if (paymentIntent?.status === 'succeeded') {
+        // Mark order PLACED (client-side fallback; webhook also handles this)
         await fetch(`/api/orders/${orderId}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'PLACED' }),
-        }).catch(() => {}) // non-blocking — webhook will also do this in production
+        }).catch(() => {})
         onSuccess()
       }
     } catch {
       toast.error('Something went wrong — please try again')
     } finally {
+      payingRef.current = false
       setPaying(false)
     }
   }
@@ -129,7 +147,7 @@ function PaymentStep({
             <span className="text-[#A1A1A1]">Subtotal</span>
             <span className="text-white">${summary.subtotal.toFixed(2)}</span>
           </div>
-          {summary.deliveryFee != null && (
+          {summary.deliveryFee != null && summary.deliveryFee > 0 && (
             <div className="flex justify-between">
               <span className="text-[#A1A1A1]">Delivery Fee</span>
               <span className="text-white">${summary.deliveryFee.toFixed(2)}</span>
@@ -149,9 +167,7 @@ function PaymentStep({
           )}
           <div className="flex justify-between pt-3 border-t border-white/10">
             <span className="text-white font-bold">Total</span>
-            <span className="text-[#FF0077] font-bold text-xl">
-              ${(summary.total + summary.fairSynqFee).toFixed(2)}
-            </span>
+            <span className="text-[#FF0077] font-bold text-xl">${total.toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -175,7 +191,7 @@ function PaymentStep({
               Processing…
             </>
           ) : (
-            `Pay $${(summary.total + summary.fairSynqFee).toFixed(2)}`
+            `Pay $${total.toFixed(2)}`
           )}
         </button>
       </div>
@@ -189,10 +205,9 @@ export default function CheckoutPage() {
   const router = useRouter()
   const params = useParams<{ fairSlug: string }>()
   const { fair, fairLoading } = useFair()
-  const { items, vendorId, itemCount, subtotal, clearCart } = useFairCart()
+  const { items, itemCount, subtotal, clearCart } = useFairCart()
   const { user } = useUser()
 
-  // ── Derived config from real event data ────────────────────────────────────
   type FulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
 
   const fc = fair.fulfillmentConfig
@@ -220,7 +235,6 @@ export default function CheckoutPage() {
     deliveryZip: '',
   })
 
-  // Prefill name when Clerk loads
   useEffect(() => {
     if (user && !form.name) {
       setForm(prev => ({
@@ -232,19 +246,27 @@ export default function CheckoutPage() {
 
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({})
   const [submitting, setSubmitting] = useState(false)
-  const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string | null>(null)
-  const [summary, setSummary] = useState<Summary | null>(null)
-  // Vendor's actual commission rate — fetched once on mount so the estimate matches the server charge
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null)
+
+  const hasOrder = orderId !== null && clientSecret !== null
+
+  // Platform fee estimate (before order creation)
   const [platformFeeRate, setPlatformFeeRate] = useState(0.10)
+  const primaryVendorId = items[0]?.vendorId ?? null
 
   useEffect(() => {
-    if (!vendorId) return
-    fetch(`/api/vendors/${vendorId}`)
+    if (!primaryVendorId) return
+    fetch(`/api/vendors/${primaryVendorId}`)
       .then(r => r.json())
-      .then(json => { if (json.success && json.data?.commissionRate != null) setPlatformFeeRate(json.data.commissionRate) })
-      .catch(() => {/* keep default 0.10 */})
-  }, [vendorId])
+      .then(json => {
+        if (json.success && json.data?.commissionRate != null) {
+          setPlatformFeeRate(Number(json.data.commissionRate))
+        }
+      })
+      .catch(() => {})
+  }, [primaryVendorId])
 
   const estimatedDeliveryFee = fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee : 0
   const estimatedPlatformFee = Math.round(subtotal * platformFeeRate * 100) / 100
@@ -278,7 +300,7 @@ export default function CheckoutPage() {
       toast.error('Still loading event data — please wait a moment')
       return false
     }
-    if (!vendorId || !fair.id) {
+    if (!fair.id) {
       toast.error('Cart data is incomplete — please re-add items from the menu')
       return false
     }
@@ -295,11 +317,9 @@ export default function CheckoutPage() {
       }
     }
     setFieldErrors({})
-    if (fulfillmentType === 'HOME_DELIVERY') {
-      if (!form.deliveryStreet.trim()) {
-        toast.error('Delivery address is required')
-        return false
-      }
+    if (fulfillmentType === 'HOME_DELIVERY' && !form.deliveryStreet.trim()) {
+      toast.error('Delivery address is required')
+      return false
     }
     return true
   }
@@ -307,47 +327,42 @@ export default function CheckoutPage() {
   const handlePlaceOrder = async () => {
     if (!validate()) return
     setSubmitting(true)
-
     try {
-      const body = {
-        vendorId,
-        eventId: fair.id,
-        fulfillmentType,
-        items: items.map(item => ({
-          menuItemId: item.menuItemId,
-          quantity: item.quantity,
-        })),
-        customerName: form.name.trim(),
-        customerPhone: form.phone.trim(),
-        ...(fulfillmentType === 'CURBSIDE' && {
-          vehicleMake: form.vehicleMake.trim(),
-          vehicleColor: form.vehicleColor.trim(),
-          vehiclePlate: form.vehiclePlate.trim() || undefined,
-        }),
-        ...(fulfillmentType === 'HOME_DELIVERY' && {
-          deliveryStreet: form.deliveryStreet.trim(),
-          deliveryCity: form.deliveryCity.trim() || form.deliveryStreet.trim(),
-          deliveryZip: form.deliveryZip.trim() || '00000',
-        }),
-      }
-
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          eventId: fair.id,
+          fulfillmentType,
+          customerName: form.name.trim(),
+          customerPhone: form.phone.trim(),
+          items: items.map(i => ({
+            menuItemId: i.menuItemId,
+            vendorId: i.vendorId,
+            quantity: i.quantity,
+          })),
+          ...(fulfillmentType === 'CURBSIDE' && {
+            vehicleMake: form.vehicleMake,
+            vehicleColor: form.vehicleColor,
+            vehiclePlate: form.vehiclePlate || undefined,
+          }),
+          ...(fulfillmentType === 'HOME_DELIVERY' && {
+            deliveryStreet: form.deliveryStreet.trim(),
+            deliveryCity: form.deliveryCity.trim() || form.deliveryStreet.trim(),
+            deliveryZip: form.deliveryZip.trim() || '00000',
+          }),
+        }),
       })
 
       const json = await res.json()
-
-      if (!res.ok) {
+      if (!json.success) {
         toast.error(json?.error?.message ?? json?.error ?? 'Failed to create order — please try again')
         return
       }
 
-      const { orderId: newOrderId, clientSecret: secret, summary: orderSummary } = json.data
-      setOrderId(newOrderId)
-      setClientSecret(secret)
-      setSummary(orderSummary)
+      setOrderId(json.data.orderId)
+      setClientSecret(json.data.clientSecret)
+      setOrderSummary(json.data.summary)
     } catch {
       toast.error('Network error — please try again')
     } finally {
@@ -362,7 +377,7 @@ export default function CheckoutPage() {
   }, [clearCart, router, params.fairSlug, orderId])
 
   // ── Empty cart guard ────────────────────────────────────────────────────────
-  if (itemCount === 0 && !clientSecret) {
+  if (itemCount === 0 && !hasOrder) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center px-4">
         <ShoppingCartIcon className="w-16 h-16 mb-4 mx-auto text-white/20" />
@@ -384,13 +399,13 @@ export default function CheckoutPage() {
       <div className="sticky top-14 sm:top-16 z-10 bg-[#0F0F0F]/90 backdrop-blur-md border-b border-white/10">
         <div className="max-w-[75rem] mx-auto px-5 sm:px-6 py-4 flex items-center gap-4">
           <button
-            onClick={() => clientSecret ? setClientSecret(null) : router.back()}
+            onClick={() => hasOrder ? (setOrderId(null), setClientSecret(null)) : router.back()}
             className="p-2 hover:bg-white/5 rounded-lg transition-colors bg-transparent border-0 cursor-pointer"
           >
             <ArrowLeftIcon className="w-5 h-5 text-white" />
           </button>
           <h1 className="font-bebas text-2xl tracking-wide text-white">
-            {clientSecret ? 'Payment' : 'Checkout'}
+            {hasOrder ? 'Payment' : 'Checkout'}
           </h1>
         </div>
       </div>
@@ -400,27 +415,16 @@ export default function CheckoutPage() {
 
           {/* ── Left: forms ─────────────────────────────────────────────────── */}
           <div className="lg:col-span-2 space-y-6">
-            {clientSecret && orderId && summary ? (
+            {hasOrder && clientSecret && orderSummary ? (
               <Elements
                 stripe={getStripe()}
-                options={{
-                  clientSecret,
-                  appearance: {
-                    theme: 'night',
-                    variables: {
-                      colorPrimary: '#FF0077',
-                      colorBackground: '#0F0F0F',
-                      colorText: '#ffffff',
-                      borderRadius: '12px',
-                    },
-                  },
-                }}
+                options={{ clientSecret, appearance: stripeAppearance }}
               >
                 <PaymentStep
-                  orderId={orderId}
+                  orderId={orderId!}
                   fairSlug={params.fairSlug}
-                  summary={summary}
-                  onBack={() => setClientSecret(null)}
+                  summary={orderSummary}
+                  onBack={() => { setOrderId(null); setClientSecret(null) }}
                   onSuccess={handleSuccess}
                 />
               </Elements>
@@ -575,7 +579,6 @@ export default function CheckoutPage() {
             <div className="bg-[#1A1A1A] border border-white/10 rounded-2xl p-6 lg:sticky lg:top-36">
               <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Order Summary</h2>
 
-              {/* Item list */}
               <div className="space-y-3 mb-5 max-h-64 overflow-y-auto -mx-1 px-1">
                 {items.map(item => (
                   <div key={item.menuItemId} className="flex gap-3 pb-3 border-b border-white/5 last:border-0 last:pb-0">
@@ -597,7 +600,6 @@ export default function CheckoutPage() {
                 ))}
               </div>
 
-              {/* Estimated ready time */}
               {estimatedReadyMin && (
                 <div className="flex items-center gap-2 py-3 px-3 mb-4 bg-white/[0.03] border border-white/5 rounded-xl">
                   <ClockIcon className="w-4 h-4 text-[#FF0077] flex-shrink-0" />
@@ -607,16 +609,15 @@ export default function CheckoutPage() {
                 </div>
               )}
 
-              {/* Price breakdown */}
               <div className="space-y-2 pb-4 border-b border-white/10 text-sm">
                 <div className="flex justify-between">
                   <span className="text-[#A1A1A1]">Subtotal</span>
-                  <span className="text-white">${subtotal.toFixed(2)}</span>
+                  <span className="text-white">${(orderSummary?.subtotal ?? subtotal).toFixed(2)}</span>
                 </div>
                 {fulfillmentType === 'HOME_DELIVERY' && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">Delivery Fee</span>
-                    <span className="text-white">${configDeliveryFee.toFixed(2)}</span>
+                    <span className="text-white">${(orderSummary?.deliveryFee ?? configDeliveryFee).toFixed(2)}</span>
                   </div>
                 )}
                 {serviceChargeAmount > 0 && (
@@ -628,24 +629,21 @@ export default function CheckoutPage() {
                 <div className="flex justify-between">
                   <span className="text-[#A1A1A1]">Platform Fee</span>
                   <span className="text-white">
-                    ${clientSecret
-                      ? (summary?.fairSynqFee ?? estimatedPlatformFee).toFixed(2)
-                      : estimatedPlatformFee.toFixed(2)}
+                    ${(orderSummary?.fairSynqFee ?? estimatedPlatformFee).toFixed(2)}
                   </span>
                 </div>
               </div>
 
               <div className="flex justify-between py-4">
                 <span className="text-white font-bold">
-                  {clientSecret ? 'Total' : 'Est. Total'}
+                  {orderSummary ? 'Total' : 'Est. Total'}
                 </span>
                 <span className="text-[#FF0077] font-bold text-xl">
-                  ${clientSecret
-                    ? ((summary?.total ?? 0) + (summary?.fairSynqFee ?? 0)).toFixed(2)
+                  ${orderSummary
+                    ? (orderSummary.total + orderSummary.fairSynqFee).toFixed(2)
                     : estimatedTotal.toFixed(2)}
                 </span>
               </div>
-
             </div>
           </div>
 

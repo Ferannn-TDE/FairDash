@@ -1,23 +1,86 @@
 'use client'
 
-import { useState } from 'react'
-import { mockOrdersForFair } from '@/lib/mock/organizer'
+import { useEffect, useState, useCallback } from 'react'
+import { useParams } from 'next/navigation'
 
-const STATUS_STYLES: Record<string, string> = {
-  pending:   'bg-yellow-400/10 text-yellow-400',
-  preparing: 'bg-blue-400/10 text-blue-400',
-  ready:     'bg-green-400/10 text-green-400',
-  completed: 'bg-white/5 text-[#888]',
-  cancelled: 'bg-red-400/10 text-red-400',
+interface OrderItem {
+  id: string
+  name: string
+  quantity: number
+  unitPrice: number
+  specialInstructions?: string | null
 }
 
-const FILTERS = ['All', 'Pending', 'Preparing', 'Ready', 'Completed']
+interface Order {
+  id: string
+  status: string
+  total: number
+  subtotal: number
+  vendorPayout: number
+  fairSynqFee: number
+  placedAt: string
+  customerName: string
+  customerPhone: string
+  fulfillmentType: string
+  pickupLocation: string | null
+  vendorId: string
+  vendorName: string
+  boothNumber: string | null
+  items: OrderItem[]
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  PLACED:           'bg-yellow-400/10 text-yellow-400',
+  ACCEPTED:         'bg-yellow-400/10 text-yellow-400',
+  PREPARING:        'bg-blue-400/10 text-blue-400',
+  READY:            'bg-green-400/10 text-green-400',
+  RUNNER_COLLECTED: 'bg-green-400/10 text-green-400',
+  COMPLETED:        'bg-white/5 text-[#888]',
+  DELIVERED:        'bg-white/5 text-[#888]',
+  CANCELLED:        'bg-red-400/10 text-red-400',
+}
+
+const FILTERS = ['All', 'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED']
+const FILTER_LABELS: Record<string, string> = {
+  All: 'All',
+  PLACED: 'Placed',
+  ACCEPTED: 'Accepted',
+  PREPARING: 'Preparing',
+  READY: 'Ready',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
 
 export default function FairOrdersPage() {
+  const params = useParams<{ fairId: string }>()
+  const fairId = params.fairId
   const [filter, setFilter] = useState('All')
+  const [orders, setOrders] = useState<Order[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const orders = filter === 'All' ? mockOrdersForFair : mockOrdersForFair.filter(o => o.status === filter.toLowerCase())
-  const activeCount = mockOrdersForFair.filter(o => o.status === 'pending' || o.status === 'preparing').length
+  const loadOrders = useCallback(() => {
+    setLoading(true)
+    const url = filter === 'All'
+      ? `/api/organizer/fair/${fairId}/orders`
+      : `/api/organizer/fair/${fairId}/orders?status=${filter}`
+    fetch(url)
+      .then(r => r.json())
+      .then(d => { if (d.data?.orders) setOrders(d.data.orders) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [fairId, filter])
+
+  useEffect(() => { loadOrders() }, [loadOrders])
+
+  const activeCount = orders.filter(o => ['PLACED', 'ACCEPTED', 'PREPARING'].includes(o.status)).length
 
   return (
     <div>
@@ -29,6 +92,12 @@ export default function FairOrdersPage() {
             <span className="text-sm text-[#666] font-inter">Live — {activeCount} active order{activeCount !== 1 ? 's' : ''}</span>
           </div>
         </div>
+        <button
+          onClick={loadOrders}
+          className="px-3 py-1.5 text-xs font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors"
+        >
+          Refresh
+        </button>
       </div>
 
       {/* Filter tabs */}
@@ -37,43 +106,58 @@ export default function FairOrdersPage() {
           <button key={f} onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold font-inter whitespace-nowrap transition-colors
               ${filter === f ? 'bg-[#FF0077] text-white' : 'text-[#888] hover:text-white'}`}>
-            {f}
+            {FILTER_LABELS[f]}
           </button>
         ))}
       </div>
 
       {/* Orders */}
-      <div className="space-y-3">
-        {orders.map(order => (
-          <div key={order.id} className="bg-[#111111] rounded-xl border border-white/5 p-4 sm:p-5 hover:border-white/10 transition-colors">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-inter font-medium text-white">Order #{order.shortId}</p>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${STATUS_STYLES[order.status] ?? ''}`}>
-                    {order.status}
-                  </span>
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-[#111111] rounded-xl border border-white/5 p-4 sm:p-5 animate-pulse">
+              <div className="h-4 w-32 bg-white/5 rounded mb-2" />
+              <div className="h-3 w-48 bg-white/5 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : orders.length === 0 ? (
+        <div className="bg-[#111111] rounded-xl border border-white/5 p-8 text-center">
+          <p className="text-[#666] font-inter text-sm">No orders found{filter !== 'All' ? ` with status "${FILTER_LABELS[filter]}"` : ''}.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orders.map(order => (
+            <div key={order.id} className="bg-[#111111] rounded-xl border border-white/5 p-4 sm:p-5 hover:border-white/10 transition-colors">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-inter font-medium text-white">Order #{order.id.slice(-6).toUpperCase()}</p>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${STATUS_STYLES[order.status] ?? ''}`}>
+                      {order.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#666] font-inter mt-0.5">{order.customerName} · {timeAgo(order.placedAt)}</p>
                 </div>
-                <p className="text-xs text-[#666] font-inter mt-0.5">{order.customerName} · {order.timeAgo}</p>
+                <p className="text-sm font-semibold text-white tabular-nums">${order.total.toFixed(2)}</p>
               </div>
-              <p className="text-sm font-semibold text-white tabular-nums">${order.total.toFixed(2)}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {order.items.map(item => (
+                  <span key={item.id} className="px-2 py-1 bg-white/5 rounded text-xs text-[#aaa] font-inter">
+                    {item.quantity}× {item.name}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between">
+                <p className="text-xs text-[#666] font-inter">
+                  {order.vendorName}{order.boothNumber ? ` · Booth ${order.boothNumber}` : ''}
+                </p>
+                <span className="text-xs text-[#555] font-inter">{order.fulfillmentType.replace('_', ' ')}</span>
+              </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {order.items.map(item => (
-                <span key={item.id} className="px-2 py-1 bg-white/5 rounded text-xs text-[#aaa] font-inter">
-                  {item.quantity}× {item.name}
-                </span>
-              ))}
-            </div>
-            <div className="mt-3 flex items-center justify-between">
-              <p className="text-xs text-[#666] font-inter">{order.vendorName} · Booth {order.booth}</p>
-              <button className="px-3 py-1 text-xs font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors">
-                Details
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -8,6 +8,7 @@ import {
   ClockIcon,
   MapPinIcon,
   XMarkIcon,
+  LockClosedIcon,
   ExclamationTriangleIcon,
   ChatBubbleLeftEllipsisIcon,
   EnvelopeIcon,
@@ -26,11 +27,32 @@ import Breadcrumb from '../../_components/Breadcrumb'
 interface OrderItem {
   id: string
   menuItemId: string
+  vendorId: string
   quantity: number
   unitPrice: number
   subtotal: number
   specialInstructions?: string | null
   menuItem: { name: string; imageUrl?: string | null; prepTime?: number | null }
+  vendor: { id: string; name: string; boothNumber?: string | null }
+}
+
+interface VendorGroup {
+  vendorId: string
+  vendorName: string
+  boothNumber?: string | null
+  items: OrderItem[]
+  subtotal: number
+}
+
+interface VendorOrderStatus {
+  vendorId: string
+  status: string
+  acceptedAt?: string | null
+  preparingAt?: string | null
+  readyAt?: string | null
+  completedAt?: string | null
+  declinedAt?: string | null
+  vendor?: { name: string } | null
 }
 
 interface Order {
@@ -62,6 +84,7 @@ interface Order {
   cancelledAt?: string | null
   vendor: { id: string; name: string; boothNumber?: string | null }
   orderItems: OrderItem[]
+  vendorOrderStatuses?: VendorOrderStatus[]
 }
 
 // ─── Status config ─────────────────────────────────────────────────────────────
@@ -72,6 +95,17 @@ const STEPS = [
   { label: 'Ready',        sublabel: 'For pickup',  icon: BuildingStorefrontIcon },
   { label: 'Completed',    sublabel: 'All done!',   icon: CheckCircleIcon },
 ]
+
+const VENDOR_STEPS = ['Placed', 'Accepted', 'Preparing', 'Ready']
+
+const VENDOR_STATUS_TO_STEP: Record<string, number> = {
+  PLACED:    0,
+  ACCEPTED:  1,
+  PREPARING: 2,
+  READY:     3,
+  COMPLETED: 4,
+  DECLINED:  -1,
+}
 
 const STATUS_TO_STEP: Record<string, number> = {
   PLACED: 0, ACCEPTED: 0,
@@ -197,37 +231,268 @@ function OrderStepper({ status, steps }: { status: string; steps: typeof STEPS }
   )
 }
 
-function OrderItemsCard({ order }: { order: Order }) {
+function buildVendorGroups(orderItems: OrderItem[]): VendorGroup[] {
+  const map = new Map<string, VendorGroup>()
+  for (const item of orderItems) {
+    const vid = item.vendor?.id ?? item.vendorId
+    if (!map.has(vid)) {
+      map.set(vid, {
+        vendorId: vid,
+        vendorName: item.vendor?.name ?? 'Vendor',
+        boothNumber: item.vendor?.boothNumber ?? null,
+        items: [],
+        subtotal: 0,
+      })
+    }
+    const group = map.get(vid)!
+    group.items.push(item)
+    group.subtotal += item.unitPrice * item.quantity
+  }
+  return [...map.values()]
+}
+
+const VENDOR_STATUS_STYLES: Record<string, string> = {
+  PLACED:    'text-amber-400 bg-amber-400/10 border-amber-400/20',
+  ACCEPTED:  'text-amber-400 bg-amber-400/10 border-amber-400/20',
+  PREPARING: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+  READY:     'text-[#FF0077] bg-[#FF0077]/10 border-[#FF0077]/20',
+  COMPLETED: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
+  DECLINED:  'text-red-400 bg-red-500/15 border-red-400/20',
+}
+
+const VENDOR_STATUS_LABELS: Record<string, string> = {
+  PLACED:    'Waiting',
+  ACCEPTED:  'Accepted',
+  PREPARING: 'Preparing',
+  READY:     'Ready',
+  COMPLETED: 'Done',
+  DECLINED:  'Cancelled',
+}
+
+function VendorStatusBadge({ status }: { status: string }) {
   return (
-    <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
-        <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold">Order Items</p>
-        <StatusBadge status={order.status} />
+    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${VENDOR_STATUS_STYLES[status] ?? 'text-[#A1A1A1] bg-white/5 border-white/10'}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+      {VENDOR_STATUS_LABELS[status] ?? status}
+    </span>
+  )
+}
+
+function VendorProgressSteps({ status }: { status: string }) {
+  if (status === 'DECLINED') {
+    return (
+      <div className="flex items-center gap-1 mt-2">
+        <div className="flex-1 h-0.5 rounded-full bg-red-400/30" />
       </div>
-      <div className="px-5 py-3 divide-y divide-white/5">
-        {order.orderItems.map(item => (
-          <div key={item.id} className="flex items-center gap-3 py-3">
-            {item.menuItem.imageUrl ? (
-              <img src={item.menuItem.imageUrl} alt={item.menuItem.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-white/5" />
-            ) : (
-              <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                <BuildingStorefrontIcon className="w-5 h-5 text-white/30" />
+    )
+  }
+  const step = VENDOR_STATUS_TO_STEP[status] ?? 0
+  const isCompleted = status === 'COMPLETED'
+  return (
+    <div className="flex items-center gap-px mt-2">
+      {VENDOR_STEPS.map((_, idx) => {
+        const filled = isCompleted || idx < step
+        const active = !isCompleted && idx === step && step < VENDOR_STEPS.length
+        return (
+          <div
+            key={idx}
+            className={`flex-1 h-0.5 rounded-full transition-colors ${
+              filled ? 'bg-[#FF0077]' : active ? 'bg-[#FF0077]/40' : 'bg-white/10'
+            }`}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function VendorStatusMessage({ status, boothNumber }: { status: string; boothNumber?: string | null }) {
+  const msg =
+    status === 'PLACED'    ? 'Waiting for vendor to confirm…' :
+    status === 'ACCEPTED'  ? 'Vendor accepted — preparing soon' :
+    status === 'PREPARING' ? 'Being prepared now' :
+    status === 'READY'     ? (boothNumber ? `Ready · collect from Booth ${boothNumber}` : 'Ready for pickup') :
+    status === 'COMPLETED' ? 'Collected ✓' :
+    status === 'DECLINED'  ? 'This vendor cancelled their portion' :
+    status.toLowerCase()
+  const color =
+    status === 'PLACED'    ? 'text-amber-400/70' :
+    status === 'ACCEPTED'  ? 'text-blue-400/70' :
+    status === 'PREPARING' ? 'text-blue-400/70' :
+    status === 'READY'     ? 'text-[#FF0077]/80' :
+    status === 'COMPLETED' ? 'text-emerald-400/70' :
+    status === 'DECLINED'  ? 'text-red-400/70' :
+    'text-[#A1A1A1]'
+  return <p className={`text-[0.6875rem] mt-1 ${color}`}>{msg}</p>
+}
+
+function MultiVendorSummaryHeader({
+  vendorGroups,
+  vendorStatuses,
+}: {
+  vendorGroups: VendorGroup[]
+  vendorStatuses: VendorOrderStatus[]
+}) {
+  const getStatus = (vid: string) => vendorStatuses.find(s => s.vendorId === vid)?.status ?? 'PLACED'
+  const statuses = vendorGroups.map(g => getStatus(g.vendorId))
+
+  const allCompleted  = statuses.every(s => s === 'COMPLETED')
+  const allDeclined   = statuses.every(s => s === 'DECLINED')
+  const allTerminal   = statuses.every(s => ['COMPLETED', 'DECLINED'].includes(s))
+  const readyCount    = statuses.filter(s => ['READY', 'COMPLETED'].includes(s)).length
+  const hasReady      = statuses.some(s => s === 'READY')
+
+  const aggregateLabel =
+    allCompleted  ? 'All Done' :
+    allDeclined   ? 'Cancelled' :
+    allTerminal   ? 'Partially Done' :
+    readyCount > 0 && readyCount < vendorGroups.length ? `${readyCount} of ${vendorGroups.length} Ready` :
+    hasReady      ? 'Ready' :
+    'In Progress'
+
+  const aggregateColor =
+    allCompleted              ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
+    allDeclined               ? 'text-red-400 bg-red-400/10 border-red-400/20' :
+    allTerminal               ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
+    (hasReady || readyCount > 0) ? 'text-[#FF0077] bg-[#FF0077]/10 border-[#FF0077]/20' :
+    'text-amber-400 bg-amber-400/10 border-amber-400/20'
+
+  return (
+    <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold">
+          {vendorGroups.length} Vendors
+        </p>
+        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${aggregateColor}`}>
+          <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+          {aggregateLabel}
+        </span>
+      </div>
+      <div className="space-y-3.5">
+        {vendorGroups.map(group => {
+          const vs = getStatus(group.vendorId)
+          const step = VENDOR_STATUS_TO_STEP[vs] ?? 0
+          const isCompleted = vs === 'COMPLETED'
+          const isDeclined  = vs === 'DECLINED'
+          const dotColor =
+            isCompleted ? 'bg-emerald-400' :
+            isDeclined  ? 'bg-red-400' :
+            vs === 'READY' ? 'bg-[#FF0077] shadow-[0_0_8px_rgba(255,0,119,0.5)]' :
+            vs === 'PREPARING' ? 'bg-blue-400 animate-pulse' :
+            'bg-amber-400/60'
+
+          return (
+            <div key={group.vendorId} className="flex items-center gap-3">
+              <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColor}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-white text-sm font-medium truncate">{group.vendorName}</span>
+                  <VendorStatusBadge status={vs} />
+                </div>
+                {isDeclined ? (
+                  <div className="mt-1.5 h-0.5 rounded-full bg-red-400/20" />
+                ) : (
+                  <div className="flex items-center gap-px mt-1.5">
+                    {VENDOR_STEPS.map((_, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex-1 h-0.5 rounded-full transition-colors ${
+                          isCompleted || idx < step ? 'bg-[#FF0077]' :
+                          idx === step ? 'bg-[#FF0077]/40' :
+                          'bg-white/10'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{item.menuItem.name}</p>
-              {item.specialInstructions && (
-                <p className="text-[#A1A1A1] text-xs mt-0.5 truncate">{item.specialInstructions}</p>
-              )}
             </div>
-            <div className="flex-shrink-0 text-right">
-              <p className="text-[#A1A1A1] text-xs">×{item.quantity}</p>
-              <p className="text-white text-sm font-medium">${item.subtotal.toFixed(2)}</p>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
-      <div className="px-5 py-4 bg-white/[0.02] border-t border-white/5 space-y-2">
+    </div>
+  )
+}
+
+function OrderItemsCard({ order }: { order: Order }) {
+  const groups = buildVendorGroups(order.orderItems)
+  const isMultiVendor = groups.length > 1
+
+  return (
+    <div className="space-y-3">
+      {/* Vendor sections */}
+      {groups.map(group => {
+        const vendorStatus = order.vendorOrderStatuses?.find(
+          s => s.vendorId === group.vendorId
+        )?.status ?? order.status
+
+        return (
+        <div key={group.vendorId} className="bg-[#1A1A1A] border border-white/5 rounded-2xl overflow-hidden">
+          {/* Vendor header */}
+          <div className="px-5 py-3.5 border-b border-white/5 bg-white/[0.02]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <BuildingStorefrontIcon className="w-4 h-4 text-[#FF0077] flex-shrink-0" />
+                <span className="text-white font-semibold text-sm uppercase tracking-wide truncate">
+                  {group.vendorName}
+                </span>
+                {group.boothNumber && (
+                  <span className="text-[#A1A1A1] text-xs flex-shrink-0">· Booth {group.boothNumber}</span>
+                )}
+              </div>
+              <VendorStatusBadge status={vendorStatus} />
+            </div>
+            {isMultiVendor && (
+              <>
+                <VendorProgressSteps status={vendorStatus} />
+                <VendorStatusMessage status={vendorStatus} boothNumber={group.boothNumber} />
+              </>
+            )}
+          </div>
+
+          {/* Items */}
+          <div className="px-5 py-2 divide-y divide-white/5">
+            {group.items.map(item => (
+              <div key={item.id} className="flex items-center gap-3 py-3">
+                {item.menuItem.imageUrl ? (
+                  <img src={item.menuItem.imageUrl} alt={item.menuItem.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-white/5" />
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <BuildingStorefrontIcon className="w-5 h-5 text-white/20" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-medium truncate">{item.menuItem.name}</p>
+                  {item.specialInstructions && (
+                    <p className="text-[#A1A1A1] text-xs mt-0.5 truncate">{item.specialInstructions}</p>
+                  )}
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-[#A1A1A1] text-xs">×{item.quantity}</p>
+                  <p className="text-white text-sm font-medium">${item.subtotal.toFixed(2)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Per-vendor subtotal (only shown for multi-vendor) */}
+          {isMultiVendor && (
+            <div className="px-5 py-3 border-t border-white/5 flex justify-between bg-white/[0.01]">
+              <span className="text-[#A1A1A1] text-xs">
+                {group.items.length} item{group.items.length !== 1 ? 's' : ''} · vendor subtotal
+              </span>
+              <span className="text-white text-sm font-medium">${group.subtotal.toFixed(2)}</span>
+            </div>
+          )}
+        </div>
+        )
+      })}
+
+      {/* Overall totals */}
+      <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl px-5 py-4 space-y-2">
+        {!isMultiVendor && (
+          <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-3">Order Total</p>
+        )}
         <div className="flex justify-between text-sm">
           <span className="text-[#A1A1A1]">Subtotal</span>
           <span className="text-white">${order.subtotal.toFixed(2)}</span>
@@ -250,7 +515,7 @@ function OrderItemsCard({ order }: { order: Order }) {
             <span className="text-white/60">${order.fairSynqFee.toFixed(2)}</span>
           </div>
         )}
-        <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-2">
+        <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-1">
           <span className="text-white">Total</span>
           <span className="text-[#FF0077] text-base [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
             ${(order.total + order.fairSynqFee).toFixed(2)}
@@ -261,10 +526,36 @@ function OrderItemsCard({ order }: { order: Order }) {
   )
 }
 
+function TimelineRow({
+  label, time, small, green, red,
+}: {
+  label: string
+  time: string | Date
+  small?: boolean
+  green?: boolean
+  red?: boolean
+}) {
+  const d = new Date(time)
+  const formatted =
+    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) +
+    ' · ' +
+    d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+  const textSize = small ? 'text-[0.6875rem]' : 'text-xs'
+  const labelColor = green ? 'text-emerald-400' : red ? 'text-red-400' : 'text-white/60'
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className={`${textSize} ${labelColor}`}>{label}</span>
+      <span className={`${textSize} text-white/30 flex-shrink-0`}>{formatted}</span>
+    </div>
+  )
+}
+
 function OrderMetaCard({ order }: { order: Order }) {
   const isDelivery = order.fulfillmentType === 'HOME_DELIVERY'
   const isCurbside = order.fulfillmentType === 'CURBSIDE'
   const hasAddress = isDelivery && order.deliveryStreet
+  const vendorGroups = buildVendorGroups(order.orderItems)
+  const isMultiVendor = vendorGroups.length > 1
 
   return (
     <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl overflow-hidden">
@@ -277,13 +568,19 @@ function OrderMetaCard({ order }: { order: Order }) {
           <p className="text-white font-mono text-sm">{order.id.slice(-8).toUpperCase()}</p>
         </div>
         <div>
-          <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-1">Vendor</p>
-          <div className="flex items-center gap-2">
-            <BuildingStorefrontIcon className="w-4 h-4 text-[#FF0077] flex-shrink-0" />
-            <span className="text-white text-sm">{order.vendor.name}</span>
-            {order.vendor.boothNumber && (
-              <span className="text-[#A1A1A1] text-xs">· Booth {order.vendor.boothNumber}</span>
-            )}
+          <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-1">
+            {isMultiVendor ? 'Vendors' : 'Vendor'}
+          </p>
+          <div className="space-y-1.5">
+            {vendorGroups.map(group => (
+              <div key={group.vendorId} className="flex items-center gap-2">
+                <BuildingStorefrontIcon className="w-4 h-4 text-[#FF0077] flex-shrink-0" />
+                <span className="text-white text-sm">{group.vendorName}</span>
+                {group.boothNumber && (
+                  <span className="text-[#A1A1A1] text-xs">· Booth {group.boothNumber}</span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
         <div>
@@ -323,20 +620,40 @@ function OrderMetaCard({ order }: { order: Order }) {
         <div>
           <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-2">Timeline</p>
           <div className="space-y-1.5">
-            {[
-              { label: 'Placed',    value: order.placedAt },
-              { label: 'Accepted',  value: order.acceptedAt },
-              { label: 'Ready',     value: order.readyAt },
-              { label: 'Completed', value: order.completedAt },
-              { label: 'Cancelled', value: order.cancelledAt },
-            ].filter(t => t.value).map(t => (
-              <div key={t.label} className="flex justify-between items-center">
-                <span className="text-[#A1A1A1] text-xs">{t.label}</span>
-                <span className="text-white text-xs font-medium">
-                  {formatTime(t.value)} · {formatDate(t.value)}
-                </span>
+            {/* Master placed event — always first */}
+            <TimelineRow label="Order Placed" time={order.placedAt} />
+
+            {isMultiVendor ? (
+              // Per-vendor timeline groups
+              <div className="mt-3 space-y-4">
+                {(order.vendorOrderStatuses ?? []).map(vs => (
+                  <div key={vs.vendorId}>
+                    <p className="text-white/30 text-[0.625rem] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <BuildingStorefrontIcon className="w-3 h-3 flex-shrink-0" />
+                      {vs.vendor?.name ?? vs.vendorId}
+                    </p>
+                    <div className="ml-3 pl-3 border-l border-white/[0.08] space-y-1.5">
+                      {vs.acceptedAt  && <TimelineRow label="Accepted"        time={vs.acceptedAt}  small />}
+                      {vs.preparingAt && <TimelineRow label="Preparing"        time={vs.preparingAt} small />}
+                      {vs.readyAt     && <TimelineRow label="Ready for Pickup" time={vs.readyAt}     small />}
+                      {vs.completedAt && <TimelineRow label="Completed"        time={vs.completedAt} small green />}
+                      {vs.declinedAt  && <TimelineRow label="Cancelled"        time={vs.declinedAt}  small red />}
+                      {vs.status === 'PLACED' && (
+                        <p className="text-white/20 text-xs italic">Awaiting response…</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              // Single vendor — flat timeline
+              <>
+                {order.acceptedAt  && <TimelineRow label="Accepted"        time={order.acceptedAt} />}
+                {order.readyAt     && <TimelineRow label="Ready for Pickup" time={order.readyAt} />}
+                {order.completedAt && <TimelineRow label="Completed"        time={order.completedAt} green />}
+                {order.cancelledAt && <TimelineRow label="Cancelled"        time={order.cancelledAt} red />}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -626,7 +943,7 @@ export default function OrderTrackingPage() {
           prepTime: item.menuItem.prepTime ?? undefined,
           imageUrl: item.menuItem.imageUrl,
         },
-        { id: order.vendorId, name: order.vendor.name }
+        { id: item.vendor?.id ?? item.vendorId, name: item.vendor?.name ?? order.vendor.name }
       )
     })
     router.push(`/fair/${params.fairSlug}/checkout`)
@@ -656,10 +973,17 @@ export default function OrderTrackingPage() {
 
   if (!order) return null
 
-  const canCancel = ['PLACED', 'ACCEPTED'].includes(order.status)
   const isCancelled = TERMINAL_STATUSES.includes(order.status)
   const isCompleted = order.status === 'COMPLETED'
   const mapSrc = getMapEmbedUrl(order)
+  const vendorGroups = buildVendorGroups(order.orderItems)
+  const isMultiVendor = vendorGroups.length > 1
+  const anyVendorAccepted = order.vendorOrderStatuses?.some(vs =>
+    ['ACCEPTED', 'PREPARING', 'READY', 'COMPLETED'].includes(vs.status)
+  ) ?? false
+  const canCancel = isMultiVendor
+    ? !anyVendorAccepted
+    : order.status === 'PLACED'
 
   // Relabel "Ready" step based on fulfillment type
   const steps = STEPS.map((s, i) =>
@@ -687,18 +1011,29 @@ export default function OrderTrackingPage() {
                   Track Order
                 </h1>
                 <p className="text-[#A1A1A1] text-sm">
-                  #{order.id.slice(-8).toUpperCase()} · {order.vendor.name} · {formatDate(order.placedAt)}
+                  #{order.id.slice(-8).toUpperCase()} ·{' '}
+                  {isMultiVendor
+                    ? `${vendorGroups.length} vendors`
+                    : order.vendor.name}{' '}
+                  · {formatDate(order.placedAt)}
                 </p>
               </div>
-              <StatusBadge status={order.status} />
+              {!isMultiVendor && <StatusBadge status={order.status} />}
             </div>
           </div>
         </div>
 
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6">
-          {/* Stepper */}
+          {/* Stepper / multi-vendor summary header */}
           <div className="mb-4">
-            <OrderStepper status={order.status} steps={steps} />
+            {isMultiVendor ? (
+              <MultiVendorSummaryHeader
+                vendorGroups={vendorGroups}
+                vendorStatuses={order.vendorOrderStatuses ?? []}
+              />
+            ) : (
+              <OrderStepper status={order.status} steps={steps} />
+            )}
           </div>
 
           {/* Status banner */}
@@ -760,13 +1095,10 @@ export default function OrderTrackingPage() {
                       Cancel Order
                     </button>
                   ) : (
-                    <p className="flex-1 text-white/40 text-xs text-center self-center leading-snug px-2">
-                      This order can no longer be cancelled.{' '}
-                      <button onClick={() => setShowSupportModal(true)} className="underline hover:text-white/60 transition-colors cursor-pointer bg-transparent border-0 p-0">
-                        Contact support
-                      </button>{' '}
-                      if you need help.
-                    </p>
+                    <div className="flex items-center justify-center gap-2 flex-1 py-3 rounded-xl border border-white/10 text-white/30 text-sm cursor-not-allowed">
+                      <LockClosedIcon className="w-4 h-4" />
+                      Cannot cancel — vendor is preparing
+                    </div>
                   )}
                 </div>
               )}

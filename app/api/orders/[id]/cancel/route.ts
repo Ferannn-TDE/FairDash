@@ -46,18 +46,23 @@ export async function PATCH(
       ? Math.max(0, order.total - ORDER_CANCELLATION_FEE_USD)
       : order.total
 
-    // Update order status
-    await db.order.update({
-      where: { id: order.id },
-      data: {
-        status: OrderStatus.CANCELLED,
-        cancelledAt: new Date(),
-        cancelledBy: 'customer',
-        cancellationReason: 'Customer requested cancellation',
-        // Persist the retained fee so reports can reconcile
-        cancellationFee: isFeeApplicable ? ORDER_CANCELLATION_FEE_USD : null,
-      },
-    })
+    // Update master order status + all vendor portions atomically
+    await db.$transaction([
+      db.order.update({
+        where: { id: order.id },
+        data: {
+          status: OrderStatus.CANCELLED,
+          cancelledAt: new Date(),
+          cancelledBy: 'customer',
+          cancellationReason: 'Customer requested cancellation',
+          cancellationFee: isFeeApplicable ? ORDER_CANCELLATION_FEE_USD : null,
+        },
+      }),
+      db.vendorOrderStatus.updateMany({
+        where: { orderId: order.id },
+        data: { status: 'DECLINED' },
+      }),
+    ])
 
     // Issue Stripe refund (best-effort — don't fail the cancellation if it errors)
     let refundIssued = false
