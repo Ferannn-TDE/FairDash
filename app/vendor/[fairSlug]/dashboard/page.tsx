@@ -22,7 +22,7 @@ export interface OrderItem {
 export type OrderStatus =
   | 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY'
   | 'RUNNER_COLLECTED' | 'COMPLETED' | 'DELIVERED'
-  | 'CANCELLED' | 'UNCOLLECTED' | 'UNDELIVERABLE'
+  | 'CANCELLED' | 'DECLINED' | 'UNCOLLECTED' | 'UNDELIVERABLE'
 
 export type FulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
 
@@ -55,6 +55,7 @@ const BUCKET: Record<string, 'incoming' | 'active' | 'ready' | 'completed'> = {
   RUNNER_COLLECTED: 'ready',
   COMPLETED:        'completed',
   DELIVERED:        'completed',
+  DECLINED:         'completed',
   CANCELLED:        'completed',
   UNCOLLECTED:      'completed',
   UNDELIVERABLE:    'completed',
@@ -73,7 +74,7 @@ async function fetchFullOrder(orderId: string): Promise<VendorOrder | null> {
 }
 
 async function transitionOrder(orderId: string, status: string): Promise<void> {
-  const res = await fetch(`/api/orders/${orderId}/status`, {
+  const res = await fetch(`/api/orders/${orderId}/vendor-status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
@@ -379,7 +380,7 @@ export default function VendorDashboardPage() {
     if (processingIds.has(order.id)) return
     setProcessingIds(prev => new Set(prev).add(order.id))
     try {
-      const res = await fetch(`/api/orders/${order.id}/status`, {
+      const res = await fetch(`/api/orders/${order.id}/vendor-status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'ACCEPTED' }),
@@ -397,8 +398,8 @@ export default function VendorDashboardPage() {
 
   const handleDecline = useCallback((order: VendorOrder) => {
     setIncoming(prev => prev.filter(o => o.id !== order.id))
-    setCompleted(prev => [{ ...order, status: 'CANCELLED' }, ...prev])
-    transitionOrder(order.id, 'CANCELLED').catch(() => {
+    setCompleted(prev => [{ ...order, status: 'DECLINED' }, ...prev])
+    transitionOrder(order.id, 'DECLINED').catch(() => {
       setCompleted(prev => prev.filter(o => o.id !== order.id))
       setIncoming(prev => [order, ...prev])
     })
@@ -408,7 +409,7 @@ export default function VendorDashboardPage() {
     // Wait for API before updating status — prevents race where user clicks Mark Ready
     // before ACCEPTED→PREPARING commits, causing a 409 on the READY transition
     try {
-      const res = await fetch(`/api/orders/${order.id}/status`, {
+      const res = await fetch(`/api/orders/${order.id}/vendor-status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'PREPARING' }),
@@ -423,7 +424,7 @@ export default function VendorDashboardPage() {
   const handleMarkReady = useCallback(async (order: VendorOrder) => {
     // Wait for API before moving — avoids 409 flash when order isn't PREPARING yet
     try {
-      const res = await fetch(`/api/orders/${order.id}/status`, {
+      const res = await fetch(`/api/orders/${order.id}/vendor-status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'READY' }),

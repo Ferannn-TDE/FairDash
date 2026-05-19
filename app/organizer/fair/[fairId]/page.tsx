@@ -1,9 +1,66 @@
-import Link from 'next/link'
-import { mockOrganizerFairs } from '@/lib/mock/organizer'
+'use client'
 
-export default async function FairOverviewPage({ params }: { params: Promise<{ fairId: string }> }) {
-  const { fairId } = await params
-  const fair = mockOrganizerFairs.find(f => f.id === fairId) ?? mockOrganizerFairs[0]
+import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
+import Link from 'next/link'
+
+interface Fair {
+  id: string
+  name: string
+  slug: string
+  status: string
+  startDate: string
+  endDate: string
+  vendorCount: number
+  orderCount: number
+  totalRevenue: number
+  pendingOrders: number
+}
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+export default function FairOverviewPage() {
+  const params = useParams<{ fairId: string }>()
+  const fairId = params.fairId
+  const [fair, setFair] = useState<Fair | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/organizer/fairs')
+      .then(r => r.json())
+      .then(d => {
+        const list: Fair[] = d.data?.fairs ?? []
+        const found = list.find(f => f.id === fairId) ?? null
+        setFair(found)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [fairId])
+
+  if (loading) {
+    return (
+      <div className="animate-pulse">
+        <div className="h-8 w-64 bg-white/5 rounded mb-2" />
+        <div className="h-4 w-40 bg-white/5 rounded mb-8" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-[#111111] border border-white/5 rounded-xl p-4 h-20" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (!fair) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-[#666] font-inter">Fair not found or you don&apos;t have access to it.</p>
+        <Link href="/organizer/fairs" className="mt-4 inline-block text-[#FF0077] text-sm hover:underline">← Back to Fairs</Link>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -11,20 +68,20 @@ export default async function FairOverviewPage({ params }: { params: Promise<{ f
         <div className="flex items-center gap-3 mb-1">
           <h1 className="font-bebas text-3xl text-white tracking-wide">{fair.name}</h1>
           <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase
-            ${fair.status === 'active' ? 'bg-green-500/15 text-green-400' : 'bg-sky-500/15 text-sky-400'}`}>
+            ${fair.status === 'ACTIVE' ? 'bg-green-500/15 text-green-400' : 'bg-sky-500/15 text-sky-400'}`}>
             {fair.status}
           </span>
         </div>
-        <p className="text-sm text-[#666] font-inter">{fair.dates.start} – {fair.dates.end}</p>
+        <p className="text-sm text-[#666] font-inter">{formatDate(fair.startDate)} – {formatDate(fair.endDate)}</p>
       </div>
 
       {/* Quick stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'Vendors', value: `${fair.vendorCount}/${fair.maxVendors}` },
-          { label: 'Orders Today', value: String(fair.ordersToday) },
-          { label: 'Revenue Today', value: `$${fair.revenueToday.toLocaleString()}` },
-          { label: 'Status', value: fair.status },
+          { label: 'Vendors', value: String(fair.vendorCount) },
+          { label: 'Total Orders', value: String(fair.orderCount) },
+          { label: 'Revenue', value: `$${fair.totalRevenue.toLocaleString()}` },
+          { label: 'Pending Orders', value: String(fair.pendingOrders) },
         ].map(({ label, value }) => (
           <div key={label} className="bg-[#111111] border border-white/5 rounded-xl p-4">
             <p className="text-xs text-[#666] font-inter uppercase tracking-wider">{label}</p>

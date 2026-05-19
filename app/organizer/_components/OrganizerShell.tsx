@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -16,7 +16,12 @@ import {
   XMarkIcon,
   BellIcon,
 } from '@heroicons/react/24/outline'
-import { mockOrganizerFairs } from '@/lib/mock/organizer'
+
+interface Fair {
+  id: string
+  name: string
+  status: string
+}
 
 interface Props {
   children: React.ReactNode
@@ -58,8 +63,16 @@ function SidebarLink({
   )
 }
 
-function SidebarContent({ currentFairId, onClose }: { currentFairId: string | null; onClose?: () => void }) {
-  const currentFair = currentFairId ? mockOrganizerFairs.find(f => f.id === currentFairId) : null
+function SidebarContent({
+  currentFairId,
+  fairs,
+  onClose,
+}: {
+  currentFairId: string | null
+  fairs: Fair[]
+  onClose?: () => void
+}) {
+  const currentFair = currentFairId ? fairs.find(f => f.id === currentFairId) : null
 
   return (
     <>
@@ -106,7 +119,15 @@ function SidebarContent({ currentFairId, onClose }: { currentFairId: string | nu
 
 export default function OrganizerShell({ children, userName, userInitials, userEmail }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [fairs, setFairs] = useState<Fair[]>([])
   const pathname = usePathname()
+
+  useEffect(() => {
+    fetch('/api/organizer/fairs')
+      .then(r => r.json())
+      .then(d => { if (d.data?.fairs) setFairs(d.data.fairs) })
+      .catch(() => {})
+  }, [])
 
   const fairIdMatch = pathname.match(/\/organizer\/fair\/([^/]+)/)
   const currentFairId = fairIdMatch?.[1] ?? null
@@ -128,7 +149,7 @@ export default function OrganizerShell({ children, userName, userInitials, userE
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
       >
-        <SidebarContent currentFairId={currentFairId} onClose={() => setSidebarOpen(false)} />
+        <SidebarContent currentFairId={currentFairId} fairs={fairs} onClose={() => setSidebarOpen(false)} />
 
         {/* Profile */}
         <div className="p-4 border-t border-white/5 shrink-0">

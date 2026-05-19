@@ -13,6 +13,7 @@ import {
   useContext,
   useReducer,
   useEffect,
+  useRef,
   useCallback,
   useMemo,
   type ReactNode,
@@ -48,7 +49,6 @@ export interface AddableMenuItem {
 
 interface FairCartState {
   fairId: string
-  vendorId: string | null   // all items must be from the same vendor
   items: CartItem[]
 }
 
@@ -61,7 +61,6 @@ type CartAction =
 
 interface FairCartContextValue {
   items: CartItem[]
-  vendorId: string | null
   itemCount: number
   subtotal: number
   addItem: (item: AddableMenuItem, vendor: AddableVendor) => void
@@ -78,36 +77,29 @@ function reducer(state: FairCartState, action: CartAction): FairCartState {
       return action.state
 
     case 'ADD_ITEM': {
-      const { item } = action
-      if (state.vendorId && state.vendorId !== item.vendorId) {
-        return { ...state, vendorId: item.vendorId, items: [{ ...item, quantity: 1 }] }
-      }
-      const existing = state.items.find((i) => i.menuItemId === item.menuItemId)
+      const existing = state.items.find(i => i.menuItemId === action.item.menuItemId)
       if (existing) {
         return {
           ...state,
-          vendorId: item.vendorId,
-          items: state.items.map((i) =>
-            i.menuItemId === item.menuItemId ? { ...i, quantity: i.quantity + 1 } : i
+          items: state.items.map(i =>
+            i.menuItemId === action.item.menuItemId
+              ? { ...i, quantity: i.quantity + action.item.quantity }
+              : i
           ),
         }
       }
-      return {
-        ...state,
-        vendorId: item.vendorId,
-        items: [...state.items, { ...item, quantity: 1 }],
-      }
+      return { ...state, items: [...state.items, action.item] }
     }
 
     case 'REMOVE_ITEM': {
       const items = state.items.filter((i) => i.menuItemId !== action.menuItemId)
-      return { ...state, items, vendorId: items.length === 0 ? null : state.vendorId }
+      return { ...state, items }
     }
 
     case 'UPDATE_QTY': {
       if (action.quantity <= 0) {
         const items = state.items.filter((i) => i.menuItemId !== action.menuItemId)
-        return { ...state, items, vendorId: items.length === 0 ? null : state.vendorId }
+        return { ...state, items }
       }
       return {
         ...state,
@@ -118,7 +110,7 @@ function reducer(state: FairCartState, action: CartAction): FairCartState {
     }
 
     case 'CLEAR':
-      return { ...state, vendorId: null, items: [] }
+      return { ...state, items: [] }
 
     default:
       return state
@@ -141,9 +133,12 @@ export function FairCartProvider({ fairSlug, children }: FairCartProviderProps) 
 
   const [state, dispatch] = useReducer(reducer, {
     fairId: fairSlug,
-    vendorId: null,
     items: [],
   })
+
+  // Skip the very first persistence write so hydration can read the stored
+  // cart before we overwrite it with the initial empty state.
+  const skipFirstPersistRef = useRef(true)
 
   // Hydrate from localStorage on mount
   useEffect(() => {
@@ -162,6 +157,10 @@ export function FairCartProvider({ fairSlug, children }: FairCartProviderProps) 
 
   // Persist to localStorage whenever state changes
   useEffect(() => {
+    if (skipFirstPersistRef.current) {
+      skipFirstPersistRef.current = false
+      return
+    }
     localStorage.setItem(storageKey, JSON.stringify(state))
   }, [state, storageKey])
 
@@ -209,7 +208,6 @@ export function FairCartProvider({ fairSlug, children }: FairCartProviderProps) 
   const value = useMemo<FairCartContextValue>(
     () => ({
       items: state.items,
-      vendorId: state.vendorId,
       itemCount,
       subtotal,
       addItem,
@@ -217,7 +215,7 @@ export function FairCartProvider({ fairSlug, children }: FairCartProviderProps) 
       updateQty,
       clearCart,
     }),
-    [state.items, state.vendorId, itemCount, subtotal, addItem, removeItem, updateQty, clearCart],
+    [state.items, itemCount, subtotal, addItem, removeItem, updateQty, clearCart],
   )
 
   return <FairCartContext.Provider value={value}>{children}</FairCartContext.Provider>

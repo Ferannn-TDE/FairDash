@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import OrganizerShell from './_components/OrganizerShell'
-import { mockOrganizerProfile } from '@/lib/mock/organizer'
 
 export const metadata: Metadata = {
   title: 'Organizer Portal — FairSynq',
@@ -8,9 +7,9 @@ export const metadata: Metadata = {
 
 export default async function OrganizerLayout({ children }: { children: React.ReactNode }) {
   // Auth check using Clerk server-side — graceful fallback for dev without Clerk configured
-  let userName = mockOrganizerProfile.contactName
-  let userInitials = mockOrganizerProfile.initials
-  let userEmail = mockOrganizerProfile.email
+  let userName = 'Organizer'
+  let userInitials = 'O'
+  let userEmail = ''
 
   try {
     const { currentUser } = await import('@clerk/nextjs/server')

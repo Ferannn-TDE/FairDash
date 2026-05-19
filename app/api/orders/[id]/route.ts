@@ -21,6 +21,19 @@ export async function GET(
         orderItems: {
           include: {
             menuItem: { select: { name: true, imageUrl: true, category: true, prepTime: true } },
+            vendor: { select: { id: true, name: true, boothNumber: true } },
+          },
+        },
+        vendorOrderStatuses: {
+          select: {
+            vendorId: true,
+            status: true,
+            acceptedAt: true,
+            preparingAt: true,
+            readyAt: true,
+            completedAt: true,
+            declinedAt: true,
+            vendor: { select: { name: true } },
           },
         },
         cancellation: true,
