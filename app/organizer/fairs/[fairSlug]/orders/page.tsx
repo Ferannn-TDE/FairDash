@@ -60,8 +60,8 @@ function timeAgo(dateStr: string) {
 }
 
 export default function FairOrdersPage() {
-  const params = useParams<{ fairId: string }>()
-  const fairId = params.fairId
+  const params = useParams<{ fairSlug: string }>()
+  const fairSlug = params.fairSlug
   const [filter, setFilter] = useState('All')
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -69,14 +69,14 @@ export default function FairOrdersPage() {
   const loadOrders = useCallback(() => {
     setLoading(true)
     const url = filter === 'All'
-      ? `/api/organizer/fair/${fairId}/orders`
-      : `/api/organizer/fair/${fairId}/orders?status=${filter}`
+      ? `/api/organizer/fairs/${fairSlug}/orders`
+      : `/api/organizer/fairs/${fairSlug}/orders?status=${filter}`
     fetch(url)
       .then(r => r.json())
       .then(d => { if (d.data?.orders) setOrders(d.data.orders) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [fairId, filter])
+  }, [fairSlug, filter])
 
   useEffect(() => { loadOrders() }, [loadOrders])
 

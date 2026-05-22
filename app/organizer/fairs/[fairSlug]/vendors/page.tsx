@@ -36,20 +36,20 @@ const STATUS_STYLES: Record<string, string> = {
 }
 
 export default function VendorManagementPage() {
-  const params = useParams<{ fairId: string }>()
-  const fairId = params.fairId
+  const params = useParams<{ fairSlug: string }>()
+  const fairSlug = params.fairSlug
   const [activeTab, setActiveTab] = useState<TabKey>('all')
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    fetch(`/api/organizer/fair/${fairId}/vendors`)
+    fetch(`/api/organizer/fairs/${fairSlug}/vendors`)
       .then(r => r.json())
       .then(d => { if (d.data?.vendors) setVendors(d.data.vendors) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [fairId])
+  }, [fairSlug])
 
   const filtered = activeTab === 'all' ? vendors : vendors.filter(v => v.status === activeTab)
   const counts: Record<TabKey, number> = {

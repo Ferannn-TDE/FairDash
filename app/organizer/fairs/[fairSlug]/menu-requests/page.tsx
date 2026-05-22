@@ -98,9 +98,9 @@ function RequestCard({ req, onReview }: { req: MenuRequest; onReview: (id: strin
   )
 }
 
-export default function MenuRequestsPage({ params }: { params: Promise<{ fairId: string }> }) {
-  const { fairId } = use(params)
-  const fair = mockOrganizerFairs.find(f => f.id === fairId) ?? mockOrganizerFairs[0]
+export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlug: string }> }) {
+  const { fairSlug } = use(params)
+  const fair = mockOrganizerFairs.find(f => f.id === fairSlug) ?? mockOrganizerFairs[0]
   const [requests, setRequests] = useState<MenuRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'PENDING' | 'ALL'>('PENDING')

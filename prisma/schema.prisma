@@ -44,6 +44,16 @@ model Event {
   // Platform controls
   isPaused Boolean @default(false) // one-button platform pause — blocks new orders
 
+  // Operational timing
+  orderAcceptanceWindowSec Int @default(120) // how long vendor has to accept before auto-cancel
+  vendorOfflineHideSec     Int @default(300) // hide vendor from menu after this many seconds offline
+  maxVendorsPerOrder       Int @default(5)   // cart cap
+
+  // Customer-facing content
+  welcomeMessage      String? // shown on fair home page, max 120 chars
+  showVendorWaitTimes Boolean @default(true)
+  allowGuestBrowse    Boolean @default(true)  // browse menu without logging in
+
   // Operator service charge (goes 100% to operator, not FairSynq)
   serviceChargeEnabled    Boolean @default(false)
   serviceChargeAmount     Float?  // e.g., 1.50 per order
@@ -124,6 +134,12 @@ model User {
   phone   String?
 
   fcmToken String? // Firebase Cloud Messaging push token
+
+  // Notification preferences (synced across devices)
+  notifNewOrder      Boolean @default(true)
+  notifVendorOffline Boolean @default(true)
+  notifMenuRequests  Boolean @default(true)
+  notifDailySummary  Boolean @default(false)
 
   role         String   @default("customer") // customer | vendor | organizer | runner
   avatarUrl    String?

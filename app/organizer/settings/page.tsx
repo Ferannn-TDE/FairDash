@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 import {
   UserCircleIcon,
   BellIcon,
@@ -20,19 +21,10 @@ interface ProfileData {
 }
 
 interface NotifPrefs {
-  newOrder: boolean
-  vendorOffline: boolean
-  menuApproval: boolean
-  dailySummary: boolean
-}
-
-const NOTIF_KEY = 'organizer-notification-prefs'
-
-const DEFAULT_NOTIF: NotifPrefs = {
-  newOrder: true,
-  vendorOffline: true,
-  menuApproval: true,
-  dailySummary: false,
+  notifNewOrder: boolean
+  notifVendorOffline: boolean
+  notifMenuRequests: boolean
+  notifDailySummary: boolean
 }
 
 // ── Toggle component ─────────────────────────────────────────────────────────
@@ -114,7 +106,7 @@ export default function OrganizerSettingsPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   // Notification prefs
-  const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>(DEFAULT_NOTIF)
+  const [notifPrefs, setNotifPrefs] = useState<NotifPrefs | null>(null)
 
   // Platform fee
   const [commissionRate, setCommissionRate] = useState<number | null>(null)
@@ -164,15 +156,22 @@ export default function OrganizerSettingsPage() {
     }
   }, [])
 
-  // ── Load notification prefs from localStorage ──────────────────────────────
+  // ── Load notification prefs from DB ───────────────────────────────────────
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(NOTIF_KEY)
-      if (raw) setNotifPrefs({ ...DEFAULT_NOTIF, ...JSON.parse(raw) })
-    } catch {
-      // use defaults
-    }
+    fetch('/api/user/preferences')
+      .then(r => r.json())
+      .then(json => {
+        if (json.data) {
+          setNotifPrefs({
+            notifNewOrder:      json.data.notifNewOrder,
+            notifVendorOffline: json.data.notifVendorOffline,
+            notifMenuRequests:  json.data.notifMenuRequests,
+            notifDailySummary:  json.data.notifDailySummary,
+          })
+        }
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -182,14 +181,13 @@ export default function OrganizerSettingsPage() {
 
   // ── Save notification prefs ────────────────────────────────────────────────
 
-  const updateNotif = (key: keyof NotifPrefs, value: boolean) => {
-    const updated = { ...notifPrefs, [key]: value }
-    setNotifPrefs(updated)
-    try {
-      localStorage.setItem(NOTIF_KEY, JSON.stringify(updated))
-    } catch {
-      // ignore storage errors
-    }
+  const updateNotif = async (key: keyof NotifPrefs, value: boolean) => {
+    setNotifPrefs(prev => prev ? { ...prev, [key]: value } : prev)
+    await fetch('/api/user/preferences', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: value }),
+    }).catch(() => {})
   }
 
   // ── Save profile ────────────────────────────────────────────────────────────
@@ -248,6 +246,7 @@ export default function OrganizerSettingsPage() {
 
   return (
     <div className="space-y-6">
+      <OrganizerBreadcrumb crumbs={[{ label: 'Settings' }]} />
       {/* Page heading */}
       <div>
         <h1 className="font-bebas text-3xl tracking-wide text-white">
@@ -360,48 +359,56 @@ export default function OrganizerSettingsPage() {
 
       <Section icon={BellIcon} title="Notification Preferences">
         <p className="text-white/30 text-xs mb-4 font-inter">
-          Saved locally in your browser. These preferences apply to this device only.
+          Synced to your account — preferences apply on all devices.
         </p>
-        <div className="space-y-4">
-          {(
-            [
-              {
-                key: 'newOrder' as const,
-                label: 'New order placed',
-                description: 'Notify when any vendor receives an order',
-              },
-              {
-                key: 'vendorOffline' as const,
-                label: 'Vendor goes offline',
-                description: 'Alert when a vendor marks themselves unavailable',
-              },
-              {
-                key: 'menuApproval' as const,
-                label: 'Menu approval requests',
-                description: 'Notify when vendors submit menu change requests',
-              },
-              {
-                key: 'dailySummary' as const,
-                label: 'Daily revenue summary',
-                description: 'End-of-day email with revenue and order stats',
-              },
-            ] as const
-          ).map(({ key, label, description }) => (
-            <div
-              key={key}
-              className="flex items-center justify-between py-3 border-b border-white/[0.05] last:border-0"
-            >
-              <div>
-                <p className="text-white text-sm font-medium">{label}</p>
-                <p className="text-white/40 text-xs mt-0.5">{description}</p>
+        {notifPrefs === null ? (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-10 bg-white/[0.03] rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {(
+              [
+                {
+                  key: 'notifNewOrder' as const,
+                  label: 'New order placed',
+                  description: 'Notify when any vendor receives an order',
+                },
+                {
+                  key: 'notifVendorOffline' as const,
+                  label: 'Vendor goes offline',
+                  description: 'Alert when a vendor marks themselves unavailable',
+                },
+                {
+                  key: 'notifMenuRequests' as const,
+                  label: 'Menu approval requests',
+                  description: 'Notify when vendors submit menu change requests',
+                },
+                {
+                  key: 'notifDailySummary' as const,
+                  label: 'Daily revenue summary',
+                  description: 'End-of-day email with revenue and order stats',
+                },
+              ] as const
+            ).map(({ key, label, description }) => (
+              <div
+                key={key}
+                className="flex items-center justify-between py-3 border-b border-white/[0.05] last:border-0"
+              >
+                <div>
+                  <p className="text-white text-sm font-medium">{label}</p>
+                  <p className="text-white/40 text-xs mt-0.5">{description}</p>
+                </div>
+                <Toggle
+                  checked={notifPrefs[key]}
+                  onChange={(v) => updateNotif(key, v)}
+                />
               </div>
-              <Toggle
-                checked={notifPrefs[key]}
-                onChange={(v) => updateNotif(key, v)}
-              />
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </Section>
 
       {/* ── Section 3: Platform Fee ──────────────────────────────────────────── */}

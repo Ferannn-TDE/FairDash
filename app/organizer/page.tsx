@@ -30,6 +30,7 @@ interface Order {
 interface Stats {
   activeFairs: number
   totalOrders: number
+  ordersToday: number
   totalRevenue: number
   totalVendors: number
 }
@@ -121,7 +122,7 @@ export default function OrganizerDashboard() {
           <>
             <StatCard label="Active Fairs" value={String(stats?.activeFairs ?? 0)} accent />
             <StatCard label="Total Vendors" value={String(stats?.totalVendors ?? 0)} />
-            <StatCard label="Total Orders" value={String(stats?.totalOrders ?? 0)} />
+            <StatCard label="Orders Today" value={String(stats?.ordersToday ?? 0)} />
             <StatCard label="Total Revenue" value={`$${(stats?.totalRevenue ?? 0).toLocaleString()}`} />
           </>
         )}
@@ -155,7 +156,7 @@ export default function OrganizerDashboard() {
             {fairs.map(fair => (
               <Link
                 key={fair.id}
-                href={`/organizer/fair/${fair.id}`}
+                href={`/organizer/fairs/${fair.slug}`}
                 className="bg-[#111111] border border-white/5 rounded-xl p-5 hover:border-white/10 transition-colors"
               >
                 <div className="flex items-center justify-between mb-3">
