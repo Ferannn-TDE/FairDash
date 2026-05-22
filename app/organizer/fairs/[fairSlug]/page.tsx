@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { OrganizerBreadcrumb } from '../../_components/Breadcrumb'
 
 interface Fair {
   id: string
@@ -22,8 +23,8 @@ function formatDate(dateStr: string) {
 }
 
 export default function FairOverviewPage() {
-  const params = useParams<{ fairId: string }>()
-  const fairId = params.fairId
+  const params = useParams<{ fairSlug: string }>()
+  const fairSlug = params.fairSlug
   const [fair, setFair] = useState<Fair | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -32,12 +33,12 @@ export default function FairOverviewPage() {
       .then(r => r.json())
       .then(d => {
         const list: Fair[] = d.data?.fairs ?? []
-        const found = list.find(f => f.id === fairId) ?? null
+        const found = list.find(f => f.slug === fairSlug) ?? null
         setFair(found)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [fairId])
+  }, [fairSlug])
 
   if (loading) {
     return (
@@ -64,6 +65,10 @@ export default function FairOverviewPage() {
 
   return (
     <div>
+      <OrganizerBreadcrumb crumbs={[
+        { label: 'My Fairs', href: '/organizer/fairs' },
+        { label: fair.name },
+      ]} />
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-1">
           <h1 className="font-bebas text-3xl text-white tracking-wide">{fair.name}</h1>
@@ -93,11 +98,11 @@ export default function FairOverviewPage() {
       {/* Quick links */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {[
-          { label: 'Manage Vendors', href: `/organizer/fair/${fair.id}/vendors` },
-          { label: 'View Orders', href: `/organizer/fair/${fair.id}/orders` },
-          { label: 'Analytics', href: `/organizer/fair/${fair.id}/analytics` },
-          { label: 'Settings', href: `/organizer/fair/${fair.id}/settings` },
-          { label: 'Disputes', href: `/organizer/fair/${fair.id}/disputes` },
+          { label: 'Manage Vendors', href: `/organizer/fairs/${fairSlug}/vendors` },
+          { label: 'View Orders', href: `/organizer/fairs/${fairSlug}/orders` },
+          { label: 'Analytics', href: `/organizer/fairs/${fairSlug}/analytics` },
+          { label: 'Settings', href: `/organizer/fairs/${fairSlug}/settings` },
+          { label: 'Disputes', href: `/organizer/fairs/${fairSlug}/disputes` },
           { label: 'View Fair Page', href: `/fair/${fair.slug}` },
         ].map(({ label, href }) => (
           <Link key={label} href={href} className="bg-[#111111] border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors text-sm font-inter text-[#888] hover:text-white">

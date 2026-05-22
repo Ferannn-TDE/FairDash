@@ -3,15 +3,11 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
-import { OrderStatus } from '@prisma/client'
-
-const PAID_STATUSES: OrderStatus[] = [
-  'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED',
-  'COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE',
-]
 
 // GET /api/organizer/stats
-// Returns aggregate stats across all fairs for the authenticated organizer
+// Aggregate stats across all fairs for the authenticated organizer.
+// Revenue = sum of OrderItem unit prices (not vendorPayout) so multi-vendor
+// orders split correctly and cancelled items are excluded.
 export async function GET(_req: NextRequest) {
   try {
     const clerkId = await requireAuth()
@@ -30,21 +26,40 @@ export async function GET(_req: NextRequest) {
     const eventIds = events.map(e => e.id)
     const activeFairs = events.filter(e => e.status === 'ACTIVE').length
 
-    const [totalOrders, totalVendors, revenueResult] = await Promise.all([
-      db.order.count({ where: { eventId: { in: eventIds }, status: { in: PAID_STATUSES } } }),
+    if (eventIds.length === 0) {
+      return success({ activeFairs: 0, totalOrders: 0, totalRevenue: 0, totalVendors: 0 })
+    }
+
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+
+    const orderWhere = {
+      eventId: { in: eventIds },
+      status: { notIn: ['PENDING_PAYMENT' as const] },
+    }
+
+    const [totalVendors, orderRows, ordersToday] = await Promise.all([
       db.vendor.count({ where: { eventId: { in: eventIds } } }),
-      db.order.aggregate({
-        where: { eventId: { in: eventIds }, status: { in: ['COMPLETED', 'DELIVERED'] } },
-        _sum: { vendorPayout: true },
+      db.order.findMany({
+        where: orderWhere,
+        select: { id: true, status: true, subtotal: true },
+      }),
+      db.order.count({
+        where: { ...orderWhere, createdAt: { gte: todayStart } },
       }),
     ])
 
-    return success({
-      activeFairs,
-      totalOrders,
-      totalRevenue: parseFloat((revenueResult._sum.vendorPayout ?? 0).toFixed(2)),
-      totalVendors,
-    })
+    // Include CANCELLED in counts (they happened, they count for history)
+    const countableOrders = orderRows
+    const totalOrders = countableOrders.length
+    const totalRevenue = parseFloat(
+      countableOrders
+        .filter(o => o.status !== 'CANCELLED')
+        .reduce((s, o) => s + o.subtotal, 0)
+        .toFixed(2)
+    )
+
+    return success({ activeFairs, totalOrders, ordersToday, totalRevenue, totalVendors })
   } catch (err) {
     return handleApiError(err)
   }

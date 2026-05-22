@@ -4,15 +4,15 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 
-// GET /api/organizer/fair/[fairId]/vendors
+// GET /api/organizer/fairs/[fairSlug]/vendors
 // Returns vendors for a specific fair (organizer must own this fair)
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ fairId: string }> }
+  { params }: { params: Promise<{ fairSlug: string }> }
 ) {
   try {
     const clerkId = await requireAuth()
-    const { fairId } = await params
+    const { fairSlug } = await params
 
     const dbUser = await db.user.findUnique({ where: { clerkId } })
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
@@ -22,12 +22,12 @@ export async function GET(
 
     // Verify this organizer owns this event
     const event = await db.event.findFirst({
-      where: { id: fairId, organizerId: orgMember.organizerId },
+      where: { urlSlug: fairSlug, organizerId: orgMember.organizerId },
     })
     if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
 
     const vendors = await db.vendor.findMany({
-      where: { eventId: fairId },
+      where: { eventId: event.id },
       orderBy: { name: 'asc' },
       include: {
         orders: {

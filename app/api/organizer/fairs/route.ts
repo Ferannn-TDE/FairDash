@@ -3,16 +3,10 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
-import { OrderStatus } from '@prisma/client'
-
-const PAID_STATUSES: OrderStatus[] = [
-  'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED',
-  'COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE',
-]
-const ACTIVE_STATUSES: OrderStatus[] = ['PLACED', 'ACCEPTED', 'PREPARING']
 
 // GET /api/organizer/fairs
-// Returns all fairs for the authenticated organizer with per-fair stats
+// Returns all events for the authenticated organizer with per-fair stats.
+// Revenue = sum of Order.subtotal for non-cancelled orders (not vendorPayout).
 export async function GET(_req: NextRequest) {
   try {
     const clerkId = await requireAuth()
@@ -26,34 +20,69 @@ export async function GET(_req: NextRequest) {
     const events = await db.event.findMany({
       where: { organizerId: orgMember.organizerId },
       orderBy: { startDate: 'desc' },
+      include: { fulfillmentConfig: true },
     })
 
-    const fairs = await Promise.all(
-      events.map(async (event) => {
-        const [vendorCount, orderCount, pendingOrders, revenueResult] = await Promise.all([
-          db.vendor.count({ where: { eventId: event.id } }),
-          db.order.count({ where: { eventId: event.id, status: { in: PAID_STATUSES } } }),
-          db.order.count({ where: { eventId: event.id, status: { in: ACTIVE_STATUSES } } }),
-          db.order.aggregate({
-            where: { eventId: event.id, status: { in: ['COMPLETED', 'DELIVERED'] } },
-            _sum: { vendorPayout: true },
-          }),
-        ])
+    const eventIds = events.map(e => e.id)
 
-        return {
-          id: event.id,
-          name: event.name,
-          slug: event.urlSlug,
-          status: event.status,
-          startDate: event.startDate,
-          endDate: event.endDate,
-          vendorCount,
-          orderCount,
-          totalRevenue: parseFloat((revenueResult._sum.vendorPayout ?? 0).toFixed(2)),
-          pendingOrders,
-        }
-      })
-    )
+    if (eventIds.length === 0) return success({ fairs: [] })
+
+    // Fetch all vendors + orders in two queries (not N×2 per event)
+    const [vendors, orders] = await Promise.all([
+      db.vendor.findMany({
+        where: { eventId: { in: eventIds } },
+        select: { id: true, eventId: true },
+      }),
+      db.order.findMany({
+        where: {
+          eventId: { in: eventIds },
+          status: { notIn: ['PENDING_PAYMENT'] },
+        },
+        select: {
+          id: true,
+          eventId: true,
+          status: true,
+          subtotal: true,
+        },
+      }),
+    ])
+
+    // Build per-fair lookup maps
+    const vendorCountByEvent: Record<string, number> = {}
+    for (const v of vendors) {
+      vendorCountByEvent[v.eventId] = (vendorCountByEvent[v.eventId] ?? 0) + 1
+    }
+
+    const orderCountByEvent: Record<string, number> = {}
+    const revenueByEvent: Record<string, number> = {}
+    const pendingByEvent: Record<string, number> = {}
+
+    const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
+
+    for (const o of orders) {
+      if (o.status === 'CANCELLED') continue
+      orderCountByEvent[o.eventId] = (orderCountByEvent[o.eventId] ?? 0) + 1
+      revenueByEvent[o.eventId] = (revenueByEvent[o.eventId] ?? 0) + o.subtotal
+      if (ACTIVE_STATUSES.has(o.status)) {
+        pendingByEvent[o.eventId] = (pendingByEvent[o.eventId] ?? 0) + 1
+      }
+    }
+
+    const fairs = events.map(event => ({
+      id: event.id,
+      name: event.name,
+      slug: event.urlSlug,
+      status: event.status,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      vendorCount:   vendorCountByEvent[event.id] ?? 0,
+      orderCount:    orderCountByEvent[event.id]  ?? 0,
+      totalRevenue:  parseFloat((revenueByEvent[event.id] ?? 0).toFixed(2)),
+      pendingOrders: pendingByEvent[event.id]     ?? 0,
+      enableBoothPickup:  event.fulfillmentConfig?.boothPickupEnabled  ?? true,
+      enableCurbside:     event.fulfillmentConfig?.curbsideEnabled     ?? false,
+      enableHomeDelivery: event.fulfillmentConfig?.homeDeliveryEnabled ?? false,
+    }))
 
     return success({ fairs })
   } catch (err) {

@@ -58,6 +58,20 @@ const ALL_FULFILLMENT_OPTIONS = [
   { value: 'HOME_DELIVERY', label: 'Home Delivery',  sub: 'Deliver to your address',  icon: HomeIcon },
 ]
 
+// ─── Phone helpers ────────────────────────────────────────────────────────────
+
+const validatePhone = (phone: string): boolean => {
+  const cleaned = phone.replace(/[\s\-\(\)\.]/g, '')
+  return /^(\+1|1)?[2-9]\d{9}$/.test(cleaned)
+}
+
+const formatPhone = (raw: string): string => {
+  const digits = raw.replace(/\D/g, '').slice(0, 11)
+  if (digits.length <= 3) return digits
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface OrderSummary {
@@ -292,8 +306,12 @@ export default function CheckoutPage() {
   }
 
   const validate = () => {
-    if (!form.name.trim() || !form.phone.trim()) {
-      toast.error('Name and phone number are required')
+    if (!form.name.trim()) {
+      toast.error('Full name is required')
+      return false
+    }
+    if (!validatePhone(form.phone)) {
+      setFieldErrors(prev => ({ ...prev, phone: 'Enter a valid 10-digit US phone number' }))
       return false
     }
     if (fairLoading) {
@@ -475,7 +493,24 @@ export default function CheckoutPage() {
                     </div>
                     <div>
                       <label className={labelClass}>Phone Number *</label>
-                      <input type="tel" name="phone" value={form.phone} onChange={handleChange} className={inputClass} placeholder="(555) 123-4567" />
+                      <input
+                        type="tel"
+                        name="phone"
+                        value={form.phone}
+                        inputMode="tel"
+                        placeholder="(618) 555-1234"
+                        onChange={e => {
+                          setForm(prev => ({ ...prev, phone: formatPhone(e.target.value) }))
+                          setFieldErrors(prev => ({ ...prev, phone: undefined }))
+                        }}
+                        onBlur={() => {
+                          if (form.phone && !validatePhone(form.phone)) {
+                            setFieldErrors(prev => ({ ...prev, phone: 'Enter a valid 10-digit US phone number' }))
+                          }
+                        }}
+                        className={`${inputClass} ${fieldErrors.phone ? 'border-red-500 focus:border-red-500' : ''}`}
+                      />
+                      {fieldErrors.phone && <p className="mt-1 text-xs text-red-400">{fieldErrors.phone}</p>}
                     </div>
                   </div>
                 </div>

@@ -72,8 +72,8 @@ function StatCard({
 }
 
 export default function FairAnalyticsPage() {
-  const params = useParams<{ fairId: string }>()
-  const fairId = params.fairId
+  const params = useParams<{ fairSlug: string }>()
+  const fairSlug = params.fairSlug
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [vendorGrid, setVendorGrid] = useState<VendorGridItem[]>([])
@@ -83,7 +83,7 @@ export default function FairAnalyticsPage() {
   const [chartLoading, setChartLoading] = useState(false)
 
   useEffect(() => {
-    fetch(`/api/admin/events/${fairId}/dashboard`)
+    fetch(`/api/admin/events/${fairSlug}/dashboard`)
       .then(r => r.json())
       .then(json => {
         if (!json.success) return
@@ -92,16 +92,16 @@ export default function FairAnalyticsPage() {
       })
       .catch(() => {})
       .finally(() => setStatsLoading(false))
-  }, [fairId])
+  }, [fairSlug])
 
   useEffect(() => {
     setChartLoading(true)
-    fetch(`/api/admin/events/${fairId}/revenue?period=${period}`)
+    fetch(`/api/admin/events/${fairSlug}/revenue?period=${period}`)
       .then(r => r.json())
       .then(json => { if (json.success) setChartData(json.data.data) })
       .catch(() => {})
       .finally(() => setChartLoading(false))
-  }, [fairId, period])
+  }, [fairSlug, period])
 
   const periodRevenue = chartData.reduce((s, d) => s + d.revenue, 0)
   const activeVendors = vendorGrid.filter(v => v.status === 'ACTIVE' && !v.isOffline)

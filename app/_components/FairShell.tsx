@@ -19,8 +19,8 @@ export default function FairShell({ fairSlug, children, initialFair, initialVend
     <FairProvider fairSlug={fairSlug} initialFair={initialFair} initialVendors={initialVendors}>
       <FairCartProvider fairSlug={fairSlug}>
         <FairNavbar />
-        {/* pb-14 sm:pb-0 reserves space for mobile bottom nav */}
-        <main className="pt-14 sm:pt-16 pb-14 sm:pb-0 min-h-screen bg-bg-dark">
+        {/* pb-14 reserves space for mobile bottom nav (hidden at md+) */}
+        <main className="pt-14 sm:pt-16 pb-14 md:pb-0 min-h-screen bg-bg-dark">
           {children}
         </main>
         <FairBottomNav />
