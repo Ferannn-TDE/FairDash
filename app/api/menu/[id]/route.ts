@@ -46,7 +46,7 @@ export async function PATCH(
       },
     })
 
-    revalidateTag(`vendor-menu-${item.vendorId}`)
+    revalidateTag(`vendor-menu-${item.vendorId}`, {})
     return success(item)
   } catch (err) {
     return handleApiError(err)
@@ -64,7 +64,7 @@ export async function DELETE(
     const id = (await params).id
     const item = await db.menuItem.findUnique({ where: { id }, select: { vendorId: true } })
     await db.menuItem.delete({ where: { id } })
-    if (item) revalidateTag(`vendor-menu-${item.vendorId}`)
+    if (item) revalidateTag(`vendor-menu-${item.vendorId}`, {})
     return success({ deleted: true })
   } catch (err) {
     return handleApiError(err)

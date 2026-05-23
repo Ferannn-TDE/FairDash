@@ -34,7 +34,7 @@ export async function PATCH(
       data: { isAvailable },
     })
 
-    revalidateTag(`vendor-menu-${item.vendorId}`)
+    revalidateTag(`vendor-menu-${item.vendorId}`, {})
 
     return success({ id: updated.id, isAvailable: updated.isAvailable })
   } catch (err) {

@@ -111,7 +111,7 @@ export async function PATCH(
     })
 
     // Bust the organizer fairs sidebar cache so the update is reflected immediately
-    revalidateTag(`organizer-fairs-${orgMember.organizerId}`)
+    revalidateTag(`organizer-fairs-${orgMember.organizerId}`, {})
 
     return success(updated)
   } catch (err) {

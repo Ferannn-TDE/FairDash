@@ -73,7 +73,7 @@ export async function PATCH(
         await db.menuItem.delete({ where: { id: menuRequest.menuItemId } })
       }
 
-      revalidateTag(`vendor-menu-${menuRequest.vendorId}`)
+      revalidateTag(`vendor-menu-${menuRequest.vendorId}`, {})
     }
 
     const updated = await db.menuRequest.update({
