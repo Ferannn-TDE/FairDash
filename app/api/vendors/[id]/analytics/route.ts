@@ -136,10 +136,12 @@ export async function GET(
       ? parseFloat((completed.length / terminal).toFixed(4))
       : 1
 
-    const todayCompleted = todayOrders.filter(o => o.status === 'COMPLETED' || o.status === 'DELIVERED')
+    // Use vendorStatus for today's stats — master order.status stays non-terminal
+    // until all vendors complete, so it undercounts revenue in multi-vendor orders.
+    const todayCompleted = todayOrders.filter(o =>
+      o.vendorStatus === 'COMPLETED' || o.vendorStatus === 'DELIVERED'
+    )
     const todayRevenue = parseFloat(todayCompleted.reduce((s, o) => s + o.revenue, 0).toFixed(2))
-    // "In Queue" = orders where THIS vendor hasn't responded yet (vendor status = PLACED)
-    const pendingOrders = todayOrders.filter(o => o.vendorStatus === 'PLACED').length
 
     return success({
       chartData,
@@ -149,7 +151,6 @@ export async function GET(
       completionRate,
       todayRevenue,
       todayOrders: todayOrders.length,
-      pendingOrders,
     })
   } catch (err) {
     return handleApiError(err)

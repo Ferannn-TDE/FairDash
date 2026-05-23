@@ -1,23 +1,57 @@
 'use client'
 
 import { useState } from 'react'
-import { PlusIcon, MinusIcon, ClockIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, MinusIcon, ClockIcon, BuildingStorefrontIcon, HeartIcon } from '@heroicons/react/24/outline'
+import { HeartIcon as HeartSolid } from '@heroicons/react/24/solid'
 import toast from 'react-hot-toast'
+import { useAuth } from '@clerk/clerk-react'
 import { useFairCart } from '@/app/_contexts/FairCartContext'
 import type { GroupedMenuItem, MenuVariant } from '@/lib/menu/getGroupedMenuItems'
 
 interface Props {
   group: GroupedMenuItem
   accentColor: string
+  isFavorited?: boolean
+  onFavoriteToggle?: (menuItemId: string, favorited: boolean) => void
 }
 
-export function GroupedFoodCard({ group, accentColor }: Props) {
+export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFavoriteToggle }: Props) {
   const { addItem, updateQty, items } = useFairCart()
+  const { isSignedIn } = useAuth()
 
   const availableVariants = group.variants.filter((v) => v.available)
   const [selected, setSelected] = useState<MenuVariant>(
     availableVariants[0] ?? group.variants[0]
   )
+  const [favLoading, setFavLoading] = useState(false)
+
+  const toggleFavorite = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!isSignedIn) {
+      toast('Sign in to save favorites', { icon: '🔒' })
+      return
+    }
+    setFavLoading(true)
+    const next = !isFavorited
+    try {
+      if (isFavorited) {
+        await fetch(`/api/favorites?menuItemId=${selected.id}`, { method: 'DELETE' })
+        toast.success('Removed from favorites')
+      } else {
+        await fetch('/api/favorites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ menuItemId: selected.id }),
+        })
+        toast.success('Saved to favorites')
+      }
+      onFavoriteToggle?.(selected.id, next)
+    } catch {
+      toast.error('Could not update favorites')
+    } finally {
+      setFavLoading(false)
+    }
+  }
 
   const isSingleVariant = group.variants.length === 1
   const cartItem = items.find((i) => i.menuItemId === selected.id)
@@ -69,6 +103,17 @@ export function GroupedFoodCard({ group, accentColor }: Props) {
             </span>
           </div>
         )}
+        <button
+          onClick={toggleFavorite}
+          disabled={favLoading}
+          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center hover:bg-black/70 transition-colors cursor-pointer border-0"
+          title={isFavorited ? 'Remove from favorites' : 'Save to favorites'}
+        >
+          {isFavorited
+            ? <HeartSolid className="w-4 h-4 text-neon-pink" />
+            : <HeartIcon className="w-4 h-4 text-white" />
+          }
+        </button>
       </div>
 
       {/* Body */}

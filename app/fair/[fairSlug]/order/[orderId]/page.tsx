@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useAuth } from '@clerk/clerk-react'
 import Link from 'next/link'
 import {
   CheckIcon,
@@ -828,6 +829,7 @@ function SupportModal({ isOpen, onClose, order }: {
 export default function OrderTrackingPage() {
   const params = useParams<{ fairSlug: string; orderId: string }>()
   const router = useRouter()
+  const { isLoaded, isSignedIn } = useAuth()
   const { fair } = useFair()
   const { addItem, clearCart } = useFairCart()
 
@@ -836,8 +838,15 @@ export default function OrderTrackingPage() {
   const [error, setError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      router.replace(`/sign-in?redirect_url=/fair/${params.fairSlug}/order/${params.orderId}`)
+    }
+  }, [isLoaded, isSignedIn, params.fairSlug, params.orderId, router])
+
   // Initial fetch
   useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
     setLoading(true)
     fetch(`/api/orders/${params.orderId}`)
       .then(r => r.json())
@@ -845,7 +854,7 @@ export default function OrderTrackingPage() {
         if (json?.success) {
           setOrder(json.data)
         } else {
-          setError(json?.error?.message ?? 'Order not found')
+          setError('Order not found')
         }
       })
       .catch(() => setError('Failed to load order — please refresh'))
@@ -921,7 +930,7 @@ export default function OrderTrackingPage() {
         if (refreshJson?.success) setOrder(refreshJson.data)
         toast.error('This order can no longer be cancelled — the vendor has started preparing it.')
       } else {
-        toast.error(json?.error?.message ?? 'Could not cancel — please contact support')
+        toast.error('Could not cancel — please contact support')
       }
     } catch {
       toast.error('Network error — please try again')

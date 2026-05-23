@@ -11,15 +11,16 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const vendor = await db.vendor.findUnique({
-      where: { id: (await params).id },
+    const { id } = await params
+    const vendor = await db.vendor.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
       select: { id: true, isOffline: true },
     })
 
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
     if (vendor.isOffline) return apiError('Vendor is currently offline', 503, 'VENDOR_OFFLINE')
 
-    const grouped = await getGroupedMenuItemsByVendor((await params).id)
+    const grouped = await getGroupedMenuItemsByVendor(vendor.id)
     return success(grouped)
   } catch (err) {
     return handleApiError(err)

@@ -1,4 +1,5 @@
 import { unstable_cache } from 'next/cache'
+import { EventStatus, VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 
@@ -31,6 +32,9 @@ export const getFairBySlugCached = unstable_cache(
         endDate: true,
         serviceChargeEnabled: true,
         serviceChargeAmount: true,
+        featuredVendorIds: true,
+        featuredLabel: true,
+        featuredEnabled: true,
         fulfillmentConfig: {
           select: {
             boothPickupEnabled: true,
@@ -75,6 +79,9 @@ export const getFairBySlugCached = unstable_cache(
         : null,
       serviceChargeEnabled: raw.serviceChargeEnabled ?? false,
       serviceChargeAmount: raw.serviceChargeAmount ?? null,
+      featuredVendorIds: raw.featuredVendorIds ?? [],
+      featuredLabel: raw.featuredLabel ?? null,
+      featuredEnabled: raw.featuredEnabled ?? true,
       // These fields aren't in the DB — pages guard with optional chaining
       location: { address: '', city: '', state: '' },
       operatingHours: { open: '', close: '' },
@@ -90,7 +97,7 @@ export const getVendorsBySlugCached = unstable_cache(
     const vendors = await db.vendor.findMany({
       where: {
         event: { urlSlug: fairSlug },
-        status: 'ACTIVE',
+        status: VendorStatus.ACTIVE,
       },
       select: {
         id: true,
@@ -119,4 +126,52 @@ export const getVendorsBySlugCached = unstable_cache(
   },
   ['vendors-by-fair-slug'],
   { revalidate: 120, tags: ['vendors'] },
+)
+
+// ─── Fair list (public) ───────────────────────────────────────────────────────
+
+export interface FairListItem {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  primaryColor: string
+  status: string
+  startDate: string
+  endDate: string
+  vendorCount: number
+}
+
+export const getAllFairsCached = unstable_cache(
+  async (): Promise<FairListItem[]> => {
+    const events = await db.event.findMany({
+      where: { status: { not: EventStatus.DRAFT } },
+      orderBy: { startDate: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        urlSlug: true,
+        description: true,
+        status: true,
+        primaryColor: true,
+        startDate: true,
+        endDate: true,
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE } } } },
+      },
+    })
+
+    return events.map(e => ({
+      id: e.id,
+      name: e.name,
+      slug: e.urlSlug,
+      description: e.description ?? null,
+      primaryColor: e.primaryColor ?? '#FF0077',
+      status: e.status,
+      startDate: e.startDate.toISOString(),
+      endDate: e.endDate.toISOString(),
+      vendorCount: e._count.vendors,
+    }))
+  },
+  ['all-fairs'],
+  { revalidate: 300, tags: ['fair'] },
 )

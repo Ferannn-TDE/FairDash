@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest) {
     const clerkId = await requireAuth()
 
     const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
+    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
 
     const orgMember = await db.orgMember.findFirst({
       where: { userId: dbUser.id },
@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest) {
     const clerkId = await requireAuth()
 
     const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
+    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
 
     const body = await req.json()
     const { name, phone, organizationName } = body as {

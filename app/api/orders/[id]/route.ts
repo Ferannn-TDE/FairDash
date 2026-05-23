@@ -14,8 +14,12 @@ export async function GET(
   try {
     const clerkId = await requireAuth()
 
-    const order = await db.order.findUnique({
-      where: { id: (await params).id },
+    const rawId = (await params).id
+    // Accept either the full cuid or the 8-char shortId (last 8 chars, uppercased)
+    const order = await db.order.findFirst({
+      where: rawId.length <= 8
+        ? { id: { endsWith: rawId.toLowerCase() } }
+        : { id: rawId },
       include: {
         vendor: { select: { id: true, name: true, boothNumber: true } },
         orderItems: {

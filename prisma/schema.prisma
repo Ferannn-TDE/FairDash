@@ -54,6 +54,11 @@ model Event {
   showVendorWaitTimes Boolean @default(true)
   allowGuestBrowse    Boolean @default(true)  // browse menu without logging in
 
+  // Featured vendors section
+  featuredVendorIds String[]  @default([])
+  featuredLabel     String?   // e.g. "Featured Today", "Staff Picks"
+  featuredEnabled   Boolean   @default(true)
+
   // Operator service charge (goes 100% to operator, not FairSynq)
   serviceChargeEnabled    Boolean @default(false)
   serviceChargeAmount     Float?  // e.g., 1.50 per order
@@ -135,7 +140,16 @@ model User {
 
   fcmToken String? // Firebase Cloud Messaging push token
 
-  // Notification preferences (synced across devices)
+  // Customer notification preferences
+  notifOrderUpdates      Boolean @default(true)
+  notifSmsAlerts         Boolean @default(true)
+  notifPromotionalEmails Boolean @default(false)
+  notifNewVendors        Boolean @default(false)
+
+  // Customer profile
+  defaultDeliveryAddress String?
+
+  // Vendor/organizer notification preferences (synced across devices)
   notifNewOrder      Boolean @default(true)
   notifVendorOffline Boolean @default(true)
   notifMenuRequests  Boolean @default(true)
@@ -172,6 +186,7 @@ model Vendor {
 
   // Basic info
   name        String
+  slug        String @unique
   description String?
   cuisineType String
   boothNumber String?
@@ -810,4 +825,17 @@ model FavoriteItem {
 
   @@unique([userId, menuItemId])
   @@index([userId])
+}
+
+// ============================================================================
+// WEBHOOK IDEMPOTENCY
+// Prevents duplicate processing when Stripe retries a webhook event.
+// ============================================================================
+
+model ProcessedWebhookEvent {
+  id            String   @id @default(cuid())
+  stripeEventId String   @unique
+  processedAt   DateTime @default(now())
+
+  @@index([processedAt])
 }

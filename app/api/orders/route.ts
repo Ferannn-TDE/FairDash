@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { currentUser } from '@clerk/nextjs/server'
 import Stripe from 'stripe'
 import { FulfillmentType, EventStatus, VendorStatus, OrderStatus } from '@prisma/client'
@@ -8,6 +8,7 @@ import { getRealtimeDb } from '@/lib/firebase-admin'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { orderRatelimit } from '@/lib/ratelimit'
 import { getOrderQueue, JOB_UNACCEPTED } from '@/lib/queues'
 import { VENDOR_ACCEPT_TIMEOUT_MS } from '@/lib/constants'
 
@@ -50,20 +51,40 @@ export async function GET(req: NextRequest) {
     if (!dbUser) return success({ orders: [], nextCursor: null })
 
     const { searchParams } = new URL(req.url)
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 50)
+    const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 100)
     const cursor = searchParams.get('cursor') ?? undefined
 
     const orders = await db.order.findMany({
-      where: { customerId: dbUser.id },
+      where: { customerId: dbUser.id, status: { not: 'PENDING_PAYMENT' } },
       orderBy: { placedAt: 'desc' },
       take: limit,
       ...(cursor && { skip: 1, cursor: { id: cursor } }),
       include: {
-        vendor: { select: { name: true, boothNumber: true } },
+        vendor: {
+          select: {
+            name: true,
+            boothNumber: true,
+            event: {
+              select: {
+                id: true,
+                name: true,
+                urlSlug: true,
+                primaryColor: true,
+                startDate: true,
+              },
+            },
+          },
+        },
         orderItems: {
-          include: {
-            menuItem: { select: { name: true, imageUrl: true } },
-            vendor: { select: { name: true } },
+          take: 4,
+          select: {
+            quantity: true,
+            menuItem: {
+              select: {
+                name: true,
+                vendor: { select: { name: true } },
+              },
+            },
           },
         },
       },
@@ -99,6 +120,22 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
+    const { success: allowed, limit, remaining } = await orderRatelimit.limit(ip)
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please slow down.' },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': String(limit),
+            'X-RateLimit-Remaining': String(remaining),
+            'Retry-After': '60',
+          },
+        }
+      )
+    }
+
     const clerkId = await requireAuth()
 
     // ── 1. Parse + validate body ───────────────────────────────────────────
@@ -485,6 +522,7 @@ export async function POST(req: NextRequest) {
     return success(
       {
         orderId: order.id,
+        shortId: order.id.slice(-8).toUpperCase(),
         clientSecret: paymentIntent.client_secret,
         summary: {
           subtotal,

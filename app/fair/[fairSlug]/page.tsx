@@ -178,12 +178,20 @@ export default function FairHomePage() {
   const gradientFrom = fair.branding?.gradientFrom ?? '#FF0077'
   const gradientTo   = fair.branding?.gradientTo   ?? '#7C3AED'
 
-  // Featured vendors — fall back to first 4 alphabetically when DB data has no featured flag
+  // Featured vendors — use admin-configured IDs, fall back to first 4 alphabetically
   const displayFeatured = useMemo(() => {
-    const flagged = vendors.filter(v => v.featured)
-    if (flagged.length > 0) return flagged
+    const ids = fair.featuredVendorIds
+    if (ids && ids.length > 0) {
+      const pinned = ids.map(id => vendors.find(v => v.id === id)).filter(Boolean) as typeof vendors
+      if (pinned.length > 0) return pinned
+    }
     return [...vendors].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 4)
-  }, [vendors])
+  }, [vendors, fair.featuredVendorIds])
+
+  const featuredLabel = fair.featuredLabel ?? 'Featured Today'
+  const featuredParts = featuredLabel.split(' ')
+  const featuredFirst = featuredParts[0]
+  const featuredRest  = featuredParts.slice(1).join(' ')
 
   // Delegate to status-specific views
   if (fair.status === 'upcoming') {
@@ -286,44 +294,46 @@ export default function FairHomePage() {
       <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10">
 
         {/* Featured Today */}
-        <section className="mb-10 sm:mb-14">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-none">
-                Featured <span style={{ color: accentColor }}>Today</span>
-              </h2>
-              <p className="text-xs text-text-gray font-inter mt-1">
-                Hand-picked vendors at {fair.name}
-              </p>
+        {fair.featuredEnabled !== false && displayFeatured.length > 0 && (
+          <section className="mb-10 sm:mb-14">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="font-bebas text-2xl sm:text-3xl text-white tracking-wide leading-none">
+                  {featuredFirst}{featuredRest && <> <span style={{ color: accentColor }}>{featuredRest}</span></>}
+                </h2>
+                <p className="text-xs text-text-gray font-inter mt-1">
+                  Hand-picked vendors at {fair.name}
+                </p>
+              </div>
+              <Link
+                href={`/fair/${fair.slug}/vendors`}
+                className="text-xs font-inter hover:text-white transition-colors shrink-0"
+                style={{ color: accentColor }}
+              >
+                See all {vendors.length} →
+              </Link>
             </div>
-            <Link
-              href={`/fair/${fair.slug}/vendors`}
-              className="text-xs font-inter hover:text-white transition-colors shrink-0"
-              style={{ color: accentColor }}
-            >
-              See all {vendors.length} →
-            </Link>
-          </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {displayFeatured.map(v => (
-              <FoodCard
-                key={v.id}
-                variant="vendor"
-                href={`/fair/${fair.slug}/vendor/${v.slug}`}
-                name={v.name}
-                description={v.description}
-                cuisineType={v.cuisineType}
-                boothNumber={v.boothNumber}
-                logoUrl={v.logoUrl}
-                itemCount={v._count?.menuItems ?? 0}
-                isBusy={v.isBusy}
-                accentColor={accentColor}
-                featuredTag={v.featuredReason}
-              />
-            ))}
-          </div>
-        </section>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              {displayFeatured.map(v => (
+                <FoodCard
+                  key={v.id}
+                  variant="vendor"
+                  href={`/fair/${fair.slug}/vendor/${v.slug}`}
+                  name={v.name}
+                  description={v.description}
+                  cuisineType={v.cuisineType}
+                  boothNumber={v.boothNumber}
+                  logoUrl={v.logoUrl}
+                  itemCount={v._count?.menuItems ?? 0}
+                  isBusy={v.isBusy}
+                  accentColor={accentColor}
+                  featuredTag={v.featuredReason}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* About */}
         {fair.description && (

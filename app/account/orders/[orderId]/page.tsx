@@ -52,7 +52,7 @@ export default async function OrderDetailPage({ params }: Props) {
   if (!order) notFound()
 
   const fairSlug = order.event?.urlSlug
-  const trackHref = fairSlug ? `/fair/${fairSlug}/order/${order.id}` : null
+  const trackHref = fairSlug ? `/fair/${fairSlug}/order/${order.id.slice(-8).toUpperCase()}` : null
   const isActive = !['COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED'].includes(order.status)
   const currentStep = TIMELINE.indexOf(order.status)
 

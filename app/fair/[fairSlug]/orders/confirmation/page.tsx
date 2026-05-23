@@ -69,7 +69,7 @@ export default function MultiOrderConfirmationPage() {
         {orders.map(order => (
           <Link
             key={order.id}
-            href={`/fair/${params.fairSlug}/order/${order.id}`}
+            href={`/fair/${params.fairSlug}/order/${order.id.slice(-8).toUpperCase()}`}
             className="block bg-[#1A1A1A] border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-colors"
           >
             <div className="flex items-center justify-between mb-1">

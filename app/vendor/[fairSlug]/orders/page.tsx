@@ -229,7 +229,7 @@ export default function VendorOrdersPage() {
 
   useEffect(() => {
     if (!vendorId) return
-    fetch(`/api/vendors/${vendorId}/orders`)
+    fetch(`/api/vendors/${vendorId}/orders?history=1`)
       .then(r => r.json())
       .then(json => {
         if (json.success) setOrders(json.data?.orders ?? [])
@@ -270,7 +270,7 @@ export default function VendorOrdersPage() {
             Order <span className="text-neon-pink">History</span>
           </h1>
           <p className="text-text-gray text-sm mt-0.5">
-            {loading ? 'Loading…' : `${orders.length} orders today`}
+            {loading ? 'Loading…' : `${orders.length} order${orders.length !== 1 ? 's' : ''} total`}
           </p>
         </div>
         <button

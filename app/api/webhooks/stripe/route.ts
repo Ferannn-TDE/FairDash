@@ -37,6 +37,17 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Invalid webhook signature' }, { status: 400 })
   }
 
+  // Idempotency check — Stripe retries webhooks on timeout; skip duplicates
+  const existing = await db.processedWebhookEvent.findUnique({
+    where: { stripeEventId: event.id },
+  })
+  if (existing) {
+    return Response.json({ received: true, duplicate: true })
+  }
+  await db.processedWebhookEvent.create({
+    data: { stripeEventId: event.id },
+  })
+
   try {
     if (event.type === 'payment_intent.succeeded') {
       const pi = event.data.object as Stripe.PaymentIntent

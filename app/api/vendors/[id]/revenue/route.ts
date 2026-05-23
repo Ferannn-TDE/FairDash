@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireVendorAuth } from '@/lib/auth'
+import { requireVendorAuth, requireVendorMembership } from '@/lib/auth'
 
 // GET /api/vendors/:id/revenue?period=7d|30d|90d
 // Returns daily revenue aggregated for the Recharts bar chart.
@@ -12,7 +12,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireVendorAuth()
+    const clerkId = await requireVendorAuth()
+    const vendorId = (await params).id
+    await requireVendorMembership(clerkId, vendorId)
 
     const { searchParams } = new URL(req.url)
     const rawPeriod = searchParams.get('period') ?? '7d'
@@ -28,7 +30,7 @@ export async function GET(
 
     const orders = await db.order.findMany({
       where: {
-        vendorId: (await params).id,
+        vendorId,
         status: { in: ['COMPLETED', 'DELIVERED'] },
         placedAt: { gte: periodStart },
       },
