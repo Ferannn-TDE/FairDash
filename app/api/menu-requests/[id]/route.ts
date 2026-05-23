@@ -4,7 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 
-const { revalidateTag } = require('next/cache') as { revalidateTag: (tag: string) => void }
+import { revalidateTag } from 'next/cache'
 
 // PATCH /api/menu-requests/:id — organizer approves or rejects a request
 // On APPROVED: applies the change to MenuItem table
