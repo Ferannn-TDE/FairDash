@@ -4,12 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   HomeIcon,
-  ClipboardDocumentListIcon,
   ShoppingBagIcon,
 } from '@heroicons/react/24/outline'
 import {
   HomeIcon as HomeIconSolid,
-  ClipboardDocumentListIcon as ClipboardIconSolid,
   ShoppingBagIcon as ShoppingBagIconSolid,
 } from '@heroicons/react/24/solid'
 import { UtensilsCrossed } from 'lucide-react'
@@ -24,10 +22,9 @@ export default function FairBottomNav() {
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
   const tabs = [
-    { label: 'Home',    href: base,              Icon: HomeIcon,                     IconActive: HomeIconSolid },
-    { label: 'Menu',    href: `${base}/menu`,    Icon: UtensilsCrossed,               IconActive: UtensilsCrossed },
-    { label: 'Orders',  href: `${base}/orders`,  Icon: ClipboardDocumentListIcon,     IconActive: ClipboardIconSolid },
-    { label: 'Cart',    href: `${base}/cart`,    Icon: ShoppingBagIcon,               IconActive: ShoppingBagIconSolid },
+    { label: 'Home', href: base,           Icon: HomeIcon,        IconActive: HomeIconSolid },
+    { label: 'Menu', href: `${base}/menu`, Icon: UtensilsCrossed, IconActive: UtensilsCrossed },
+    { label: 'Cart', href: `${base}/cart`, Icon: ShoppingBagIcon, IconActive: ShoppingBagIconSolid },
   ]
 
   return (

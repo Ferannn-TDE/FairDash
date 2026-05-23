@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ShoppingBagIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
+import { useAuth } from '@clerk/clerk-react'
 import { useFair } from '../../../../_contexts/FairContext'
 import { useFairCart } from '../../../../_contexts/FairCartContext'
 import type { GroupedMenuItem } from '@/lib/menu/getGroupedMenuItems'
@@ -59,11 +60,30 @@ export default function VendorMenuPage() {
   const { itemCount, subtotal } = useFairCart()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
+  const { isSignedIn } = useAuth()
   const [vendor, setVendor] = useState<VendorDetail | null>(null)
   // Pre-grouped items — set once in useEffect, never computed in render
   const [groupedItems, setGroupedItems] = useState<GroupedMenuItem[]>([])
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set())
+
+  // Single bulk favorites fetch — one request for all cards
+  useEffect(() => {
+    if (!isSignedIn) return
+    fetch('/api/favorites/ids')
+      .then((r) => r.json())
+      .then((json) => { if (json.success) setFavoritedIds(new Set(json.data)) })
+      .catch(() => {})
+  }, [isSignedIn])
+
+  const handleFavoriteToggle = useCallback((menuItemId: string, favorited: boolean) => {
+    setFavoritedIds((prev) => {
+      const next = new Set(prev)
+      favorited ? next.add(menuItemId) : next.delete(menuItemId)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (!params.vendorSlug || !params.fairSlug) return
@@ -171,6 +191,8 @@ export default function VendorMenuPage() {
                     key={group.groupKey}
                     group={group}
                     accentColor={accentColor}
+                    isFavorited={group.variants.some((v) => favoritedIds.has(v.id))}
+                    onFavoriteToggle={handleFavoriteToggle}
                   />
                 ))}
             </div>

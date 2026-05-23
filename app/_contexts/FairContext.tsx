@@ -50,6 +50,10 @@ export interface FairData {
   admissionFree: boolean
   contactEmail?: string
   website?: string
+  // Featured Today customization
+  featuredVendorIds?: string[]
+  featuredLabel?: string | null
+  featuredEnabled?: boolean
 }
 
 export interface VendorData {
@@ -200,7 +204,7 @@ function normalizeVendor(raw: any): VendorData {
   return {
     id: raw.id,
     name: raw.name,
-    slug: raw.id,
+    slug: raw.slug ?? raw.id,
     cuisineType: raw.cuisineType,
     description: raw.description ?? null,
     boothNumber: raw.boothNumber ?? null,

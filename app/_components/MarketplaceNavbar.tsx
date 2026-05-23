@@ -112,7 +112,7 @@ export default function MarketplaceNavbar() {
                     {displayName}
                   </span>
                   <ChevronDownIcon
-                    className={`w-3.5 h-3.5 text-text-gray transition-transform duration-200 hidden sm:block ${dropdownOpen ? 'rotate-180' : ''}`}
+                    className={`w-3.5 h-3.5 text-text-gray transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}
                   />
                 </button>
 

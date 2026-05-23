@@ -2,17 +2,23 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
+import { useAuth } from '@clerk/clerk-react'
 import { useFair } from '../../../_contexts/FairContext'
 import Breadcrumb from '../_components/Breadcrumb'
+
+interface OrderItem {
+  quantity: number
+  menuItem: { name: string; vendor?: { name: string } | null } | null
+}
 
 interface OrderSummary {
   id: string
   status: string
   placedAt: string
   total: number
-  vendor: { name: string }
-  orderItems: { id: string }[]
+  vendor: { name: string } | null
+  orderItems: OrderItem[]
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -47,6 +53,8 @@ function formatDate(iso: string) {
 
 export default function FairOrdersPage() {
   const params = useParams<{ fairSlug: string }>()
+  const router = useRouter()
+  const { isLoaded, isSignedIn } = useAuth()
   const { fair } = useFair()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
@@ -54,15 +62,38 @@ export default function FairOrdersPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      router.replace(`/sign-in?redirect_url=/fair/${params.fairSlug}/orders`)
+    }
+  }, [isLoaded, isSignedIn, params.fairSlug, router])
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
     setLoading(true)
     fetch('/api/orders?limit=50')
       .then(r => r.json())
       .then(json => {
-        if (json?.success) setOrders(json.data.orders ?? [])
+        if (json?.success) {
+          const all: OrderSummary[] = json.data.orders ?? []
+          setOrders(all.filter(o => o.status !== 'PENDING_PAYMENT'))
+        }
       })
       .catch(() => {/* show empty state */})
       .finally(() => setLoading(false))
   }, [])
+
+  if (!isLoaded || !isSignedIn) {
+    return (
+      <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 sm:py-10">
+        <div className="h-9 w-64 bg-white/10 rounded-lg animate-pulse mb-6" />
+        <div className="space-y-3 animate-pulse">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-5 h-24" />
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   if (loading) {
     return (
@@ -106,29 +137,43 @@ export default function FairOrdersPage() {
         </div>
       ) : (
         <div className="space-y-3 max-w-2xl">
-          {orders.map(order => (
-            <Link
-              key={order.id}
-              href={`/fair/${params.fairSlug}/order/${order.id}`}
-              className="block bg-[#1A1A1A] border border-white/5 rounded-2xl p-5 no-underline hover:border-[#FF0077]/30 hover:scale-[1.01] transition-all duration-200 group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className="text-white font-semibold text-sm">{order.vendor?.name}</p>
-                    <StatusBadge status={order.status} />
+          {orders.map(order => {
+            const shortId = order.id.slice(-8).toUpperCase()
+            const vendorNames = [...new Set(
+              order.orderItems
+                .map(i => i.menuItem?.vendor?.name)
+                .filter(Boolean) as string[]
+            )]
+            const vendorSummary = vendorNames.length === 0
+              ? (order.vendor?.name ?? 'Unknown')
+              : vendorNames.length === 1
+              ? vendorNames[0]
+              : vendorNames.length === 2
+              ? `${vendorNames[0]} & ${vendorNames[1]}`
+              : `${vendorNames[0]} +${vendorNames.length - 1} more`
+
+            return (
+              <Link
+                key={order.id}
+                href={`/fair/${params.fairSlug}/order/${shortId}`}
+                className="block bg-[#1A1A1A] border border-white/5 rounded-2xl p-5 no-underline hover:border-[#FF0077]/30 hover:scale-[1.01] transition-all duration-200 group"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-white font-bold text-sm font-mono tracking-tight">#{shortId}</p>
+                      <StatusBadge status={order.status} />
+                    </div>
+                    <p className="text-[#A1A1A1] text-xs truncate">{vendorSummary}</p>
+                    <p className="text-[#A1A1A1] text-xs mt-0.5">
+                      {order.orderItems.length} item{order.orderItems.length !== 1 ? 's' : ''} · ${order.total.toFixed(2)} · {formatDate(order.placedAt)}
+                    </p>
                   </div>
-                  <p className="text-[#A1A1A1] text-xs">
-                    Order #{order.id.slice(-8).toUpperCase()} · {formatDate(order.placedAt)}
-                  </p>
-                  <p className="text-[#A1A1A1] text-xs mt-1">
-                    {order.orderItems.length} item{order.orderItems.length !== 1 ? 's' : ''} · ${order.total.toFixed(2)}
-                  </p>
+                  <span className="text-[#A1A1A1] group-hover:text-[#FF0077] transition-colors flex-shrink-0 text-lg">→</span>
                 </div>
-                <span className="text-[#A1A1A1] group-hover:text-[#FF0077] transition-colors flex-shrink-0 text-lg">→</span>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            )
+          })}
         </div>
       )}
     </div>

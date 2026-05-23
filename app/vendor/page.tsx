@@ -1,44 +1,48 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { MapPin, Calendar, ChevronRight, Users, Clock, XCircle, CalendarX } from 'lucide-react'
 
-// ─── Mock state ───────────────────────────────────────────────────────────────
-// Swap flags to test each branch. In production, derive from API/session.
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-const mockVendorState = {
-  hasCompletedOnboarding: true,
-  applicationStatus: 'approved' as 'pending' | 'rejected' | 'approved',
+interface VendorFair {
+  vendorId: string
+  vendorName: string
+  vendorSlug: string
+  vendorStatus: string
+  boothNumber: string | null
+  role: string
+  fairId: string
+  fairName: string
+  fairSlug: string
+  fairStatus: string
+  startDate: string
+  endDate: string
+  primaryColor: string
+  vendorCount: number
 }
 
-const mockAvailableFairs = [
-  {
-    id: 'fair_001',
-    slug: 'springfield-state-fair-2026',
-    name: 'Springfield State Fair',
-    location: 'Springfield, IL',
-    dates: 'June 15–22, 2026',
-    status: 'active' as const,
-    vendorCount: 12,
-    booth: 'B-12',
-  },
-  {
-    id: 'fair_002',
-    slug: 'stl-food-festival-2026',
-    name: 'STL Street Food Festival',
-    location: 'St. Louis, MO',
-    dates: 'July 4–6, 2026',
-    status: 'upcoming' as const,
-    vendorCount: 8,
-    booth: 'C-04',
-  },
-]
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatDateRange(start: string, end: string) {
+  const s = new Date(start)
+  const e = new Date(end)
+  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
+  const year = e.getFullYear()
+  return `${s.toLocaleDateString('en-US', opts)} – ${e.toLocaleDateString('en-US', { ...opts, year: 'numeric' })}`
+}
+
+function normalizeFairStatus(raw: string): 'active' | 'upcoming' | 'other' {
+  if (raw === 'ACTIVE') return 'active'
+  if (raw === 'UPCOMING') return 'upcoming'
+  return 'other'
+}
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 
-function Redirecting() {
+function Spinner() {
   return (
     <div className="min-h-screen bg-bg-dark flex items-center justify-center">
       <div className="w-8 h-8 rounded-full border-2 border-neon-pink/30 border-t-neon-pink animate-spin" />
@@ -61,14 +65,14 @@ function ApplicationPending() {
         </p>
         <div className="bg-bg-card border border-white/[0.06] rounded-2xl p-5 mb-6 text-left space-y-3">
           {[
-            { label: 'Application submitted',    done: true  },
-            { label: 'Under review',              done: true, active: true },
-            { label: 'Decision sent via email',   done: false },
-            { label: 'Access granted',            done: false },
+            { label: 'Application submitted',  done: true              },
+            { label: 'Under review',            done: true, active: true },
+            { label: 'Decision sent via email', done: false             },
+            { label: 'Access granted',          done: false             },
           ].map((step, i) => (
             <div key={i} className="flex items-center gap-3">
               <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${step.done ? 'bg-amber-500/20 border-amber-500/40' : 'border-white/10'}`}>
-                {step.done && <div className={`w-2 h-2 rounded-full ${step.active ? 'bg-amber-400 animate-pulse' : 'bg-amber-400'}`} />}
+                {step.done && <div className={`w-2 h-2 rounded-full bg-amber-400 ${step.active ? 'animate-pulse' : ''}`} />}
               </div>
               <span className={`text-sm ${step.done ? 'text-white' : 'text-text-gray'}`}>{step.label}</span>
             </div>
@@ -92,7 +96,10 @@ function ApplicationRejected() {
           Unfortunately your application wasn't approved at this time. You may have received more details via email.
         </p>
         <div className="flex flex-col gap-3">
-          <a href="mailto:support@fairsynq.com" className="px-5 py-3 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors">
+          <a
+            href="mailto:support@fairsynq.com"
+            className="px-5 py-3 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors"
+          >
             Contact Support
           </a>
           <Link href="/" className="text-text-gray text-sm hover:text-white transition-colors">← Back to FairSynq</Link>
@@ -102,12 +109,24 @@ function ApplicationRejected() {
   )
 }
 
+function NoFairs() {
+  return (
+    <div className="text-center py-20 bg-bg-card border border-white/[0.04] rounded-2xl">
+      <CalendarX className="w-10 h-10 text-text-gray/30 mx-auto mb-4" />
+      <h2 className="font-bebas text-xl text-white uppercase mb-2">No Fairs Assigned</h2>
+      <p className="text-text-gray text-sm max-w-xs mx-auto">
+        You haven't been assigned to any fairs yet. Contact your event organizer to get added.
+      </p>
+    </div>
+  )
+}
+
 // ─── Fair selection ───────────────────────────────────────────────────────────
 
-function FairSelectionPage({ fairs }: { fairs: typeof mockAvailableFairs }) {
+function FairSelectionPage({ fairs }: { fairs: VendorFair[] }) {
   const router = useRouter()
-  const activeFairs = fairs.filter(f => f.status === 'active')
-  const upcomingFairs = fairs.filter(f => f.status === 'upcoming')
+  const activeFairs  = fairs.filter(f => normalizeFairStatus(f.fairStatus) === 'active')
+  const upcomingFairs = fairs.filter(f => normalizeFairStatus(f.fairStatus) === 'upcoming')
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
@@ -143,24 +162,31 @@ function FairSelectionPage({ fairs }: { fairs: typeof mockAvailableFairs }) {
             <div className="space-y-3">
               {activeFairs.map(fair => (
                 <button
-                  key={fair.id}
-                  onClick={() => router.push(`/vendor/${fair.slug}/dashboard`)}
+                  key={fair.fairId}
+                  onClick={() => router.push(`/vendor/${fair.fairSlug}/dashboard`)}
                   className="w-full bg-bg-card rounded-2xl border border-white/[0.06] p-5 sm:p-6 hover:border-neon-pink/20 hover:shadow-[0_0_25px_rgba(255,0,119,0.06)] active:scale-[0.98] transition-all duration-300 text-left group cursor-pointer"
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <h3 className="font-bebas text-xl text-white uppercase tracking-wide leading-none">{fair.name}</h3>
+                        <h3 className="font-bebas text-xl text-white uppercase tracking-wide leading-none">{fair.fairName}</h3>
                         <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[0.6rem] font-bold rounded-full uppercase tracking-wider shrink-0">Live</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-gray">
-                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3 shrink-0" />{fair.location}</span>
-                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3 shrink-0" />{fair.dates}</span>
-                        <span className="flex items-center gap-1"><Users className="w-3 h-3 shrink-0" />{fair.vendorCount} vendors</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 shrink-0" />
+                          {formatDateRange(fair.startDate, fair.endDate)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Users className="w-3 h-3 shrink-0" />
+                          {fair.vendorCount} vendor{fair.vendorCount !== 1 ? 's' : ''}
+                        </span>
                       </div>
-                      <p className="mt-2 text-xs text-text-gray">
-                        Your booth: <span className="text-white font-semibold">{fair.booth}</span>
-                      </p>
+                      {fair.boothNumber && (
+                        <p className="mt-2 text-xs text-text-gray">
+                          Your booth: <span className="text-white font-semibold">{fair.boothNumber}</span>
+                        </p>
+                      )}
                     </div>
                     <ChevronRight className="w-5 h-5 text-text-gray group-hover:text-neon-pink group-hover:translate-x-0.5 transition-all shrink-0" />
                   </div>
@@ -177,22 +203,26 @@ function FairSelectionPage({ fairs }: { fairs: typeof mockAvailableFairs }) {
             <div className="space-y-3">
               {upcomingFairs.map(fair => (
                 <div
-                  key={fair.id}
+                  key={fair.fairId}
                   className="bg-bg-card rounded-2xl border border-white/[0.04] p-5 sm:p-6 opacity-50"
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <h3 className="font-bebas text-xl text-white uppercase tracking-wide leading-none">{fair.name}</h3>
+                        <h3 className="font-bebas text-xl text-white uppercase tracking-wide leading-none">{fair.fairName}</h3>
                         <span className="px-2 py-0.5 bg-neon-pink/10 text-neon-pink text-[0.6rem] font-bold rounded-full uppercase tracking-wider shrink-0">Upcoming</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-gray">
-                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3 shrink-0" />{fair.location}</span>
-                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3 shrink-0" />{fair.dates}</span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 shrink-0" />
+                          {formatDateRange(fair.startDate, fair.endDate)}
+                        </span>
                       </div>
-                      <p className="mt-2 text-xs text-text-gray">
-                        Your booth: <span className="text-white font-semibold">{fair.booth}</span>
-                      </p>
+                      {fair.boothNumber && (
+                        <p className="mt-2 text-xs text-text-gray">
+                          Your booth: <span className="text-white font-semibold">{fair.boothNumber}</span>
+                        </p>
+                      )}
                     </div>
                     <span className="text-xs text-text-gray shrink-0">Not yet live</span>
                   </div>
@@ -202,16 +232,7 @@ function FairSelectionPage({ fairs }: { fairs: typeof mockAvailableFairs }) {
           </div>
         )}
 
-        {/* No fairs */}
-        {fairs.length === 0 && (
-          <div className="text-center py-20 bg-bg-card border border-white/[0.04] rounded-2xl">
-            <CalendarX className="w-10 h-10 text-text-gray/30 mx-auto mb-4" />
-            <h2 className="font-bebas text-xl text-white uppercase mb-2">No Fairs Assigned</h2>
-            <p className="text-text-gray text-sm max-w-xs mx-auto">
-              You haven't been assigned to any fairs yet. Contact your event organizer to get added.
-            </p>
-          </div>
-        )}
+        {fairs.length === 0 && <NoFairs />}
       </div>
     </div>
   )
@@ -221,18 +242,33 @@ function FairSelectionPage({ fairs }: { fairs: typeof mockAvailableFairs }) {
 
 export default function VendorRootPage() {
   const router = useRouter()
-  const { hasCompletedOnboarding, applicationStatus } = mockVendorState
+  const [loading, setLoading] = useState(true)
+  const [fairs, setFairs] = useState<VendorFair[]>([])
+  const [applicationStatus, setApplicationStatus] = useState<string>('none')
 
   useEffect(() => {
-    if (!hasCompletedOnboarding) {
-      router.replace('/vendor/onboarding')
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    fetch('/api/vendor/fairs')
+      .then(r => r.json())
+      .then(json => {
+        if (json.success) {
+          setFairs(json.data.fairs)
+          setApplicationStatus(json.data.applicationStatus)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
-  if (!hasCompletedOnboarding) return <Redirecting />
+  if (loading) return <Spinner />
   if (applicationStatus === 'pending')  return <ApplicationPending />
   if (applicationStatus === 'rejected') return <ApplicationRejected />
 
-  // approved → always show fair selection (vendor picks each time)
-  return <FairSelectionPage fairs={mockAvailableFairs} />
+  // If only one active fair, jump straight to its dashboard
+  const activeFairs = fairs.filter(f => f.fairStatus === 'ACTIVE')
+  if (activeFairs.length === 1) {
+    router.replace(`/vendor/${activeFairs[0].fairSlug}/dashboard`)
+    return <Spinner />
+  }
+
+  return <FairSelectionPage fairs={fairs} />
 }

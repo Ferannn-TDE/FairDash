@@ -74,6 +74,17 @@ export async function requireRunnerAuth(): Promise<string> {
   return userId
 }
 
+/** Require auth + membership in a specific vendor. Returns { user, membership }. */
+export async function requireVendorMembership(clerkId: string, vendorId: string) {
+  const user = await db.user.findUnique({ where: { clerkId } })
+  if (!user) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+  const membership = await db.vendorMember.findFirst({
+    where: { vendorId, userId: user.id },
+  })
+  if (!membership) throw new ApiError('Forbidden', 403, 'FORBIDDEN')
+  return { user, membership }
+}
+
 /** Require auth + admin role. Returns Clerk userId. */
 export async function requireAdminAuth(): Promise<string> {
   const { userId } = await auth()

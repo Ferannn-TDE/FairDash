@@ -19,6 +19,8 @@
     "@prisma/client": "^5.22.0",
     "@stripe/react-stripe-js": "^5.6.1",
     "@stripe/stripe-js": "^8.11.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.0",
     "@vis.gl/react-google-maps": "^1.7.1",
     "bullmq": "^5.0.0",
     "cors": "^2.8.5",

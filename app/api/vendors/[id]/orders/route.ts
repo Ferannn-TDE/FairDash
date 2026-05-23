@@ -4,8 +4,10 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 
-// GET /api/vendors/:id/orders?since=ISO_DATE&limit=100
-// Returns orders that contain at least one item belonging to this vendor.
+// GET /api/vendors/:id/orders?limit=100&history=1
+// Default (no history param): active orders (VendorOrderStatus not COMPLETED/DECLINED)
+//   + today's completed/declined. Used by the kanban dashboard.
+// history=1: all orders regardless of date or status. Used by the Order History page.
 // OrderItems are filtered to only this vendor's items.
 // Caller must be a VendorMember of this vendor.
 export async function GET(
@@ -25,21 +27,35 @@ export async function GET(
     if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
     const { searchParams } = new URL(req.url)
-    const sinceRaw = searchParams.get('since')
-    const limit = Math.min(200, parseInt(searchParams.get('limit') ?? '100'))
+    const limit = Math.min(500, parseInt(searchParams.get('limit') ?? '100'))
+    const historyMode = searchParams.get('history') === '1'
 
-    const sinceFilter: Date | undefined = sinceRaw === 'today'
-      ? (() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d })()
-      : sinceRaw
-      ? new Date(sinceRaw)
-      : undefined
+    const todayStart = new Date()
+    todayStart.setUTCHours(0, 0, 0, 0)
 
     const orders = await db.order.findMany({
-      where: {
-        orderItems: { some: { vendorId } },
-        status: { not: 'PENDING_PAYMENT' },
-        ...(sinceFilter ? { placedAt: { gte: sinceFilter } } : {}),
-      },
+      where: historyMode
+        ? {
+            // History page: all orders for this vendor, no date restriction
+            orderItems: { some: { vendorId } },
+            status: { not: 'PENDING_PAYMENT' },
+          }
+        : {
+            // Dashboard: active workflow orders + today's completed/declined
+            orderItems: { some: { vendorId } },
+            status: { not: 'PENDING_PAYMENT' },
+            OR: [
+              {
+                vendorOrderStatuses: {
+                  some: {
+                    vendorId,
+                    status: { notIn: ['COMPLETED', 'DECLINED'] },
+                  },
+                },
+              },
+              { placedAt: { gte: todayStart } },
+            ],
+          },
       orderBy: { placedAt: 'desc' },
       take: limit,
       include: {

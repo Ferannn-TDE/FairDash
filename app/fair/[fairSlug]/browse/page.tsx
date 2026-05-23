@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { MagnifyingGlassIcon, XMarkIcon, ShoppingBagIcon } from '@heroicons/react/24/outline'
+import { useAuth } from '@clerk/clerk-react'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 import { GroupedFoodCard } from '@/components/menu/GroupedFoodCard'
@@ -29,12 +30,30 @@ export default function BrowsePage() {
   const router = useRouter()
   const { fair } = useFair()
   const { itemCount, subtotal } = useFairCart()
+  const { isSignedIn } = useAuth()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
   const [allGrouped, setAllGrouped] = useState<GroupedMenuItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null)
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!isSignedIn) return
+    fetch('/api/favorites/ids')
+      .then((r) => r.json())
+      .then((json) => { if (json.success) setFavoritedIds(new Set(json.data)) })
+      .catch(() => {})
+  }, [isSignedIn])
+
+  const handleFavoriteToggle = useCallback((menuItemId: string, favorited: boolean) => {
+    setFavoritedIds((prev) => {
+      const next = new Set(prev)
+      favorited ? next.add(menuItemId) : next.delete(menuItemId)
+      return next
+    })
+  }, [])
 
   // Bust stale cart versions
   useEffect(() => {
@@ -174,6 +193,8 @@ export default function BrowsePage() {
                 key={group.groupKey}
                 group={group}
                 accentColor={accentColor}
+                isFavorited={group.variants.some((v) => favoritedIds.has(v.id))}
+                onFavoriteToggle={handleFavoriteToggle}
               />
             ))}
           </div>

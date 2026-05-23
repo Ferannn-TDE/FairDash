@@ -13,10 +13,10 @@ export async function GET(_req: NextRequest) {
     const clerkId = await requireAuth()
 
     const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
-
-    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Not an organizer', 403, 'FORBIDDEN')
+    const orgMember = dbUser
+      ? await db.orgMember.findFirst({ where: { userId: dbUser.id } })
+      : null
+    if (!dbUser || !orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
 
     const events = await db.event.findMany({
       where: { organizerId: orgMember.organizerId },

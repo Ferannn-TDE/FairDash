@@ -17,10 +17,10 @@ export async function GET(req: NextRequest) {
     const clerkId = await requireAuth()
 
     const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
+    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
 
     const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Not an organizer', 403, 'FORBIDDEN')
+    if (!orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
 
     const { searchParams } = req.nextUrl
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '20', 10)))

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useClerk, useUser } from '@clerk/clerk-react'
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   MapPinIcon,
   ClockIcon,
@@ -22,10 +22,12 @@ export default function CustomerSignInPage() {
   const { openSignIn, openSignUp } = useClerk()
   const { isSignedIn } = useUser()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectUrl = searchParams.get('redirect_url') ?? searchParams.get('redirect') ?? '/account'
 
   useEffect(() => {
-    if (isSignedIn) router.replace('/account')
-  }, [isSignedIn, router])
+    if (isSignedIn) router.replace(redirectUrl)
+  }, [isSignedIn, router, redirectUrl])
 
   return (
     <div className="min-h-screen bg-bg-dark flex flex-col">
@@ -62,13 +64,13 @@ export default function CustomerSignInPage() {
           {/* CTAs */}
           <div className="space-y-3 mb-8">
             <button
-              onClick={() => openSignIn({ redirectUrl: '/account' })}
+              onClick={() => openSignIn({ redirectUrl })}
               className="w-full py-3.5 bg-neon-pink text-white font-semibold rounded-xl text-sm hover:bg-[#e0006b] shadow-[0_4px_16px_rgba(255,0,119,0.3)] transition-colors cursor-pointer border-0"
             >
               Sign In
             </button>
             <button
-              onClick={() => openSignUp({ redirectUrl: '/account' })}
+              onClick={() => openSignUp({ redirectUrl })}
               className="w-full py-3.5 bg-white/5 border border-white/10 text-white font-semibold rounded-xl text-sm hover:bg-white/10 transition-colors cursor-pointer"
             >
               Create Account

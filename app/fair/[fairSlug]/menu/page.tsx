@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import {
   MagnifyingGlassIcon,
   BuildingStorefrontIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { useAuth } from '@clerk/clerk-react'
 import { useFair } from '../../../_contexts/FairContext'
 import type { GroupedMenuItem } from '@/lib/menu/getGroupedMenuItems'
 import { GroupedFoodCard } from '@/components/menu/GroupedFoodCard'
@@ -41,10 +42,28 @@ const CART_VERSION = 'v2-real-ids'
 export default function FairMenuPage() {
   const params = useParams<{ fairSlug: string }>()
   const { fair, vendors } = useFair()
+  const { isSignedIn } = useAuth()
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
   const [allGrouped, setAllGrouped] = useState<GroupedMenuItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!isSignedIn) return
+    fetch('/api/favorites/ids')
+      .then((r) => r.json())
+      .then((json) => { if (json.success) setFavoritedIds(new Set(json.data)) })
+      .catch(() => {})
+  }, [isSignedIn])
+
+  const handleFavoriteToggle = useCallback((menuItemId: string, favorited: boolean) => {
+    setFavoritedIds((prev) => {
+      const next = new Set(prev)
+      favorited ? next.add(menuItemId) : next.delete(menuItemId)
+      return next
+    })
+  }, [])
 
   // Bust stale localStorage carts with mock IDs
   useEffect(() => {
@@ -216,6 +235,8 @@ export default function FairMenuPage() {
                   key={group.groupKey}
                   group={group}
                   accentColor={accentColor}
+                  isFavorited={group.variants.some((v) => favoritedIds.has(v.id))}
+                  onFavoriteToggle={handleFavoriteToggle}
                 />
               ))}
             </div>

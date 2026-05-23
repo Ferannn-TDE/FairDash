@@ -298,7 +298,6 @@ export default function VendorDashboardPage() {
   // Stats pulled from analytics endpoint — same source as analytics page
   const [todayOrders,  setTodayOrders]  = useState<number>(0)
   const [todayRevenue, setTodayRevenue] = useState<number>(0)
-  const [pendingCount, setPendingCount] = useState<number>(0)
 
 
   // Track Firebase order IDs we've already fetched to avoid duplicate fetches
@@ -309,7 +308,7 @@ export default function VendorDashboardPage() {
   useEffect(() => {
     if (!vendorId) return
     Promise.all([
-      fetch(`/api/vendors/${vendorId}/orders?since=today`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/orders`).then(r => r.json()),
       fetch(`/api/vendors/${vendorId}/analytics?days=1`).then(r => r.json()),
     ])
       .then(([ordersJson, analyticsJson]) => {
@@ -323,7 +322,6 @@ export default function VendorDashboardPage() {
         if (analyticsJson.success) {
           setTodayOrders(analyticsJson.data.todayOrders)
           setTodayRevenue(analyticsJson.data.todayRevenue)
-          setPendingCount(analyticsJson.data.pendingOrders)
         }
       })
       .catch(() => {/* keep empty state */})
@@ -496,7 +494,7 @@ export default function VendorDashboardPage() {
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Orders Today" value={loading ? '…' : todayOrders} color="blue" />
           <StatCard label="Revenue"      value={loading ? '…' : `$${todayRevenue.toFixed(0)}`} color="pink" />
-          <StatCard label="In Queue"     value={loading ? '…' : pendingCount} color="amber" />
+          <StatCard label="In Queue"     value={loading ? '…' : incoming.length} color="amber" />
         </div>
       </div>
 

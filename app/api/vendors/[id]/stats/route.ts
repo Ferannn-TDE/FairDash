@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireVendorAuth } from '@/lib/auth'
+import { requireVendorAuth, requireVendorMembership } from '@/lib/auth'
 
 // GET /api/vendors/:id/stats
 // Revenue and order counts scoped to this vendor's OrderItems only,
@@ -11,8 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireVendorAuth()
+    const clerkId = await requireVendorAuth()
     const vendorId = (await params).id
+    await requireVendorMembership(clerkId, vendorId)
 
     const todayStart = new Date()
     todayStart.setUTCHours(0, 0, 0, 0)

@@ -12,7 +12,7 @@ import {
   ShoppingCartIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
-import { useUser } from '@clerk/clerk-react'
+import { useUser, useAuth } from '@clerk/clerk-react'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
@@ -120,7 +120,7 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/fair/${fairSlug}/order/${orderId}`,
+          return_url: `${window.location.origin}/fair/${fairSlug}/order/${orderId.slice(-8).toUpperCase()}`,
         },
         redirect: 'if_required',
       })
@@ -218,9 +218,19 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
 export default function CheckoutPage() {
   const router = useRouter()
   const params = useParams<{ fairSlug: string }>()
+  const { isLoaded: authLoaded, isSignedIn } = useAuth()
   const { fair, fairLoading } = useFair()
   const { items, itemCount, subtotal, clearCart } = useFairCart()
   const { user } = useUser()
+
+  // Redirect unauthenticated users to sign-in with a return URL
+  useEffect(() => {
+    if (authLoaded && !isSignedIn) {
+      router.replace(
+        `/sign-in?redirect_url=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`
+      )
+    }
+  }, [authLoaded, isSignedIn, params.fairSlug, router])
 
   type FulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
 
@@ -261,6 +271,7 @@ export default function CheckoutPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
+  const [orderShortId, setOrderShortId] = useState<string | null>(null)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null)
 
@@ -343,6 +354,10 @@ export default function CheckoutPage() {
   }
 
   const handlePlaceOrder = async () => {
+    if (!isSignedIn) {
+      router.push(`/sign-in?redirect_url=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`)
+      return
+    }
     if (!validate()) return
     setSubmitting(true)
     try {
@@ -374,11 +389,12 @@ export default function CheckoutPage() {
 
       const json = await res.json()
       if (!json.success) {
-        toast.error(json?.error?.message ?? json?.error ?? 'Failed to create order — please try again')
+        toast.error('Failed to create order — please try again')
         return
       }
 
       setOrderId(json.data.orderId)
+      setOrderShortId(json.data.shortId ?? json.data.orderId.slice(-8).toUpperCase())
       setClientSecret(json.data.clientSecret)
       setOrderSummary(json.data.summary)
     } catch {
@@ -391,8 +407,18 @@ export default function CheckoutPage() {
   const handleSuccess = useCallback(() => {
     toast.success('Order placed!')
     clearCart()
-    router.push(`/fair/${params.fairSlug}/order/${orderId}`)
-  }, [clearCart, router, params.fairSlug, orderId])
+    router.push(`/fair/${params.fairSlug}/order/${orderShortId ?? orderId}`)
+  }, [clearCart, router, params.fairSlug, orderId, orderShortId])
+
+  // ── Auth guard — show skeleton while redirecting unauthenticated users ──────
+  if (!authLoaded || !isSignedIn) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-3">
+        <div className="w-8 h-8 border-2 border-[#FF0077] border-t-transparent rounded-full animate-spin" />
+        <p className="text-[#A1A1A1] text-sm">Checking sign-in…</p>
+      </div>
+    )
+  }
 
   // ── Empty cart guard ────────────────────────────────────────────────────────
   if (itemCount === 0 && !hasOrder) {
