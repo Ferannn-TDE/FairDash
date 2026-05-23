@@ -1,5 +1,5 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { revalidateTag } = require('next/cache') as { revalidateTag: (tag: string) => void }
+import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
