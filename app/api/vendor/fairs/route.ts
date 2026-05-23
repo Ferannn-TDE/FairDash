@@ -72,7 +72,7 @@ export async function GET() {
     const applicationStatus =
       statuses.some(s => s === 'ACTIVE')   ? 'approved' :
       statuses.some(s => s === 'PENDING')  ? 'pending'  :
-      statuses.some(s => s === 'INACTIVE') ? 'rejected' :
+      statuses.some(s => s === 'REJECTED' || s === 'SUSPENDED') ? 'rejected' :
       'none'
 
     return success({ fairs, applicationStatus })

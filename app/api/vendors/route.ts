@@ -65,10 +65,13 @@ export async function POST(req: Request) {
     const user = await db.user.findUnique({ where: { clerkId } })
     if (!user) return apiError('User not found — Clerk sync may be pending', 404, 'NOT_FOUND')
 
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now()
+
     const vendor = await db.vendor.create({
       data: {
         eventId: event.id,
         name,
+        slug,
         description,
         cuisineType,
         boothNumber,
