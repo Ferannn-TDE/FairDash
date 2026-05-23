@@ -9,7 +9,7 @@ export const metadata = {
   title: 'Discover Fairs — FairSynq',
 }
 
-const STATUS_ORDER: FairStatus[] = ['active', 'upcoming', 'completed', 'draft', 'archived']
+const STATUS_ORDER: FairStatus[] = ['active', 'upcoming', 'completed', 'archived', 'draft']
 
 const SECTION_LABELS: Partial<Record<FairStatus, string>> = {
   active:    'Happening Now',
@@ -21,7 +21,7 @@ function normalizeFairStatus(s: string): FairStatus {
   const map: Record<string, FairStatus> = {
     ACTIVE: 'active', UPCOMING: 'upcoming',
     INACTIVE: 'completed', COMPLETED: 'completed',
-    PAUSED: 'paused', DRAFT: 'draft',
+    DRAFT: 'draft',
   }
   return map[s] ?? 'upcoming'
 }
@@ -36,8 +36,8 @@ export default async function FairsPage() {
         id: e.id,
         name: e.name,
         slug: e.slug,
-        description: e.description,
-        location: { city: 'Collinsville', state: 'IL', address: '' },
+        description: e.description ?? undefined,
+        location: { city: 'Collinsville', state: 'IL', address: '', coordinates: { lat: 0, lng: 0 } },
         dates: { startDate: e.startDate, endDate: e.endDate },
         status: normalizeFairStatus(e.status),
         operatingHours: { open: '', close: '' },

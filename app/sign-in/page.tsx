@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useClerk, useUser } from '@clerk/clerk-react'
-import { useEffect } from 'react'
+import { useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   MapPinIcon,
@@ -18,7 +18,7 @@ const FEATURES = [
   { icon: HeartIcon,       label: 'Save your favorites',     desc: 'Bookmark vendors and items for your next visit.' },
 ]
 
-export default function CustomerSignInPage() {
+function CustomerSignInContent() {
   const { openSignIn, openSignUp } = useClerk()
   const { isSignedIn } = useUser()
   const router = useRouter()
@@ -102,5 +102,13 @@ export default function CustomerSignInPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function CustomerSignInPage() {
+  return (
+    <Suspense>
+      <CustomerSignInContent />
+    </Suspense>
   )
 }

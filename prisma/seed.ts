@@ -31,6 +31,7 @@ async function upsertVendor(
       data: {
         eventId,
         name: vendor.name,
+        slug: vendor.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now(),
         description: vendor.description,
         cuisineType: vendor.cuisineType,
         boothNumber: vendor.boothNumber ?? null,

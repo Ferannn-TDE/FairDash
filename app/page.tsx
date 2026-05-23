@@ -357,7 +357,7 @@ function normalizeFairStatus(s: string): Fair['status'] {
   const map: Record<string, Fair['status']> = {
     ACTIVE: 'active', UPCOMING: 'upcoming',
     INACTIVE: 'completed', COMPLETED: 'completed',
-    PAUSED: 'paused', DRAFT: 'draft',
+    DRAFT: 'draft',
   }
   return map[s] ?? 'upcoming'
 }

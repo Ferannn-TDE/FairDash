@@ -145,7 +145,7 @@ export interface FairListItem {
 export const getAllFairsCached = unstable_cache(
   async (): Promise<FairListItem[]> => {
     const events = await db.event.findMany({
-      where: { status: { not: EventStatus.DRAFT } },
+      where: { status: { in: [EventStatus.ACTIVE, EventStatus.UPCOMING] } },
       orderBy: { startDate: 'asc' },
       select: {
         id: true,
