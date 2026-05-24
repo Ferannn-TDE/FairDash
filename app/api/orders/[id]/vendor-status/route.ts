@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { getRealtimeDb } from '@/lib/firebase-admin'
-import { getOrderQueue, JOB_REFUND } from '@/lib/queues'
+import { enqueueRefund } from '@/lib/order-side-effects'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -107,42 +107,15 @@ export async function PATCH(
 
       // Enqueue Stripe refund (async, idempotent via jobId dedup)
       if (order.stripePaymentIntentId) {
-        await db.cancellation.upsert({
-          where: { orderId },
-          create: {
+        try {
+          await enqueueRefund({
             orderId,
             vendorId: order.vendorId,
-            reason: 'All vendors declined',
-            refundIssued: false,
-            refundAmount: null,
-          },
-          update: {},
-        })
-
-        try {
-          const queue = getOrderQueue()
-          if (queue) {
-            await queue.add(
-              JOB_REFUND,
-              {
-                eventId: order.eventId,
-                orderId,
-                vendorId: order.vendorId,
-                cancellationVendorId: order.vendorId,
-                stripePaymentIntentId: order.stripePaymentIntentId,
-                stripeChargeId: order.stripeChargeId ?? undefined,
-                refundReason: 'all_vendors_declined',
-                refundIdempotencyKey: `stripe-refund-${orderId}`,
-              },
-              {
-                attempts: 3,
-                backoff: { type: 'exponential', delay: 1000 },
-                jobId: `refund-${orderId}`,
-              }
-            )
-          } else {
-            console.warn(`[VendorStatus] Redis unavailable — refund job for order ${orderId} not enqueued`)
-          }
+            eventId: order.eventId,
+            stripePaymentIntentId: order.stripePaymentIntentId,
+            stripeChargeId: order.stripeChargeId,
+            refundReason: 'all_vendors_declined',
+          })
         } catch (err) {
           console.error('[VendorStatus] Failed to enqueue refund job:', err)
         }

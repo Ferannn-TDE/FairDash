@@ -434,6 +434,9 @@ model Order {
   // Uncollected (timeout after READY)
   uncollectedAt DateTime?
 
+  // Async payout status (set by process-vendor-payout worker)
+  payoutStatus  PayoutStatus?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -471,6 +474,12 @@ enum FulfillmentType {
   BOOTH_PICKUP  // Customer collects directly at vendor booth
   CURBSIDE      // Runner delivers to customer's vehicle in parking zone
   HOME_DELIVERY // Runner delivers to customer's off-site address
+}
+
+enum PayoutStatus {
+  PENDING    // Job enqueued, transfer not yet attempted
+  COMPLETED  // Stripe transfer succeeded
+  FAILED     // All retry attempts exhausted — requires manual intervention
 }
 
 model OrderItem {

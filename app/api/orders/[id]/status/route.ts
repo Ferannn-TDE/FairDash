@@ -9,9 +9,8 @@ import {
   getOrderQueue,
   JOB_UNCOLLECTED,
   JOB_UNDELIVERABLE,
-  JOB_VENDOR_PAYOUT,
-  JOB_REFUND,
 } from '@/lib/queues'
+import { enqueueVendorPayout, enqueueRefund } from '@/lib/order-side-effects'
 import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M } from '@/lib/constants'
 
 // PATCH /api/orders/:id/status
@@ -290,32 +289,17 @@ async function handleCompleted(
     return
   }
 
-  const queue = getOrderQueue()
-  if (!queue) {
-    console.warn(`[Status] Redis unavailable — payout job for order ${order.id} not enqueued`)
-    return
-  }
+  const enqueued = await enqueueVendorPayout({
+    orderId: order.id,
+    vendorId: order.vendorId,
+    eventId: order.eventId,
+    vendorStripeAccountId: vendor.stripeAccountId,
+    stripePaymentIntentId: order.stripePaymentIntentId,
+    stripeChargeId: order.stripeChargeId,
+    vendorPayout: order.vendorPayout,
+  })
 
-  await queue.add(
-    JOB_VENDOR_PAYOUT,
-    {
-      eventId: order.eventId,
-      orderId: order.id,
-      vendorId: order.vendorId,
-      vendorStripeAccountId: vendor.stripeAccountId,
-      stripePaymentIntentId: order.stripePaymentIntentId ?? undefined,
-      stripeChargeId: order.stripeChargeId ?? undefined,
-      transferAmountCents: Math.round(order.vendorPayout * 100),
-      payoutIdempotencyKey: `transfer-completed-${order.id}`,
-    },
-    {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
-      jobId: `payout-${order.id}`,
-    }
-  )
-
-  console.log(`[Status] Vendor payout job enqueued for order ${order.id}`)
+  if (enqueued) console.log(`[Status] Vendor payout job enqueued for order ${order.id}`)
 }
 
 // ─── CANCELLED side-effect ────────────────────────────────────────────────────
@@ -324,45 +308,24 @@ async function handleCancelled(
   order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null },
   reason?: string
 ) {
-  // Write Cancellation record immediately (no refund amount yet — worker fills it in)
-  await db.cancellation.upsert({
-    where: { orderId: order.id },
-    create: {
-      orderId: order.id,
-      vendorId: order.vendorId,
-      reason: reason ?? null,
-      refundIssued: false,
-      refundAmount: null,
-    },
-    update: {},
-  })
-
-  if (!order.stripePaymentIntentId) return
-
-  const queue = getOrderQueue()
-  if (!queue) {
-    console.warn(`[Status] Redis unavailable — refund job for order ${order.id} not enqueued`)
+  if (!order.stripePaymentIntentId) {
+    // No payment taken — just write the cancellation record
+    await db.cancellation.upsert({
+      where: { orderId: order.id },
+      create: { orderId: order.id, vendorId: order.vendorId, reason: reason ?? null, refundIssued: false, refundAmount: null },
+      update: {},
+    })
     return
   }
 
-  await queue.add(
-    JOB_REFUND,
-    {
-      eventId: order.eventId,
-      orderId: order.id,
-      vendorId: order.vendorId,
-      cancellationVendorId: order.vendorId,
-      stripePaymentIntentId: order.stripePaymentIntentId,
-      stripeChargeId: order.stripeChargeId ?? undefined,
-      refundReason: reason ?? 'vendor_cancelled',
-      refundIdempotencyKey: `stripe-refund-${order.id}`,
-    },
-    {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
-      jobId: `refund-${order.id}`,
-    }
-  )
+  const enqueued = await enqueueRefund({
+    orderId: order.id,
+    vendorId: order.vendorId,
+    eventId: order.eventId,
+    stripePaymentIntentId: order.stripePaymentIntentId,
+    stripeChargeId: order.stripeChargeId,
+    refundReason: reason ?? 'vendor_cancelled',
+  })
 
-  console.log(`[Status] Refund job enqueued for order ${order.id}`)
+  if (enqueued) console.log(`[Status] Refund job enqueued for order ${order.id}`)
 }

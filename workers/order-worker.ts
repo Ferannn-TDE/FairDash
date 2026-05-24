@@ -522,6 +522,11 @@ async function handleVendorPayout(job: Job<JobData>) {
 
   console.log(`[Worker] process-vendor-payout → order ${orderId}, amount ${transferAmountCents}¢`)
 
+  // Test hook: simulate failure on first attempt to verify retry behaviour
+  if (process.env.TEST_RETRY_FAILURE === 'true' && job.attemptsMade === 0) {
+    throw new Error('Simulated failure — TEST_RETRY_FAILURE')
+  }
+
   // Retrieve chargeId if not supplied (needed for source_transaction)
   let chargeId = jobChargeId ?? null
   if (!chargeId && stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
@@ -689,12 +694,32 @@ const worker = new Worker<JobData>(
   { connection, concurrency: 5 }
 )
 
-worker.on('completed', job => {
+worker.on('completed', async job => {
   console.log(`[Worker] ✓ ${job.name} (${job.id}) completed`)
+
+  if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
+    await prisma.order.update({
+      where: { id: job.data.orderId },
+      data: { payoutStatus: 'COMPLETED' },
+    }).catch(e => console.error('[Worker] Failed to set payoutStatus=COMPLETED:', e))
+  }
 })
 
-worker.on('failed', (job, err) => {
-  console.error(`[Worker] ✗ ${job?.name} (${job?.id}) failed:`, err.message)
+worker.on('failed', async (job, err) => {
+  console.error(`[Worker] ✗ ${job?.name} (${job?.id}) failed after ${job?.attemptsMade} attempt(s):`, err.message)
+
+  // Mark payout as permanently failed when all retries are exhausted
+  if (
+    job?.name === JOB_VENDOR_PAYOUT &&
+    job?.data?.orderId &&
+    job.attemptsMade >= (job.opts.attempts ?? 3)
+  ) {
+    await prisma.order.update({
+      where: { id: job.data.orderId },
+      data: { payoutStatus: 'FAILED' },
+    }).catch(e => console.error('[Worker] Failed to set payoutStatus=FAILED:', e))
+    console.error(`[Worker] Payout permanently FAILED for order ${job.data.orderId} — manual intervention required`)
+  }
 })
 
 worker.on('error', err => {

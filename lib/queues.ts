@@ -51,6 +51,14 @@ function getConnectionOptions(): ConnectionOptions | null {
 
 export const ORDER_QUEUE_NAME = 'fairsynq-orders'
 
+// TEST_REDIS_PREFIX (e.g. "test:") isolates test jobs in a separate Redis
+// namespace so they never land in the production queue. BullMQ prefix option
+// strips the trailing colon — we normalise it here.
+export function getQueuePrefix(): string {
+  const raw = process.env.TEST_REDIS_PREFIX ?? ''
+  return raw.replace(/:$/, '') || 'bull'
+}
+
 // ─── Job name constants ───────────────────────────────────────────────────────
 // Single source of truth. Worker imports these same constants.
 
@@ -130,6 +138,7 @@ export function getOrderQueue(): Queue | null {
 
   const queue = new Queue(ORDER_QUEUE_NAME, {
     connection,
+    prefix: getQueuePrefix(),
     defaultJobOptions: {
       removeOnComplete: 100,
       removeOnFail: 500,
