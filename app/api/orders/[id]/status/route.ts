@@ -1,10 +1,11 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { OrderStatus, FulfillmentType } from '@prisma/client'
 import { db } from '@/lib/db'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { vendorStatusRatelimit } from '@/lib/ratelimit'
 import {
   getOrderQueue,
   JOB_UNCOLLECTED,
@@ -74,6 +75,23 @@ export async function PATCH(
 ) {
   try {
     const clerkId = await requireAuth()
+
+    const { success: allowed, limit, remaining } = await vendorStatusRatelimit.limit(
+      `vendor-status:${clerkId}`
+    )
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests — slow down.' },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': String(limit),
+            'X-RateLimit-Remaining': String(remaining),
+            'Retry-After': '60',
+          },
+        }
+      )
+    }
 
     // ── 1. Load order ──────────────────────────────────────────────────────
     const order = await db.order.findUnique({

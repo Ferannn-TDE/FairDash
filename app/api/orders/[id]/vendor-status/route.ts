@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { enqueueRefund } from '@/lib/order-side-effects'
+import { vendorStatusRatelimit } from '@/lib/ratelimit'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -27,6 +29,24 @@ export async function PATCH(
 ) {
   try {
     const clerkId = await requireAuth()
+
+    const { success: rlOk, limit, remaining } = await vendorStatusRatelimit.limit(
+      `vendor-status:${clerkId}`
+    )
+    if (!rlOk) {
+      return NextResponse.json(
+        { error: 'Too many requests — slow down.' },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': String(limit),
+            'X-RateLimit-Remaining': String(remaining),
+            'Retry-After': '60',
+          },
+        }
+      )
+    }
+
     const orderId = (await params).id
 
     const dbUser = await db.user.findUnique({ where: { clerkId } })
