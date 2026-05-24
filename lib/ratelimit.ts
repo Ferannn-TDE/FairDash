@@ -19,3 +19,12 @@ export const publicRatelimit = new Ratelimit({
   limiter: Ratelimit.slidingWindow(60, '1 m'),
   analytics: true,
 })
+
+// Vendor status mutations — 30 per vendor per minute.
+// Covers both PATCH /api/orders/:id/status and PATCH /api/orders/:id/vendor-status.
+// Keyed by clerkId (not IP) so shared proxies don't lock out multiple vendors.
+export const vendorStatusRatelimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(30, '1 m'),
+  analytics: true,
+})
