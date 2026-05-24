@@ -31,7 +31,7 @@ export async function GET(
     const historyMode = searchParams.get('history') === '1'
 
     const todayStart = new Date()
-    todayStart.setUTCHours(0, 0, 0, 0)
+    todayStart.setHours(0, 0, 0, 0)
 
     const orders = await db.order.findMany({
       where: historyMode
