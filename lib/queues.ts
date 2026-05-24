@@ -78,6 +78,12 @@ export const JOB_POST_EVENT_REPORT = 'generate-post-event-report'
 /** Emergency cancel → bulk Stripe refund all open orders for an event */
 export const JOB_BULK_REFUND = 'bulk-refund-event'
 
+/** Order completed → transfer vendor payout via Stripe Connect */
+export const JOB_VENDOR_PAYOUT = 'process-vendor-payout'
+
+/** Order cancelled → issue Stripe refund to customer */
+export const JOB_REFUND = 'process-refund'
+
 // ─── Job payload ──────────────────────────────────────────────────────────────
 // Unified interface — all jobs share the same queue so all payloads must be
 // compatible with the Worker<JobData> generic. Fields are optional when not
@@ -96,6 +102,18 @@ export interface JobData {
 
   // Incident job
   incidentId?: string
+
+  // process-vendor-payout
+  vendorStripeAccountId?: string
+  stripePaymentIntentId?: string
+  stripeChargeId?: string
+  transferAmountCents?: number
+  payoutIdempotencyKey?: string
+
+  // process-refund
+  refundReason?: string
+  refundIdempotencyKey?: string
+  cancellationVendorId?: string
 }
 
 // ─── Queue singleton ──────────────────────────────────────────────────────────

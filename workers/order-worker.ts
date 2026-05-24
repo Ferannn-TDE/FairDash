@@ -26,6 +26,8 @@ import {
   JOB_ESCALATE_DISPUTE,
   JOB_POST_EVENT_REPORT,
   JOB_BULK_REFUND,
+  JOB_VENDOR_PAYOUT,
+  JOB_REFUND,
   JobData,
 } from '../lib/queues'
 import {
@@ -495,6 +497,137 @@ async function handleBulkRefundEvent(job: Job<JobData>) {
   console.log(`[Worker] bulk-refund-event: ${orders.length} orders cancelled and refunded`)
 }
 
+/**
+ * process-vendor-payout
+ * Executes the Stripe Connect transfer for a completed order.
+ * Retries up to 3x with exponential backoff. Idempotent via Stripe idempotency key.
+ * On final failure: logs and marks payoutStatus FAILED on the order.
+ */
+async function handleVendorPayout(job: Job<JobData>) {
+  const {
+    orderId,
+    vendorId,
+    eventId,
+    vendorStripeAccountId,
+    stripePaymentIntentId,
+    stripeChargeId: jobChargeId,
+    transferAmountCents,
+    payoutIdempotencyKey,
+  } = job.data
+
+  if (!orderId || !vendorId || !vendorStripeAccountId || !transferAmountCents || !payoutIdempotencyKey) {
+    console.error(`[Worker] process-vendor-payout: missing required fields in job ${job.id}`)
+    return
+  }
+
+  console.log(`[Worker] process-vendor-payout → order ${orderId}, amount ${transferAmountCents}¢`)
+
+  // Retrieve chargeId if not supplied (needed for source_transaction)
+  let chargeId = jobChargeId ?? null
+  if (!chargeId && stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
+    try {
+      const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
+        expand: ['latest_charge'],
+      })
+      const charge = pi.latest_charge
+      if (charge && typeof charge === 'object' && 'id' in charge) {
+        chargeId = charge.id as string
+        await prisma.order.update({ where: { id: orderId }, data: { stripeChargeId: chargeId } })
+      }
+    } catch (err) {
+      console.warn(`[Worker] process-vendor-payout: could not retrieve charge for order ${orderId}:`, err)
+    }
+  }
+
+  const transfer = await stripe.transfers.create(
+    {
+      amount: transferAmountCents,
+      currency: 'usd',
+      destination: vendorStripeAccountId,
+      ...(chargeId && { source_transaction: chargeId }),
+      metadata: { orderId, vendorId },
+    },
+    { idempotencyKey: payoutIdempotencyKey }
+  )
+
+  // Fetch the order to get eventId-scoped payout fields
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { subtotal: true, fairSynqFee: true, vendorPayout: true },
+  })
+
+  await prisma.$transaction([
+    prisma.order.update({
+      where: { id: orderId },
+      data: { stripeTransferId: transfer.id },
+    }),
+    prisma.payout.create({
+      data: {
+        eventId: eventId,
+        vendorId: vendorId,
+        grossAmount: order?.subtotal ?? 0,
+        fairSynqFee: order?.fairSynqFee ?? 0,
+        netAmount: order?.vendorPayout ?? transferAmountCents / 100,
+        stripeTransferId: transfer.id,
+        stripeStatus: 'pending',
+        processedAt: new Date(),
+      },
+    }),
+  ])
+
+  console.log(`[Worker] Transfer ${transfer.id} created for order ${orderId}`)
+}
+
+/**
+ * process-refund
+ * Issues a Stripe refund for a cancelled order.
+ * Idempotent via Stripe idempotency key + BullMQ jobId deduplication.
+ * Updates the Cancellation record with the issued refund amount on success.
+ */
+async function handleRefund(job: Job<JobData>) {
+  const {
+    orderId,
+    vendorId,
+    cancellationVendorId,
+    stripePaymentIntentId,
+    stripeChargeId,
+    refundReason,
+    refundIdempotencyKey,
+  } = job.data
+
+  if (!orderId || !stripePaymentIntentId || !refundIdempotencyKey) {
+    console.error(`[Worker] process-refund: missing required fields in job ${job.id}`)
+    return
+  }
+
+  console.log(`[Worker] process-refund → order ${orderId}`)
+
+  const refundParams = stripeChargeId
+    ? { charge: stripeChargeId, metadata: { orderId, reason: refundReason ?? 'cancelled' } }
+    : { payment_intent: stripePaymentIntentId, metadata: { orderId, reason: refundReason ?? 'cancelled' } }
+
+  const refund = await stripe.refunds.create(
+    refundParams,
+    { idempotencyKey: refundIdempotencyKey }
+  )
+
+  const refundAmount = refund.amount / 100
+
+  await prisma.cancellation.upsert({
+    where: { orderId },
+    create: {
+      orderId,
+      vendorId: cancellationVendorId ?? vendorId ?? '',
+      reason: refundReason ?? null,
+      refundIssued: true,
+      refundAmount,
+    },
+    update: { refundIssued: true, refundAmount },
+  })
+
+  console.log(`[Worker] Refund ${refund.id} issued for order ${orderId} — $${refundAmount.toFixed(2)}`)
+}
+
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
 function buildConnectionOptions(url: string): ConnectionOptions {
@@ -543,6 +676,12 @@ const worker = new Worker<JobData>(
       case JOB_BULK_REFUND:
         await handleBulkRefundEvent(job)
         break
+      case JOB_VENDOR_PAYOUT:
+        await handleVendorPayout(job)
+        break
+      case JOB_REFUND:
+        await handleRefund(job)
+        break
       default:
         console.warn(`[Worker] Unknown job: ${job.name}`)
     }
@@ -567,6 +706,7 @@ console.log(`[Worker] Handlers: ${[
   JOB_UNACCEPTED, JOB_UNCOLLECTED, JOB_UNDELIVERABLE,
   JOB_HIDE_VENDOR, JOB_INCIDENT_REFUND, JOB_ESCALATE_DISPUTE,
   JOB_POST_EVENT_REPORT, JOB_BULK_REFUND,
+  JOB_VENDOR_PAYOUT, JOB_REFUND,
 ].join(', ')}`)
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────

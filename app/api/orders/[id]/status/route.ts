@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server'
 import { OrderStatus, FulfillmentType } from '@prisma/client'
 import { db } from '@/lib/db'
-import { stripe } from '@/lib/stripe'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -10,6 +9,8 @@ import {
   getOrderQueue,
   JOB_UNCOLLECTED,
   JOB_UNDELIVERABLE,
+  JOB_VENDOR_PAYOUT,
+  JOB_REFUND,
 } from '@/lib/queues'
 import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M } from '@/lib/constants'
 
@@ -28,8 +29,8 @@ import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS
 //
 // Side-effects per transition:
 //   → READY:     schedule BullMQ delayed job (UNCOLLECTED / UNDELIVERABLE)
-//   → COMPLETED / DELIVERED: stripe.transfers.create + write Payout record
-//   → CANCELLED: stripe.refunds.create + write Cancellation record
+//   → COMPLETED / DELIVERED: enqueue process-vendor-payout BullMQ job (Stripe transfer async)
+//   → CANCELLED: write Cancellation record + enqueue process-refund BullMQ job (Stripe refund async)
 //   All:         Firebase RTDB write to orders/{vendorId}/{orderId}
 //                             and customerOrders/{customerId}/{orderId}
 
@@ -239,7 +240,7 @@ export async function PATCH(
     // 6b. COMPLETED or DELIVERED → Stripe transfer + Payout record ──────────
     if (newStatus === OrderStatus.COMPLETED || newStatus === OrderStatus.DELIVERED) {
       try {
-        await handleCompleted(order, updatedOrder)
+        await handleCompleted(order)
       } catch (e) {
         console.warn('[Status] handleCompleted side-effect failed:', e)
       }
@@ -280,126 +281,88 @@ export async function PATCH(
 // ─── COMPLETED side-effect ────────────────────────────────────────────────────
 
 async function handleCompleted(
-  order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null; subtotal: number; fairSynqFee: number; vendorPayout: number; vendor: { stripeAccountId: string | null; stripeVerified: boolean } },
-  _updatedOrder: unknown
+  order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null; vendorPayout: number; vendor: { stripeAccountId: string | null; stripeVerified: boolean } },
 ) {
   const vendor = order.vendor
 
-  // Only trigger Stripe transfer for verified Connect vendors (OPTION_A)
   if (!vendor.stripeAccountId || !vendor.stripeVerified) {
-    console.log(`[Status] Vendor ${order.vendorId} not on Stripe Connect — skipping transfer (manual settlement)`)
+    console.log(`[Status] Vendor ${order.vendorId} not on Stripe Connect — skipping payout enqueue (manual settlement)`)
     return
   }
 
-  // Retrieve the charge ID from the PaymentIntent if not already stored
-  let chargeId = order.stripeChargeId
-  if (!chargeId && order.stripePaymentIntentId) {
-    try {
-      const pi = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId, {
-        expand: ['latest_charge'],
-      })
-      const charge = pi.latest_charge
-      if (charge && typeof charge === 'object' && 'id' in charge) {
-        chargeId = charge.id as string
-        // Persist it for idempotency
-        await db.order.update({
-          where: { id: order.id },
-          data: { stripeChargeId: chargeId },
-        })
-      }
-    } catch (err) {
-      console.error('[Status] Failed to retrieve charge from PI:', err)
+  const queue = getOrderQueue()
+  if (!queue) {
+    console.warn(`[Status] Redis unavailable — payout job for order ${order.id} not enqueued`)
+    return
+  }
+
+  await queue.add(
+    JOB_VENDOR_PAYOUT,
+    {
+      eventId: order.eventId,
+      orderId: order.id,
+      vendorId: order.vendorId,
+      vendorStripeAccountId: vendor.stripeAccountId,
+      stripePaymentIntentId: order.stripePaymentIntentId ?? undefined,
+      stripeChargeId: order.stripeChargeId ?? undefined,
+      transferAmountCents: Math.round(order.vendorPayout * 100),
+      payoutIdempotencyKey: `transfer-completed-${order.id}`,
+    },
+    {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      jobId: `payout-${order.id}`,
     }
-  }
+  )
 
-  // Create the transfer with idempotency key to prevent double-payout
-  const idempotencyKey = `transfer-completed-${order.id}`
-  const transferAmountCents = Math.round(order.vendorPayout * 100)
-
-  try {
-    const transfer = await stripe.transfers.create(
-      {
-        amount: transferAmountCents,
-        currency: 'usd',
-        destination: vendor.stripeAccountId,
-        ...(chargeId && { source_transaction: chargeId }),
-        metadata: { orderId: order.id, vendorId: order.vendorId },
-      },
-      { idempotencyKey }
-    )
-
-    // Write Payout record and stripeTransferId to order atomically
-    await db.$transaction([
-      db.order.update({
-        where: { id: order.id },
-        data: { stripeTransferId: transfer.id },
-      }),
-      db.payout.create({
-        data: {
-          eventId: order.eventId,
-          vendorId: order.vendorId,
-          grossAmount: order.subtotal,
-          fairSynqFee: order.fairSynqFee,
-          netAmount: order.vendorPayout,
-          stripeTransferId: transfer.id,
-          stripeStatus: 'pending',
-          processedAt: new Date(),
-        },
-      }),
-    ])
-
-    console.log(`[Status] Transfer ${transfer.id} created for order ${order.id}`)
-  } catch (err) {
-    // Log but don't fail the status update — payout can be retried separately
-    console.error(`[Status] Stripe transfer failed for order ${order.id}:`, err)
-  }
+  console.log(`[Status] Vendor payout job enqueued for order ${order.id}`)
 }
 
 // ─── CANCELLED side-effect ────────────────────────────────────────────────────
 
 async function handleCancelled(
-  order: { id: string; vendorId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null; total: number },
+  order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null },
   reason?: string
 ) {
-  let refundAmount: number | null = null
-  let refundIssued = false
-
-  // Issue Stripe refund if a PaymentIntent exists
-  if (order.stripePaymentIntentId) {
-    try {
-      // Try to refund via charge; fall back to PI-level refund
-      const chargeId = order.stripeChargeId
-      const refund = chargeId
-        ? await stripe.refunds.create({
-            charge: chargeId,
-            metadata: { orderId: order.id, reason: reason ?? 'vendor_cancelled' },
-          })
-        : await stripe.refunds.create({
-            payment_intent: order.stripePaymentIntentId,
-            metadata: { orderId: order.id, reason: reason ?? 'vendor_cancelled' },
-          })
-
-      refundAmount = refund.amount / 100
-      refundIssued = true
-      console.log(`[Status] Refund ${refund.id} issued for order ${order.id} — $${refundAmount}`)
-    } catch (err) {
-      console.error(`[Status] Stripe refund failed for order ${order.id}:`, err)
-    }
-  }
-
-  // Write Cancellation record (upsert — idempotent if worker also cancels)
+  // Write Cancellation record immediately (no refund amount yet — worker fills it in)
   await db.cancellation.upsert({
     where: { orderId: order.id },
     create: {
       orderId: order.id,
       vendorId: order.vendorId,
       reason: reason ?? null,
-      refundIssued,
-      refundAmount,
+      refundIssued: false,
+      refundAmount: null,
     },
-    update: {
-      refundIssued,
-      refundAmount,
-    },
+    update: {},
   })
+
+  if (!order.stripePaymentIntentId) return
+
+  const queue = getOrderQueue()
+  if (!queue) {
+    console.warn(`[Status] Redis unavailable — refund job for order ${order.id} not enqueued`)
+    return
+  }
+
+  await queue.add(
+    JOB_REFUND,
+    {
+      eventId: order.eventId,
+      orderId: order.id,
+      vendorId: order.vendorId,
+      cancellationVendorId: order.vendorId,
+      stripePaymentIntentId: order.stripePaymentIntentId,
+      stripeChargeId: order.stripeChargeId ?? undefined,
+      refundReason: reason ?? 'vendor_cancelled',
+      refundIdempotencyKey: `stripe-refund-${order.id}`,
+    },
+    {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+      jobId: `refund-${order.id}`,
+    }
+  )
+
+  console.log(`[Status] Refund job enqueued for order ${order.id}`)
 }
