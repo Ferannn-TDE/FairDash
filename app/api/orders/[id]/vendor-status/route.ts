@@ -146,11 +146,21 @@ export async function PATCH(
         .catch(() => {})
     }
 
-    // Always update this vendor's RTDB node with their own status
+    // Always update both RTDB paths on every vendor status transition.
+    // Vendor path: used by the vendor dashboard Firebase listener.
+    // Customer path: used by the customer order tracking page — must fire on
+    // every transition so the customer sees ACCEPTED/PREPARING/READY in real time,
+    // not only when all vendors reach a terminal state.
     const rtdb = getRealtimeDb()
-    rtdb?.ref(`fairs/${order.eventId}/orders/${vendorId}/${orderId}`)
-      .update({ status: newStatus, updatedAt: Date.now() })
-      .catch(() => {})
+    if (rtdb) {
+      const now = Date.now()
+      rtdb.ref(`fairs/${order.eventId}/orders/${vendorId}/${orderId}`)
+        .update({ status: newStatus, updatedAt: now })
+        .catch(() => {})
+      rtdb.ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`)
+        .update({ status: newStatus, vendorId, updatedAt: now })
+        .catch(() => {})
+    }
 
     return success({ vendorId, orderId, status: newStatus })
   } catch (err) {

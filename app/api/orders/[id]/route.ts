@@ -51,9 +51,13 @@ export async function GET(
     if (!dbUser) return apiError('User not found', 404, 'USER_NOT_FOUND')
 
     const isCustomer = order.customerId === dbUser.id
-    const isVendorMember = await db.vendorMember.findFirst({
-      where: { vendorId: order.vendorId, userId: dbUser.id },
-    })
+    // Check all vendorIds present in this order's items (multi-vendor orders have N vendors)
+    const vendorIds = [...new Set(order.orderItems.map(i => i.vendorId))]
+    const isVendorMember = vendorIds.length > 0
+      ? await db.vendorMember.findFirst({
+          where: { vendorId: { in: vendorIds }, userId: dbUser.id },
+        })
+      : null
 
     if (!isCustomer && !isVendorMember) {
       return apiError('Access denied', 403, 'FORBIDDEN')

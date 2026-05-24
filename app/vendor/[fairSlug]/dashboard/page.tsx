@@ -494,7 +494,7 @@ export default function VendorDashboardPage() {
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Orders Today" value={loading ? '…' : todayOrders} color="blue" />
           <StatCard label="Revenue"      value={loading ? '…' : `$${todayRevenue.toFixed(0)}`} color="pink" />
-          <StatCard label="In Queue"     value={loading ? '…' : incoming.length} color="amber" />
+          <StatCard label="In Queue"     value={loading ? '…' : incoming.length + active.length + ready.length} color="amber" />
         </div>
       </div>
 
