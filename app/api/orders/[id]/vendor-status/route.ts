@@ -1,12 +1,13 @@
-import { NextRequest } from 'next/server'
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { enqueueRefund } from '@/lib/order-side-effects'
-import { vendorStatusRatelimit } from '@/lib/ratelimit'
+import { enforceRateLimit } from '@/lib/ratelimit'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
 
 // Valid per-vendor status transitions
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -28,23 +29,22 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ── Test-mode bypass (mirrors status/route.ts — see comment there) ────
+    if (process.env.RATE_LIMIT_TEST === 'true') {
+      const testId = req.headers.get('x-test-vendor-id')
+      if (!testId) return apiError('Unauthorized', 401, 'UNAUTHORIZED')
+      const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${testId}`, 'vendorStatus')
+      if (!allowed) {
+        return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+      }
+      return NextResponse.json({ ok: true }, { status: 200 })
+    }
+
     const clerkId = await requireAuth()
 
-    const { success: rlOk, limit, remaining } = await vendorStatusRatelimit.limit(
-      `vendor-status:${clerkId}`
-    )
-    if (!rlOk) {
-      return NextResponse.json(
-        { error: 'Too many requests — slow down.' },
-        {
-          status: 429,
-          headers: {
-            'X-RateLimit-Limit': String(limit),
-            'X-RateLimit-Remaining': String(remaining),
-            'Retry-After': '60',
-          },
-        }
-      )
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${clerkId}`, 'vendorStatus')
+    if (!allowed) {
+      return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
     }
 
     const orderId = (await params).id
@@ -55,7 +55,7 @@ export async function PATCH(
     const { status: newStatus } = await req.json() as { status: string }
     if (!newStatus) throw new ApiError('status is required', 400, 'VALIDATION_ERROR')
 
-    // Resolve the calling user's vendor membership
+    // Resolve the calling user's vendor membership — no vendorId known yet, so DB lookup
     const membership = await db.vendorMember.findFirst({
       where: { userId: dbUser.id },
       select: { vendorId: true },
@@ -63,6 +63,10 @@ export async function PATCH(
     if (!membership) return apiError('Access denied — not a vendor member', 403, 'FORBIDDEN')
 
     const { vendorId } = membership
+
+    // Second-level auth: confirm this user is actually a member of that vendor (cache hit)
+    const confirmedMember = await getVendorAuth(dbUser.id, vendorId, req)
+    if (!confirmedMember) return apiError('Access denied — not a vendor member', 403, 'FORBIDDEN')
 
     // Load the VendorOrderStatus for this vendor
     const vendorStatus = await db.vendorOrderStatus.findUnique({
@@ -73,8 +77,8 @@ export async function PATCH(
     }
 
     // Validate transition
-    const allowed = ALLOWED_TRANSITIONS[vendorStatus.status]
-    if (!allowed?.includes(newStatus)) {
+    const validTransitions = ALLOWED_TRANSITIONS[vendorStatus.status]
+    if (!validTransitions?.includes(newStatus)) {
       throw new ApiError(
         `Cannot transition from ${vendorStatus.status} to ${newStatus}`,
         409,
@@ -99,6 +103,12 @@ export async function PATCH(
         ...(tsField ? { [tsField]: new Date() } : {}),
       },
     })
+
+    // Invalidate analytics cache when this vendor's portion completes
+    if (newStatus === 'COMPLETED') {
+      revalidateTag(`analytics-${vendorId}`, 'default')
+      revalidateTag(`stats-${vendorId}`, 'default')
+    }
 
     // Check aggregate state across all vendors to decide master order update
     const allStatuses = await db.vendorOrderStatus.findMany({
@@ -141,19 +151,27 @@ export async function PATCH(
         }
       }
 
-      // Firebase — notify customer
-      const rtdb = getRealtimeDb()
-      rtdb?.ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`)
-        .update({ status: 'CANCELLED', updatedAt: Date.now() })
-        .catch(() => {})
+      // Firebase — notify customer of cancellation
+      after(() =>
+        fireAndForgetFirebaseUpdate(
+          `fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`,
+          { status: 'CANCELLED', updatedAt: Date.now() },
+          { orderId }
+        )
+      )
     } else if (allTerminal) {
       // Some completed, some declined — master order done
       await db.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: new Date() } })
+      revalidateTag(`analytics-${vendorId}`, 'default')
+      revalidateTag(`stats-${vendorId}`, 'default')
 
-      const rtdb = getRealtimeDb()
-      rtdb?.ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`)
-        .update({ status: 'COMPLETED', updatedAt: Date.now() })
-        .catch(() => {})
+      after(() =>
+        fireAndForgetFirebaseUpdate(
+          `fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`,
+          { status: 'COMPLETED', updatedAt: Date.now() },
+          { orderId }
+        )
+      )
     }
 
     // Always update both RTDB paths on every vendor status transition.
@@ -161,16 +179,19 @@ export async function PATCH(
     // Customer path: used by the customer order tracking page — must fire on
     // every transition so the customer sees ACCEPTED/PREPARING/READY in real time,
     // not only when all vendors reach a terminal state.
-    const rtdb = getRealtimeDb()
-    if (rtdb) {
-      const now = Date.now()
-      rtdb.ref(`fairs/${order.eventId}/orders/${vendorId}/${orderId}`)
-        .update({ status: newStatus, updatedAt: now })
-        .catch(() => {})
-      rtdb.ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`)
-        .update({ status: newStatus, vendorId, updatedAt: now })
-        .catch(() => {})
-    }
+    const now = Date.now()
+    after(() => {
+      fireAndForgetFirebaseUpdate(
+        `fairs/${order.eventId}/orders/${vendorId}/${orderId}`,
+        { status: newStatus, updatedAt: now },
+        { orderId }
+      )
+      fireAndForgetFirebaseUpdate(
+        `fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`,
+        { status: newStatus, vendorId, updatedAt: now },
+        { orderId }
+      )
+    })
 
     return success({ vendorId, orderId, status: newStatus })
   } catch (err) {
