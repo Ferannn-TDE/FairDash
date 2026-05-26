@@ -269,7 +269,8 @@ export async function PATCH(
         console.warn('[Status] handleCompleted side-effect failed:', e)
       }
       revalidateTag(`analytics-${order.vendorId}`, 'default')
-      revalidateTag(`stats-${order.vendorId}`, 'default')
+      revalidateTag(`stats-${order.vendorId}`,     'default')
+      revalidateTag(`revenue-${order.vendorId}`,   'default')
     }
 
     // 6c. CANCELLED -> Stripe refund + Cancellation record
