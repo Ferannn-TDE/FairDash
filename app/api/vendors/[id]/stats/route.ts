@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
+import { logger } from '@/lib/logger'
 import { requireVendorAuth, requireVendorMembership } from '@/lib/auth'
 import { FLAGS } from '@/lib/feature-flags'
 
@@ -161,9 +162,7 @@ export async function GET(
 
     const stats = await getCachedStats(vendorId, since.toISOString())
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Stats]', { vendorId, range, durationMs: Date.now() - t0 })
-    }
+    logger.debug('[Stats] served', { vendorId, range, durationMs: Date.now() - t0 })
 
     return success(stats)
   } catch (err) {

@@ -4,6 +4,7 @@ import { stripe } from '@/lib/stripe'
 import { db } from '@/lib/db'
 import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { handleApiError } from '@/lib/api-error'
+import { logger } from '@/lib/logger'
 import type Stripe from 'stripe'
 
 // POST /api/webhooks/stripe
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
           )
         })
       }
-      console.log(`[Stripe Webhook] payment_intent.succeeded → ${pi.id}`)
+      logger.info('[Stripe Webhook] payment_intent.succeeded', { piId: pi.id })
 
     } else if (event.type === 'payment_intent.payment_failed') {
       const pi = event.data.object as Stripe.PaymentIntent
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
         where: { stripePaymentIntentId: pi.id },
         data: { status: 'CANCELLED', cancelledBy: 'system', cancellationReason: 'Payment failed' },
       })
-      console.log(`[Stripe Webhook] payment_intent.payment_failed → ${pi.id}`)
+      logger.warn('[Stripe Webhook] payment_intent.payment_failed', { piId: pi.id })
 
     } else if (event.type === 'transfer.created') {
       // Record per-transaction payout in our Payout table
@@ -110,7 +111,7 @@ export async function POST(req: Request) {
           update: {},
         })
       }
-      console.log(`[Stripe Webhook] transfer.created → ${transfer.id}`)
+      logger.info('[Stripe Webhook] transfer.created', { transferId: transfer.id })
 
     } else {
       // transfer.paid and other non-typed events
@@ -121,7 +122,7 @@ export async function POST(req: Request) {
           data: { stripeStatus: 'paid', processedAt: new Date() },
         })
       }
-      console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`)
+      logger.debug('[Stripe Webhook] unhandled event', { type: event.type })
     }
 
     return Response.json({ received: true })

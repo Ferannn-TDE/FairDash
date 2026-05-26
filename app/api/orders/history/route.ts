@@ -4,6 +4,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import type { OrderDTO } from '@/types/order-dto'
+import { logger } from '@/lib/logger'
 
 // GET /api/orders/history
 // Paginated order history with compound cursor (placedAt + id) and date filters.
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
       ).toString('base64')
     }
 
-    console.log(`[orders/history] query ${Date.now() - t0}ms, returned ${dtos.length}`)
+    logger.debug('[orders/history] served', { durationMs: Date.now() - t0, rowCount: dtos.length })
 
     return success({ orders: dtos, nextCursor })
   } catch (err) {

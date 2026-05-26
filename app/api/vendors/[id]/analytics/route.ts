@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
+import { logger } from '@/lib/logger'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 
@@ -132,13 +133,11 @@ export async function GET(
       getCachedSummary(id, startDate, endDate),
     ])
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Analytics]', {
-        vendorId: id,
-        range: range ?? '30d',
-        durationMs: Math.round(performance.now() - start),
-      })
-    }
+    logger.debug('[Analytics] served', {
+      vendorId: id,
+      range: range ?? '30d',
+      durationMs: Math.round(performance.now() - start),
+    })
 
     // ── Derived totals from SQL results ──────────────────────────────────────
     const totalRevenue = parseFloat((summary._sum.totalPrice ?? 0).toFixed(2))

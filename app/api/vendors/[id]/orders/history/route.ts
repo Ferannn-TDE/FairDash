@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { logger } from '@/lib/logger'
 
 // Terminal VendorOrderStatus values + master order CANCELLED
 const TERMINAL_VENDOR_STATUSES = ['COMPLETED', 'DECLINED']
@@ -85,12 +86,10 @@ export async function GET(
 
     const nextCursor = orders.length === take ? orders[orders.length - 1].id : null
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[vendor/orders/history]', {
-        durationMs: Math.round(performance.now() - start),
-        rowCount: result.length,
-      })
-    }
+    logger.debug('[vendor/orders/history] served', {
+      durationMs: Math.round(performance.now() - start),
+      rowCount: result.length,
+    })
 
     return success({ orders: result, nextCursor })
   } catch (err) {
