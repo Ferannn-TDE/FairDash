@@ -64,7 +64,7 @@ export default function VendorsLoading() {
               <SkeletonBlock className="h-8 w-36" />
               <SkeletonLine className="h-3.5 w-16" />
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(16.25rem,1fr))] gap-3 sm:gap-6 animate-pulse">
+            <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3 sm:gap-5 animate-pulse">
               {Array.from({ length: 6 }).map((_, i) => (
                 <SkeletonVendorCard key={i} />
               ))}

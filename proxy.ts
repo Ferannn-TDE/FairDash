@@ -31,7 +31,7 @@ const clerkHandler = clerkMiddleware(async (auth, req) => {
   }
 })
 
-export default function middleware(request: NextRequest, event: NextFetchEvent) {
+export default function proxy(request: NextRequest, event: NextFetchEvent) {
   if (!process.env.CLERK_SECRET_KEY) {
     return NextResponse.next()
   }

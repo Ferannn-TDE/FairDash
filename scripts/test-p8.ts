@@ -49,7 +49,8 @@ async function main() {
     fail('logger.debug missing isDev guard')
 
   // warn has no isDev guard (always logs)
-  const warnBlock = loggerSrc.match(/warn:\s*\([^)]*\)\s*=>\s*\{([^}]*)\}/s)?.[1] ?? ''
+  const warnIdx = loggerSrc.indexOf('warn:')
+  const warnBlock = warnIdx >= 0 ? loggerSrc.slice(warnIdx, loggerSrc.indexOf('},', warnIdx)) : ''
   if (!warnBlock.includes('isDev'))
     pass('logger.warn always logs (no isDev guard)')
   else

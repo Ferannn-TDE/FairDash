@@ -12,10 +12,11 @@ export default function FairLoading() {
           {/* Tagline */}
           <div className="h-4 w-48 bg-white/8 rounded" />
           {/* Meta pills */}
-          <div className="flex gap-3 pt-1">
+          <div className="flex flex-wrap gap-2 sm:gap-3 pt-1">
             <div className="h-4 w-20 bg-white/8 rounded" />
             <div className="h-4 w-24 bg-white/8 rounded" />
             <div className="h-4 w-16 bg-white/8 rounded" />
+            <div className="h-4 w-20 bg-white/8 rounded" />
           </div>
         </div>
       </div>
@@ -36,7 +37,7 @@ export default function FairLoading() {
         </div>
 
         {/* Vendor cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-10 sm:mb-14">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="bg-bg-card border border-white/5 rounded-2xl overflow-hidden animate-pulse">
               <div className="aspect-[4/3] bg-white/8" />
@@ -47,6 +48,16 @@ export default function FairLoading() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* About section */}
+        <div className="animate-pulse">
+          <div className="h-5 w-36 bg-white/10 rounded mb-2" />
+          <div className="space-y-1.5">
+            <div className="h-3 bg-white/5 rounded w-full" />
+            <div className="h-3 bg-white/5 rounded w-5/6" />
+            <div className="h-3 bg-white/5 rounded w-3/4" />
+          </div>
         </div>
       </div>
     </div>
