@@ -598,6 +598,7 @@ async function handleRefund(job: Job<JobData>) {
     stripeChargeId,
     refundReason,
     refundIdempotencyKey,
+    refundAmountCents,
   } = job.data
 
   if (!orderId || !stripePaymentIntentId || !refundIdempotencyKey) {
@@ -607,9 +608,12 @@ async function handleRefund(job: Job<JobData>) {
 
   console.log(`[Worker] process-refund → order ${orderId}`)
 
-  const refundParams = stripeChargeId
+  const baseParams = stripeChargeId
     ? { charge: stripeChargeId, metadata: { orderId, reason: refundReason ?? 'cancelled' } }
     : { payment_intent: stripePaymentIntentId, metadata: { orderId, reason: refundReason ?? 'cancelled' } }
+  const refundParams = refundAmountCents
+    ? { ...baseParams, amount: refundAmountCents }
+    : baseParams
 
   const refund = await stripe.refunds.create(
     refundParams,
