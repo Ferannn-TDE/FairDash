@@ -24,8 +24,7 @@ import express, { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
 import { Webhook } from 'svix'
 import Stripe from 'stripe'
-import { Worker, ConnectionOptions } from 'bullmq'
-import { PrismaClient, OrderStatus } from '@prisma/client'
+import { PrismaClient } from '@prisma/client'
 import admin from 'firebase-admin'
 
 // ─── Environment ──────────────────────────────────────────────────────────────
@@ -66,90 +65,6 @@ if (!admin.apps.length) {
   } else {
     console.warn('[Firebase Admin] Missing credentials — realtime features disabled')
   }
-}
-
-// ─── BullMQ Worker ────────────────────────────────────────────────────────────
-
-const ORDER_QUEUE_NAME = 'fairsynq-orders'
-const JOB_UNCOLLECTED = 'mark-uncollected'
-const JOB_UNDELIVERABLE = 'mark-undeliverable'
-
-function startOrderWorker() {
-  const redisUrl = process.env.REDIS_URL
-  if (!redisUrl) {
-    console.warn('[Worker] REDIS_URL not set — order timeout worker disabled')
-    return null
-  }
-
-  let connection: ConnectionOptions
-  try {
-    const parsed = new URL(redisUrl)
-    connection = {
-      host: parsed.hostname,
-      port: parseInt(parsed.port || '6379', 10),
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      ...(parsed.password ? { password: decodeURIComponent(parsed.password) } : {}),
-      ...(parsed.username && parsed.username !== 'default'
-        ? { username: decodeURIComponent(parsed.username) }
-        : {}),
-      ...(parsed.protocol === 'rediss:' ? { tls: {} } : {}),
-    } as ConnectionOptions
-  } catch (err) {
-    console.error('[Worker] Failed to parse REDIS_URL:', err)
-    return null
-  }
-
-  const worker = new Worker(
-    ORDER_QUEUE_NAME,
-    async (job) => {
-      const { orderId, vendorId } = job.data as { orderId: string; vendorId: string }
-
-      if (job.name === JOB_UNCOLLECTED) {
-        const order = await prisma.order.findUnique({ where: { id: orderId } })
-        if (!order || order.status !== OrderStatus.READY) return
-
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: OrderStatus.UNCOLLECTED, uncollectedAt: new Date() },
-        })
-
-        // Update Firebase RTDB so vendor dashboard reflects the change
-        if (admin.apps.length) {
-          await admin
-            .database()
-            .ref(`orders/${vendorId}/${orderId}/status`)
-            .set('UNCOLLECTED')
-            .catch((err) => console.error('[Worker] Firebase update failed:', err))
-        }
-
-        console.log(`[Worker] ${JOB_UNCOLLECTED} → order ${orderId} marked UNCOLLECTED`)
-
-      } else if (job.name === JOB_UNDELIVERABLE) {
-        const order = await prisma.order.findUnique({ where: { id: orderId } })
-        if (!order || order.status !== OrderStatus.READY) return
-
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: 'UNDELIVERABLE' as OrderStatus },
-        })
-
-        console.log(`[Worker] ${JOB_UNDELIVERABLE} → order ${orderId} marked UNDELIVERABLE`)
-      }
-    },
-    { connection, concurrency: 5 }
-  )
-
-  worker.on('completed', (job) => {
-    console.log(`[Worker] Job ${job.id} (${job.name}) completed`)
-  })
-
-  worker.on('failed', (job, err) => {
-    console.error(`[Worker] Job ${job?.id} (${job?.name}) failed:`, err.message)
-  })
-
-  console.log('[Worker] Order worker started — listening on queue:', ORDER_QUEUE_NAME)
-  return worker
 }
 
 // ─── Express App ─────────────────────────────────────────────────────────────
@@ -379,9 +294,6 @@ async function main() {
     console.error('[Server] Database connection failed:', err)
     process.exit(1)
   }
-
-  // Start background worker
-  startOrderWorker()
 
   // Start HTTP server
   app.listen(PORT, () => {

@@ -8,8 +8,8 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint . --ext js,jsx,ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "start:api": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' server.ts",
-    "worker": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' workers/order-worker.ts",
+    "server": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' server.ts",
+    "worker": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' workers/index.ts",
     "test:c1": "tsx scripts/test-c1.ts"
   },
   "dependencies": {
