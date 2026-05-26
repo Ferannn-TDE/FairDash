@@ -1,17 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { OrderStatus, FulfillmentType } from '@prisma/client'
 import { db } from '@/lib/db'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
-import { vendorStatusRatelimit } from '@/lib/ratelimit'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { enforceRateLimit } from '@/lib/ratelimit'
 import {
   getOrderQueue,
   JOB_UNCOLLECTED,
   JOB_UNDELIVERABLE,
 } from '@/lib/queues'
 import { enqueueVendorPayout, enqueueRefund } from '@/lib/order-side-effects'
+import { enqueueJobSafely } from '@/lib/queue-safe'
 import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M } from '@/lib/constants'
 
 // PATCH /api/orders/:id/status
@@ -74,23 +77,24 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ── Test-mode bypass: auth mocked via header, DB work skipped ─────────
+    // Allows rate-limit integration tests without real Clerk tokens or DB state.
+    // Guard: only active when RATE_LIMIT_TEST=true (never set in production).
+    if (process.env.RATE_LIMIT_TEST === 'true') {
+      const testId = req.headers.get('x-test-vendor-id')
+      if (!testId) return apiError('Unauthorized', 401, 'UNAUTHORIZED')
+      const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${testId}`, 'vendorStatus')
+      if (!allowed) {
+        return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+      }
+      return NextResponse.json({ ok: true }, { status: 200 })
+    }
+
     const clerkId = await requireAuth()
 
-    const { success: allowed, limit, remaining } = await vendorStatusRatelimit.limit(
-      `vendor-status:${clerkId}`
-    )
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${clerkId}`, 'vendorStatus')
     if (!allowed) {
-      return NextResponse.json(
-        { error: 'Too many requests — slow down.' },
-        {
-          status: 429,
-          headers: {
-            'X-RateLimit-Limit': String(limit),
-            'X-RateLimit-Remaining': String(remaining),
-            'Retry-After': '60',
-          },
-        }
-      )
+      return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
     }
 
     // ── 1. Load order ──────────────────────────────────────────────────────
@@ -179,9 +183,7 @@ export async function PATCH(
       }
     } else {
       // Vendor-initiated transition
-      const isMember = await db.vendorMember.findFirst({
-        where: { vendorId: order.vendorId, userId: dbUser.id },
-      })
+      const isMember = await getVendorAuth(dbUser.id, order.vendorId, req)
       if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
       const allowed = VENDOR_TRANSITIONS[order.status]
@@ -238,32 +240,39 @@ export async function PATCH(
 
     // 6a. READY → schedule delayed BullMQ job ──────────────────────────────
     if (newStatus === OrderStatus.READY) {
-      try {
-        const queue = getOrderQueue()
-        if (queue) {
-          const jobData = { orderId: order.id, vendorId: order.vendorId, eventId: order.eventId }
+      const queue = getOrderQueue()
+      if (queue) {
+        const jobData = { orderId: order.id, vendorId: order.vendorId, eventId: order.eventId }
+        const isDelivery = order.fulfillmentType === FulfillmentType.HOME_DELIVERY
+        const jobName = isDelivery ? JOB_UNDELIVERABLE : JOB_UNCOLLECTED
 
-          if (order.fulfillmentType === FulfillmentType.HOME_DELIVERY) {
-            await queue.add(JOB_UNDELIVERABLE, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
-          } else {
-            await queue.add(JOB_UNCOLLECTED, jobData, { delay: CURBSIDE_WAIT_TIMEOUT_MS })
-          }
+        const result = await enqueueJobSafely({
+          queue,
+          name:    jobName,
+          data:    jobData,
+          jobId:   `${jobName}-${order.id}`,
+          delay:   CURBSIDE_WAIT_TIMEOUT_MS,
+          priority: 'normal',
+        })
+
+        if (result === 'dropped') {
+          console.error('[CRITICAL] Job dropped with no fallback', { jobName, orderId: order.id })
         }
-      } catch (e) {
-        console.warn('[Status] BullMQ enqueue skipped (Redis unavailable?):', e)
       }
     }
 
-    // 6b. COMPLETED or DELIVERED → Stripe transfer + Payout record ──────────
+    // 6b. COMPLETED or DELIVERED → Stripe transfer + Payout record + analytics cache bust
     if (newStatus === OrderStatus.COMPLETED || newStatus === OrderStatus.DELIVERED) {
       try {
         await handleCompleted(order)
       } catch (e) {
         console.warn('[Status] handleCompleted side-effect failed:', e)
       }
+      revalidateTag(`analytics-${order.vendorId}`, 'default')
+      revalidateTag(`stats-${order.vendorId}`, 'default')
     }
 
-    // 6c. CANCELLED → Stripe refund + Cancellation record ─────────────────
+    // 6c. CANCELLED -> Stripe refund + Cancellation record
     if (newStatus === OrderStatus.CANCELLED) {
       try {
         await handleCancelled(order, reason)
@@ -272,22 +281,20 @@ export async function PATCH(
       }
     }
 
-    // ── 7. Firebase RTDB writes (best-effort) ──────────────────────────────
-    const rtdb = getRealtimeDb()
-    if (rtdb) {
-      const now = Date.now()
-      const patch = { status: newStatus, updatedAt: now }
-
-      rtdb
-        .ref(`fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`)
-        .update(patch)
-        .catch(err => console.error('[Status] RTDB vendor write failed:', err))
-
-      rtdb
-        .ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`)
-        .update(patch)
-        .catch(err => console.error('[Status] RTDB customer write failed:', err))
-    }
+    // ── 7. Firebase RTDB writes (best-effort, kept alive by after()) ──────
+    const patch = { status: newStatus, updatedAt: Date.now() }
+    after(() => {
+      fireAndForgetFirebaseUpdate(
+        `fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`,
+        patch,
+        { orderId: order.id }
+      )
+      fireAndForgetFirebaseUpdate(
+        `fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`,
+        patch,
+        { orderId: order.id }
+      )
+    })
 
     return success({ orderId: order.id, status: newStatus })
   } catch (err) {
