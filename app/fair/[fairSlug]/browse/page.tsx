@@ -211,7 +211,7 @@ export default function BrowsePage() {
           >
             <ShoppingBagIcon className="w-4 h-4" />
             <span>
-              View Cart · {itemCount} {itemCount === 1 ? 'item' : 'items'} · ${subtotal.toFixed(2)}
+              View Cart · {itemCount} {itemCount === 1 ? 'item' : 'items'} · ${(subtotal ?? 0).toFixed(2)}
             </span>
           </button>
         </div>

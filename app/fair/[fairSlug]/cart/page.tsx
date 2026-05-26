@@ -58,7 +58,7 @@ export default function FairCartPage() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-medium text-sm sm:text-base truncate">{item.name}</p>
-                      <p className="text-text-gray text-xs sm:text-sm tabular-nums">${item.price.toFixed(2)} each</p>
+                      <p className="text-text-gray text-xs sm:text-sm tabular-nums">${(item.price ?? 0).toFixed(2)} each</p>
                     </div>
 
                     {/* Qty controls */}
@@ -104,7 +104,7 @@ export default function FairCartPage() {
             <h2 className="font-bebas text-xl text-white tracking-wide mb-4">Order Summary</h2>
             <div className="flex justify-between text-sm mb-2">
               <span className="text-text-gray">Subtotal</span>
-              <span className="text-white tabular-nums">${subtotal.toFixed(2)}</span>
+              <span className="text-white tabular-nums">${(subtotal ?? 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm mb-4 pb-4 border-b border-white/10">
               <span className="text-text-gray">Service charge</span>
@@ -112,7 +112,7 @@ export default function FairCartPage() {
             </div>
             <div className="flex justify-between font-semibold mb-5">
               <span className="text-white">Total</span>
-              <span className="text-white tabular-nums">${subtotal.toFixed(2)}+</span>
+              <span className="text-white tabular-nums">${(subtotal ?? 0).toFixed(2)}+</span>
             </div>
             <button
               onClick={handleCheckout}

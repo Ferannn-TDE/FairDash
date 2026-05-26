@@ -245,30 +245,31 @@ export default function VendorRootPage() {
   const [loading, setLoading] = useState(true)
   const [fairs, setFairs] = useState<VendorFair[]>([])
   const [applicationStatus, setApplicationStatus] = useState<string>('none')
+  const [redirectSlug, setRedirectSlug] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/vendor/fairs')
       .then(r => r.json())
       .then(json => {
         if (json.success) {
-          setFairs(json.data.fairs)
+          const fairList: VendorFair[] = json.data.fairs
+          setFairs(fairList)
           setApplicationStatus(json.data.applicationStatus)
+          const activeFairs = fairList.filter(f => f.fairStatus === 'ACTIVE')
+          if (activeFairs.length === 1) setRedirectSlug(activeFairs[0].fairSlug)
         }
       })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <Spinner />
+  useEffect(() => {
+    if (redirectSlug) router.replace(`/vendor/${redirectSlug}/dashboard`)
+  }, [redirectSlug, router])
+
+  if (loading || redirectSlug) return <Spinner />
   if (applicationStatus === 'pending')  return <ApplicationPending />
   if (applicationStatus === 'rejected') return <ApplicationRejected />
-
-  // If only one active fair, jump straight to its dashboard
-  const activeFairs = fairs.filter(f => f.fairStatus === 'ACTIVE')
-  if (activeFairs.length === 1) {
-    router.replace(`/vendor/${activeFairs[0].fairSlug}/dashboard`)
-    return <Spinner />
-  }
 
   return <FairSelectionPage fairs={fairs} />
 }

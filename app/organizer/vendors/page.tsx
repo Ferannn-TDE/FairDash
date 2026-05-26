@@ -103,7 +103,7 @@ export default function OrganizerVendorsPage() {
                   {vendor.boothNumber && ` · Booth ${vendor.boothNumber}`}
                 </p>
                 <p className="text-white/25 text-xs font-inter mt-0.5">
-                  {vendor.orderCount} orders · ${vendor.revenue.toFixed(0)} revenue
+                  {vendor.orderCount} orders · ${(vendor.revenue ?? 0).toFixed(0)} revenue
                 </p>
               </div>
 

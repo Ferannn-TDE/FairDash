@@ -369,7 +369,7 @@ export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMulti
                   </div>
                   <div className="flex-shrink-0 text-right">
                     <p className="text-[#A1A1A1] text-xs">×{item.quantity}</p>
-                    <p className="text-white text-sm font-medium">${item.subtotal.toFixed(2)}</p>
+                    <p className="text-white text-sm font-medium">${(item.subtotal ?? 0).toFixed(2)}</p>
                   </div>
                 </div>
               ))}
@@ -379,7 +379,7 @@ export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMulti
                 <span className="text-[#A1A1A1] text-xs">
                   {group.items.length} item{group.items.length !== 1 ? 's' : ''} · vendor subtotal
                 </span>
-                <span className="text-white text-sm font-medium">${group.subtotal.toFixed(2)}</span>
+                <span className="text-white text-sm font-medium">${(group.subtotal ?? 0).toFixed(2)}</span>
               </div>
             )}
           </div>
@@ -392,7 +392,7 @@ export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMulti
         )}
         <div className="flex justify-between text-sm">
           <span className="text-[#A1A1A1]">Subtotal</span>
-          <span className="text-white">${order.subtotal.toFixed(2)}</span>
+          <span className="text-white">${(order.subtotal ?? 0).toFixed(2)}</span>
         </div>
         {(order.deliveryFee ?? 0) > 0 && (
           <div className="flex justify-between text-sm">
@@ -409,7 +409,7 @@ export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMulti
         {order.fairSynqFee > 0 && (
           <div className="flex justify-between text-sm">
             <span className="text-[#A1A1A1]">Platform Fee</span>
-            <span className="text-white/60">${order.fairSynqFee.toFixed(2)}</span>
+            <span className="text-white/60">${(order.fairSynqFee ?? 0).toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-1">
@@ -668,7 +668,7 @@ export function SupportModal({ isOpen, onClose, order, vendors }: {
     : order.vendor.name
   const subject = encodeURIComponent(`Order #${shortId} — Support Request`)
   const body = encodeURIComponent(
-    `Hi FairSynq Support,\n\nI need help with Order #${shortId}.\n\nOrder ID: ${order.id}\nVendor(s): ${vendorNames}\nStatus: ${order.status}\nTotal: $${order.total.toFixed(2)}\n\nDescription of issue:\n`
+    `Hi FairSynq Support,\n\nI need help with Order #${shortId}.\n\nOrder ID: ${order.id}\nVendor(s): ${vendorNames}\nStatus: ${order.status}\nTotal: $${(order.total ?? 0).toFixed(2)}\n\nDescription of issue:\n`
   )
 
   return (
@@ -721,7 +721,7 @@ export function SupportModal({ isOpen, onClose, order, vendors }: {
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#A1A1A1]">Total</span>
-            <span className="text-[#FF0077] font-semibold">${order.total.toFixed(2)}</span>
+            <span className="text-[#FF0077] font-semibold">${(order.total ?? 0).toFixed(2)}</span>
           </div>
         </div>
         <p className="text-[#A1A1A1] text-xs leading-relaxed mb-4">

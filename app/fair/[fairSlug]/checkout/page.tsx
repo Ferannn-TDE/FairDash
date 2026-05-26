@@ -159,29 +159,29 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-[#A1A1A1]">Subtotal</span>
-            <span className="text-white">${summary.subtotal.toFixed(2)}</span>
+            <span className="text-white">${(summary.subtotal ?? 0).toFixed(2)}</span>
           </div>
           {summary.deliveryFee != null && summary.deliveryFee > 0 && (
             <div className="flex justify-between">
               <span className="text-[#A1A1A1]">Delivery Fee</span>
-              <span className="text-white">${summary.deliveryFee.toFixed(2)}</span>
+              <span className="text-white">${(summary.deliveryFee ?? 0).toFixed(2)}</span>
             </div>
           )}
           {summary.serviceCharge != null && summary.serviceCharge > 0 && (
             <div className="flex justify-between">
               <span className="text-[#A1A1A1]">Event service charge</span>
-              <span className="text-white">${summary.serviceCharge.toFixed(2)}</span>
+              <span className="text-white">${(summary.serviceCharge ?? 0).toFixed(2)}</span>
             </div>
           )}
           {summary.fairSynqFee > 0 && (
             <div className="flex justify-between">
               <span className="text-[#A1A1A1]">Platform Fee</span>
-              <span className="text-white">${summary.fairSynqFee.toFixed(2)}</span>
+              <span className="text-white">${(summary.fairSynqFee ?? 0).toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between pt-3 border-t border-white/10">
             <span className="text-white font-bold">Total</span>
-            <span className="text-[#FF0077] font-bold text-xl">${total.toFixed(2)}</span>
+            <span className="text-[#FF0077] font-bold text-xl">${(total ?? 0).toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -205,7 +205,7 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
               Processing…
             </>
           ) : (
-            `Pay $${total.toFixed(2)}`
+            `Pay $${(total ?? 0).toFixed(2)}`
           )}
         </button>
       </div>
@@ -497,7 +497,7 @@ export default function CheckoutPage() {
                                 <p className="text-white font-semibold text-sm">{opt.label}</p>
                                 <p className="text-[#A1A1A1] text-xs mt-0.5">
                                   {opt.value === 'HOME_DELIVERY'
-                                    ? `${opt.sub} — $${configDeliveryFee.toFixed(2)} fee`
+                                    ? `${opt.sub} — $${(configDeliveryFee ?? 0).toFixed(2)} fee`
                                     : opt.sub}
                                 </p>
                               </div>
@@ -654,7 +654,7 @@ export default function CheckoutPage() {
                       <p className="text-white font-semibold text-sm truncate">{item.name}</p>
                       {item.vendorName && <p className="text-[#A1A1A1] text-xs">{item.vendorName}</p>}
                       <p className="text-[#FF0077] font-bold text-sm mt-0.5">
-                        {item.quantity} × ${item.price.toFixed(2)}
+                        {item.quantity} × ${(item.price ?? 0).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -684,7 +684,7 @@ export default function CheckoutPage() {
                 {serviceChargeAmount > 0 && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">Event service charge</span>
-                    <span className="text-white">${serviceChargeAmount.toFixed(2)}</span>
+                    <span className="text-white">${(serviceChargeAmount ?? 0).toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
@@ -702,7 +702,7 @@ export default function CheckoutPage() {
                 <span className="text-[#FF0077] font-bold text-xl">
                   ${orderSummary
                     ? (orderSummary.total + orderSummary.fairSynqFee).toFixed(2)
-                    : estimatedTotal.toFixed(2)}
+                    : (estimatedTotal ?? 0).toFixed(2)}
                 </span>
               </div>
             </div>

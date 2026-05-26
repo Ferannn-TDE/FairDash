@@ -43,7 +43,7 @@ export default function SizeSelectionModal({ item, isOpen, onClose, onSelectSize
               className="w-full p-4 bg-bg-dark border border-white/10 rounded-xl hover:border-neon-pink/30 hover:bg-white/5 active:scale-[0.97] transition-all duration-200 flex items-center justify-between cursor-pointer text-left"
             >
               <span className="text-white font-semibold">{size.name}</span>
-              <span className="text-neon-pink font-bold">${size.price.toFixed(2)}</span>
+              <span className="text-neon-pink font-bold">${(size.price ?? 0).toFixed(2)}</span>
             </button>
           ))}
         </div>

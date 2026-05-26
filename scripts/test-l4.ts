@@ -82,7 +82,7 @@ async function seedOrder(opts: {
   items:      SeedItem[]
 }): Promise<string> {
   const subtotal = opts.items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
-  const total    = parseFloat(subtotal.toFixed(2))
+  const total    = parseFloat((subtotal ?? 0).toFixed(2))
 
   const order = await db.order.create({
     data: {
@@ -539,9 +539,9 @@ async function test10_cacheInvalidatedOnCompletion() {
   const newRevenue = Number(after._sum.totalPrice ?? 0)
 
   if (newRevenue >= baseRevenue + 25.00)
-    pass(`revenue increased by ≥ $25 after completion (${baseRevenue.toFixed(2)} → ${newRevenue.toFixed(2)})`)
+    pass(`revenue increased by ≥ $25 after completion (${(baseRevenue ?? 0).toFixed(2)} → ${(newRevenue ?? 0).toFixed(2)})`)
   else
-    fail(`revenue before=${baseRevenue.toFixed(2)}, after=${newRevenue.toFixed(2)} — expected +$25`)
+    fail(`revenue before=${(baseRevenue ?? 0).toFixed(2)}, after=${(newRevenue ?? 0).toFixed(2)} — expected +$25`)
 
   // Verify status route imports revalidateTag with analytics- pattern
   const routePath = path.join(process.cwd(), 'app/api/orders/[id]/status/route.ts')

@@ -100,7 +100,7 @@ function FavoriteCard({ fav, onRequestDelete }: FavoriteCardProps) {
 
         <div className="flex items-center justify-between mt-2">
           <span className="text-neon-pink font-bold text-base">
-            ${menuItem.price.toFixed(2)}
+            ${(menuItem.price ?? 0).toFixed(2)}
           </span>
           {menuItem.prepTime && (
             <span className="flex items-center gap-1 text-white/30 text-xs">

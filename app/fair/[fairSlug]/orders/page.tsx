@@ -156,7 +156,7 @@ export default function FairOrdersPage() {
                     </div>
                     <p className="text-[#A1A1A1] text-xs truncate">{vendorSummary}</p>
                     <p className="text-[#A1A1A1] text-xs mt-0.5">
-                      {order.items.length} item{order.items.length !== 1 ? 's' : ''} · ${order.total.toFixed(2)} · {formatDate(order.placedAt)}
+                      {order.items.length} item{order.items.length !== 1 ? 's' : ''} · ${(order.total ?? 0).toFixed(2)} · {formatDate(order.placedAt)}
                     </p>
                   </div>
                   <span className="text-[#A1A1A1] group-hover:text-[#FF0077] transition-colors flex-shrink-0 text-lg">→</span>

@@ -382,9 +382,9 @@ async function test9_vendorStatusBenchmark() {
 
   const avg = totalMs / RUNS
   if (avg < 50) {
-    pass(`avg query time ${avg.toFixed(1)}ms < 50ms (${RUNS} runs)`)
+    pass(`avg query time ${(avg ?? 0).toFixed(1)}ms < 50ms (${RUNS} runs)`)
   } else {
-    fail(`avg query time ${avg.toFixed(1)}ms exceeded 50ms`)
+    fail(`avg query time ${(avg ?? 0).toFixed(1)}ms exceeded 50ms`)
   }
 }
 

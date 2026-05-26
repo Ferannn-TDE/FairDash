@@ -151,7 +151,7 @@ function ItemRow({ item, onToggle, onEdit, onDelete }: {
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-neon-pink font-semibold text-xs">${item.price.toFixed(2)}</span>
+          <span className="text-neon-pink font-semibold text-xs">${(item.price ?? 0).toFixed(2)}</span>
           {item.prepTime && (
             <span className="flex items-center gap-0.5 text-text-gray text-[0.6rem]">
               <ClockIcon className="w-2.5 h-2.5" />{item.prepTime}m

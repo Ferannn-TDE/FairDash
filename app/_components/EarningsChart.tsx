@@ -23,7 +23,7 @@ function RevenueTooltip({ active, payload, label }: RevenueTooltipProps) {
   return (
     <div className="bg-[#111] border border-white/10 rounded-xl px-3 py-2 shadow-2xl">
       <p className="text-text-gray text-[10px] uppercase tracking-wide font-semibold mb-0.5">{label}</p>
-      <p className="text-white font-semibold text-sm">${payload[0].value.toFixed(2)}</p>
+      <p className="text-white font-semibold text-sm">\${(payload[0].value ?? 0).toFixed(2)}</p>
     </div>
   )
 }

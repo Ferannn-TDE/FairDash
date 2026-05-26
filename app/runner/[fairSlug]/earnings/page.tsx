@@ -51,14 +51,14 @@ export default function RunnerEarningsPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           label="Earned Today"
-          value={`$${stats.earningsToday.toFixed(2)}`}
+          value={`$${(stats.earningsToday ?? 0).toFixed(2)}`}
           sub={`${stats.deliveriesToday} deliveries`}
           icon={DollarSign}
           color="text-emerald-400"
         />
         <StatCard
           label="Tips Today"
-          value={`$${totalTips.toFixed(2)}`}
+          value={`$${(totalTips ?? 0).toFixed(2)}`}
           sub={`avg $${(totalTips / recent.length).toFixed(2)}/delivery`}
           icon={TrendingUp}
           color="text-neon-pink"
@@ -72,7 +72,7 @@ export default function RunnerEarningsPage() {
         />
         <StatCard
           label="This Week"
-          value={`$${weekTotal.toFixed(2)}`}
+          value={`$${(weekTotal ?? 0).toFixed(2)}`}
           sub={`${weekly.reduce((s, d) => s + d.deliveries, 0)} deliveries`}
           icon={DollarSign}
           color="text-amber-400"
@@ -150,10 +150,10 @@ export default function RunnerEarningsPage() {
               <div className="text-right shrink-0 space-y-0.5">
                 <p className="text-white text-sm font-semibold">${(entry.basePay + entry.tip).toFixed(2)}</p>
                 <div className="flex items-center gap-1 justify-end">
-                  <span className="text-text-gray text-[0.625rem]">${entry.basePay.toFixed(2)}</span>
+                  <span className="text-text-gray text-[0.625rem]">${(entry.basePay ?? 0).toFixed(2)}</span>
                   {entry.tip > 0 && (
                     <span className="text-emerald-400 text-[0.625rem] bg-emerald-500/10 rounded-full px-1.5 py-0.5">
-                      +${entry.tip.toFixed(2)} tip
+                      +${(entry.tip ?? 0).toFixed(2)} tip
                     </span>
                   )}
                 </div>

@@ -164,13 +164,13 @@ export default function FoodCard(props: FoodCardProps) {
                     : 'bg-white/[0.04] text-gray-400 hover:bg-white/[0.08]'}`}
                 style={(selectedVariantId ?? variants[0]?.id) === v.id ? { background: accentColor } : {}}
               >
-                {v.label} · ${v.price.toFixed(2)}
+                {v.label} · ${(v.price ?? 0).toFixed(2)}
               </button>
             ))}
           </div>
         ) : (
           <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
-            ${displayPrice.toFixed(2)}
+            ${(displayPrice ?? 0).toFixed(2)}
           </p>
         )}
 
