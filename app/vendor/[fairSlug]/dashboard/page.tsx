@@ -161,7 +161,7 @@ function IncomingCard({ order, onAccept, onDecline, accepting }: {
       <p className="text-white/80 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
       {detail && <p className="text-text-gray text-[0.65rem] mb-2.5">{detail}</p>}
       <div className="flex items-center justify-between mt-2.5">
-        <span className="font-bold text-neon-pink text-sm">${order.total.toFixed(2)}</span>
+        <span className="font-bold text-neon-pink text-sm">${(order.total ?? 0).toFixed(2)}</span>
         <div className="flex gap-1.5">
           <button
             onClick={() => onDecline(order)}
@@ -209,7 +209,7 @@ function ActiveCard({ order, onStartPreparing, onMarkReady }: {
       <p className="text-white/70 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
       {detail && <p className="text-text-gray text-[0.65rem] mb-2">{detail}</p>}
       <div className="flex items-center justify-between mt-2.5">
-        <span className="text-neon-pink font-bold text-sm">${order.total.toFixed(2)}</span>
+        <span className="text-neon-pink font-bold text-sm">${(order.total ?? 0).toFixed(2)}</span>
         {isAccepted ? (
           <button
             onClick={() => onStartPreparing(order)}
@@ -320,8 +320,8 @@ export default function VendorDashboardPage() {
         setCompleted(orders.filter(o => BUCKET[o.status] === 'completed'))
 
         if (analyticsJson.success) {
-          setTodayOrders(analyticsJson.data.todayOrders)
-          setTodayRevenue(analyticsJson.data.todayRevenue)
+          setTodayOrders(analyticsJson.data.totalOrders ?? analyticsJson.data.todayOrders ?? 0)
+          setTodayRevenue(analyticsJson.data.totalRevenue ?? analyticsJson.data.todayRevenue ?? 0)
         }
       })
       .catch(() => {/* keep empty state */})
@@ -493,7 +493,7 @@ export default function VendorDashboardPage() {
 
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Orders Today" value={loading ? '…' : todayOrders} color="blue" />
-          <StatCard label="Revenue"      value={loading ? '…' : `$${todayRevenue.toFixed(0)}`} color="pink" />
+          <StatCard label="Revenue"      value={loading ? '…' : `$${(todayRevenue ?? 0).toFixed(0)}`} color="pink" />
           <StatCard label="In Queue"     value={loading ? '…' : incoming.length + active.length + ready.length} color="amber" />
         </div>
       </div>
@@ -601,7 +601,7 @@ export default function VendorDashboardPage() {
                           <p className="text-text-gray text-[0.6rem] mt-0.5 truncate max-w-[120px]">{fmtItems(order)}</p>
                         </div>
                         <span className={`font-bold text-xs ${order.status === 'CANCELLED' ? 'text-red-400' : 'text-emerald-400'}`}>
-                          {order.status === 'CANCELLED' ? 'Cancelled' : `$${order.total.toFixed(2)}`}
+                          {order.status === 'CANCELLED' ? 'Cancelled' : `$${(order.total ?? 0).toFixed(2)}`}
                         </span>
                       </div>
                     ))}
