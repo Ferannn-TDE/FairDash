@@ -107,7 +107,8 @@ export async function PATCH(
     // Invalidate analytics cache when this vendor's portion completes
     if (newStatus === 'COMPLETED') {
       revalidateTag(`analytics-${vendorId}`, 'default')
-      revalidateTag(`stats-${vendorId}`, 'default')
+      revalidateTag(`stats-${vendorId}`,     'default')
+      revalidateTag(`revenue-${vendorId}`,   'default')
     }
 
     // Check aggregate state across all vendors to decide master order update
@@ -163,7 +164,8 @@ export async function PATCH(
       // Some completed, some declined — master order done
       await db.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: new Date() } })
       revalidateTag(`analytics-${vendorId}`, 'default')
-      revalidateTag(`stats-${vendorId}`, 'default')
+      revalidateTag(`stats-${vendorId}`,     'default')
+      revalidateTag(`revenue-${vendorId}`,   'default')
 
       after(() =>
         fireAndForgetFirebaseUpdate(
