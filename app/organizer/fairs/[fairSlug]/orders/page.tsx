@@ -139,7 +139,7 @@ export default function FairOrdersPage() {
                   </div>
                   <p className="text-xs text-[#666] font-inter mt-0.5">{order.customerName} · {timeAgo(order.placedAt)}</p>
                 </div>
-                <p className="text-sm font-semibold text-white tabular-nums">${order.total.toFixed(2)}</p>
+                <p className="text-sm font-semibold text-white tabular-nums">${(order.total ?? 0).toFixed(2)}</p>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {order.items.map(item => (

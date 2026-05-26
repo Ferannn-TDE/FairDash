@@ -125,7 +125,7 @@ export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFav
         <p className="mt-0.5 text-[0.6rem] text-text-gray">{group.vendorName}</p>
 
         <p className="mt-1 text-sm font-bold tabular-nums" style={{ color: accentColor }}>
-          ${selected.price.toFixed(2)}
+          ${(selected.price ?? 0).toFixed(2)}
         </p>
 
         {group.description && (

@@ -16,9 +16,7 @@ interface AnalyticsData {
   totalOrders: number
   avgOrderValue: number
   completionRate: number
-  todayRevenue: number
-  todayOrders: number
-  pendingOrders: number
+  totalItemsSold: number
 }
 
 function StatCard({
@@ -115,14 +113,14 @@ export default function VendorAnalyticsPage() {
         />
         <StatCard
           label="Today's Orders"
-          value={analytics?.todayOrders ?? '—'}
+          value={analytics?.totalOrders ?? '—'}
           icon={ShoppingBagIcon}
           accentColor="blue"
           loading={loading}
         />
         <StatCard
           label="Avg Order Value"
-          value={analytics ? `$${analytics.avgOrderValue.toFixed(2)}` : '—'}
+          value={analytics ? `$${(analytics.avgOrderValue ?? 0).toFixed(2)}` : '—'}
           icon={BanknotesIcon}
           accentColor="emerald"
           loading={loading}
@@ -142,9 +140,9 @@ export default function VendorAnalyticsPage() {
           <h3 className="font-bebas text-xl tracking-wide text-white mb-5">Today&apos;s Snapshot</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { label: "Today's Revenue", value: `$${analytics.todayRevenue.toFixed(2)}`, note: 'Excludes platform fees' },
-              { label: "Today's Orders",  value: String(analytics.todayOrders) },
-              { label: 'Pending Orders',  value: String(analytics.pendingOrders) },
+              { label: "Period Revenue", value: `$${(analytics.totalRevenue ?? 0).toFixed(2)}`, note: 'Excludes platform fees' },
+              { label: 'Total Orders',  value: String(analytics.totalOrders ?? 0) },
+              { label: 'Items Sold',    value: String(analytics.totalItemsSold ?? 0) },
               { label: 'Completion Rate', value: completionRate },
             ].map(({ label, value, note }) => (
               <div key={label}>

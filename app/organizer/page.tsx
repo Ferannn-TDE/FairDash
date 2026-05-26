@@ -212,7 +212,7 @@ export default function OrganizerDashboard() {
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-sm font-semibold text-white tabular-nums">${order.total.toFixed(2)}</p>
+                  <p className="text-sm font-semibold text-white tabular-nums">${(order.total ?? 0).toFixed(2)}</p>
                   <p className="text-xs text-[#666] font-inter truncate max-w-[100px]">{order.vendorName}</p>
                 </div>
               </div>

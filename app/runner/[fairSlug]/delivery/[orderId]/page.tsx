@@ -177,11 +177,11 @@ export default function DeliveryPage() {
               <Package className="w-4 h-4 text-text-gray" />
               <span className="text-text-gray text-sm">
                 {order.vendorStops.reduce((s, v) => s + v.items.reduce((a, i) => a + i.quantity, 0), 0)} items ·{' '}
-                ${order.total.toFixed(2)}
+                ${(order.total ?? 0).toFixed(2)}
               </span>
             </div>
             <span className="text-emerald-400 text-sm font-semibold">
-              +${order.deliveryFee.toFixed(2)} fee
+              +${(order.deliveryFee ?? 0).toFixed(2)} fee
             </span>
           </div>
         </div>

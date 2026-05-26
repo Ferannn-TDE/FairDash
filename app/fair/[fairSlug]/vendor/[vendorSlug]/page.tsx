@@ -209,7 +209,7 @@ export default function VendorMenuPage() {
           >
             <ShoppingBagIcon className="w-4 h-4 shrink-0" />
             <span className="text-sm font-semibold">
-              View Cart · {itemCount} {itemCount === 1 ? 'item' : 'items'} · ${subtotal.toFixed(2)}
+              View Cart · {itemCount} {itemCount === 1 ? 'item' : 'items'} · ${(subtotal ?? 0).toFixed(2)}
             </span>
           </Link>
         </div>

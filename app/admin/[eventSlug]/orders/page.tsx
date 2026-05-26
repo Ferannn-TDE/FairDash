@@ -73,7 +73,7 @@ function OrderRow({ order }: { order: MockAdminOrder }) {
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="font-bold text-neon-pink text-sm">${order.total.toFixed(2)}</span>
+          <span className="font-bold text-neon-pink text-sm">${(order.total ?? 0).toFixed(2)}</span>
           {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
         </div>
       </button>

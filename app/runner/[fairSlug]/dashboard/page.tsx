@@ -70,7 +70,7 @@ function TodayStats() {
   const stats = mockRunnerStats
   const rows = [
     { icon: Truck,       iconColor: 'text-neon-pink',   bg: 'bg-neon-pink/10',    label: 'Deliveries', value: String(stats.deliveriesToday),         color: 'text-white' },
-    { icon: DollarSign,  iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10',  label: 'Earned',     value: `$${stats.earningsToday.toFixed(2)}`,   color: 'text-emerald-400' },
+    { icon: DollarSign,  iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10',  label: 'Earned',     value: `$${(stats.earningsToday ?? 0).toFixed(2)}`,   color: 'text-emerald-400' },
     { icon: CheckCircle, iconColor: 'text-blue-400',    bg: 'bg-blue-500/10',     label: 'Completion', value: `${Math.round(stats.completionRate * 100)}%`, color: 'text-white' },
   ]
 
@@ -124,7 +124,7 @@ function TipsToday() {
       <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-3">
         Tips Today
       </p>
-      <p className="text-2xl font-bebas text-emerald-400">${total.toFixed(2)}</p>
+      <p className="text-2xl font-bebas text-emerald-400">${(total ?? 0).toFixed(2)}</p>
       <p className="text-xs text-text-gray mt-1">
         From {tipped} of {recent.length} deliveries
       </p>
@@ -201,7 +201,7 @@ function DeliveryRequest({ fairSlug }: { fairSlug: string }) {
         <p className="text-text-gray text-sm">
           {request.vendorStops.length} vendor stop{request.vendorStops.length !== 1 ? 's' : ''} ·{' '}
           {request.vendorStops.reduce((s, v) => s + v.items.reduce((a, i) => a + i.quantity, 0), 0)} items ·{' '}
-          <span className="text-neon-pink font-semibold">${request.total.toFixed(2)}</span>
+          <span className="text-neon-pink font-semibold">${(request.total ?? 0).toFixed(2)}</span>
         </p>
         <p className="text-text-gray text-xs">
           Vendors: {request.vendorStops.map(v => v.vendorName).join(', ')}
@@ -258,7 +258,7 @@ function RecentDeliveries() {
                 ${(entry.basePay + entry.tip).toFixed(2)}
               </p>
               {entry.tip > 0 && (
-                <p className="text-text-gray text-[0.625rem]">+${entry.tip.toFixed(2)} tip</p>
+                <p className="text-text-gray text-[0.625rem]">+${(entry.tip ?? 0).toFixed(2)} tip</p>
               )}
             </div>
           </div>

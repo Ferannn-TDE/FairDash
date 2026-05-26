@@ -81,14 +81,14 @@ export default function AdminReportsPage() {
         />
         <StatCard
           label="Platform Fee"
-          value={`$${summary.platformFee.toFixed(2)}`}
+          value={`$${(summary.platformFee ?? 0).toFixed(2)}`}
           sub={`${mockAdminDashboard.platformFeeToday > 0 ? '10%' : '—'} of revenue`}
           icon={TrendingUp}
           color="text-neon-pink"
         />
         <StatCard
           label="Vendor Payouts"
-          value={`$${summary.vendorPayouts.toFixed(2)}`}
+          value={`$${(summary.vendorPayouts ?? 0).toFixed(2)}`}
           sub="After platform fee"
           icon={ShoppingBag}
           color="text-blue-400"
@@ -113,7 +113,7 @@ export default function AdminReportsPage() {
           <p className="text-text-gray text-xs uppercase tracking-wide font-semibold mt-0.5">Completion Rate</p>
         </div>
         <div className="bg-bg-card border border-white/10 rounded-2xl p-4 text-center">
-          <p className="font-bebas text-4xl tracking-wide text-neon-pink">${summary.avgOrderValue.toFixed(2)}</p>
+          <p className="font-bebas text-4xl tracking-wide text-neon-pink">${(summary.avgOrderValue ?? 0).toFixed(2)}</p>
           <p className="text-text-gray text-xs uppercase tracking-wide font-semibold mt-0.5">Avg Order Value</p>
         </div>
       </div>
@@ -142,8 +142,8 @@ export default function AdminReportsPage() {
                   <tr key={i} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
                     <td className="px-5 py-3.5 text-sm font-semibold text-white whitespace-nowrap">{v.vendorName}</td>
                     <td className="px-5 py-3.5 text-sm text-text-gray">{v.orders}</td>
-                    <td className="px-5 py-3.5 text-sm text-neon-pink font-semibold">${v.revenue.toFixed(2)}</td>
-                    <td className="px-5 py-3.5 text-sm text-emerald-400">${v.payout.toFixed(2)}</td>
+                    <td className="px-5 py-3.5 text-sm text-neon-pink font-semibold">${(v.revenue ?? 0).toFixed(2)}</td>
+                    <td className="px-5 py-3.5 text-sm text-emerald-400">${(v.payout ?? 0).toFixed(2)}</td>
                     <td className="px-5 py-3.5 text-sm text-text-gray">{v.avgPrepTime} min</td>
                     <td className="px-5 py-3.5">
                       <span className={`text-xs font-semibold ${v.cancellations > 0 ? 'text-red-400' : 'text-text-gray'}`}>
@@ -201,7 +201,7 @@ export default function AdminReportsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-sm text-white font-semibold truncate">{v.vendorName}</p>
-                  <p className="text-sm text-emerald-400 font-semibold shrink-0 ml-2">${v.payout.toFixed(2)}</p>
+                  <p className="text-sm text-emerald-400 font-semibold shrink-0 ml-2">${(v.payout ?? 0).toFixed(2)}</p>
                 </div>
                 <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
                   <div
@@ -215,7 +215,7 @@ export default function AdminReportsPage() {
         </div>
         <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
           <p className="text-text-gray text-sm">Total Payouts</p>
-          <p className="text-white font-bold text-lg">${summary.vendorPayouts.toFixed(2)}</p>
+          <p className="text-white font-bold text-lg">${(summary.vendorPayouts ?? 0).toFixed(2)}</p>
         </div>
       </div>
 

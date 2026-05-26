@@ -73,7 +73,7 @@ function OrderRow({ order, fairSlug }: { order: Order; fairSlug: string }) {
         )}
       </div>
       <div className="text-right shrink-0 ml-4">
-        <p className="text-neon-pink font-bold text-sm">${total.toFixed(2)}</p>
+        <p className="text-neon-pink font-bold text-sm">${(total ?? 0).toFixed(2)}</p>
         <p className="text-white/30 text-xs">
           {new Date(order.placedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         </p>

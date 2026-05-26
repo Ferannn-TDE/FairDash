@@ -136,12 +136,12 @@ export default async function OrderDetailPage({ params }: Props) {
                     )}
                     <div>
                       <p className="text-white text-sm font-semibold">{item.menuItem.name}</p>
-                      <p className="text-text-gray text-xs">${item.unitPrice.toFixed(2)} each</p>
+                      <p className="text-text-gray text-xs">${(item.unitPrice ?? 0).toFixed(2)} each</p>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-white text-sm font-semibold">×{item.quantity}</p>
-                    <p className="text-neon-pink text-xs font-bold">${item.subtotal.toFixed(2)}</p>
+                    <p className="text-neon-pink text-xs font-bold">${(item.subtotal ?? 0).toFixed(2)}</p>
                   </div>
                 </div>
               ))}
@@ -154,23 +154,23 @@ export default async function OrderDetailPage({ params }: Props) {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between text-text-gray">
                 <span>Subtotal</span>
-                <span>${order.subtotal.toFixed(2)}</span>
+                <span>${(order.subtotal ?? 0).toFixed(2)}</span>
               </div>
               {order.deliveryFee != null && (
                 <div className="flex justify-between text-text-gray">
                   <span>Delivery Fee</span>
-                  <span>${order.deliveryFee.toFixed(2)}</span>
+                  <span>${(order.deliveryFee ?? 0).toFixed(2)}</span>
                 </div>
               )}
               {order.serviceCharge != null && (
                 <div className="flex justify-between text-text-gray">
                   <span>Service Charge</span>
-                  <span>${order.serviceCharge.toFixed(2)}</span>
+                  <span>${(order.serviceCharge ?? 0).toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between text-white font-bold pt-2 border-t border-white/10">
                 <span>Total</span>
-                <span className="text-neon-pink">${order.total.toFixed(2)}</span>
+                <span className="text-neon-pink">${(order.total ?? 0).toFixed(2)}</span>
               </div>
             </div>
           </div>

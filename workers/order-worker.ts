@@ -353,7 +353,7 @@ async function handleIncidentAutoRefund(job: Job<JobData>) {
     }),
   ])
 
-  console.log(`[Worker] Incident ${incidentId} auto-refunded: $${refundAmount.toFixed(2)}`)
+  console.log(`[Worker] Incident ${incidentId} auto-refunded: $${(refundAmount ?? 0).toFixed(2)}`)
 }
 
 /**
@@ -628,7 +628,7 @@ async function handleRefund(job: Job<JobData>) {
     update: { refundIssued: true, refundAmount },
   })
 
-  console.log(`[Worker] Refund ${refund.id} issued for order ${orderId} — $${refundAmount.toFixed(2)}`)
+  console.log(`[Worker] Refund ${refund.id} issued for order ${orderId} — $${(refundAmount ?? 0).toFixed(2)}`)
 }
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
