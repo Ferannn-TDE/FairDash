@@ -7,6 +7,7 @@ import {
   Package, ArrowUpDown,
 } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
+import { StatusPill } from '@/components/ui/StatusPill'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -39,15 +40,6 @@ interface Order {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  PLACED:    { label: 'New',       cls: 'bg-neon-pink/10 text-neon-pink border-neon-pink/20' },
-  ACCEPTED:  { label: 'Accepted',  cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  PREPARING: { label: 'Preparing', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  READY:     { label: 'Ready',     cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  COMPLETED: { label: 'Completed', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  CANCELLED: { label: 'Cancelled', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
-}
-
 const FULFILLMENT_LABEL: Record<string, string> = {
   BOOTH_PICKUP: 'Booth Pickup',
   CURBSIDE: 'Curbside',
@@ -64,15 +56,6 @@ const FILTER_TABS = [
 ] as const
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-  const meta = STATUS_META[status] ?? { label: status, cls: 'bg-white/5 text-text-gray border-white/10' }
-  return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${meta.cls}`}>
-      {meta.label}
-    </span>
-  )
-}
 
 function FulfillmentIcon({ type }: { type: string }) {
   if (type === 'CURBSIDE') return <Car className="w-3.5 h-3.5" />
@@ -96,7 +79,7 @@ function OrderCard({ order }: { order: Order }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-white text-sm">{shortId}</span>
-            <StatusBadge status={order.status} />
+            <StatusPill status={order.status} />
           </div>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-text-gray">

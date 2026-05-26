@@ -10,6 +10,7 @@ import {
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { getFirebaseApp } from '@/lib/firebase-client'
+import { StatusPill } from '@/components/ui/StatusPill'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,11 +199,7 @@ function ActiveCard({ order, onStartPreparing, onMarkReady }: {
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-bold text-white text-xs">{fmtId(order.id)}</span>
-          <span className={`px-1.5 py-0.5 rounded-full text-[0.6rem] font-bold border ${
-            isAccepted
-              ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-          }`}>{isAccepted ? 'Accepted' : 'Preparing'}</span>
+          <StatusPill status={order.status} />
         </div>
         <span className="text-text-gray text-[0.65rem] shrink-0">{fmtFulfillment(order.fulfillmentType)}</span>
       </div>
