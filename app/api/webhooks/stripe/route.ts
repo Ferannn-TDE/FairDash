@@ -1,7 +1,8 @@
 import { headers } from 'next/headers'
+import { after } from 'next/server'
 import { stripe } from '@/lib/stripe'
 import { db } from '@/lib/db'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { handleApiError } from '@/lib/api-error'
 import type Stripe from 'stripe'
 
@@ -64,14 +65,19 @@ export async function POST(req: Request) {
           },
         })
         // Push status update to Firebase RTDB so vendor dashboard sees PLACED
-        try {
-          const rtdb = getRealtimeDb()
-          if (rtdb) {
-            const patch = { status: 'PLACED', updatedAt: Date.now() }
-            rtdb.ref(`fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`).update(patch).catch(() => {})
-            rtdb.ref(`fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`).update(patch).catch(() => {})
-          }
-        } catch { /* Firebase not configured */ }
+        const patch = { status: 'PLACED', updatedAt: Date.now() }
+        after(() => {
+          fireAndForgetFirebaseUpdate(
+            `fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`,
+            patch,
+            { orderId: order.id }
+          )
+          fireAndForgetFirebaseUpdate(
+            `fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`,
+            patch,
+            { orderId: order.id }
+          )
+        })
       }
       console.log(`[Stripe Webhook] payment_intent.succeeded → ${pi.id}`)
 

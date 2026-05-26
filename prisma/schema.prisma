@@ -233,7 +233,8 @@ model Vendor {
   disputes           Dispute[]
   menuRequests       MenuRequest[]
 
-  @@index([eventId])
+  @@index([eventId, status],   map: "idx_vendor_event_status")
+  @@index([eventId, isOffline],map: "idx_vendor_event_active")
   @@index([status])
   @@index([stripeVerified])
   @@index([isOffline])
@@ -263,8 +264,7 @@ model VendorMember {
   createdAt DateTime @default(now())
 
   @@unique([vendorId, userId])
-  @@index([vendorId])
-  @@index([userId])
+  @@unique([userId, vendorId], map: "uq_vendormember_user_vendor")
 }
 
 // ============================================================================
@@ -448,11 +448,13 @@ model Order {
   incidentReports     IncidentReport[]
   disputes            Dispute[]
 
-  @@index([eventId])
-  @@index([customerId])
-  @@index([vendorId])
+  @@unique([placedAt, id],                   map: "uq_order_placed_id")
+  @@index([customerId, placedAt(sort: Desc)], map: "idx_order_customer_placed")
+  @@index([eventId, status],                 map: "idx_order_event_status")
+  @@index([eventId, placedAt(sort: Desc)],   map: "idx_order_event_placed")
+  @@index([vendorId, placedAt(sort: Desc)],  map: "idx_order_vendor_placed")
+  @@index([vendorId, status, placedAt(sort: Desc)], map: "idx_order_vendor_status_placed")
   @@index([status])
-  @@index([placedAt])
   @@index([fulfillmentType])
 }
 
@@ -493,15 +495,23 @@ model OrderItem {
   menuItemId String
   menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
 
+  // Denormalized snapshot of the menu item name at order time.
+  // Eliminates the menuItem join on every dashboard query.
+  itemName String @default("")
+
   quantity            Int
   unitPrice           Float
+  totalPrice          Float  // unitPrice * quantity, stored at creation time
   subtotal            Float
   specialInstructions String?
 
   createdAt DateTime @default(now())
 
+  @@index([vendorId, orderId],             map: "idx_orderitem_vendor_order")
+  @@index([menuItemId],                    map: "idx_orderitem_menuitem")
   @@index([orderId])
-  @@index([vendorId])
+  @@index([vendorId, createdAt],           map: "idx_orderitem_vendor_created")
+  @@index([vendorId, menuItemId, createdAt], map: "idx_orderitem_vendor_menu_created")
 }
 
 // ============================================================================
@@ -531,8 +541,8 @@ model VendorOrderStatus {
   updatedAt DateTime @updatedAt
 
   @@unique([orderId, vendorId])
-  @@index([orderId])
-  @@index([vendorId])
+  @@index([status],           map: "idx_vos_status")
+  @@index([vendorId, status], map: "idx_vos_vendor_status")
 }
 
 // ============================================================================

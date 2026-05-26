@@ -4,7 +4,8 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorAuth } from '@/lib/auth'
 import { ApiError } from '@/lib/api-error'
-import { publicRatelimit } from '@/lib/ratelimit'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { enforceRateLimit } from '@/lib/ratelimit'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -14,7 +15,7 @@ export async function GET(
 ) {
   try {
     const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
-    const { success: allowed } = await publicRatelimit.limit(ip)
+    const { allowed } = await enforceRateLimit(ip, 'publicRoutes')
     if (!allowed) {
       return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
     }
@@ -77,9 +78,7 @@ export async function PATCH(
     const user = await db.user.findUnique({ where: { clerkId } })
     if (!user) throw new ApiError('User record not found', 404, 'NOT_FOUND')
 
-    const membership = await db.vendorMember.findFirst({
-      where: { vendorId: id, userId: user.id },
-    })
+    const membership = await getVendorAuth(user.id, id, req)
     if (!membership) throw new ApiError('Forbidden', 403, 'FORBIDDEN')
 
     const body = await req.json()

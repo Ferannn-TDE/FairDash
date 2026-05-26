@@ -13,7 +13,7 @@ import { useVendorMeta } from '@/lib/contexts/VendorContext'
 type OrderStatus = 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED' | string
 
 interface OrderItem {
-  menuItem: { name: string }
+  itemName: string
   quantity: number
   unitPrice: number
 }
@@ -115,7 +115,7 @@ function OrderCard({ order }: { order: Order }) {
         </div>
         <div className="hidden sm:block flex-1 min-w-0">
           <p className="text-white/60 text-xs truncate">
-            {order.orderItems.map(i => `${i.quantity}× ${i.menuItem.name}`).join(', ')}
+            {order.orderItems.map(i => `${i.quantity}× ${i.itemName}`).join(', ')}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -133,7 +133,7 @@ function OrderCard({ order }: { order: Order }) {
                 <div key={i} className="flex items-center justify-between">
                   <span className="text-sm text-white">
                     <span className="text-neon-pink font-semibold">{item.quantity}×</span>{' '}
-                    {item.menuItem.name}
+                    {item.itemName}
                   </span>
                   <span className="text-sm text-text-gray">${(item.unitPrice * item.quantity).toFixed(2)}</span>
                 </div>
@@ -229,7 +229,7 @@ export default function VendorOrdersPage() {
 
   useEffect(() => {
     if (!vendorId) return
-    fetch(`/api/vendors/${vendorId}/orders?history=1`)
+    fetch(`/api/vendors/${vendorId}/orders/history`)
       .then(r => r.json())
       .then(json => {
         if (json.success) setOrders(json.data?.orders ?? [])

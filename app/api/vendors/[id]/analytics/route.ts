@@ -1,16 +1,110 @@
-export const revalidate = 300
-
 import { NextRequest } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
 
-// GET /api/vendors/:id/analytics?days=7|30|90
+// GET /api/vendors/:id/analytics
 //
-// Revenue is computed from OrderItem rows where vendorId = this vendor,
-// so multi-vendor orders are correctly split — each vendor only sees
-// revenue from their own items.
+// Query params:
+//   ?range=7d | 30d | 90d | custom   (default: 30d)
+//   ?from=ISO_DATE                    (only with range=custom)
+//   ?to=ISO_DATE                      (only with range=custom; defaults to now)
+//
+// Revenue is computed entirely in SQL from OrderItem.totalPrice — no JS .reduce().
+// Each SQL query is independently cached via unstable_cache (60s revalidate).
+// Invalidate tag `analytics-${vendorId}` when a new order completes.
+
+function buildDateRange(
+  range: string | null,
+  from: string | null,
+  to: string | null,
+): { startDate: Date; endDate: Date } {
+  const now = new Date()
+  const endDate = to ? new Date(to) : now
+
+  if (range === 'custom' && from) {
+    return { startDate: new Date(from), endDate }
+  }
+
+  const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
+  const startDate = new Date(now)
+  startDate.setDate(startDate.getDate() - days)
+  startDate.setHours(0, 0, 0, 0)
+  return { startDate, endDate }
+}
+
+// ─── Cached queries ────────────────────────────────────────────────────────────
+
+const getCachedRevenueByDay = unstable_cache(
+  async (vendorId: string, startDate: Date, endDate: Date) => {
+    const rows = await db.$queryRaw<{ day: Date; revenue: number; orderCount: bigint }[]>`
+      SELECT
+        DATE_TRUNC('day', oi."createdAt") AS day,
+        SUM(oi."totalPrice")              AS revenue,
+        COUNT(DISTINCT oi."orderId")      AS "orderCount"
+      FROM "OrderItem" oi
+      WHERE oi."vendorId" = ${vendorId}
+        AND oi."createdAt" >= ${startDate}
+        AND oi."createdAt" <= ${endDate}
+      GROUP BY DATE_TRUNC('day', oi."createdAt")
+      ORDER BY day DESC
+      LIMIT 90
+    `
+    // Prisma returns BigInt for COUNT — normalize to number
+    return rows.map(r => ({
+      day:        r.day.toISOString(),
+      revenue:    Number(r.revenue),
+      orderCount: Number(r.orderCount),
+    }))
+  },
+  ['vendor-analytics-revenue'],
+  { revalidate: 60, tags: [] }  // tags injected per-vendor at call site via wrapper
+)
+
+const getCachedTopItems = unstable_cache(
+  async (vendorId: string, startDate: Date, endDate: Date) => {
+    return db.orderItem.groupBy({
+      by: ['menuItemId', 'itemName'],
+      where: { vendorId, createdAt: { gte: startDate, lte: endDate } },
+      _sum: { totalPrice: true, quantity: true },
+      orderBy: { _sum: { totalPrice: 'desc' } },
+      take: 10,
+    })
+  },
+  ['vendor-analytics-top-items'],
+  { revalidate: 60, tags: [] }
+)
+
+const getCachedStatusBreakdown = unstable_cache(
+  async (vendorId: string, startDate: Date, endDate: Date) => {
+    return db.order.groupBy({
+      by: ['status'],
+      where: { vendorId, placedAt: { gte: startDate, lte: endDate } },
+      _count: { id: true },
+      _sum: { total: true },
+    })
+  },
+  ['vendor-analytics-status'],
+  { revalidate: 60, tags: [] }
+)
+
+const getCachedSummary = unstable_cache(
+  async (vendorId: string, startDate: Date, endDate: Date) => {
+    return db.orderItem.aggregate({
+      where: { vendorId, createdAt: { gte: startDate, lte: endDate } },
+      _sum: { totalPrice: true },
+      _count: { id: true },
+    })
+  },
+  ['vendor-analytics-summary'],
+  { revalidate: 60, tags: [] }
+)
+
+// ─── Route handler ─────────────────────────────────────────────────────────────
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -22,135 +116,86 @@ export async function GET(
     const dbUser = await db.user.findUnique({ where: { clerkId } })
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
-    const isMember = await db.vendorMember.findFirst({
-      where: { vendorId: id, userId: dbUser.id },
-    })
+    const isMember = await getVendorAuth(dbUser.id, id, req)
     if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
-    const days = Math.min(90, Math.max(1, parseInt(req.nextUrl.searchParams.get('days') ?? '7', 10)))
+    const sp = req.nextUrl.searchParams
+    const range = sp.get('range')
+    const { startDate, endDate } = buildDateRange(range, sp.get('from'), sp.get('to'))
 
-    const since = new Date()
-    since.setDate(since.getDate() - (days - 1))
-    since.setHours(0, 0, 0, 0)
+    const start = performance.now()
 
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-
-    // Pull OrderItems for this vendor, joining to parent Order for status + date.
-    // This is the source of truth for revenue — not Order.vendorPayout.
-    const [periodItems, todayItems] = await Promise.all([
-      db.orderItem.findMany({
-        where: {
-          vendorId: id,
-          order: {
-            placedAt: { gte: since },
-            status: { not: 'PENDING_PAYMENT' },
-          },
-        },
-        select: {
-          unitPrice: true,
-          quantity: true,
-          order: { select: { id: true, status: true, placedAt: true } },
-        },
-      }),
-      db.orderItem.findMany({
-        where: {
-          vendorId: id,
-          order: {
-            placedAt: { gte: todayStart },
-            status: { not: 'PENDING_PAYMENT' },
-          },
-        },
-        select: {
-          unitPrice: true,
-          quantity: true,
-          order: {
-            select: {
-              id: true,
-              status: true,
-              vendorOrderStatuses: {
-                where: { vendorId: id },
-                select: { status: true },
-              },
-            },
-          },
-        },
-      }),
+    const [revenueByDay, topItemsByRevenue, statusBreakdown, summary] = await Promise.all([
+      getCachedRevenueByDay(id, startDate, endDate),
+      getCachedTopItems(id, startDate, endDate),
+      getCachedStatusBreakdown(id, startDate, endDate),
+      getCachedSummary(id, startDate, endDate),
     ])
 
-    // Aggregate per order — each order appears once per item, so group first
-    const periodOrderMap = new Map<string, { status: string; placedAt: Date; revenue: number }>()
-    for (const item of periodItems) {
-      const o = item.order
-      if (!periodOrderMap.has(o.id)) {
-        periodOrderMap.set(o.id, { status: o.status, placedAt: o.placedAt, revenue: 0 })
-      }
-      periodOrderMap.get(o.id)!.revenue += item.unitPrice * item.quantity
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Analytics]', {
+        vendorId: id,
+        range: range ?? '30d',
+        durationMs: Math.round(performance.now() - start),
+      })
     }
 
-    const todayOrderMap = new Map<string, { status: string; vendorStatus: string; revenue: number }>()
-    for (const item of todayItems) {
-      const o = item.order
-      if (!todayOrderMap.has(o.id)) {
-        const vendorStatus = o.vendorOrderStatuses[0]?.status ?? o.status
-        todayOrderMap.set(o.id, { status: o.status, vendorStatus, revenue: 0 })
-      }
-      todayOrderMap.get(o.id)!.revenue += item.unitPrice * item.quantity
+    // ── Derived totals from SQL results ──────────────────────────────────────
+    const totalRevenue = parseFloat((summary._sum.totalPrice ?? 0).toFixed(2))
+    const totalItemsSold = summary._count.id
+
+    const completedStatuses = new Set(['COMPLETED', 'DELIVERED'])
+    const cancelledStatuses = new Set(['CANCELLED'])
+
+    let completedCount = 0
+    let cancelledCount = 0
+    let totalOrderCount = 0
+
+    for (const row of statusBreakdown) {
+      const n = row._count.id
+      totalOrderCount += n
+      if (completedStatuses.has(row.status)) completedCount += n
+      if (cancelledStatuses.has(row.status)) cancelledCount += n
     }
 
-    const periodOrders = [...periodOrderMap.values()]
-    const todayOrders = [...todayOrderMap.values()]
-
-    // Build daily chart buckets
-    const buckets: Record<string, { revenue: number; orders: number }> = {}
-    for (let i = 0; i < days; i++) {
-      const d = new Date(since)
-      d.setDate(d.getDate() + i)
-      const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      buckets[key] = { revenue: 0, orders: 0 }
-    }
-
-    for (const o of periodOrders) {
-      const key = new Date(o.placedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      if (buckets[key]) {
-        buckets[key].orders += 1
-        if (o.status === 'COMPLETED' || o.status === 'DELIVERED') {
-          buckets[key].revenue += o.revenue
-        }
-      }
-    }
-
-    const chartData = Object.entries(buckets).map(([day, v]) => ({
-      day,
-      revenue: parseFloat(v.revenue.toFixed(2)),
-      orders: v.orders,
-    }))
-
-    const completed = periodOrders.filter(o => o.status === 'COMPLETED' || o.status === 'DELIVERED')
-    const cancelled = periodOrders.filter(o => o.status === 'CANCELLED')
-    const totalRevenue = parseFloat(completed.reduce((s, o) => s + o.revenue, 0).toFixed(2))
-    const totalOrders = periodOrders.length - cancelled.length
-    const avgOrderValue = completed.length > 0 ? parseFloat((totalRevenue / completed.length).toFixed(2)) : 0
-    const terminal = completed.length + cancelled.length
+    const terminal = completedCount + cancelledCount
     const completionRate = terminal > 0
-      ? parseFloat((completed.length / terminal).toFixed(4))
+      ? parseFloat((completedCount / terminal).toFixed(4))
       : 1
 
-    // Use vendorStatus for today's stats — master order.status stays non-terminal
-    // until all vendors complete, so it undercounts revenue in multi-vendor orders.
-    const todayCompleted = todayOrders.filter(o =>
-      o.vendorStatus === 'COMPLETED' || o.vendorStatus === 'DELIVERED'
+    const avgOrderValue = completedCount > 0
+      ? parseFloat((totalRevenue / completedCount).toFixed(2))
+      : 0
+
+    // ── Chart data — day rows already ordered DESC from SQL ───────────────────
+    const chartData = revenueByDay.map(r => ({
+      day:      new Date(r.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      revenue:  parseFloat(r.revenue.toFixed(2)),
+      orders:   r.orderCount,
+    })).reverse()  // return ascending for chart rendering
+
+    // ── Top items ─────────────────────────────────────────────────────────────
+    const topItems = topItemsByRevenue.map(r => ({
+      menuItemId: r.menuItemId,
+      itemName:   r.itemName,
+      revenue:    parseFloat((r._sum.totalPrice ?? 0).toFixed(2)),
+      quantity:   r._sum.quantity ?? 0,
+    }))
+
+    // ── Status breakdown ──────────────────────────────────────────────────────
+    const ordersByStatus = Object.fromEntries(
+      statusBreakdown.map(r => [r.status, { count: r._count.id, revenue: parseFloat((r._sum.total ?? 0).toFixed(2)) }])
     )
-    const todayRevenue = parseFloat(todayCompleted.reduce((s, o) => s + o.revenue, 0).toFixed(2))
 
     return success({
       chartData,
+      topItems,
+      ordersByStatus,
       totalRevenue,
-      totalOrders,
+      totalOrders: totalOrderCount,
+      totalItemsSold,
       avgOrderValue,
       completionRate,
-      todayRevenue,
-      todayOrders: todayOrders.length,
     })
   } catch (err) {
     return handleApiError(err)

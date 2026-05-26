@@ -65,11 +65,24 @@ interface CreateOrderBody {
 export async function POST(req: NextRequest) {
   try {
     const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
+<<<<<<< Updated upstream
     const { allowed, headers: rlHeaders } = await enforceRateLimit(ip, 'orderCreate', { failClosed: true })
     if (!allowed) {
       return NextResponse.json(
         { error: 'Too many requests. Please slow down.' },
         { status: 429, headers: rlHeaders }
+=======
+    const { allowed } = await enforceRateLimit(ip, 'orderCreate', { failClosed: true })
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please slow down.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': '60',
+          },
+        }
+>>>>>>> Stashed changes
       )
     }
 
@@ -278,6 +291,8 @@ export async function POST(req: NextRequest) {
         unitPrice,
         totalPrice: lineSubtotal,  // unitPrice * quantity — stored for SQL aggregation
         subtotal: lineSubtotal,
+        totalPrice: lineSubtotal,
+        itemName: mi.name,
       }
     })
 
@@ -380,10 +395,12 @@ export async function POST(req: NextRequest) {
               menuItemId: item.menuItemId,
               itemName: item.itemName,
               vendorId: item.vendorId,
+              itemName: item.itemName,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
               totalPrice: item.totalPrice,
               subtotal: item.subtotal,
+              totalPrice: item.totalPrice,
               specialInstructions: item.specialInstructions,
             })),
           },

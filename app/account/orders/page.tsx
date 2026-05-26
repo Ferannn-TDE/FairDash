@@ -5,30 +5,9 @@ import Link from 'next/link'
 import { ChevronRightIcon } from '@heroicons/react/24/outline'
 import MarketplaceNavbar from '../../_components/MarketplaceNavbar'
 
-interface OrderItem {
-  quantity: number
-  menuItem: { name: string; vendor?: { name: string } | null } | null
-}
+import type { OrderDTO } from '@/types/order-dto'
 
-interface Order {
-  id: string
-  status: string
-  total: number
-  subtotal: number
-  placedAt: string
-  vendor: {
-    name: string
-    boothNumber: string | null
-    event: {
-      id: string
-      name: string
-      urlSlug: string
-      primaryColor: string
-      startDate: string
-    } | null
-  } | null
-  orderItems: OrderItem[]
-}
+type Order = OrderDTO
 
 interface FairGroup {
   fairId: string
@@ -58,11 +37,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function vendorSummary(order: Order): string {
-  const names = [...new Set(
-    order.orderItems
-      .map(i => i.menuItem?.vendor?.name)
-      .filter(Boolean) as string[]
-  )]
+  const names = [...new Set(order.items.map(i => i.vendorName).filter(Boolean) as string[])]
   if (names.length === 0) return order.vendor?.name ?? 'Unknown'
   if (names.length === 1) return names[0]
   if (names.length === 2) return `${names[0]} & ${names[1]}`
@@ -71,8 +46,8 @@ function vendorSummary(order: Order): string {
 
 function OrderRow({ order, fairSlug }: { order: Order; fairSlug: string }) {
   const shortId = order.id.slice(-8).toUpperCase()
-  const itemSummary = order.orderItems
-    .map((i) => `${i.menuItem?.name ?? 'Item'} ×${i.quantity}`)
+  const itemSummary = order.items
+    .map((i) => `${i.itemName} ×${i.quantity}`)
     .join(', ')
 
   const total = order.total ?? order.subtotal ?? 0
@@ -113,7 +88,7 @@ export default function AccountOrdersPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/orders?limit=100')
+    fetch('/api/orders/history?limit=50')
       .then((r) => r.json())
       .then((json) => { if (json.success) setOrders(json.data.orders ?? []) })
       .catch(() => {})

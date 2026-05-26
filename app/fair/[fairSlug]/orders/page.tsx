@@ -7,19 +7,9 @@ import { useAuth } from '@clerk/clerk-react'
 import { useFair } from '../../../_contexts/FairContext'
 import Breadcrumb from '../_components/Breadcrumb'
 
-interface OrderItem {
-  quantity: number
-  menuItem: { name: string; vendor?: { name: string } | null } | null
-}
+import type { OrderDTO } from '@/types/order-dto'
 
-interface OrderSummary {
-  id: string
-  status: string
-  placedAt: string
-  total: number
-  vendor: { name: string } | null
-  orderItems: OrderItem[]
-}
+type OrderSummary = Pick<OrderDTO, 'id' | 'status' | 'placedAt' | 'total' | 'vendor' | 'items'>
 
 const STATUS_COLORS: Record<string, string> = {
   PLACED:        'text-amber-400 bg-amber-400/10 border-amber-400/20',
@@ -70,7 +60,7 @@ export default function FairOrdersPage() {
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
     setLoading(true)
-    fetch('/api/orders?limit=50')
+    fetch('/api/orders/history?limit=50')
       .then(r => r.json())
       .then(json => {
         if (json?.success) {
@@ -140,8 +130,8 @@ export default function FairOrdersPage() {
           {orders.map(order => {
             const shortId = order.id.slice(-8).toUpperCase()
             const vendorNames = [...new Set(
-              order.orderItems
-                .map(i => i.menuItem?.vendor?.name)
+              order.items
+                .map(i => i.vendorName)
                 .filter(Boolean) as string[]
             )]
             const vendorSummary = vendorNames.length === 0
@@ -166,7 +156,7 @@ export default function FairOrdersPage() {
                     </div>
                     <p className="text-[#A1A1A1] text-xs truncate">{vendorSummary}</p>
                     <p className="text-[#A1A1A1] text-xs mt-0.5">
-                      {order.orderItems.length} item{order.orderItems.length !== 1 ? 's' : ''} · ${order.total.toFixed(2)} · {formatDate(order.placedAt)}
+                      {order.items.length} item{order.items.length !== 1 ? 's' : ''} · ${order.total.toFixed(2)} · {formatDate(order.placedAt)}
                     </p>
                   </div>
                   <span className="text-[#A1A1A1] group-hover:text-[#FF0077] transition-colors flex-shrink-0 text-lg">→</span>

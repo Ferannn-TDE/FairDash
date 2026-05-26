@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
 
 // POST /api/menu-requests — submit ADD / EDIT / DELETE request for organizer approval
 export async function POST(req: NextRequest) {
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     const dbUser = await db.user.findUnique({ where: { clerkId } })
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
-    const isMember = await db.vendorMember.findFirst({ where: { vendorId, userId: dbUser.id } })
+    const isMember = await getVendorAuth(dbUser.id, vendorId, req)
     if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
     if (type === 'ADD' && (!name || price === undefined || !category)) {
@@ -60,7 +61,7 @@ export async function GET(req: NextRequest) {
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
     if (vendorId) {
-      const isMember = await db.vendorMember.findFirst({ where: { vendorId, userId: dbUser.id } })
+      const isMember = await getVendorAuth(dbUser.id, vendorId, req)
       if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
       const requests = await db.menuRequest.findMany({

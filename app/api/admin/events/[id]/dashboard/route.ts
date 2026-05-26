@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -8,7 +9,30 @@ import { OrderStatus } from '@prisma/client'
 
 // GET /api/admin/events/[id]/dashboard
 // Returns live event stats + vendor grid for the admin dashboard.
-// Requires admin or event_operator role.
+// Aggregate stats cached 30s per event — vendor heartbeats fetched live every request.
+
+async function getEventStats(eventId: string, todayStart: Date) {
+  const [todayOrders, liveOrders, totalRevenue, platformFee] = await Promise.all([
+    db.order.count({
+      where: { eventId, placedAt: { gte: todayStart } },
+    }),
+    db.order.count({
+      where: {
+        eventId,
+        status: { in: [OrderStatus.PLACED, OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY] },
+      },
+    }),
+    db.order.aggregate({
+      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      _sum: { total: true },
+    }),
+    db.order.aggregate({
+      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      _sum: { fairSynqFee: true },
+    }),
+  ])
+  return { todayOrders, liveOrders, totalRevenue, platformFee }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -17,9 +41,10 @@ export async function GET(
   try {
     await requireAdminAuth()
 
-    // Accept both UUID and urlSlug so admin/organizer pages can pass either
+    const { id } = await params
+
     const event = await db.event.findFirst({
-      where: { OR: [{ id: (await params).id }, { urlSlug: (await params).id }] },
+      where: { OR: [{ id }, { urlSlug: id }] },
       select: {
         id: true, name: true, urlSlug: true, status: true, isPaused: true,
         eventLat: true, eventLng: true, startDate: true, endDate: true,
@@ -35,41 +60,25 @@ export async function GET(
 
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
-    // Aggregate today's orders
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
 
-    const [todayOrders, liveOrders, totalRevenue, platformFee] = await Promise.all([
-      db.order.count({
-        where: { eventId: (await params).id, placedAt: { gte: todayStart } },
-      }),
-      db.order.count({
-        where: {
-          eventId: (await params).id,
-          status: { in: [OrderStatus.PLACED, OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY] },
-        },
-      }),
-      db.order.aggregate({
-        where: { eventId: (await params).id, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
-        _sum: { total: true },
-      }),
-      db.order.aggregate({
-        where: { eventId: (await params).id, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
-        _sum: { fairSynqFee: true },
-      }),
-    ])
+    // Cache stats aggregates 30s — live orders and revenue don't need sub-second freshness
+    const todayKey = todayStart.toISOString().slice(0, 10)
+    const getCachedStats = unstable_cache(
+      () => getEventStats(event.id, todayStart),
+      [`event-dashboard-stats-${event.id}-${todayKey}`],
+      { revalidate: 30, tags: [`event-stats-${event.id}`] }
+    )
+    const { todayOrders, liveOrders, totalRevenue, platformFee } = await getCachedStats()
 
-    // Firebase heartbeats — check which vendors are truly connected
+    // Firebase heartbeats — always fetched live (sub-second latency matters here)
     const rtdb = getRealtimeDb()
     const heartbeats: Record<string, number> = {}
-
     if (rtdb) {
       try {
-        const snap = await rtdb.ref(`fairs/${(await params).id}/heartbeats`).get()
-        if (snap.exists()) {
-          const data = snap.val() as Record<string, number>
-          Object.assign(heartbeats, data)
-        }
+        const snap = await rtdb.ref(`fairs/${event.id}/heartbeats`).get()
+        if (snap.exists()) Object.assign(heartbeats, snap.val() as Record<string, number>)
       } catch {
         // Firebase unavailable — heartbeats default to disconnected
       }
@@ -84,9 +93,7 @@ export async function GET(
     })
 
     const activeVendors = event.vendors.filter(v => v.status === 'ACTIVE' && !v.isOffline).length
-    const activeRunners = await db.runner.count({
-      where: { eventId: (await params).id, status: 'ACTIVE' },
-    })
+    const activeRunners = await db.runner.count({ where: { eventId: event.id, status: 'ACTIVE' } })
 
     return success({
       event: {

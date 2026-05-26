@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
 
 import { revalidateTag } from 'next/cache'
 
@@ -26,7 +27,7 @@ export async function PATCH(
     const item = await db.menuItem.findUnique({ where: { id }, select: { vendorId: true } })
     if (!item) return apiError('Menu item not found', 404, 'NOT_FOUND')
 
-    const isMember = await db.vendorMember.findFirst({ where: { vendorId: item.vendorId, userId: dbUser.id } })
+    const isMember = await getVendorAuth(dbUser.id, item.vendorId, req)
     if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
     const updated = await db.menuItem.update({

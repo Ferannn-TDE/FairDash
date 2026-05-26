@@ -6,7 +6,10 @@ import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+<<<<<<< Updated upstream
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+=======
+>>>>>>> Stashed changes
 import { enforceRateLimit } from '@/lib/ratelimit'
 import {
   getOrderQueue,
@@ -92,9 +95,23 @@ export async function PATCH(
 
     const clerkId = await requireAuth()
 
+<<<<<<< Updated upstream
     const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${clerkId}`, 'vendorStatus')
     if (!allowed) {
       return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+=======
+    const { allowed } = await enforceRateLimit(clerkId, 'vendorStatus', { failClosed: false })
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests — slow down.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': '60',
+          },
+        }
+      )
+>>>>>>> Stashed changes
     }
 
     // ── 1. Load order ──────────────────────────────────────────────────────

@@ -41,10 +41,27 @@ function buildDatabaseUrl(): string {
 
 function createClient(): PrismaClient {
   const url = buildDatabaseUrl()
-  return new PrismaClient({
+  const isDev = process.env.NODE_ENV === 'development'
+  const client = new PrismaClient({
     datasources: { db: { url } },
-    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    log: isDev
+      ? [
+          { emit: 'event',  level: 'query' },
+          { emit: 'stdout', level: 'warn' },
+          { emit: 'stdout', level: 'error' },
+        ]
+      : ['warn', 'error'],
   })
+
+  if (isDev) {
+    client.$on('query', (e) => {
+      if (e.duration > 100) {
+        console.warn('[Slow Query]', { query: e.query, durationMs: e.duration })
+      }
+    })
+  }
+
+  return client
 }
 
 export const db = globalForPrisma.prisma ?? createClient()
