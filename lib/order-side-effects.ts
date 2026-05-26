@@ -4,10 +4,16 @@
  * These functions enqueue BullMQ jobs rather than calling Stripe inline,
  * keeping HTTP response times under 50ms regardless of Stripe latency.
  * Imported by both the Next.js route handlers and scripts/test-c1.ts.
+ *
+ * Each function uses enqueueJobSafely() which retries 3x with exponential
+ * backoff and runs an inline Stripe fallback if the queue is unreachable,
+ * guaranteeing no payout or refund is silently dropped.
  */
 
 import { db } from './db'
+import { stripe } from './stripe'
 import { getOrderQueue, JOB_VENDOR_PAYOUT, JOB_REFUND } from './queues'
+import { enqueueJobSafely } from './queue-safe'
 
 // ─── Payout ───────────────────────────────────────────────────────────────────
 
@@ -22,8 +28,8 @@ export interface VendorPayoutInput {
 }
 
 /**
- * Enqueues a process-vendor-payout job. Returns true if enqueued, false if
- * Redis is unavailable. jobId deduplication prevents double-payout on retry.
+ * Enqueues a process-vendor-payout job. Returns true if queued or fallback ran,
+ * false if dropped. jobId deduplication prevents double-payout on retry.
  */
 export async function enqueueVendorPayout(input: VendorPayoutInput): Promise<boolean> {
   const queue = getOrderQueue()
@@ -32,26 +38,42 @@ export async function enqueueVendorPayout(input: VendorPayoutInput): Promise<boo
     return false
   }
 
-  await queue.add(
-    JOB_VENDOR_PAYOUT,
-    {
-      eventId: input.eventId,
-      orderId: input.orderId,
-      vendorId: input.vendorId,
+  const transferAmountCents = Math.round(input.vendorPayout * 100)
+  const payoutIdempotencyKey = `transfer-completed-${input.orderId}`
+
+  const result = await enqueueJobSafely({
+    queue,
+    name: JOB_VENDOR_PAYOUT,
+    data: {
+      eventId:              input.eventId,
+      orderId:              input.orderId,
+      vendorId:             input.vendorId,
       vendorStripeAccountId: input.vendorStripeAccountId,
       stripePaymentIntentId: input.stripePaymentIntentId ?? undefined,
-      stripeChargeId: input.stripeChargeId ?? undefined,
-      transferAmountCents: Math.round(input.vendorPayout * 100),
-      payoutIdempotencyKey: `transfer-completed-${input.orderId}`,
+      stripeChargeId:       input.stripeChargeId ?? undefined,
+      transferAmountCents,
+      payoutIdempotencyKey,
     },
-    {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
-      jobId: `payout-${input.orderId}`,
-    }
-  )
+    jobId:    `payout-${input.orderId}`,
+    priority: 'critical',
+    fallback: async () => {
+      await stripe.transfers.create(
+        {
+          amount:      transferAmountCents,
+          currency:    'usd',
+          destination: input.vendorStripeAccountId,
+          ...(input.stripeChargeId ? { source_transaction: input.stripeChargeId } : {}),
+        },
+        { idempotencyKey: `fallback-${payoutIdempotencyKey}` }
+      )
+    },
+  })
 
-  return true
+  if (result === 'dropped') {
+    console.error('[CRITICAL] Payout job dropped with no fallback', { jobName: JOB_VENDOR_PAYOUT, orderId: input.orderId })
+  }
+
+  return result !== 'dropped'
 }
 
 // ─── Refund ───────────────────────────────────────────────────────────────────
@@ -72,11 +94,11 @@ export interface RefundInput {
  */
 export async function enqueueRefund(input: RefundInput): Promise<boolean> {
   await db.cancellation.upsert({
-    where: { orderId: input.orderId },
+    where:  { orderId: input.orderId },
     create: {
-      orderId: input.orderId,
-      vendorId: input.vendorId,
-      reason: input.refundReason ?? null,
+      orderId:      input.orderId,
+      vendorId:     input.vendorId,
+      reason:       input.refundReason ?? null,
       refundIssued: false,
       refundAmount: null,
     },
@@ -89,24 +111,34 @@ export async function enqueueRefund(input: RefundInput): Promise<boolean> {
     return false
   }
 
-  await queue.add(
-    JOB_REFUND,
-    {
-      eventId: input.eventId,
-      orderId: input.orderId,
-      vendorId: input.vendorId,
+  const refundIdempotencyKey = `stripe-refund-${input.orderId}`
+
+  const result = await enqueueJobSafely({
+    queue,
+    name: JOB_REFUND,
+    data: {
+      eventId:              input.eventId,
+      orderId:              input.orderId,
+      vendorId:             input.vendorId,
       cancellationVendorId: input.vendorId,
       stripePaymentIntentId: input.stripePaymentIntentId,
-      stripeChargeId: input.stripeChargeId ?? undefined,
-      refundReason: input.refundReason ?? 'cancelled',
-      refundIdempotencyKey: `stripe-refund-${input.orderId}`,
+      stripeChargeId:       input.stripeChargeId ?? undefined,
+      refundReason:         input.refundReason ?? 'cancelled',
+      refundIdempotencyKey,
     },
-    {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
-      jobId: `refund-${input.orderId}`,
-    }
-  )
+    jobId:    `refund-${input.orderId}`,
+    priority: 'critical',
+    fallback: async () => {
+      await stripe.refunds.create(
+        { payment_intent: input.stripePaymentIntentId },
+        { idempotencyKey: `fallback-${refundIdempotencyKey}` }
+      )
+    },
+  })
 
-  return true
+  if (result === 'dropped') {
+    console.error('[CRITICAL] Refund job dropped with no fallback', { jobName: JOB_REFUND, orderId: input.orderId })
+  }
+
+  return result !== 'dropped'
 }

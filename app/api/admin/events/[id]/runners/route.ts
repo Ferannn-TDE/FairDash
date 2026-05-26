@@ -8,19 +8,28 @@ import { requireAdminAuth } from '@/lib/auth'
 // Returns the runner roster for the event.
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await requireAdminAuth()
 
-    const event = await db.event.findUnique({ where: { id: (await params).id } })
+    const { id: eventId } = await params
+    const { searchParams } = new URL(req.url)
+    const take = Math.min(Math.max(1, parseInt(searchParams.get('take') ?? '200', 10)), 500)
+
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { id: true } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
     const runners = await db.runner.findMany({
-      where: { eventId: (await params).id },
+      where: { eventId },
       orderBy: { createdAt: 'asc' },
-      include: {
+      take,
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        eventId: true,
         user: { select: { name: true, email: true } },
       },
     })

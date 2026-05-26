@@ -14,7 +14,7 @@ import { getFirebaseApp } from '@/lib/firebase-client'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface OrderItem {
-  menuItem: { name: string }
+  itemName: string
   quantity: number
   unitPrice: number
 }
@@ -89,7 +89,7 @@ async function transitionOrder(orderId: string, status: string): Promise<void> {
 
 function fmtId(id: string) { return '#' + id.slice(-8).toUpperCase() }
 function fmtItems(order: VendorOrder) {
-  return order.orderItems.map(i => `${i.quantity}× ${i.menuItem.name}`).join(', ')
+  return order.orderItems.map(i => `${i.quantity}× ${i.itemName}`).join(', ')
 }
 function fmtFulfillment(type: FulfillmentType) {
   return { BOOTH_PICKUP: 'Booth Pickup', CURBSIDE: 'Curbside', HOME_DELIVERY: 'Home Delivery' }[type]
@@ -308,7 +308,7 @@ export default function VendorDashboardPage() {
   useEffect(() => {
     if (!vendorId) return
     Promise.all([
-      fetch(`/api/vendors/${vendorId}/orders`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/orders/active`).then(r => r.json()),
       fetch(`/api/vendors/${vendorId}/analytics?days=1`).then(r => r.json()),
     ])
       .then(([ordersJson, analyticsJson]) => {
@@ -673,7 +673,7 @@ export default function VendorDashboardPage() {
               <div>
                 <h3 className="font-bebas text-xl text-white tracking-wide">Decline Order?</h3>
                 <p className="text-white/40 text-xs">
-                  #{declineTarget.id.slice(-8).toUpperCase()} · {declineTarget.orderItems?.[0]?.menuItem?.name ?? ''}
+                  #{declineTarget.id.slice(-8).toUpperCase()} · {declineTarget.orderItems?.[0]?.itemName ?? ''}
                 </p>
               </div>
             </div>

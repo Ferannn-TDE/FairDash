@@ -3,12 +3,13 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
 
 // GET /api/orders/:id — fetch a single order with full detail.
 // Accessible by the order's customer OR any VendorMember of the order's vendor.
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -53,10 +54,10 @@ export async function GET(
     const isCustomer = order.customerId === dbUser.id
     // Check all vendorIds present in this order's items (multi-vendor orders have N vendors)
     const vendorIds = [...new Set(order.orderItems.map(i => i.vendorId))]
+    // Fan-out cache check — resolves as soon as any vendor membership is confirmed
     const isVendorMember = vendorIds.length > 0
-      ? await db.vendorMember.findFirst({
-          where: { vendorId: { in: vendorIds }, userId: dbUser.id },
-        })
+      ? await Promise.any(vendorIds.map(vid => getVendorAuth(dbUser.id, vid, req).then(m => m ?? Promise.reject())))
+          .catch(() => null)
       : null
 
     if (!isCustomer && !isVendorMember) {
