@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { logger } from '@/lib/logger'
 
 // Active VendorOrderStatus values (string field, not enum)
 const ACTIVE_VENDOR_STATUSES = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY']
@@ -74,12 +75,10 @@ export async function GET(
       })),
     }))
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[vendor/orders/active]', {
-        durationMs: Math.round(performance.now() - start),
-        rowCount: result.length,
-      })
-    }
+    logger.debug('[vendor/orders/active] served', {
+      durationMs: Math.round(performance.now() - start),
+      rowCount: result.length,
+    })
 
     return success({ orders: result })
   } catch (err) {

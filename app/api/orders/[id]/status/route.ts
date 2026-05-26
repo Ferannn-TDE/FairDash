@@ -16,6 +16,7 @@ import {
 import { enqueueVendorPayout, enqueueRefund } from '@/lib/order-side-effects'
 import { enqueueJobSafely } from '@/lib/queue-safe'
 import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M } from '@/lib/constants'
+import { logger } from '@/lib/logger'
 
 // PATCH /api/orders/:id/status
 // Advance an order through its lifecycle.
@@ -311,7 +312,7 @@ async function handleCompleted(
   const vendor = order.vendor
 
   if (!vendor.stripeAccountId || !vendor.stripeVerified) {
-    console.log(`[Status] Vendor ${order.vendorId} not on Stripe Connect — skipping payout enqueue (manual settlement)`)
+    logger.info('[Status] skipping payout — vendor not on Stripe Connect', { vendorId: order.vendorId })
     return
   }
 
@@ -325,7 +326,7 @@ async function handleCompleted(
     vendorPayout: order.vendorPayout,
   })
 
-  if (enqueued) console.log(`[Status] Vendor payout job enqueued for order ${order.id}`)
+  if (enqueued) logger.info('[Status] payout job enqueued', { orderId: order.id })
 }
 
 // ─── CANCELLED side-effect ────────────────────────────────────────────────────
@@ -353,5 +354,5 @@ async function handleCancelled(
     refundReason: reason ?? 'vendor_cancelled',
   })
 
-  if (enqueued) console.log(`[Status] Refund job enqueued for order ${order.id}`)
+  if (enqueued) logger.info('[Status] refund job enqueued', { orderId: order.id })
 }

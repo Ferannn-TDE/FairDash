@@ -2,6 +2,7 @@ import { headers } from 'next/headers'
 import { Webhook } from 'svix'
 import { db } from '@/lib/db'
 import { handleApiError } from '@/lib/api-error'
+import { logger } from '@/lib/logger'
 
 // POST /api/webhooks/clerk
 // Verifies the svix signature and syncs Clerk user lifecycle events to our DB.
@@ -110,13 +111,13 @@ export async function POST(req: Request) {
     switch (event.type) {
       case 'user.created': {
         await syncUser(event.data, true)
-        console.log(`[Clerk Webhook] user.created → synced ${event.data.id}`)
+        logger.info('[Clerk Webhook] user.created synced', { userId: event.data.id })
         break
       }
 
       case 'user.updated': {
         await syncUser(event.data, false)
-        console.log(`[Clerk Webhook] user.updated → synced ${event.data.id}`)
+        logger.info('[Clerk Webhook] user.updated synced', { userId: event.data.id })
         break
       }
 
@@ -124,7 +125,7 @@ export async function POST(req: Request) {
         const existing = await db.user.findUnique({ where: { clerkId: event.data.id } })
         if (existing) {
           await db.user.delete({ where: { clerkId: event.data.id } })
-          console.log(`[Clerk Webhook] user.deleted → removed ${event.data.id}`)
+          logger.info('[Clerk Webhook] user.deleted removed', { userId: event.data.id })
         }
         break
       }
@@ -140,7 +141,7 @@ export async function POST(req: Request) {
       }
 
       default:
-        console.log(`[Clerk Webhook] Unhandled event: ${event.type}`)
+        logger.debug('[Clerk Webhook] unhandled event', { type: event.type })
     }
 
     return Response.json({ received: true })

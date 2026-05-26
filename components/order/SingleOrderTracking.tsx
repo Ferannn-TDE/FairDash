@@ -79,8 +79,6 @@ export default function SingleOrderTracking({
   // the same update path, falling back to liveStatus if the row isn't present.
   const vendorStatus = order.vendorOrderStatuses?.[0]?.status ?? liveStatus
 
-  console.log('[SingleOrderTracking] liveStatus:', liveStatus, '| vendorStatus:', vendorStatus)
-
   const isCancelled     = TERMINAL_STATUSES.includes(vendorStatus)
   const isCompleted     = vendorStatus === 'COMPLETED' || vendorStatus === 'DELIVERED'
   const canCancel       = vendorStatus === 'PLACED'

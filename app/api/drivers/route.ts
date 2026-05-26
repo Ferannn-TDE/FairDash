@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { ApiError } from '@/lib/api-error'
+import { logger } from '@/lib/logger'
 
 // GET  /api/drivers  — list driver applications (admin only, stub)
 // POST /api/drivers  — submit driver application (public + auth optional)
@@ -37,8 +38,7 @@ export async function POST(req: NextRequest) {
 
     // Applications are acknowledged here. Runner records are created by admin
     // when assigning a driver to a specific event (Runner.eventId is required).
-    console.log('[Drivers] Application received:', {
-      name: `${personal.firstName} ${personal.lastName}`,
+    logger.info('[Drivers] Application received', {
       email: personal.email,
       city: personal.city ?? null,
       vehicleType: body.vehicle?.type ?? null,

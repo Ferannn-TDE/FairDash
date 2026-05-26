@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
+import { logger } from '@/lib/logger'
 import { requireVendorAuth, requireVendorMembership } from '@/lib/auth'
 import { FLAGS } from '@/lib/feature-flags'
 
@@ -145,9 +146,7 @@ export async function GET(
 
     const data = await getCachedRevenue(vendorId, startDate.toISOString(), endDate.toISOString())
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Revenue]', { vendorId, period, durationMs: Date.now() - t0 })
-    }
+    logger.debug('[Revenue] served', { vendorId, period, durationMs: Date.now() - t0 })
 
     return success({ ...data, period })
   } catch (err) {
