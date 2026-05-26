@@ -1,6 +1,7 @@
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 import { ApiError } from './api-error'
+import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -44,19 +45,18 @@ export async function requireVendorAuth(): Promise<string> {
   return userId
 }
 
-/** Require auth + organizer role. Returns Clerk userId. */
-export async function requireOrganizerAuth(): Promise<string> {
-  const { userId } = await auth()
-  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+/** Require auth + organizer role + DB orgMember. Returns { clerkId, organizerId }. */
+export async function requireOrganizerAuth(): Promise<{ clerkId: string; organizerId: string }> {
+  const { userId: clerkId } = await auth()
+  if (!clerkId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
-  const user = await currentUser()
-  const role = user?.publicMetadata?.role as string | undefined
+  const dbUser = await db.user.findUnique({ where: { clerkId } })
+  if (!dbUser) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
-  if (role !== 'organizer') {
-    throw new ApiError('Forbidden — organizer access required', 403, 'FORBIDDEN')
-  }
+  const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
+  if (!orgMember) throw new ApiError('Forbidden — organizer access required', 403, 'FORBIDDEN')
 
-  return userId
+  return { clerkId, organizerId: orgMember.organizerId }
 }
 
 /** Require auth + runner role. Returns Clerk userId. */
@@ -75,12 +75,14 @@ export async function requireRunnerAuth(): Promise<string> {
 }
 
 /** Require auth + membership in a specific vendor. Returns { user, membership }. */
-export async function requireVendorMembership(clerkId: string, vendorId: string) {
+export async function requireVendorMembership(
+  clerkId:  string,
+  vendorId: string,
+  req?:     object
+): Promise<{ user: User; membership: VendorAuthPayload }> {
   const user = await db.user.findUnique({ where: { clerkId } })
   if (!user) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
-  const membership = await db.vendorMember.findFirst({
-    where: { vendorId, userId: user.id },
-  })
+  const membership = await getVendorAuth(user.id, vendorId, req)
   if (!membership) throw new ApiError('Forbidden', 403, 'FORBIDDEN')
   return { user, membership }
 }

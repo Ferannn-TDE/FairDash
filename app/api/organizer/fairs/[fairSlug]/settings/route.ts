@@ -3,7 +3,7 @@ import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireOrganizerAuth } from '@/lib/auth'
 
 const ALLOWED_FIELDS = new Set([
   'orderAcceptanceWindowSec',
@@ -34,17 +34,11 @@ export async function GET(
   { params }: { params: Promise<{ fairSlug: string }> }
 ) {
   try {
-    const clerkId = await requireAuth()
+    const { organizerId } = await requireOrganizerAuth()
     const { fairSlug } = await params
 
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
-
     const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId: orgMember.organizerId },
+      where: { urlSlug: fairSlug, organizerId },
       include: { fulfillmentConfig: true },
     })
     if (!event) return apiError('Fair not found', 404, 'NOT_FOUND')
@@ -61,17 +55,11 @@ export async function PATCH(
   { params }: { params: Promise<{ fairSlug: string }> }
 ) {
   try {
-    const clerkId = await requireAuth()
+    const { organizerId } = await requireOrganizerAuth()
     const { fairSlug } = await params
 
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
-
     const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId: orgMember.organizerId },
+      where: { urlSlug: fairSlug, organizerId },
     })
     if (!event) return apiError('Fair not found', 404, 'NOT_FOUND')
 
@@ -111,7 +99,7 @@ export async function PATCH(
     })
 
     // Bust the organizer fairs sidebar cache so the update is reflected immediately
-    revalidateTag(`organizer-fairs-${orgMember.organizerId}`, {})
+    revalidateTag(`organizer-fairs-${organizerId}`, 'default')
 
     return success(updated)
   } catch (err) {

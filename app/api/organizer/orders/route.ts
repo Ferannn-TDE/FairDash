@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireOrganizerAuth } from '@/lib/auth'
 import { OrderStatus } from '@prisma/client'
 
 const PAID_STATUSES: OrderStatus[] = [
@@ -10,31 +10,30 @@ const PAID_STATUSES: OrderStatus[] = [
   'COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE',
 ]
 
-// GET /api/organizer/orders?limit=20&fairId=<optional>
-// Returns recent orders across all organizer's fairs (or scoped to a fairId)
+// GET /api/organizer/orders?take=20&cursor=<id>&fairId=<optional>
+// Returns paginated orders across all organizer's fairs (or scoped to a fairId).
+// Cursor-based pagination: pass nextCursor from the previous response as cursor.
 export async function GET(req: NextRequest) {
   try {
-    const clerkId = await requireAuth()
-
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
+    const { organizerId } = await requireOrganizerAuth()
 
     const { searchParams } = req.nextUrl
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '20', 10)))
+    const take   = Math.min(Math.max(1, parseInt(searchParams.get('take') ?? '20', 10)), 100)
+    const cursor = searchParams.get('cursor') ?? undefined
     const fairId = searchParams.get('fairId') ?? undefined
 
     // Resolve event IDs for this organizer
     let eventIds: string[]
     if (fairId) {
-      const event = await db.event.findFirst({ where: { id: fairId, organizerId: orgMember.organizerId } })
+      const event = await db.event.findFirst({
+        where: { id: fairId, organizerId },
+        select: { id: true },
+      })
       if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
       eventIds = [fairId]
     } else {
       const events = await db.event.findMany({
-        where: { organizerId: orgMember.organizerId },
+        where: { organizerId },
         select: { id: true },
       })
       eventIds = events.map(e => e.id)
@@ -42,11 +41,21 @@ export async function GET(req: NextRequest) {
 
     const orders = await db.order.findMany({
       where: { eventId: { in: eventIds }, status: { in: PAID_STATUSES } },
-      orderBy: { placedAt: 'desc' },
-      take: limit,
-      include: {
+      orderBy: [{ placedAt: 'desc' }, { id: 'desc' }],
+      take,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
+      select: {
+        id: true,
+        status: true,
+        total: true,
+        subtotal: true,
+        vendorPayout: true,
+        fairSynqFee: true,
+        placedAt: true,
+        customerName: true,
         vendor: { select: { id: true, name: true, boothNumber: true } },
-        event: { select: { id: true, name: true } },
+        event:  { select: { id: true, name: true } },
         orderItems: {
           select: {
             id: true,
@@ -80,7 +89,9 @@ export async function GET(req: NextRequest) {
       })),
     }))
 
-    return success({ orders: result })
+    const nextCursor = orders.length === take ? orders[orders.length - 1].id : null
+
+    return success({ orders: result, nextCursor })
   } catch (err) {
     return handleApiError(err)
   }
