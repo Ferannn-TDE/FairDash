@@ -27,10 +27,10 @@ services:
       # pgbouncer (port 6543) is for serverless; it drops prepared statements
       # that Prisma needs for persistent connections.
       - key: DATABASE_URL
-        sync: false   # Set manually in Render dashboard
+        sync: false # Set manually in Render dashboard
 
       - key: DIRECT_URL
-        sync: false   # Set manually in Render dashboard
+        sync: false # Set manually in Render dashboard
 
       # ── Clerk ────────────────────────────────────────────────────────────────
       - key: CLERK_SECRET_KEY
@@ -65,7 +65,7 @@ services:
 
       # ── CORS ─────────────────────────────────────────────────────────────────
       - key: FRONTEND_URL
-        value: https://fairdash.vercel.app   # Update to your actual Vercel domain
+        value: https://fair-synq.vercel.app # Update to your actual Vercel domain
 
   # ── FairSynq Job Workers (Render Background Worker) ─────────────────────────
   # MUST be a separate process from the web service.
