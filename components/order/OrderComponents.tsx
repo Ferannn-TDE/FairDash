@@ -18,13 +18,13 @@ import {
   STATUS_LABELS,
   STATUS_TO_STEP,
   TERMINAL_STATUSES,
-  VENDOR_STATUS_STYLES,
-  VENDOR_STATUS_LABELS,
   VENDOR_STATUS_TO_STEP,
   VENDOR_STEPS,
   STEPS,
   buildVendorGroups,
 } from './helpers'
+import { StatusPill } from '@/components/ui/StatusPill'
+import { getStatusConfig } from '@/lib/order-status-config'
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
@@ -107,12 +107,7 @@ export function OrderStepper({
 // ─── Vendor-level sub-components ──────────────────────────────────────────────
 
 export function VendorStatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${VENDOR_STATUS_STYLES[status] ?? 'text-[#A1A1A1] bg-white/5 border-white/10'}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current" />
-      {VENDOR_STATUS_LABELS[status] ?? status}
-    </span>
-  )
+  return <StatusPill status={status} />
 }
 
 export function VendorProgressSteps({ status }: { status: string }) {
@@ -213,12 +208,7 @@ export function MultiVendorSummaryHeader({
           const step = VENDOR_STATUS_TO_STEP[vs] ?? 0
           const isCompleted = vs === 'COMPLETED'
           const isDeclined  = vs === 'DECLINED'
-          const dotColor =
-            isCompleted      ? 'bg-emerald-400' :
-            isDeclined       ? 'bg-red-400' :
-            vs === 'READY'   ? 'bg-[#FF0077] shadow-[0_0_8px_rgba(255,0,119,0.5)]' :
-            vs === 'PREPARING' ? 'bg-blue-400 animate-pulse' :
-            'bg-amber-400/60'
+          const dotColor = getStatusConfig(vs).dotColor
 
           return (
             <div key={group.vendorId} className="flex items-center gap-3">
@@ -284,13 +274,7 @@ export function SingleVendorProgress({
   // so both elements are guaranteed to be in sync with a single source of truth.
   const fillWidth   = progressWidth ?? PROGRESS_WIDTH[status] ?? '10%'
 
-  const dotColor =
-    isCompleted        ? 'bg-emerald-400' :
-    isDeclined         ? 'bg-red-400' :
-    status === 'READY' || status === 'RUNNER_COLLECTED'
-                       ? 'bg-[#FF0077] shadow-[0_0_8px_rgba(255,0,119,0.5)]' :
-    status === 'PREPARING' ? 'bg-blue-400 animate-pulse' :
-    'bg-amber-400/60'
+  const dotColor = getStatusConfig(status).dotColor
 
   return (
     <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-5">

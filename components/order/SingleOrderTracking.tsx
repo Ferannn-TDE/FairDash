@@ -17,34 +17,7 @@ import {
 } from './OrderComponents'
 import { TERMINAL_STATUSES, getMapEmbedUrl, formatDate } from './helpers'
 import type { OrderTrackingProps } from './types'
-
-// Computed directly from liveStatus so the badge is always in sync with the
-// vendor pill and progress bar — no delegation to a shared STATUS_LABELS map.
-const BADGE_LABEL: Record<string, string> = {
-  PLACED:           'Order Placed',
-  ACCEPTED:         'Accepted',
-  PREPARING:        'Preparing',
-  READY:            'Ready for Pickup',
-  RUNNER_COLLECTED: 'Ready for Pickup',
-  COMPLETED:        'Completed',
-  DELIVERED:        'Completed',
-  CANCELLED:        'Cancelled',
-  UNCOLLECTED:      'Uncollected',
-  UNDELIVERABLE:    'Undeliverable',
-}
-
-const BADGE_COLOR: Record<string, string> = {
-  PLACED:           'text-amber-400 bg-amber-400/10 border-amber-400/20',
-  ACCEPTED:         'text-blue-400 bg-blue-400/10 border-blue-400/20',
-  PREPARING:        'text-blue-400 bg-blue-400/10 border-blue-400/20',
-  READY:            'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
-  RUNNER_COLLECTED: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
-  COMPLETED:        'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
-  DELIVERED:        'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
-  CANCELLED:        'text-red-400 bg-red-400/10 border-red-400/20',
-  UNCOLLECTED:      'text-red-400 bg-red-400/10 border-red-400/20',
-  UNDELIVERABLE:    'text-red-400 bg-red-400/10 border-red-400/20',
-}
+import { StatusPill } from '@/components/ui/StatusPill'
 
 // Same mapping used by SingleVendorProgress — defined here too so badge and
 // bar always reference the identical variable.
@@ -85,9 +58,6 @@ export default function SingleOrderTracking({
   const mapSrc          = getMapEmbedUrl(order)
   const runnerLocation: { lat: number; lng: number } | null = null
 
-  // Badge, bar, and pill all derive from the same vendorStatus variable.
-  const badgeLabel    = BADGE_LABEL[vendorStatus]   ?? vendorStatus
-  const badgeColor    = BADGE_COLOR[vendorStatus]   ?? 'text-[#A1A1A1] bg-white/5 border-white/10'
   const progressWidth = `${PROGRESS_PERCENT[vendorStatus] ?? 10}%`
 
   return (
@@ -112,10 +82,7 @@ export default function SingleOrderTracking({
                   #{order.id.slice(-8).toUpperCase()} · {order.vendor.name} · {formatDate(order.placedAt)}
                 </p>
               </div>
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${badgeColor}`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                {badgeLabel}
-              </span>
+              <StatusPill status={vendorStatus} />
             </div>
           </div>
         </div>
