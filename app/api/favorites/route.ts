@@ -14,6 +14,7 @@ export async function GET() {
 
     const favorites = await db.favoriteItem.findMany({
       where: { userId: dbUser.id },
+      take: 100,
       orderBy: { createdAt: 'desc' },
       include: {
         menuItem: {

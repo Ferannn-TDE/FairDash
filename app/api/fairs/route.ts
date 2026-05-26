@@ -10,6 +10,7 @@ export async function GET() {
   try {
     const events = await db.event.findMany({
       where: { status: { in: [EventStatus.ACTIVE, EventStatus.UPCOMING] } },
+      take: 50,
       orderBy: { startDate: 'asc' },
       select: {
         id: true,
