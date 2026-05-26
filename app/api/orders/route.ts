@@ -1,15 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { currentUser } from '@clerk/nextjs/server'
 import Stripe from 'stripe'
 import { FulfillmentType, EventStatus, VendorStatus, OrderStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { fireAndForgetFirebaseSet } from '@/lib/firebase-sync'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
-import { orderRatelimit } from '@/lib/ratelimit'
+import { enforceRateLimit } from '@/lib/ratelimit'
 import { getOrderQueue, JOB_UNACCEPTED } from '@/lib/queues'
+import { enqueueJobSafely } from '@/lib/queue-safe'
 import { VENDOR_ACCEPT_TIMEOUT_MS } from '@/lib/constants'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -41,64 +43,6 @@ interface CreateOrderBody {
   deliveryZip?: string
 }
 
-// ─── GET /api/orders ──────────────────────────────────────────────────────────
-
-export async function GET(req: NextRequest) {
-  try {
-    const clerkId = await requireAuth()
-
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return success({ orders: [], nextCursor: null })
-
-    const { searchParams } = new URL(req.url)
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 100)
-    const cursor = searchParams.get('cursor') ?? undefined
-
-    const orders = await db.order.findMany({
-      where: { customerId: dbUser.id, status: { not: 'PENDING_PAYMENT' } },
-      orderBy: { placedAt: 'desc' },
-      take: limit,
-      ...(cursor && { skip: 1, cursor: { id: cursor } }),
-      include: {
-        vendor: {
-          select: {
-            name: true,
-            boothNumber: true,
-            event: {
-              select: {
-                id: true,
-                name: true,
-                urlSlug: true,
-                primaryColor: true,
-                startDate: true,
-              },
-            },
-          },
-        },
-        orderItems: {
-          take: 4,
-          select: {
-            quantity: true,
-            menuItem: {
-              select: {
-                name: true,
-                vendor: { select: { name: true } },
-              },
-            },
-          },
-        },
-      },
-    })
-
-    return success({
-      orders,
-      nextCursor: orders.length === limit ? orders[orders.length - 1].id : null,
-    })
-  } catch (err) {
-    return handleApiError(err)
-  }
-}
-
 // ─── POST /api/orders ─────────────────────────────────────────────────────────
 //
 // One cart → one PaymentIntent → one Order.
@@ -121,18 +65,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
-    const { success: allowed, limit, remaining } = await orderRatelimit.limit(ip)
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(ip, 'orderCreate', { failClosed: true })
     if (!allowed) {
       return NextResponse.json(
         { error: 'Too many requests. Please slow down.' },
-        {
-          status: 429,
-          headers: {
-            'X-RateLimit-Limit': String(limit),
-            'X-RateLimit-Remaining': String(remaining),
-            'Retry-After': '60',
-          },
-        }
+        { status: 429, headers: rlHeaders }
       )
     }
 
@@ -162,17 +99,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!items?.length) {
-      throw new ApiError('items must be a non-empty array', 400, 'VALIDATION_ERROR')
+    if (!Array.isArray(items) || items.length === 0) {
+      return apiError('Cart is empty', 400, 'VALIDATION_ERROR')
     }
-
+    if (items.length > 20) {
+      return apiError('Cart cannot exceed 20 items', 400, 'VALIDATION_ERROR')
+    }
     for (const item of items) {
-      if (!item.menuItemId || !item.vendorId || !Number.isInteger(item.quantity) || item.quantity < 1) {
-        throw new ApiError(
-          'Each item must have menuItemId, vendorId, and a positive integer quantity',
-          400,
-          'VALIDATION_ERROR'
-        )
+      if (!item.menuItemId || typeof item.menuItemId !== 'string') {
+        return apiError('Invalid item in cart', 400, 'VALIDATION_ERROR')
+      }
+      if (!item.quantity || item.quantity < 1 || item.quantity > 99) {
+        return apiError('Invalid quantity', 400, 'VALIDATION_ERROR')
+      }
+      if (!item.vendorId || typeof item.vendorId !== 'string') {
+        return apiError('Invalid vendorId in cart item', 400, 'VALIDATION_ERROR')
       }
     }
 
@@ -330,10 +271,12 @@ export async function POST(req: NextRequest) {
       fairSynqFeeAccumulator += lineFee
       return {
         menuItemId: cartItem.menuItemId,
+        itemName: mi.name,     // snapshot at order time — eliminates join on dashboard queries
         vendorId: cartItem.vendorId,
         quantity: cartItem.quantity,
         specialInstructions: cartItem.specialInstructions ?? null,
         unitPrice,
+        totalPrice: lineSubtotal,  // unitPrice * quantity — stored for SQL aggregation
         subtotal: lineSubtotal,
       }
     })
@@ -435,9 +378,11 @@ export async function POST(req: NextRequest) {
           orderItems: {
             create: lineItems.map(item => ({
               menuItemId: item.menuItemId,
+              itemName: item.itemName,
               vendorId: item.vendorId,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
+              totalPrice: item.totalPrice,
               subtotal: item.subtotal,
               specialInstructions: item.specialInstructions,
             })),
@@ -465,6 +410,9 @@ export async function POST(req: NextRequest) {
       return created
     })
 
+    // Invalidate cached recent orders for this customer
+    revalidateTag(`orders-${dbUser.id}`, 'default')
+
     // ── 7. Patch PI metadata with orderId (best-effort) ────────────────────
     stripe.paymentIntents
       .update(paymentIntent.id, {
@@ -475,22 +423,21 @@ export async function POST(req: NextRequest) {
       )
 
     // ── 8. Firebase RTDB — push to each vendor's path ─────────────────────
-    const rtdb = getRealtimeDb()
-    if (rtdb) {
-      const itemsByVendor: Record<string, string[]> = {}
-      for (const oi of order.orderItems) {
-        if (!itemsByVendor[oi.vendorId]) itemsByVendor[oi.vendorId] = []
-        itemsByVendor[oi.vendorId].push(`${oi.menuItem.name} ×${oi.quantity}`)
-      }
+    const itemsByVendor: Record<string, string[]> = {}
+    for (const oi of order.orderItems) {
+      if (!itemsByVendor[oi.vendorId]) itemsByVendor[oi.vendorId] = []
+      itemsByVendor[oi.vendorId].push(`${oi.itemName || oi.menuItem.name} ×${oi.quantity}`)
+    }
 
+    after(() => {
       for (const [vid, itemLines] of Object.entries(itemsByVendor)) {
         const vendorSubtotal = lineItems
           .filter(l => l.vendorId === vid)
           .reduce((s, l) => s + l.subtotal, 0)
 
-        rtdb
-          .ref(`fairs/${eventId}/orders/${vid}/${order.id}`)
-          .set({
+        fireAndForgetFirebaseSet(
+          `fairs/${eventId}/orders/${vid}/${order.id}`,
+          {
             orderId: order.id,
             status: 'PENDING_PAYMENT',
             fulfillmentType,
@@ -501,21 +448,27 @@ export async function POST(req: NextRequest) {
             itemCount: lineItems.filter(l => l.vendorId === vid).reduce((s, l) => s + l.quantity, 0),
             itemSummary: itemLines.join(', '),
             placedAt: Date.now(),
-          })
-          .catch(err => console.error('[Orders] Firebase RTDB write failed:', err))
+          },
+          { orderId: order.id }
+        )
       }
-    }
+    })
 
     // ── 9. Schedule accept-timeout for primary vendor ──────────────────────
     const ordersQueue = getOrderQueue()
     if (ordersQueue) {
-      ordersQueue
-        .add(
-          JOB_UNACCEPTED,
-          { orderId: order.id, vendorId: primaryVendorId, eventId },
-          { delay: VENDOR_ACCEPT_TIMEOUT_MS }
-        )
-        .catch(err => console.error('[Orders] Failed to schedule JOB_UNACCEPTED:', err))
+      const result = await enqueueJobSafely({
+        queue:    ordersQueue,
+        name:     JOB_UNACCEPTED,
+        data:     { orderId: order.id, vendorId: primaryVendorId, eventId },
+        jobId:    `unaccepted-${order.id}`,
+        delay:    VENDOR_ACCEPT_TIMEOUT_MS,
+        priority: 'normal',
+      })
+
+      if (result === 'dropped') {
+        console.error('[CRITICAL] Job dropped with no fallback', { jobName: JOB_UNACCEPTED, orderId: order.id })
+      }
     }
 
     // ── 10. Return to frontend ─────────────────────────────────────────────
