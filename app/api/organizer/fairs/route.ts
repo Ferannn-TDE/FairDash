@@ -1,47 +1,67 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { success, apiError } from '@/lib/api-response'
+import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireOrganizerAuth } from '@/lib/auth'
+
+const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
 
 async function fetchOrganizerFairs(organizerId: string) {
   const events = await db.event.findMany({
     where: { organizerId },
     orderBy: { startDate: 'desc' },
-    include: { fulfillmentConfig: true },
+    select: {
+      id: true,
+      name: true,
+      urlSlug: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      fulfillmentConfig: {
+        select: {
+          boothPickupEnabled: true,
+          curbsideEnabled: true,
+          homeDeliveryEnabled: true,
+        },
+      },
+    },
   })
 
   const eventIds = events.map(e => e.id)
   if (eventIds.length === 0) return { fairs: [] }
 
-  const [vendors, orders] = await Promise.all([
-    db.vendor.findMany({
+  // SQL aggregation — no full-row scans, no JS reduce
+  const [vendorGroups, orderGroups] = await Promise.all([
+    db.vendor.groupBy({
+      by: ['eventId'],
       where: { eventId: { in: eventIds } },
-      select: { id: true, eventId: true },
+      _count: { id: true },
     }),
-    db.order.findMany({
+    db.order.groupBy({
+      by: ['eventId', 'status'],
       where: { eventId: { in: eventIds }, status: { notIn: ['PENDING_PAYMENT'] } },
-      select: { id: true, eventId: true, status: true, subtotal: true },
+      _count: { id: true },
+      _sum: { subtotal: true },
     }),
   ])
 
+  // Build lookup maps from grouped results
   const vendorCountByEvent: Record<string, number> = {}
-  for (const v of vendors) {
-    vendorCountByEvent[v.eventId] = (vendorCountByEvent[v.eventId] ?? 0) + 1
+  for (const g of vendorGroups) {
+    vendorCountByEvent[g.eventId] = g._count.id
   }
 
   const orderCountByEvent: Record<string, number> = {}
   const revenueByEvent: Record<string, number> = {}
   const pendingByEvent: Record<string, number> = {}
-  const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
 
-  for (const o of orders) {
-    if (o.status === 'CANCELLED') continue
-    orderCountByEvent[o.eventId] = (orderCountByEvent[o.eventId] ?? 0) + 1
-    revenueByEvent[o.eventId] = (revenueByEvent[o.eventId] ?? 0) + o.subtotal
-    if (ACTIVE_STATUSES.has(o.status)) {
-      pendingByEvent[o.eventId] = (pendingByEvent[o.eventId] ?? 0) + 1
+  for (const g of orderGroups) {
+    if (g.status === 'CANCELLED') continue
+    orderCountByEvent[g.eventId] = (orderCountByEvent[g.eventId] ?? 0) + g._count.id
+    revenueByEvent[g.eventId] = (revenueByEvent[g.eventId] ?? 0) + (g._sum.subtotal ?? 0)
+    if (ACTIVE_STATUSES.has(g.status)) {
+      pendingByEvent[g.eventId] = (pendingByEvent[g.eventId] ?? 0) + g._count.id
     }
   }
 
@@ -66,26 +86,19 @@ async function fetchOrganizerFairs(organizerId: string) {
 
 // GET /api/organizer/fairs
 // Returns all events for the authenticated organizer with per-fair stats.
-// Revenue = sum of Order.subtotal for non-cancelled orders (not vendorPayout).
-// Result is cached 60s per organizer — busted when a fair is created or settings updated.
+// Per-event counts and revenue computed via SQL groupBy — no full-row order scans.
+// Result cached 60s per organizer.
 export async function GET(_req: NextRequest) {
   try {
-    const clerkId = await requireAuth()
-
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
+    const { organizerId } = await requireOrganizerAuth()
 
     const cached = unstable_cache(
-      () => fetchOrganizerFairs(orgMember.organizerId),
-      [`organizer-fairs-${orgMember.organizerId}`],
-      { revalidate: 60, tags: [`organizer-fairs-${orgMember.organizerId}`] }
+      () => fetchOrganizerFairs(organizerId),
+      [`organizer-fairs-${organizerId}`],
+      { revalidate: 60, tags: [`organizer-fairs-${organizerId}`] }
     )
 
-    const data = await cached()
-    return success(data)
+    return success(await cached())
   } catch (err) {
     return handleApiError(err)
   }

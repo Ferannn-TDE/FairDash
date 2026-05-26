@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireOrganizerAuth } from '@/lib/auth'
 import { OrderStatus } from '@prisma/client'
 
 const ALL_PAID_STATUSES: OrderStatus[] = [
@@ -10,37 +10,50 @@ const ALL_PAID_STATUSES: OrderStatus[] = [
   'COMPLETED', 'DELIVERED', 'CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE',
 ]
 
-// GET /api/organizer/fairs/[fairSlug]/orders?status=PLACED|ACCEPTED|...
-// Returns orders for a specific fair with optional status filter
+// GET /api/organizer/fairs/[fairSlug]/orders?status=...&take=50&cursor=<id>
+// Returns paginated orders for a specific fair with optional status filter.
+// Cursor-based pagination: pass nextCursor from the previous response as cursor.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ fairSlug: string }> }
 ) {
   try {
-    const clerkId = await requireAuth()
+    const { organizerId } = await requireOrganizerAuth()
     const { fairSlug } = await params
 
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-    if (!orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    // Verify this organizer owns this event
     const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId: orgMember.organizerId },
+      where: { urlSlug: fairSlug, organizerId },
+      select: { id: true },
     })
     if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
 
-    const statusParam = req.nextUrl.searchParams.get('status') as OrderStatus | null
+    const { searchParams } = req.nextUrl
+    const take   = Math.min(Math.max(1, parseInt(searchParams.get('take') ?? '50', 10)), 100)
+    const cursor = searchParams.get('cursor') ?? undefined
+
+    const statusParam = searchParams.get('status') as OrderStatus | null
     const statusFilter: OrderStatus[] = statusParam && ALL_PAID_STATUSES.includes(statusParam)
       ? [statusParam]
       : ALL_PAID_STATUSES
 
     const orders = await db.order.findMany({
       where: { eventId: event.id, status: { in: statusFilter } },
-      orderBy: { placedAt: 'desc' },
-      include: {
+      orderBy: [{ placedAt: 'desc' }, { id: 'desc' }],
+      take,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
+      select: {
+        id: true,
+        status: true,
+        total: true,
+        subtotal: true,
+        vendorPayout: true,
+        fairSynqFee: true,
+        placedAt: true,
+        customerName: true,
+        customerPhone: true,
+        fulfillmentType: true,
+        pickupLocation: true,
         vendor: { select: { id: true, name: true, boothNumber: true } },
         orderItems: {
           select: {
@@ -78,7 +91,9 @@ export async function GET(
       })),
     }))
 
-    return success({ orders: result })
+    const nextCursor = orders.length === take ? orders[orders.length - 1].id : null
+
+    return success({ orders: result, nextCursor })
   } catch (err) {
     return handleApiError(err)
   }

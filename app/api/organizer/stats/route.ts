@@ -1,65 +1,60 @@
 import { NextRequest } from 'next/server'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { success, apiError } from '@/lib/api-response'
+import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireOrganizerAuth } from '@/lib/auth'
+
+async function computeOrganizerStats(organizerId: string) {
+  const events = await db.event.findMany({
+    where: { organizerId },
+    select: { id: true, status: true },
+  })
+
+  const eventIds = events.map(e => e.id)
+  const activeFairs = events.filter(e => e.status === 'ACTIVE').length
+
+  if (eventIds.length === 0) {
+    return { activeFairs: 0, totalOrders: 0, ordersToday: 0, totalRevenue: 0, totalVendors: 0 }
+  }
+
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+
+  const baseWhere = {
+    eventId: { in: eventIds },
+    status: { notIn: ['PENDING_PAYMENT' as const] },
+  }
+
+  const [totalVendors, totalOrderCount, revenueAgg, ordersToday] = await Promise.all([
+    db.vendor.count({ where: { eventId: { in: eventIds } } }),
+    db.order.count({ where: baseWhere }),
+    db.order.aggregate({
+      where: { ...baseWhere, status: { notIn: ['PENDING_PAYMENT' as const, 'CANCELLED' as const] } },
+      _sum: { subtotal: true },
+    }),
+    db.order.count({ where: { ...baseWhere, createdAt: { gte: todayStart } } }),
+  ])
+
+  const totalRevenue = parseFloat((revenueAgg._sum.subtotal ?? 0).toFixed(2))
+
+  return { activeFairs, totalOrders: totalOrderCount, ordersToday, totalRevenue, totalVendors }
+}
 
 // GET /api/organizer/stats
 // Aggregate stats across all fairs for the authenticated organizer.
-// Revenue = sum of OrderItem unit prices (not vendorPayout) so multi-vendor
-// orders split correctly and cancelled items are excluded.
+// Cached 30s per organizer — all revenue via SQL aggregate, no JS reduction.
 export async function GET(_req: NextRequest) {
   try {
-    const clerkId = await requireAuth()
+    const { organizerId } = await requireOrganizerAuth()
 
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    const orgMember = dbUser
-      ? await db.orgMember.findFirst({ where: { userId: dbUser.id } })
-      : null
-    if (!dbUser || !orgMember) return apiError('Forbidden', 403, 'FORBIDDEN')
-
-    const events = await db.event.findMany({
-      where: { organizerId: orgMember.organizerId },
-      select: { id: true, status: true },
-    })
-
-    const eventIds = events.map(e => e.id)
-    const activeFairs = events.filter(e => e.status === 'ACTIVE').length
-
-    if (eventIds.length === 0) {
-      return success({ activeFairs: 0, totalOrders: 0, totalRevenue: 0, totalVendors: 0 })
-    }
-
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-
-    const orderWhere = {
-      eventId: { in: eventIds },
-      status: { notIn: ['PENDING_PAYMENT' as const] },
-    }
-
-    const [totalVendors, orderRows, ordersToday] = await Promise.all([
-      db.vendor.count({ where: { eventId: { in: eventIds } } }),
-      db.order.findMany({
-        where: orderWhere,
-        select: { id: true, status: true, subtotal: true },
-      }),
-      db.order.count({
-        where: { ...orderWhere, createdAt: { gte: todayStart } },
-      }),
-    ])
-
-    // Include CANCELLED in counts (they happened, they count for history)
-    const countableOrders = orderRows
-    const totalOrders = countableOrders.length
-    const totalRevenue = parseFloat(
-      countableOrders
-        .filter(o => o.status !== 'CANCELLED')
-        .reduce((s, o) => s + o.subtotal, 0)
-        .toFixed(2)
+    const cached = unstable_cache(
+      () => computeOrganizerStats(organizerId),
+      [`organizer-stats-${organizerId}`],
+      { revalidate: 30, tags: [`organizer-stats-${organizerId}`] }
     )
 
-    return success({ activeFairs, totalOrders, ordersToday, totalRevenue, totalVendors })
+    return success(await cached())
   } catch (err) {
     return handleApiError(err)
   }
