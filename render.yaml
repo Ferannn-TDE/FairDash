@@ -1,6 +1,7 @@
 services:
-  # ── FairSynq API / Worker (Render Web Service) ──────────────────────────────
-  # Handles: Clerk webhooks, Stripe webhooks, BullMQ order-timeout worker
+  # ── FairSynq API (Render Web Service) ────────────────────────────────────────
+  # Handles: Clerk webhooks, Stripe webhooks, health check.
+  # BullMQ workers run in the SEPARATE fairsynq-job-workers service below.
   # Regular API routes (/api/orders, /api/vendors, etc.) run on Vercel as
   # Next.js serverless functions — they are NOT served from this process.
   #
@@ -14,7 +15,7 @@ services:
     region: oregon
     branch: main
     buildCommand: npm install --include=dev && npx prisma generate
-    startCommand: npx ts-node --compiler-options '{"module":"CommonJS"}' server.ts
+    startCommand: npm run server
     healthCheckPath: /health
 
     envVars:
@@ -65,3 +66,44 @@ services:
       # ── CORS ─────────────────────────────────────────────────────────────────
       - key: FRONTEND_URL
         value: https://fairdash.vercel.app   # Update to your actual Vercel domain
+
+  # ── FairSynq Job Workers (Render Background Worker) ─────────────────────────
+  # MUST be a separate process from the web service.
+  # Processes all BullMQ jobs: order timeouts, refunds, payouts, disputes.
+  # Killing this service queues jobs in Redis; they drain on restart.
+  - type: worker
+    name: fairsynq-job-workers
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install --include=dev && npx prisma generate
+    startCommand: npm run worker
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: DATABASE_URL
+        sync: false
+
+      - key: DIRECT_URL
+        sync: false
+
+      - key: STRIPE_SECRET_KEY
+        sync: false
+
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      - key: NEXT_PUBLIC_FIREBASE_DATABASE_URL
+        sync: false
+
+      - key: REDIS_URL
+        sync: false

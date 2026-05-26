@@ -39,12 +39,6 @@ import {
 require('dotenv').config({ path: '.env.local' })
 require('dotenv').config({ path: '.env' })
 
-const redisUrl = process.env.REDIS_URL
-if (!redisUrl) {
-  console.error('[Worker] REDIS_URL is not set — cannot start worker')
-  process.exit(1)
-}
-
 // Use DIRECT_URL for the worker — avoids pgBouncer transaction mode restrictions
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
@@ -655,97 +649,94 @@ function buildConnectionOptions(url: string): ConnectionOptions {
   return opts
 }
 
-const connection = buildConnectionOptions(redisUrl)
+export function startOrderWorker() {
+  const redisUrl = process.env.REDIS_URL
+  if (!redisUrl) {
+    console.error('[Worker] REDIS_URL is not set — cannot start worker')
+    process.exit(1)
+  }
 
-const worker = new Worker<JobData>(
-  ORDER_QUEUE_NAME,
-  async (job: Job<JobData>) => {
-    switch (job.name) {
-      case JOB_UNACCEPTED:
-        await handleMarkUnaccepted(job)
-        break
-      case JOB_UNCOLLECTED:
-        await handleMarkUncollected(job)
-        break
-      case JOB_UNDELIVERABLE:
-        await handleMarkUndeliverable(job)
-        break
-      case JOB_HIDE_VENDOR:
-        await handleAutoHideVendor(job)
-        break
-      case JOB_INCIDENT_REFUND:
-        await handleIncidentAutoRefund(job)
-        break
-      case JOB_ESCALATE_DISPUTE:
-        await handleEscalateDispute(job)
-        break
-      case JOB_POST_EVENT_REPORT:
-        await handleGeneratePostEventReport(job)
-        break
-      case JOB_BULK_REFUND:
-        await handleBulkRefundEvent(job)
-        break
-      case JOB_VENDOR_PAYOUT:
-        await handleVendorPayout(job)
-        break
-      case JOB_REFUND:
-        await handleRefund(job)
-        break
-      default:
-        console.warn(`[Worker] Unknown job: ${job.name}`)
+  const connection = buildConnectionOptions(redisUrl)
+
+  const worker = new Worker<JobData>(
+    ORDER_QUEUE_NAME,
+    async (job: Job<JobData>) => {
+      switch (job.name) {
+        case JOB_UNACCEPTED:
+          await handleMarkUnaccepted(job)
+          break
+        case JOB_UNCOLLECTED:
+          await handleMarkUncollected(job)
+          break
+        case JOB_UNDELIVERABLE:
+          await handleMarkUndeliverable(job)
+          break
+        case JOB_HIDE_VENDOR:
+          await handleAutoHideVendor(job)
+          break
+        case JOB_INCIDENT_REFUND:
+          await handleIncidentAutoRefund(job)
+          break
+        case JOB_ESCALATE_DISPUTE:
+          await handleEscalateDispute(job)
+          break
+        case JOB_POST_EVENT_REPORT:
+          await handleGeneratePostEventReport(job)
+          break
+        case JOB_BULK_REFUND:
+          await handleBulkRefundEvent(job)
+          break
+        case JOB_VENDOR_PAYOUT:
+          await handleVendorPayout(job)
+          break
+        case JOB_REFUND:
+          await handleRefund(job)
+          break
+        default:
+          console.warn(`[Worker] Unknown job: ${job.name}`)
+      }
+    },
+    { connection, concurrency: 5 }
+  )
+
+  worker.on('completed', async job => {
+    console.log(`[Worker] ✓ ${job.name} (${job.id}) completed`)
+
+    if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
+      await prisma.order.update({
+        where: { id: job.data.orderId },
+        data: { payoutStatus: 'COMPLETED' },
+      }).catch(e => console.error('[Worker] Failed to set payoutStatus=COMPLETED:', e))
     }
-  },
-  { connection, concurrency: 5 }
-)
+  })
 
-worker.on('completed', async job => {
-  console.log(`[Worker] ✓ ${job.name} (${job.id}) completed`)
+  worker.on('failed', async (job, err) => {
+    console.error(`[Worker] ✗ ${job?.name} (${job?.id}) failed after ${job?.attemptsMade} attempt(s):`, err.message)
 
-  if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
-    await prisma.order.update({
-      where: { id: job.data.orderId },
-      data: { payoutStatus: 'COMPLETED' },
-    }).catch(e => console.error('[Worker] Failed to set payoutStatus=COMPLETED:', e))
-  }
-})
+    if (
+      job?.name === JOB_VENDOR_PAYOUT &&
+      job?.data?.orderId &&
+      job.attemptsMade >= (job.opts.attempts ?? 3)
+    ) {
+      await prisma.order.update({
+        where: { id: job.data.orderId },
+        data: { payoutStatus: 'FAILED' },
+      }).catch(e => console.error('[Worker] Failed to set payoutStatus=FAILED:', e))
+      console.error(`[Worker] Payout permanently FAILED for order ${job.data.orderId} — manual intervention required`)
+    }
+  })
 
-worker.on('failed', async (job, err) => {
-  console.error(`[Worker] ✗ ${job?.name} (${job?.id}) failed after ${job?.attemptsMade} attempt(s):`, err.message)
+  worker.on('error', err => {
+    console.error('[Worker] Connection error:', err)
+  })
 
-  // Mark payout as permanently failed when all retries are exhausted
-  if (
-    job?.name === JOB_VENDOR_PAYOUT &&
-    job?.data?.orderId &&
-    job.attemptsMade >= (job.opts.attempts ?? 3)
-  ) {
-    await prisma.order.update({
-      where: { id: job.data.orderId },
-      data: { payoutStatus: 'FAILED' },
-    }).catch(e => console.error('[Worker] Failed to set payoutStatus=FAILED:', e))
-    console.error(`[Worker] Payout permanently FAILED for order ${job.data.orderId} — manual intervention required`)
-  }
-})
+  console.log(`[Worker] Listening on queue: ${ORDER_QUEUE_NAME}`)
+  console.log(`[Worker] Handlers: ${[
+    JOB_UNACCEPTED, JOB_UNCOLLECTED, JOB_UNDELIVERABLE,
+    JOB_HIDE_VENDOR, JOB_INCIDENT_REFUND, JOB_ESCALATE_DISPUTE,
+    JOB_POST_EVENT_REPORT, JOB_BULK_REFUND,
+    JOB_VENDOR_PAYOUT, JOB_REFUND,
+  ].join(', ')}`)
 
-worker.on('error', err => {
-  console.error('[Worker] Connection error:', err)
-})
-
-console.log(`[Worker] Listening on queue: ${ORDER_QUEUE_NAME}`)
-console.log(`[Worker] Handlers: ${[
-  JOB_UNACCEPTED, JOB_UNCOLLECTED, JOB_UNDELIVERABLE,
-  JOB_HIDE_VENDOR, JOB_INCIDENT_REFUND, JOB_ESCALATE_DISPUTE,
-  JOB_POST_EVENT_REPORT, JOB_BULK_REFUND,
-  JOB_VENDOR_PAYOUT, JOB_REFUND,
-].join(', ')}`)
-
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
-
-async function shutdown() {
-  console.log('[Worker] Shutting down...')
-  await worker.close()
-  await prisma.$disconnect()
-  process.exit(0)
+  return worker
 }
-
-process.on('SIGTERM', shutdown)
-process.on('SIGINT', shutdown)
