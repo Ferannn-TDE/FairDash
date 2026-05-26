@@ -121,6 +121,7 @@ export interface JobData {
   // process-refund
   refundReason?: string
   refundIdempotencyKey?: string
+  refundAmountCents?: number      // partial refund — omit for full refund
   cancellationVendorId?: string
 }
 
@@ -128,6 +129,11 @@ export interface JobData {
 
 const globalForQueue = globalThis as unknown as {
   orderQueue: Queue | undefined
+}
+
+export function __setOrderQueueForTest(q: Queue | null): void {
+  if (q === null) delete globalForQueue.orderQueue
+  else globalForQueue.orderQueue = q
 }
 
 export function getOrderQueue(): Queue | null {
