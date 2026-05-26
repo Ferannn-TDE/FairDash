@@ -54,6 +54,8 @@ export async function GET(
         id: true,
         status: true,
         total: true,
+        subtotal: true,
+        vendorPayout: true,
         placedAt: true,
         vendorOrderStatuses: {
           where: { vendorId },
@@ -75,6 +77,8 @@ export async function GET(
       id: o.id,
       status: o.vendorOrderStatuses[0]?.status ?? o.status,
       total: o.total,
+      subtotal: o.subtotal,
+      vendorPayout: o.vendorPayout,
       placedAt: o.placedAt,
       orderItems: o.orderItems.map(i => ({
         id: i.id,
