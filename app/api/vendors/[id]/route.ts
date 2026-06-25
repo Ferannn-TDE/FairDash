@@ -6,6 +6,8 @@ import { requireVendorAuth } from '@/lib/auth'
 import { ApiError } from '@/lib/api-error'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { enforceRateLimit } from '@/lib/ratelimit'
+import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
+import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -35,6 +37,12 @@ export async function GET(
         busyUntil: true,
         status: true,
         eventId: true,
+        operatingHours: true,
+        foodHandlerPermitUrl: true,
+        insuranceUrl: true,
+        businessLicenseUrl: true,
+        stripeAccountId: true,
+        stripeVerified: true,
         menuItems: {
           where: { isAvailable: true },
           orderBy: { category: 'asc' },
@@ -56,6 +64,15 @@ export async function GET(
 
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
     if (vendor.isOffline) return apiError('Vendor is currently offline', 503, 'VENDOR_OFFLINE')
+
+    // Phase 5 gate: when enforcement is on, a not-ready vendor (no Stripe / no
+    // available menu) is treated as not found — invisible to customers, matching
+    // the marketplace list. menuItems already filtered to isAvailable, so length is
+    // the available count. OFF by default → unchanged. Uses the shared predicate.
+    if (isVendorReadinessEnforced() &&
+        !vendorReady({ status: vendor.status, stripeVerified: vendor.stripeVerified, availableMenuCount: vendor.menuItems.length })) {
+      return apiError('Vendor not found', 404, 'NOT_FOUND')
+    }
 
     return success(vendor)
   } catch (err) {
@@ -82,7 +99,9 @@ export async function PATCH(
     if (!membership) throw new ApiError('Forbidden', 403, 'FORBIDDEN')
 
     const body = await req.json()
-    const { isBusy, isOffline, boothNumber, description, name, cuisineType } = body
+    // `status` is intentionally excluded — vendors cannot deactivate themselves.
+    // Status changes require admin or organizer auth (see /api/admin/vendors/:id).
+    const { isBusy, isOffline, boothNumber, description, name, cuisineType, operatingHours } = body
 
     const vendor = await db.vendor.update({
       where: { id },
@@ -96,8 +115,24 @@ export async function PATCH(
         ...(description !== undefined && { description }),
         ...(name !== undefined && { name: String(name) }),
         ...(cuisineType !== undefined && { cuisineType: String(cuisineType) }),
+        ...(operatingHours !== undefined && { operatingHours }),
       },
     })
+
+    // Determine which settings section was updated for audit granularity
+    const isProfileUpdate = name !== undefined || cuisineType !== undefined || description !== undefined
+    const isHoursUpdate   = operatingHours !== undefined
+
+    if (isProfileUpdate) {
+      logVendorAction(id, user.id, AUDIT_ACTIONS.SETTINGS_PROFILE_UPDATED, {
+        fields: Object.fromEntries(
+          Object.entries({ name, cuisineType, description }).filter(([, v]) => v !== undefined)
+        ),
+      })
+    }
+    if (isHoursUpdate) {
+      logVendorAction(id, user.id, AUDIT_ACTIONS.SETTINGS_HOURS_UPDATED, {})
+    }
 
     return success(vendor)
   } catch (err) {

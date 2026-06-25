@@ -2,6 +2,7 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 import { ApiError } from './api-error'
 import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
+import { hasRole } from './roles'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -29,18 +30,18 @@ export async function requireDbUser(): Promise<User> {
   return user
 }
 
-/** Require auth + vendor role (checks Clerk metadata). Returns Clerk userId. */
+/** Require auth + vendor access. Authority = a VendorMember row. Returns Clerk userId.
+ *  (publicMetadata.roles is the fast gate for middleware/navbar; API authorization
+ *  verifies against the DB so the two can't drift.) */
 export async function requireVendorAuth(): Promise<string> {
   const { userId } = await auth()
   if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
-  const user = await currentUser()
-  const role = user?.publicMetadata?.role as string | undefined
-  const isVendorLegacy = user?.unsafeMetadata?.isVendor === true
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } })
+  if (!dbUser) throw new ApiError('Forbidden — vendor access required', 403, 'FORBIDDEN')
 
-  if (role !== 'vendor' && !isVendorLegacy) {
-    throw new ApiError('Forbidden — vendor access required', 403, 'FORBIDDEN')
-  }
+  const member = await db.vendorMember.findFirst({ where: { userId: dbUser.id }, select: { id: true } })
+  if (!member) throw new ApiError('Forbidden — vendor access required', 403, 'FORBIDDEN')
 
   return userId
 }
@@ -59,17 +60,16 @@ export async function requireOrganizerAuth(): Promise<{ clerkId: string; organiz
   return { clerkId, organizerId: orgMember.organizerId }
 }
 
-/** Require auth + runner role. Returns Clerk userId. */
+/** Require auth + runner access. Authority = a Runner row. Returns Clerk userId. */
 export async function requireRunnerAuth(): Promise<string> {
   const { userId } = await auth()
   if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
-  const user = await currentUser()
-  const role = user?.publicMetadata?.role as string | undefined
+  const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } })
+  if (!dbUser) throw new ApiError('Forbidden — runner access required', 403, 'FORBIDDEN')
 
-  if (role !== 'runner') {
-    throw new ApiError('Forbidden — runner access required', 403, 'FORBIDDEN')
-  }
+  const runner = await db.runner.findUnique({ where: { userId: dbUser.id }, select: { id: true } })
+  if (!runner) throw new ApiError('Forbidden — runner access required', 403, 'FORBIDDEN')
 
   return userId
 }
@@ -87,15 +87,15 @@ export async function requireVendorMembership(
   return { user, membership }
 }
 
-/** Require auth + admin role. Returns Clerk userId. */
+/** Require auth + admin role. Returns Clerk userId.
+ *  Admin family lives in publicMetadata.roles[] (unified shape; read via hasRole),
+ *  consistent with the admin layout, middleware, and /api/auth/access. */
 export async function requireAdminAuth(): Promise<string> {
   const { userId } = await auth()
   if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
   const user = await currentUser()
-  const role = user?.publicMetadata?.role as string | undefined
-
-  if (role !== 'admin' && role !== 'super_admin') {
+  if (!hasRole(user?.publicMetadata, 'admin')) {
     throw new ApiError('Forbidden — admin access required', 403, 'FORBIDDEN')
   }
 

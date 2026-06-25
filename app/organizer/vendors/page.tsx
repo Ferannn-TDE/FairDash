@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 
 interface Vendor {
@@ -15,24 +17,23 @@ interface Vendor {
   revenue: number
 }
 
+const VENDORS_KEY = ['organizer-vendors-global']
+
 export default function OrganizerVendorsPage() {
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [loading, setLoading] = useState(true)
+  const qc = useQueryClient()
+  const query = useQuery({
+    queryKey: VENDORS_KEY,
+    queryFn: () => fetchJson<Vendor[]>('/api/organizer/vendors'),
+  })
+  const vendors = query.data ?? []
+  const loading = query.isPending
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<Vendor | null>(null)
-
-  useEffect(() => {
-    fetch('/api/organizer/vendors')
-      .then(r => r.json())
-      .then(json => { if (Array.isArray(json.data)) setVendors(json.data) })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
 
   const handleToggleOffline = useCallback(async (vendor: Vendor) => {
     setTogglingId(vendor.id)
     const next = !vendor.isOffline
-    setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, isOffline: next } : v))
+    qc.setQueryData<Vendor[]>(VENDORS_KEY, prev => prev?.map(v => v.id === vendor.id ? { ...v, isOffline: next } : v) ?? [])
     try {
       await fetch(`/api/vendors/${vendor.id}`, {
         method: 'PATCH',
@@ -40,12 +41,11 @@ export default function OrganizerVendorsPage() {
         body: JSON.stringify({ isOffline: next }),
       })
     } catch {
-      // Revert on error
-      setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, isOffline: !next } : v))
+      qc.setQueryData<Vendor[]>(VENDORS_KEY, prev => prev?.map(v => v.id === vendor.id ? { ...v, isOffline: !next } : v) ?? [])
     } finally {
       setTogglingId(null)
     }
-  }, [])
+  }, [qc])
 
   const online  = vendors.filter(v => !v.isOffline).length
   const offline = vendors.filter(v => v.isOffline).length

@@ -12,6 +12,7 @@
  */
 
 import { Queue } from 'bullmq'
+import { logger } from './logger'
 
 type JobPriority = 'critical' | 'normal' | 'low'
 
@@ -66,20 +67,20 @@ export async function enqueueJobSafely<T>(
       }
 
       // All retries exhausted
-      console.error('[Queue] Failed to enqueue after 3 attempts', {
+      logger.error('[Queue] Failed to enqueue after 3 attempts', {
         queue:   queue.name,
         jobName: name,
         jobId,
-        error:   err instanceof Error ? err.message : err,
+        error:   err instanceof Error ? err.message : String(err),
       })
 
       if (fallback) {
-        console.warn('[Queue] Executing inline fallback for', name)
+        logger.warn('[Queue] Executing inline fallback for ' + name)
         try {
           await fallback()
           return 'fallback'
         } catch (fallbackErr) {
-          console.error('[Queue] Fallback also failed', { jobName: name, error: fallbackErr })
+          logger.error('[Queue] Fallback also failed', { jobName: name, error: String(fallbackErr) })
         }
       }
 

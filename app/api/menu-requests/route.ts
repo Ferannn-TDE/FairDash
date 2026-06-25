@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 
 // POST /api/menu-requests — submit ADD / EDIT / DELETE request for organizer approval
 export async function POST(req: NextRequest) {
@@ -24,6 +25,12 @@ export async function POST(req: NextRequest) {
     if (type === 'ADD' && (!name || price === undefined || !category)) {
       return apiError('name, price, and category are required for ADD', 400, 'VALIDATION_ERROR')
     }
+    if (price !== undefined) {
+      const p = Number(price)
+      if (isNaN(p) || p <= 0 || p > 10_000) {
+        return apiError('Price must be between $0.01 and $10,000', 400, 'VALIDATION_ERROR')
+      }
+    }
     if ((type === 'EDIT' || type === 'DELETE') && !menuItemId) {
       return apiError('menuItemId is required for EDIT/DELETE', 400, 'VALIDATION_ERROR')
     }
@@ -41,6 +48,13 @@ export async function POST(req: NextRequest) {
         prepTime: prepTime !== undefined ? Number(prepTime) : null,
         imageUrl: imageUrl ?? null,
       },
+    })
+
+    logVendorAction(vendorId, dbUser.id, AUDIT_ACTIONS.MENU_CHANGE_REQUESTED, {
+      requestType: type,
+      menuItemId:  menuItemId ?? null,
+      name:        name ?? null,
+      requestId:   request.id,
     })
 
     return success(request, 201)

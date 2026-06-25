@@ -71,6 +71,20 @@ export async function PATCH(
       select: { id: true, name: true, status: true, isPaused: true },
     })
 
+    // Event close (→ INACTIVE) triggers the per-event organizer batch payout: all
+    // refund windows have closed by now, so the accrued organizer share is paid as
+    // one batch (Part B B3). Idempotent + reconciler-backstopped; never blocks the
+    // close response.
+    if (targetStatus === EventStatus.INACTIVE) {
+      try {
+        const { enqueueOrganizerPayout } = await import('@/lib/order-side-effects')
+        await enqueueOrganizerPayout({ eventId: updated.id })
+      } catch (err) {
+        const { logger } = await import('@/lib/logger')
+        logger.error('[EventClose] organizer payout enqueue failed (reconciler Pattern Q backstops)', { eventId: updated.id, error: String(err) })
+      }
+    }
+
     return success({ event: updated })
   } catch (err) {
     return handleApiError(err)

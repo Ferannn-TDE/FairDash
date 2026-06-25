@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from 'react'
 import { useUser } from '@clerk/clerk-react'
+import { ADMIN_ROLES } from '@/lib/roles'
 
 type Role = 'customer' | 'vendor' | 'driver' | 'runner' | 'organizer' | 'admin'
 
@@ -28,11 +29,12 @@ const RoleContext = createContext<RoleContextValue>({
 export function RoleProvider({ children }: { children: React.ReactNode }) {
   const { user } = useUser()
 
+  // Unified shape: read roles[] only. The legacy singular publicMetadata.role is
+  // no longer read anywhere (gates use roles[]); primaryRole is derived from the
+  // array for the (currently unused) convenience field.
   const meta = (user?.publicMetadata ?? {}) as Record<string, unknown>
-  const primaryRole = (meta.role as Role) ?? null
-  const rolesArr: Role[] = Array.isArray(meta.roles)
-    ? (meta.roles as Role[])
-    : primaryRole ? [primaryRole] : []
+  const rolesArr: Role[] = Array.isArray(meta.roles) ? (meta.roles as Role[]) : []
+  const primaryRole: Role | null = rolesArr[0] ?? null
 
   const isRunner = rolesArr.includes('runner') || rolesArr.includes('driver')
 
@@ -43,7 +45,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     isOrganizer: rolesArr.includes('organizer'),
     isRunner,
     isDriver: isRunner,  // alias
-    isAdmin: rolesArr.includes('admin'),
+    isAdmin: rolesArr.some((r) => (ADMIN_ROLES as readonly string[]).includes(r)),
   }
 
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>

@@ -13,6 +13,7 @@
  */
 
 import { Queue, ConnectionOptions } from 'bullmq'
+import { logger } from './logger'
 
 // ─── Connection ───────────────────────────────────────────────────────────────
 
@@ -36,13 +37,13 @@ function buildConnectionOptions(url: string): ConnectionOptions {
 function getConnectionOptions(): ConnectionOptions | null {
   const url = process.env.REDIS_URL
   if (!url) {
-    console.warn('[BullMQ] REDIS_URL not set — delayed jobs disabled')
+    logger.warn('[BullMQ] REDIS_URL not set — delayed jobs disabled')
     return null
   }
   try {
     return buildConnectionOptions(url)
   } catch (err) {
-    console.error('[BullMQ] Failed to parse REDIS_URL:', err)
+    logger.error('[BullMQ] Failed to parse REDIS_URL', { error: String(err) })
     return null
   }
 }
@@ -89,8 +90,17 @@ export const JOB_BULK_REFUND = 'bulk-refund-event'
 /** Order completed → transfer vendor payout via Stripe Connect */
 export const JOB_VENDOR_PAYOUT = 'process-vendor-payout'
 
+/** Order delivered (behind refund window) → transfer runner payout (Part B B2) */
+export const JOB_RUNNER_PAYOUT = 'process-runner-payout'
+
+/** Event closed → batched per-event organizer payout (Part B B3) */
+export const JOB_ORGANIZER_PAYOUT = 'process-organizer-payout'
+
 /** Order cancelled → issue Stripe refund to customer */
 export const JOB_REFUND = 'process-refund'
+
+/** Recurring backstop sweep → reconciles Stripe (money) ↔ DB (state), self-heals leaks */
+export const JOB_RECONCILE = 'reconcile-sweep'
 
 // ─── Job payload ──────────────────────────────────────────────────────────────
 // Unified interface — all jobs share the same queue so all payloads must be

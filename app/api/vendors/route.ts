@@ -1,11 +1,16 @@
-import { clerkClient } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import { success, apiError, paginated } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { uniqueVendorSlug } from '@/lib/vendor-slug'
+import { logger } from '@/lib/logger'
+import { syncUserRoleMetadata } from '@/lib/role-sync'
+import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 
 // GET /api/vendors?eventSlug=springfield-fair-2026&page=1&limit=20
-// Returns active, online vendors for a given event.
+// Returns active, online vendors for a given event. When ENFORCE_VENDOR_READINESS
+// is on, also requires the (c) bar (stripeVerified + ≥1 available item) so unready
+// vendors aren't shown as orderable. OFF by default → unchanged behavior.
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
@@ -23,6 +28,7 @@ export async function GET(req: Request) {
       eventId: event.id,
       status: 'ACTIVE' as const,
       isOffline: false,
+      ...readinessWhereIfEnforced(),
     }
 
     const [vendors, total] = await Promise.all([
@@ -65,7 +71,7 @@ export async function POST(req: Request) {
     const user = await db.user.findUnique({ where: { clerkId } })
     if (!user) return apiError('User not found — Clerk sync may be pending', 404, 'NOT_FOUND')
 
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now()
+    const slug = await uniqueVendorSlug(name, event.id)
 
     const vendor = await db.vendor.create({
       data: {
@@ -82,15 +88,13 @@ export async function POST(req: Request) {
       },
     })
 
-    // Set publicMetadata.role = 'vendor' so requireVendorAuth() passes immediately
+    // Derive publicMetadata.roles[] from DB memberships (now includes this new
+    // VendorMember) so the fast gate matches the authority immediately.
     try {
-      const clerk = await clerkClient()
-      await clerk.users.updateUserMetadata(clerkId, {
-        publicMetadata: { role: 'vendor' },
-      })
+      await syncUserRoleMetadata(user.id)
     } catch (err) {
-      // Non-fatal — vendor record exists; admin can manually set role if needed
-      console.error('[Vendors] Failed to set Clerk publicMetadata for', clerkId, err)
+      // Non-fatal — vendor record exists; backfill/next sync will reconcile.
+      logger.error('[Vendors] Failed to sync Clerk role metadata', { clerkId, error: String(err) })
     }
 
     return success(vendor, 201)

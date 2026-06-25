@@ -79,6 +79,7 @@ model Event {
   fulfillmentConfig FulfillmentConfig?
   runners           Runner[]
   postEventReport   PostEventReport?
+  organizerPayouts  OrganizerPayout[]
 
   @@index([urlSlug])
   @@index([status])
@@ -110,9 +111,15 @@ model FulfillmentConfig {
   curbsideZoneLng         Float?
   curbsideZoneDescription String? // e.g. "North parking lot, Row A"
   curbsideMethod          CurbsideMethod?
+  curbsideFee             Float   @default(0) // Flat fee for curbside (default $0, optional). Same runner/organizer split as delivery.
 
   // ── Home delivery config ───────────────────────────────────────────────────
   homeDeliveryFee            Float? // Flat fee charged to customer
+
+  // ── Fee split ──────────────────────────────────────────────────────────────
+  // What % of the applicable runner-fulfilled fee (delivery or curbside) goes to
+  // the RUNNER (0–100). The leftover (100 − this) is the ORGANIZER's earning.
+  runnerFeePercent Int @default(0)
   homeDeliveryRadiusKm       Float? // Max delivery radius from event coords
   runnerTransportDescription String? // e.g. "Delivered by golf cart"
 
@@ -170,6 +177,7 @@ model User {
   runner        Runner?
   orgMembers    OrgMember[]
   favoriteItems FavoriteItem[]
+  vendorAuditLogs VendorAuditLog[]
 
   @@index([clerkId])
   @@index([email])
@@ -186,7 +194,9 @@ model Vendor {
 
   // Basic info
   name        String
-  slug        String @unique
+  // Slug is set on creation and intentionally NOT regenerated on rename — changing
+  // it would break existing organizer/customer URLs. Scoped unique per event below.
+  slug        String
   description String?
   cuisineType String
   boothNumber String?
@@ -204,18 +214,23 @@ model Vendor {
   // Onboarding documents
   foodHandlerPermitUrl String?
   insuranceUrl         String?
+  businessLicenseUrl   String?
   insuranceExpiryDate  DateTime?
   insuranceExpired     Boolean   @default(false)
+
+  // Operating hours — JSON: Record<Day, { open: string; close: string; enabled: boolean }>
+  operatingHours Json?
 
   // Booth photos (array of URLs)
   boothPhotoUrls Json?
 
   // Stripe Connect
-  stripeAccountId String?
-  stripeVerified  Boolean @default(false)
+  stripeAccountId   String?
+  stripeVerified    Boolean   @default(false)
+  stripeConnectedAt DateTime?
 
   // Commission
-  commissionRate Float @default(0.10) // 10% FairSynq platform fee on subtotal
+  commissionRate Float @default(0.10) // DEPRECATED — abandoned vendor-commission model; not read anywhere. Drop in a future migration.
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -232,7 +247,12 @@ model Vendor {
   notifications      VendorNotification[]
   disputes           Dispute[]
   menuRequests       MenuRequest[]
+  auditLogs          VendorAuditLog[]
+  payoutHolds        PayoutHold[]
+  refunds            Refund[]
+  refundRequests     RefundRequest[]
 
+  @@unique([eventId, slug], map: "uq_vendor_event_slug")
   @@index([eventId, status],   map: "idx_vendor_event_status")
   @@index([eventId, isOffline],map: "idx_vendor_event_active")
   @@index([status])
@@ -374,10 +394,11 @@ model Order {
 
   // Pricing (all in USD)
   subtotal     Float  // Sum of item prices × quantities
-  deliveryFee  Float? // Home delivery only — passed through to runner pool
-  total        Float  // subtotal + deliveryFee (if applicable)
-  fairSynqFee  Float  // 7% of subtotal, auto-deducted at transfer
-  vendorPayout Float  // subtotal - fairSynqFee (delivery fee excluded)
+  deliveryFee  Float? // The applicable runner-fulfilled fee (home delivery OR curbside); split runner/organizer. Null/0 for booth pickup.
+  tip          Float? // Customer tip on runner-fulfilled orders only. 100% the runner's; NO service fee, NO split. Null/0 otherwise.
+  total        Float  // subtotal + serviceFee(10%×subtotal) + deliveryFee + serviceCharge + tip
+  fairSynqFee  Float  // FairSynq revenue = 10% service fee charged to the customer on top (on subtotal only)
+  vendorPayout Float  // = subtotal in full — vendor keeps everything, no commission deducted
 
   // Customer info
   customerName   String
@@ -437,6 +458,20 @@ model Order {
   // Async payout status (set by process-vendor-payout worker)
   payoutStatus  PayoutStatus?
 
+  // Part B B4 — tip-refund record (1:1 with the order, so the order row carries it,
+  // ledger-as-record like the runner case). Set when a CANCELLED runner-fulfilled
+  // order's tip is owed BACK to the customer (no runner ever earned it). Presence =
+  // refunded; the idempotency key tip_refund_${id} + this field prevent double-refund.
+  tipRefundId   String?   @unique
+  tipRefundedAt DateTime?
+
+  // Out-of-model exclusion marker. NOT a terminal status (these orders may be
+  // COMPLETED/CANCELLED/PLACED in their own right) — a distinct flag meaning
+  // "intentionally excluded from reconciliation/payout" (e.g. pre-fee-model test
+  // data). The reconciler skips any order with voidedAt set. Stripe is untouched.
+  voidedAt   DateTime?
+  voidReason String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -447,6 +482,13 @@ model Order {
   orderEvents         OrderEvent[]
   incidentReports     IncidentReport[]
   disputes            Dispute[]
+  payouts             Payout[]
+  payoutHolds         PayoutHold[]
+  refunds             Refund[]
+  refundRequests      RefundRequest[]
+  chargebacks         Chargeback[]
+  runnerEarning       RunnerEarning?
+  organizerEarning    OrganizerEarning?
 
   @@unique([placedAt, id],                   map: "uq_order_placed_id")
   @@index([customerId, placedAt(sort: Desc)], map: "idx_order_customer_placed")
@@ -456,6 +498,8 @@ model Order {
   @@index([vendorId, status, placedAt(sort: Desc)], map: "idx_order_vendor_status_placed")
   @@index([status])
   @@index([fulfillmentType])
+  // The dispute webhook and refund engine resolve orders by Stripe charge id.
+  @@index([stripeChargeId], map: "idx_order_stripe_charge")
 }
 
 enum OrderStatus {
@@ -529,7 +573,8 @@ model VendorOrderStatus {
 
   // PLACED → ACCEPTED → PREPARING → READY → COMPLETED
   // or      PLACED → DECLINED
-  status String @default("PLACED")
+  status  String @default("PLACED")
+  version Int    @default(1)
 
   acceptedAt  DateTime?
   preparingAt DateTime?
@@ -573,22 +618,211 @@ model Payout {
   id      String @id @default(cuid())
   eventId String
 
+  // The order this payout settles. Required for completed-vs-paid reconciliation.
+  // Nullable only to tolerate legacy rows (there are none); always set by code.
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id])
+
   vendorId String
   vendor   Vendor @relation(fields: [vendorId], references: [id])
 
-  // Amounts (USD)
-  grossAmount Float // Order subtotal (excludes delivery fee)
-  fairSynqFee Float // 7% of subtotal kept by FairSynq
-  netAmount   Float // grossAmount - fairSynqFee transferred to vendor
+  // Amounts (USD) — per vendor, per order
+  grossAmount Float // This vendor's subtotal slice
+  fairSynqFee Float // Stripe processing-fee share withheld from this transfer (NOT FairSynq's 10%)
+  netAmount   Float // grossAmount - fairSynqFee = amount actually transferred to the vendor
 
   // Stripe transfer record
   stripeTransferId String @unique
   stripeStatus     String // pending | paid | failed
 
+  // Reversal convergence (CASE 2 refund-after-payout). When a transfer is
+  // reversed to claw back a refunded slice, the refund engine sets these. They
+  // are the AUTHORITATIVE post-reversal truth: any reader (reconciler, earnings)
+  // must treat reversedAt != null as "this payout was clawed back", regardless
+  // of stripeStatus — because the transfer.paid webhook may still set
+  // stripeStatus='paid' after the reversal. Neither write path (webhook upsert
+  // create-only, worker upsert) touches these fields, so they never go stale.
+  reversedAt       DateTime?
+  stripeReversalId String?
+
   processedAt DateTime?
   createdAt   DateTime  @default(now())
 
+  @@unique([orderId, vendorId], map: "uq_payout_order_vendor")
   @@index([vendorId])
+  @@index([eventId])
+  @@index([orderId])
+}
+
+// ============================================================================
+// PAYOUT HOLDS
+// A vendor's payout slice that could NOT be transferred at completion time —
+// almost always because the vendor isn't Stripe-connected/verified yet. Persisted
+// (not just logged) so the reconciler can pay it once the vendor connects.
+// ============================================================================
+
+model PayoutHold {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  // What the vendor is owed (their subtotal slice − Stripe fee share), in cents.
+  amountCents Int
+  reason      String // 'unconnected' | 'non_positive' | other
+
+  resolved   Boolean   @default(false) // true once a transfer for this slice succeeds
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, vendorId], map: "uq_payouthold_order_vendor")
+  @@index([resolved])
+  @@index([vendorId, resolved])
+}
+
+// ============================================================================
+// REFUNDS: per-vendor money-truth (mirrors Payout).
+// One row per (order, vendor) refund. The customer is returned this vendor's
+// SUBTOTAL SLICE ONLY — the 10% service fee is NEVER refunded (decision B), and
+// Stripe's processing fee is NOT recovered (FairSynq eats it). amountCents is
+// the slice in integer cents. stripeReversalId is set only in CASE 2 (refund
+// after the vendor payout already fired).
+// ============================================================================
+
+model Refund {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  amountCents      Int     // vendor subtotal slice returned to customer (NEVER the fee)
+  reason           String?
+  status           String  // PENDING | COMPLETED | FAILED
+  stripeRefundId   String? // the customer refund on the original charge
+  stripeReversalId String? // CASE 2 only — transfer reversal clawing back the vendor
+
+  createdBy String?  // actor id (admin/organizer/customer/system)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, vendorId], map: "uq_refund_order_vendor")
+  @@index([status])
+  @@index([vendorId])
+  @@index([orderId])
+  @@index([eventId])
+}
+
+// ============================================================================
+// REFUND REQUESTS: customer-initiated requests for a vendor portion AFTER that
+// vendor accepted. Customers cannot self-refund post-acceptance (decision E) —
+// they file a request that an admin/organizer approves, which then calls the
+// SAME refundVendorPortion() engine. "Customer asked" is kept distinct from
+// "money moved" (the Refund row).
+// ============================================================================
+
+model RefundRequest {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  reason      String?
+  status      String   @default("PENDING") // PENDING | APPROVED | DENIED
+  requestedBy String
+  resolvedBy  String?
+  resolvedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, vendorId], map: "uq_refundrequest_order_vendor")
+  @@index([status])
+  @@index([eventId, status])
+}
+
+// ============================================================================
+// NEGATIVE BALANCE EVENTS: FairSynq's clawback-debt ledger.
+// When a CASE 2 transfer reversal hits a vendor whose connected balance is
+// insufficient, the reversal still completes (losses_collector: 'application')
+// — FairSynq fronts the money to keep the customer refunded. This row tracks
+// what the vendor owes back. Deliberately relation-free (plain ids) so the debt
+// record survives even if the order is later removed. The reconciler surfaces
+// unresolved (open) rows so debts are chased, never silently absorbed.
+// ============================================================================
+
+model NegativeBalanceEvent {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId  String
+  vendorId String
+
+  amountCents Int     // amount FairSynq fronted that the vendor owes back
+  reversalId  String? // the Stripe transfer reversal that went negative
+  status      String  @default("open") // open | chased | recovered
+  // What created this debt: refund_reversal (CASE 2 refund), dispute_clawback
+  // (chargeback reversal that went negative), dispute_fee (~$15 dispute fee
+  // FairSynq absorbed but recoverable from the at-fault vendor). One ledger,
+  // typed entries — the "what does this vendor owe FairSynq" view.
+  kind        String  @default("refund_reversal")
+  note        String?
+
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([status])
+  @@index([vendorId, status])
+  @@index([eventId])
+}
+
+// ============================================================================
+// CHARGEBACKS: bank-initiated disputes (charge.dispute.*). Distinct from the
+// in-app Dispute model (customer/vendor complaints). A chargeback is money the
+// BANK already pulled — we do NOT refund the customer (they were paid by the
+// bank); we claw back the vendors' slices proportionally (reuse the CASE 2
+// reversal machinery), front any gaps (NegativeBalanceEvent kind=dispute_clawback),
+// record the ~$15 fee as recoverable (kind=dispute_fee), and SURFACE to admin.
+// The fight/accept decision is human (Stripe dashboard) — never auto.
+// ============================================================================
+
+model Chargeback {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  stripeDisputeId String  @unique // idempotency anchor — dispute events redeliver
+  stripeChargeId  String
+  amountCents     Int     // the whole charge the bank pulled
+  feeCents        Int     // Stripe's dispute fee (~$15), FairSynq-absorbed-but-recoverable
+  reason          String? // Stripe dispute reason
+
+  // Mirrors Stripe dispute.status: needs_response | under_review | won | lost | ...
+  status          String
+  atFaultVendorId String? // admin-set (or inferred); the fee is recoverable from them
+  clawbackStatus  String  @default("pending") // pending | done | partial
+  fundsReinstated Boolean @default(false)     // set on funds_reinstated (WON) — admin reconciles
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([orderId])
   @@index([eventId])
 }
 
@@ -648,12 +882,24 @@ model FairOrganizer {
   website          String?
   stripeCustomerId String?  // for 2027 licensing billing
 
+  // Stripe Connect (Part B payout destination). Deliberately at the ORGANIZER
+  // level, NOT per-event: one organizer = one connected account, reused across
+  // all their fairs (avoids re-onboarding for every event — same lesson as the
+  // vendor dedup). An event's payout destination resolves via event.organizer.
+  // (Event.operatorStripeAccountId remains an optional per-event override.)
+  stripeAccountId   String?
+  stripeVerified    Boolean   @default(false)
+  stripeConnectedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
   fairs   Event[]
   members OrgMember[]
+
+  @@index([stripeVerified])
+  @@index([stripeAccountId])
 }
 
 model OrgMember {
@@ -695,10 +941,121 @@ model Runner {
   currentLng        Float?
   locationUpdatedAt DateTime?
 
+  // Stripe Connect (Part B payout destination — net-new for runners; mirrors
+  // Vendor). The unpaid RunnerEarning rows ARE the hold: a runner who delivers
+  // before connecting accrues earnings that pay out the moment they verify.
+  stripeAccountId   String?
+  stripeVerified    Boolean   @default(false)
+  stripeConnectedAt DateTime?
+
   createdAt DateTime @default(now())
 
   // Relations
   incidentReports IncidentReport[]
+  earnings        RunnerEarning[]
+
+  @@index([eventId])
+  @@index([status])
+  @@index([stripeVerified])
+  @@index([stripeAccountId])
+}
+
+// ============================================================================
+// RUNNER EARNINGS: tracked-but-not-yet-paid record of what a runner earned per
+// completed delivery. The amount is the customer-paid delivery fee
+// (Order.deliveryFee, "passed through to runner pool") — NOT a deduction from
+// the vendor or FairSynq. This is DISPLAY/TRACKING only: actual Stripe payouts
+// to runners are a separate money-flow phase (runners need their own Connect
+// accounts) and are deliberately NOT wired into process-payout.ts.
+// ============================================================================
+
+model RunnerEarning {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String @unique // one earning per delivered order (idempotent)
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  runnerId String
+  runner   Runner @relation(fields: [runnerId], references: [id], onDelete: Cascade)
+
+  amountCents Int      // = runnerShare (runner% × applicable fee) + tip, in cents. RECORDED, not paid (payout deferred to Part B).
+  status      String   @default("tracked") // tracked | paid (Part B B2 executor sets paid)
+
+  // Part B B2 payout record. The ledger row DOUBLES as the payout record (just as
+  // the unpaid row IS the hold) — no separate RunnerPayout table. On a successful
+  // transfer the executor sets status='paid' + the transfer id + paidAt. The
+  // reconciler asserts status='paid' ⟺ stripeTransferId != null.
+  stripeTransferId String?   @unique // the runner payout transfer (idempotency-keyed)
+  paidAt           DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([runnerId])
+  @@index([eventId])
+  @@index([status])
+}
+
+// Organizer's accrued share of the runner-fulfilled fee: (100 − runnerFeePercent)
+// × applicable fee. RECORDED only (status 'accrued') — organizer payout is Part B.
+// Mirrors RunnerEarning's shape. NO tip here (tip is 100% the runner's).
+model OrganizerEarning {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String @unique // one earning per delivered order (idempotent)
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  organizerId String? // resolved from the event's organizer when available
+
+  amountCents Int    // = organizerShare (applicable fee − runnerShare), in cents
+  source      String // delivery_fee_share | curbside_fee_share
+  status      String @default("accrued") // accrued | paid (Part B B3 batch executor sets paid)
+
+  // Part B B3 batch audit. N earnings : 1 batch payout (unlike runner's 1:1), so
+  // the batch needs its OWN record (OrganizerPayout) — the ledger row can't double
+  // as the record here. Each earning FKs to the batch that paid it: answers both
+  // "what did this batch pay?" (rows → batch) and "which payout covered this
+  // earning?" (batchId). Reconciler asserts: status='paid' ⟺ batchId set ⟺ that
+  // batch has a stripeTransferId. The unpaid (batchId null, status accrued) row IS
+  // the hold, same as runners.
+  paidAt  DateTime?
+  batchId String?
+  batch   OrganizerPayout? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([organizerId])
+  @@index([status])
+  @@index([batchId])
+}
+
+// ============================================================================
+// ORGANIZER PAYOUT (Part B B3): one batched transfer per event, covering a SET
+// of OrganizerEarning rows. The idempotency anchor (idempotencyKey = this id, so
+// a re-run finds the existing batch and transfers nothing) AND the audit of which
+// payout covered which earnings. NO source_transaction — the batch spans multiple
+// charges, so it's a plain transfer from the platform balance. Destination is the
+// event's organizer's Connect account (FairOrganizer.stripeAccountId).
+// ============================================================================
+
+model OrganizerPayout {
+  id      String @id @default(cuid())
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  organizerId String? // the FairOrganizer paid (resolved via the event)
+
+  totalCents       Int     // = Σ amountCents of the covered earnings (the proven set sum)
+  status           String  @default("pending") // pending | paid | failed
+  stripeTransferId String? @unique // the batch transfer (idempotency-keyed by this row's id)
+
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  // The earnings this batch covers (each carries batchId back to here).
+  earnings OrganizerEarning[]
 
   @@index([eventId])
   @@index([status])
@@ -857,4 +1214,30 @@ model ProcessedWebhookEvent {
   processedAt   DateTime @default(now())
 
   @@index([processedAt])
+}
+
+// ============================================================================
+// VENDOR AUDIT LOG
+// Immutable record of vendor-initiated actions for organizer/admin review.
+// ============================================================================
+
+model VendorAuditLog {
+  id        String   @id @default(cuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Action type — coarse-grained bucket for filtering
+  // e.g., ORDER_ACCEPTED | ORDER_DECLINED | MENU_CHANGE_REQUESTED | SETTINGS_UPDATED
+  action    String
+
+  // Free-form structured data: orderId, menuItemId, before/after values, etc.
+  // Stored as JSON — never queried by content, only returned as-is.
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([vendorId, createdAt])
+  @@index([userId])
 }

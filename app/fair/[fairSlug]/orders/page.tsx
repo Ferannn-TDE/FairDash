@@ -53,7 +53,7 @@ export default function FairOrdersPage() {
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
-      router.replace(`/sign-in?redirect_url=/fair/${params.fairSlug}/orders`)
+      router.replace(`/login?redirect=/fair/${params.fairSlug}/orders`)
     }
   }, [isLoaded, isSignedIn, params.fairSlug, router])
 

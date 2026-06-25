@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 
 interface OrderItem {
@@ -56,18 +58,14 @@ function formatTime(ts: string) {
 }
 
 export default function OrganizerOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([])
-  const [loading, setLoading] = useState(true)
+  const query = useQuery({
+    queryKey: ['organizer-orders-global'],
+    queryFn: () => fetchJson<{ orders: Order[] }>('/api/organizer/orders?limit=100'),
+  })
+  const orders = query.data?.orders ?? []
+  const loading = query.isPending
   const [filter, setFilter] = useState('All')
   const [search, setSearch] = useState('')
-
-  useEffect(() => {
-    fetch('/api/organizer/orders?limit=100')
-      .then(r => r.json())
-      .then(json => { if (json.data?.orders) setOrders(json.data.orders) })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
 
   const filtered = orders.filter(o => {
     const matchesStatus = filter === 'All' || o.status === filter

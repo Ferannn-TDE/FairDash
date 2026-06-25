@@ -3,14 +3,14 @@
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { EnvelopeIcon, ArrowRightIcon } from '@heroicons/react/24/outline'
-import { ShoppingBag, Store, CalendarDays, Truck } from 'lucide-react'
+import { Store, CalendarDays, Truck } from 'lucide-react'
 import { EASE, TIMING, Reveal, Stagger, StaggerItem } from '@/components/animations/motion'
 import MarketplaceNavbar from './_components/MarketplaceNavbar'
 import FairCard from './_components/FairCard'
 import HowItWorksSection from './_components/HowItWorksSection'
 import { mockFairs, getActiveFairs } from '@/lib/mock'
 import type { Fair } from '@/lib/mock'
-import { useUser, SignedIn, SignedOut } from '@clerk/clerk-react'
+import { useUser } from '@clerk/clerk-react'
 import { useState, useEffect } from 'react'
 import { useRole } from './_contexts/RoleContext'
 
@@ -26,42 +26,29 @@ function FacebookIcon({ className }: { className?: string }) {
 
 // ── Role cards section ────────────────────────────────────────────────────────
 
-const ROLE_CARDS = [
-  {
-    icon: ShoppingBag,
-    title: "I'm Hungry",
-    desc: 'Browse vendors, order ahead, and skip the queue at your next fair.',
-    href: '/fairs',
-    cta: 'Find a Fair',
-    color: '#FF0077',
-    glow: 'rgba(255,0,119,0.15)',
-  },
+// Operator paths only — the customer is the hero above (browse free, no login
+// wall). Mono-pink across the board; each routes to its dedicated login page.
+const OPERATOR_CARDS = [
   {
     icon: Store,
-    title: "I'm a Vendor",
-    desc: 'List your booth, manage your menu, and reach thousands of hungry fairgoers.',
-    href: '/login?role=vendor',
-    cta: 'Become a Vendor',
-    color: '#FF6B35',
-    glow: 'rgba(255,107,53,0.15)',
+    title: 'Become a Vendor',
+    desc: 'List your booth, manage your menu, and reach thousands of hungry fairgoers. Free to join.',
+    href: '/sign-in/vendor',
+    cta: 'Vendor sign-in',
   },
   {
     icon: CalendarDays,
-    title: 'I Run Events',
-    desc: 'Create fairs, onboard vendors, monitor orders live, and grow your event.',
-    href: '/login?role=organizer',
-    cta: 'Organizer Portal',
-    color: '#8B5CF6',
-    glow: 'rgba(139,92,246,0.15)',
+    title: 'Host an Event',
+    desc: 'Create fairs, approve vendors, and monitor orders live — run your event end to end.',
+    href: '/organizer/login',
+    cta: 'Organizer sign-in',
   },
   {
     icon: Truck,
-    title: 'I Deliver',
-    desc: 'Earn on your schedule by running orders between booths and pickup zones.',
-    href: '/login?role=runner',
-    cta: 'Become a Driver',
-    color: '#3B82F6',
-    glow: 'rgba(59,130,246,0.15)',
+    title: 'Deliver with FairSynq',
+    desc: 'Claim deliveries, run orders across the fairgrounds, and earn per drop.',
+    href: '/sign-in/runner',
+    cta: 'Runner sign-in',
   },
 ]
 
@@ -72,33 +59,30 @@ function RoleSection() {
   return (
     <section className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-20">
       <Reveal className="text-center mb-10">
+        <p className="text-[11px] text-neon-pink font-inter font-semibold uppercase tracking-[0.2em] mb-3">
+          Work with FairSynq
+        </p>
         <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
-          How will you <span className="text-neon-pink">FairSynq?</span>
+          Run the <span className="text-neon-pink">other side</span> of the fair
         </h2>
         <p className="mt-3 text-text-gray text-sm sm:text-base max-w-xl mx-auto">
-          One platform, four ways to participate. Pick your role.
+          Vendors, organizers, and runners power FairSynq. Pick your path to sign in.
         </p>
       </Reveal>
 
-      <Stagger className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-        {ROLE_CARDS.map(({ icon: Icon, title, desc, href, cta, color, glow }) => (
+      <Stagger className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 max-w-5xl mx-auto">
+        {OPERATOR_CARDS.map(({ icon: Icon, title, desc, href, cta }) => (
           <StaggerItem key={href}>
             <Link
               href={href}
-              className="group flex flex-col h-full p-5 bg-white/[0.03] border border-white/[0.08] rounded-2xl hover:border-white/[0.15] transition-all duration-300 no-underline"
-              style={{ boxShadow: `0 0 0 0 ${glow}` }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 32px ${glow}` }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = `0 0 0 0 ${glow}` }}
+              className="group flex flex-col h-full p-6 bg-white/[0.03] border border-white/[0.08] rounded-2xl hover:border-neon-pink/30 hover:bg-white/[0.05] hover:shadow-[0_8px_32px_rgba(255,0,119,0.12)] motion-safe:hover:-translate-y-0.5 transition-all duration-300 no-underline"
             >
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center mb-4 shrink-0"
-                style={{ background: `${glow}` }}
-              >
-                <Icon className="w-5 h-5" style={{ color }} />
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 shrink-0 bg-neon-pink/10 border border-neon-pink/20">
+                <Icon className="w-5 h-5 text-neon-pink" />
               </div>
-              <p className="font-bebas text-xl tracking-wide text-white mb-1">{title}</p>
+              <p className="font-bebas text-2xl tracking-wide text-white mb-1.5">{title}</p>
               <p className="text-text-gray text-xs leading-relaxed flex-1">{desc}</p>
-              <div className="flex items-center gap-1.5 mt-4 text-xs font-semibold transition-colors" style={{ color }}>
+              <div className="flex items-center gap-1.5 mt-5 text-xs font-semibold text-neon-pink">
                 {cta}
                 <ArrowRightIcon className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" />
               </div>
@@ -263,14 +247,6 @@ function FinalCTABanner() {
               Browse Fairs Near You
             </Link>
           </motion.div>
-          <SignedOut>
-            <Link
-              href="/login"
-              className="flex items-center justify-center w-full sm:w-auto px-8 py-3.5 text-sm font-inter font-medium rounded-xl btn-secondary"
-            >
-              Create an Account
-            </Link>
-          </SignedOut>
         </div>
       </Reveal>
     </section>
@@ -321,9 +297,9 @@ function SiteFooter() {
               <p className="text-[10px] font-inter text-gray-600 uppercase tracking-[0.15em] mb-4">Platform</p>
               <div className="flex flex-col gap-2.5">
                 <Link href="/fairs" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Discover Fairs</Link>
-                <SignedOut>
-                  <Link href="/login" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Sign In</Link>
-                </SignedOut>
+                <Link href="/sign-in/vendor" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Vendor sign-in</Link>
+                <Link href="/organizer/login" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Organizer sign-in</Link>
+                <Link href="/sign-in/runner" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Runner sign-in</Link>
               </div>
             </div>
             <div>
@@ -341,9 +317,13 @@ function SiteFooter() {
           <p className="text-[10px] text-gray-700 font-inter">
             © {new Date().getFullYear()} FairSynq. All rights reserved.
           </p>
-          <p className="text-[10px] text-gray-700 font-inter">
-            Made with 🩷 for fair food lovers everywhere.
-          </p>
+          <div className="flex items-center gap-4">
+            <p className="text-[10px] text-gray-700 font-inter">Made with 🩷 for fair food lovers.</p>
+            {/* Discreet, internal-only admin entry */}
+            <Link href="/admin/login" className="text-[10px] text-gray-700 hover:text-gray-400 transition-colors font-inter">
+              Admin
+            </Link>
+          </div>
         </div>
 
       </div>

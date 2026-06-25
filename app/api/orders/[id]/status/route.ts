@@ -2,6 +2,9 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { OrderStatus, FulfillmentType } from '@prisma/client'
 import { db } from '@/lib/db'
+import { stripe } from '@/lib/stripe'
+import { placePaidOrder } from '@/lib/place-order'
+import { reconcileMasterStatus } from '@/lib/reconcile-order-status'
 import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -13,9 +16,10 @@ import {
   JOB_UNCOLLECTED,
   JOB_UNDELIVERABLE,
 } from '@/lib/queues'
-import { enqueueVendorPayout, enqueueRefund } from '@/lib/order-side-effects'
+import { enqueueOrderPayout } from '@/lib/order-side-effects'
+import { refundVendorPortion } from '@/lib/process-refund'
 import { enqueueJobSafely } from '@/lib/queue-safe'
-import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M } from '@/lib/constants'
+import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M, REFUND_WINDOW_MS } from '@/lib/constants'
 import { logger } from '@/lib/logger'
 
 // PATCH /api/orders/:id/status
@@ -132,14 +136,22 @@ export async function PATCH(
       if (order.customerId !== dbUser.id) {
         return apiError('Access denied', 403, 'FORBIDDEN')
       }
-      // Idempotent — if webhook already set PLACED, this is a no-op
+      // Idempotent — if the webhook already placed the order, this is a no-op
       if (order.status !== OrderStatus.PENDING_PAYMENT) {
         return success({ orderId: order.id, status: order.status })
       }
-      await db.order.update({
-        where: { id: order.id },
-        data: { status: OrderStatus.PLACED },
-      })
+      // Fast-path placement on client confirm. NEVER trust the client that
+      // payment succeeded — verify the PaymentIntent with Stripe first, so a
+      // customer can't place an unpaid order by calling this endpoint directly.
+      if (!order.stripePaymentIntentId) {
+        return apiError('Order has no payment intent', 409, 'NO_PAYMENT_INTENT')
+      }
+      const pi = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId)
+      if (pi.status !== 'succeeded') {
+        return apiError('Payment has not completed', 409, 'PAYMENT_NOT_COMPLETED')
+      }
+      // Shared, idempotent placement — webhook will run the same path as backstop.
+      await placePaidOrder(order.id, (pi.latest_charge as string | null) ?? undefined)
       return success({ orderId: order.id, status: OrderStatus.PLACED })
     }
 
@@ -175,13 +187,57 @@ export async function PATCH(
         throw new ApiError('photoUrl is required to mark an order as delivered', 400, 'VALIDATION_ERROR')
       }
 
-      // Assign runner if not already assigned (runner taking an unassigned order)
-      if (newStatus === OrderStatus.RUNNER_COLLECTED && !order.runnerId) {
-        await db.order.update({
-          where: { id: order.id },
+      // ── RACE-SAFE CLAIM ──────────────────────────────────────────────────
+      // Two runners may tap "Claim" on the same order at the same instant. The
+      // claim MUST be a single atomic conditional update — never a read-then-write
+      // (the stale `!order.runnerId` check + separate update had a race window
+      // where both runners passed the check and both claimed). Same atomic-flip
+      // pattern as placePaidOrder. `runnerId IS NULL` is the contested guard:
+      // exactly one updateMany returns count 1 (the winner); the loser gets 0.
+      if (newStatus === OrderStatus.RUNNER_COLLECTED && order.runnerId !== runner.id) {
+        const claim = await db.order.updateMany({
+          // Atomic AND status-aware: only an unclaimed, still-READY row matches. The
+          // status guard means a claim landing after the UNDELIVERABLE timeout fired
+          // can't even set runnerId on the terminal order (no stray assignment) —
+          // the resurrection is prevented at the claim, with canAdvance as backstop.
+          where: { id: order.id, runnerId: null, status: OrderStatus.READY },
           data: { runnerId: runner.id, dispatchedAt: new Date() },
         })
+        if (claim.count === 0) {
+          // Lost the claim, or the order is no longer a claimable READY one (e.g. it
+          // already timed out). Bail BEFORE the status flip.
+          return apiError('This delivery is no longer claimable', 409, 'ALREADY_CLAIMED')
+        }
       }
+
+      // Only the ASSIGNED runner may mark their order delivered — never another runner.
+      if (newStatus === OrderStatus.DELIVERED && order.runnerId !== runner.id) {
+        return apiError('This delivery is assigned to another runner', 403, 'NOT_YOUR_DELIVERY')
+      }
+
+      // ── Phase 4: runner status via the aggregator ──────────────────────────
+      // The atomic claim above won the assignment (runnerId, race-safe). Now write
+      // the runner DATA (delivery proof) and let the aggregator DERIVE the master
+      // status from the persistent columns — RUNNER_COLLECTED from runnerId,
+      // DELIVERED from curbsidePhotoUrl — behind canAdvance. The aggregator owns the
+      // status write (gaining the monotonic guard) AND the DELIVERED side-effects
+      // (RunnerEarning + OrganizerEarning accrual + delayed payout). Returns here so
+      // runner transitions never reach the legacy monolithic update below.
+      if (newStatus === OrderStatus.DELIVERED) {
+        await db.order.update({
+          where: { id: order.id },
+          data: {
+            curbsidePhotoUrl: photoUrl ?? null,
+            ...(lat != null ? { runnerConfirmedLat: lat } : {}),
+            ...(lng != null ? { runnerConfirmedLng: lng } : {}),
+          },
+        })
+      }
+      const rec = await reconcileMasterStatus(order.id)
+      if (!rec.wrote) {
+        return apiError(rec.reason, 409, 'INVALID_TRANSITION')
+      }
+      return success({ orderId: order.id, status: rec.to })
     } else {
       // Vendor-initiated transition
       const isMember = await getVendorAuth(dbUser.id, order.vendorId, req)
@@ -212,14 +268,11 @@ export async function PATCH(
     if (newStatus === OrderStatus.COMPLETED)        timestampPatch.completedAt = new Date()
     if (newStatus === OrderStatus.CANCELLED)        timestampPatch.cancelledAt = new Date()
 
-    const runnerDataPatch: Record<string, unknown> = {}
-    if (newStatus === OrderStatus.DELIVERED) {
-      runnerDataPatch.curbsidePhotoUrl = photoUrl ?? null
-      if (lat != null) runnerDataPatch.runnerConfirmedLat = lat
-      if (lng != null) runnerDataPatch.runnerConfirmedLng = lng
-    }
+    // NOTE: runner transitions (RUNNER_COLLECTED/DELIVERED) returned above, routed
+    // through the aggregator. This monolithic update handles the remaining
+    // (legacy/vendor + customer-confirm) transitions only.
 
-    // ── 5. Apply DB update (status + timestamps + runner data) ────────────
+    // ── 5. Apply DB update (status + timestamps) ──────────────────────────
     const updatedOrder = await db.order.update({
       where: { id: order.id },
       data: {
@@ -233,7 +286,6 @@ export async function PATCH(
           cancellationReason: reason ?? null,
         }),
         ...timestampPatch,
-        ...runnerDataPatch,
       },
     })
 
@@ -257,21 +309,23 @@ export async function PATCH(
         })
 
         if (result === 'dropped') {
-          console.error('[CRITICAL] Job dropped with no fallback', { jobName, orderId: order.id })
+          logger.error('[CRITICAL] Timeout job dropped', { jobName, orderId: order.id })
         }
       }
     }
 
-    // 6b. COMPLETED or DELIVERED → Stripe transfer + Payout record + analytics cache bust
-    if (newStatus === OrderStatus.COMPLETED || newStatus === OrderStatus.DELIVERED) {
+    // 6b. COMPLETED → delayed payout enqueue + analytics cache bust. (DELIVERED is
+    // handled by the aggregator via the runner path above — incl. its earnings
+    // accrual, which moved into reconcileMasterStatus in Phase 4.)
+    if (newStatus === OrderStatus.COMPLETED) {
       try {
         await handleCompleted(order)
       } catch (e) {
-        console.warn('[Status] handleCompleted side-effect failed:', e)
+        logger.warn('[Status] handleCompleted side-effect failed: ' + String(e))
       }
       revalidateTag(`analytics-${order.vendorId}`, 'default')
-      revalidateTag(`stats-${order.vendorId}`,     'default')
-      revalidateTag(`revenue-${order.vendorId}`,   'default')
+      revalidateTag(`stats-${order.vendorId}`, 'default')
+      revalidateTag(`revenue-${order.vendorId}`, 'default')
     }
 
     // 6c. CANCELLED -> Stripe refund + Cancellation record
@@ -279,7 +333,7 @@ export async function PATCH(
       try {
         await handleCancelled(order, reason)
       } catch (e) {
-        console.warn('[Status] handleCancelled side-effect failed:', e)
+        logger.warn('[Status] handleCancelled side-effect failed: ' + String(e))
       }
     }
 
@@ -307,26 +361,23 @@ export async function PATCH(
 // ─── COMPLETED side-effect ────────────────────────────────────────────────────
 
 async function handleCompleted(
-  order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null; vendorPayout: number; vendor: { stripeAccountId: string | null; stripeVerified: boolean } },
+  order: { id: string; eventId: string },
 ) {
-  const vendor = order.vendor
-
-  if (!vendor.stripeAccountId || !vendor.stripeVerified) {
-    logger.info('[Status] skipping payout — vendor not on Stripe Connect', { vendorId: order.vendorId })
-    return
-  }
-
-  const enqueued = await enqueueVendorPayout({
+  // Per-vendor payout: the worker reads the settled Stripe fee and splits it
+  // proportionally across ALL vendors on the cart, sending one transfer each.
+  // Connection/verification is checked per-vendor inside the worker (unconnected
+  // vendors are held, not skipped silently). Idempotent — safe if this fires
+  // more than once (e.g. multi-vendor completion).
+  // DELAYED behind the refund window (decision C2) — same as the vendor-status
+  // completion path. Without the delay this route would pay out immediately and
+  // defeat the window. The reconciler (Pattern C) backstops it post-window.
+  const enqueued = await enqueueOrderPayout({
     orderId: order.id,
-    vendorId: order.vendorId,
     eventId: order.eventId,
-    vendorStripeAccountId: vendor.stripeAccountId,
-    stripePaymentIntentId: order.stripePaymentIntentId,
-    stripeChargeId: order.stripeChargeId,
-    vendorPayout: order.vendorPayout,
+    delayMs: REFUND_WINDOW_MS,
   })
 
-  if (enqueued) logger.info('[Status] payout job enqueued', { orderId: order.id })
+  if (enqueued) logger.info('[Status] delayed payout job enqueued', { orderId: order.id })
 }
 
 // ─── CANCELLED side-effect ────────────────────────────────────────────────────
@@ -335,24 +386,27 @@ async function handleCancelled(
   order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null },
   reason?: string
 ) {
-  if (!order.stripePaymentIntentId) {
-    // No payment taken — just write the cancellation record
-    await db.cancellation.upsert({
-      where: { orderId: order.id },
-      create: { orderId: order.id, vendorId: order.vendorId, reason: reason ?? null, refundIssued: false, refundAmount: null },
-      update: {},
-    })
-    return
-  }
-
-  const enqueued = await enqueueRefund({
-    orderId: order.id,
-    vendorId: order.vendorId,
-    eventId: order.eventId,
-    stripePaymentIntentId: order.stripePaymentIntentId,
-    stripeChargeId: order.stripeChargeId,
-    refundReason: reason ?? 'vendor_cancelled',
+  // Write the cancellation audit record (money-truth lives in Refund rows).
+  await db.cancellation.upsert({
+    where: { orderId: order.id },
+    create: { orderId: order.id, vendorId: order.vendorId, reason: reason ?? null, refundIssued: false, refundAmount: null },
+    update: { reason: reason ?? null },
   })
 
-  if (enqueued) logger.info('[Status] refund job enqueued', { orderId: order.id })
+  if (!order.stripePaymentIntentId) return // no payment taken — nothing to refund
+
+  // Per-vendor refund through the SINGLE engine (fee kept, reconciled, idempotent),
+  // NOT a whole-order/fee-inclusive Stripe refund. A whole-order cancel = refund
+  // every vendor's slice; loop them. Idempotent — already-refunded vendors no-op.
+  const items = await db.orderItem.findMany({ where: { orderId: order.id }, select: { vendorId: true } })
+  const vendorIds = [...new Set(items.map(i => i.vendorId))]
+  for (const vendorId of vendorIds) {
+    try {
+      await refundVendorPortion({ orderId: order.id, vendorId, reason: reason ?? 'vendor_cancelled', actor: 'system' })
+    } catch (err) {
+      logger.error('[Status] per-vendor cancel refund failed — reconciler will retry', { orderId: order.id, vendorId, error: String(err) })
+    }
+  }
+
+  logger.info('[Status] per-vendor refunds issued for cancelled order', { orderId: order.id, vendors: vendorIds.length })
 }

@@ -76,7 +76,8 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/organizer/profile — stub
+// DELETE /api/organizer/profile — organizers cannot delete their own organization.
+// Org deletion is a platform-admin action handled out-of-band (support ticket).
 export async function DELETE(_req: NextRequest) {
-  return apiError('Not implemented', 501, 'NOT_IMPLEMENTED')
+  return apiError('Organization deletion must be requested via support', 403, 'FORBIDDEN')
 }

@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 
 async function computeOrganizerStats(organizerId: string) {
   const events = await db.event.findMany({
@@ -27,7 +28,7 @@ async function computeOrganizerStats(organizerId: string) {
   }
 
   const [totalVendors, totalOrderCount, revenueAgg, ordersToday] = await Promise.all([
-    db.vendor.count({ where: { eventId: { in: eventIds } } }),
+    db.vendor.count({ where: { eventId: { in: eventIds }, ...ACTIVE_VENDOR_WHERE } }),
     db.order.count({ where: baseWhere }),
     db.order.aggregate({
       where: { ...baseWhere, status: { notIn: ['PENDING_PAYMENT' as const, 'CANCELLED' as const] } },

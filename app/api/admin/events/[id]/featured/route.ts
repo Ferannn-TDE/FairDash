@@ -72,8 +72,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       },
     })
 
-    revalidateTag('fair', {})
-    revalidateTag(`fair-${event.urlSlug}`, {})
+    revalidateTag('fair', 'default')
+    revalidateTag(`fair-${event.urlSlug}`, 'default')
 
     return success(updated)
   } catch (err) {

@@ -2,12 +2,15 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
-import { enqueueRefund } from '@/lib/order-side-effects'
+import { reconcileMasterStatus } from '@/lib/reconcile-order-status'
+import { refundVendorPortion } from '@/lib/process-refund'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { logger } from '@/lib/logger'
+import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 
 // Valid per-vendor status transitions
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -76,6 +79,11 @@ export async function PATCH(
       return apiError('This order does not include your vendor', 404, 'NOT_FOUND')
     }
 
+    // Idempotent: if already in the target status, return success immediately
+    if (vendorStatus.status === newStatus) {
+      return success({ vendorId, orderId, status: newStatus })
+    }
+
     // Validate transition
     const validTransitions = ALLOWED_TRANSITIONS[vendorStatus.status]
     if (!validTransitions?.includes(newStatus)) {
@@ -94,28 +102,37 @@ export async function PATCH(
       DECLINED:  'declinedAt',
     }
 
-    // Apply the vendor-level status update + set the corresponding timestamp
+    // Apply the vendor-level status update, timestamp, and monotonic version counter.
+    // version is used by the dashboard's onChildChanged handler to discard
+    // out-of-order Firebase pushes — higher version always wins.
     const tsField = TIMESTAMP_FIELD[newStatus]
     const updated = await db.vendorOrderStatus.update({
       where: { orderId_vendorId: { orderId, vendorId } },
       data: {
-        status: newStatus,
+        status:  newStatus,
+        version: { increment: 1 },
         ...(tsField ? { [tsField]: new Date() } : {}),
       },
+      select: { version: true },
     })
 
-    // Invalidate analytics cache when this vendor's portion completes
-    if (newStatus === 'COMPLETED') {
-      revalidateTag(`analytics-${vendorId}`, 'default')
-      revalidateTag(`stats-${vendorId}`,     'default')
-      revalidateTag(`revenue-${vendorId}`,   'default')
+    // Audit log — fire-and-forget, never blocks response
+    const auditActionMap: Record<string, string | undefined> = {
+      ACCEPTED:  AUDIT_ACTIONS.ORDER_ACCEPTED,
+      DECLINED:  AUDIT_ACTIONS.ORDER_DECLINED,
+      PREPARING: AUDIT_ACTIONS.ORDER_MARKED_PREPARING,
+      READY:     AUDIT_ACTIONS.ORDER_MARKED_READY,
+      COMPLETED: AUDIT_ACTIONS.ORDER_COMPLETED,
+    }
+    const auditAction = auditActionMap[newStatus]
+    if (auditAction) {
+      logVendorAction(vendorId, dbUser.id, auditAction as Parameters<typeof logVendorAction>[2], { orderId })
     }
 
-    // Check aggregate state across all vendors to decide master order update
-    const allStatuses = await db.vendorOrderStatus.findMany({
-      where: { orderId },
-      select: { status: true, vendorId: true },
-    })
+    // Revalidate analytics on every status change — decline must clear revenue immediately
+    revalidateTag(`analytics-${vendorId}`, 'default')
+    revalidateTag(`stats-${vendorId}`, 'default')
+    revalidateTag(`revenue-${vendorId}`, 'default')
 
     const order = await db.order.findUnique({
       where: { id: orderId },
@@ -126,66 +143,50 @@ export async function PATCH(
     })
     if (!order) return apiError('Order not found', 404, 'ORDER_NOT_FOUND')
 
-    const allDeclined  = allStatuses.every(s => s.status === 'DECLINED')
-    const allTerminal  = allStatuses.every(s => ['COMPLETED', 'DECLINED'].includes(s.status))
-
-    if (allDeclined) {
-      // Every vendor declined — cancel the master order and refund
-      await db.order.update({
-        where: { id: orderId },
-        data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: 'vendor' },
-      })
-
-      // Enqueue Stripe refund (async, idempotent via jobId dedup)
-      if (order.stripePaymentIntentId) {
-        try {
-          await enqueueRefund({
-            orderId,
-            vendorId: order.vendorId,
-            eventId: order.eventId,
-            stripePaymentIntentId: order.stripePaymentIntentId,
-            stripeChargeId: order.stripeChargeId,
-            refundReason: 'all_vendors_declined',
-          })
-        } catch (err) {
-          console.error('[VendorStatus] Failed to enqueue refund job:', err)
-        }
+    // A vendor declining their portion IS a per-vendor refund of that vendor's
+    // slice (fee kept, reconciled) — route it through the SINGLE engine, not a
+    // whole-order/fee-inclusive Stripe refund. markVendorStatus:false keeps the
+    // portion DECLINED (its accurate terminal state, relied on by history); the
+    // Refund row records the money. This also self-heals the old leak where a
+    // single decline in a multi-vendor order refunded nothing. Don't block the
+    // response; the reconciler (Pattern G/H) backstops a failed refund.
+    if (newStatus === 'DECLINED' && order.stripePaymentIntentId) {
+      try {
+        await refundVendorPortion({ orderId, vendorId, reason: 'vendor_declined', actor: `vendor:${vendorId}`, markVendorStatus: false })
+      } catch (err) {
+        logger.error('[VendorStatus] per-vendor decline refund failed — reconciler will retry', { orderId, vendorId, error: String(err) })
       }
+    }
 
-      // Firebase — notify customer of cancellation
-      after(() =>
-        fireAndForgetFirebaseUpdate(
-          `fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`,
-          { status: 'CANCELLED', updatedAt: Date.now() },
-          { orderId }
-        )
-      )
-    } else if (allTerminal) {
-      // Some completed, some declined — master order done
-      await db.order.update({ where: { id: orderId }, data: { status: 'COMPLETED', completedAt: new Date() } })
-      revalidateTag(`analytics-${vendorId}`, 'default')
-      revalidateTag(`stats-${vendorId}`,     'default')
-      revalidateTag(`revenue-${vendorId}`,   'default')
-
-      after(() =>
-        fireAndForgetFirebaseUpdate(
-          `fairs/${order.eventId}/customerOrders/${order.customerId}/${orderId}`,
-          { status: 'COMPLETED', updatedAt: Date.now() },
-          { orderId }
-        )
-      )
+    // ── Master status: the aggregator owns READY / COMPLETED / CANCELLED ──────
+    // After writing this vendor's portion (and firing any per-decline refund
+    // above), hand master-status derivation to the single aggregator. Behind
+    // canAdvance it applies READY (all active ready), COMPLETED (BOOTH all-done →
+    // enqueues the DELAYED payout behind the refund window), or CANCELLED (all
+    // declined) — or no-ops. It is fulfillment-aware: a delivery order never
+    // completes vendor-side (it clamps to READY; completion is the runner's
+    // DELIVERED in W3). The per-decline refund (above) and the per-vendor
+    // Firebase/stats pushes (below) STAY here — they are per-vendor-status
+    // side-effects, not master-transition ones. Awaited so the runner feed /
+    // payout are consistent on response; never throws (side-effects are
+    // best-effort internally).
+    try {
+      await reconcileMasterStatus(orderId)
+    } catch (err) {
+      logger.error('[VendorStatus] master reconcile failed — reconciler/next transition will retry', { orderId, error: String(err) })
     }
 
     // Always update both RTDB paths on every vendor status transition.
-    // Vendor path: used by the vendor dashboard Firebase listener.
+    // Vendor path: lightweight payload — id + status + version only.
+    //   onChildChanged on the dashboard reads this to sync cross-tab status moves.
+    //   version is a monotonic ms timestamp used to discard stale out-of-order pushes.
     // Customer path: used by the customer order tracking page — must fire on
-    // every transition so the customer sees ACCEPTED/PREPARING/READY in real time,
-    // not only when all vendors reach a terminal state.
+    //   every transition so the customer sees ACCEPTED/PREPARING/READY in real time.
     const now = Date.now()
     after(() => {
       fireAndForgetFirebaseUpdate(
         `fairs/${order.eventId}/orders/${vendorId}/${orderId}`,
-        { status: newStatus, updatedAt: now },
+        { id: orderId, status: newStatus, updatedAt: now, version: updated.version },
         { orderId }
       )
       fireAndForgetFirebaseUpdate(
@@ -193,6 +194,47 @@ export async function PATCH(
         { status: newStatus, vendorId, updatedAt: now },
         { orderId }
       )
+    })
+
+    // Push live stats to vendorStats/{vendorId} on every status change.
+    // Revenue is COMPLETED/DELIVERED only — decline must immediately zero it out.
+    // Runs in after() so it doesn't block the API response.
+    after(async () => {
+      try {
+        const startOfToday = new Date()
+        startOfToday.setHours(0, 0, 0, 0)
+
+        const [orderCount, revenueAgg] = await Promise.all([
+          db.vendorOrderStatus.count({
+            where: {
+              vendorId,
+              status: { in: ['COMPLETED', 'DELIVERED'] },
+              order: { placedAt: { gte: startOfToday } },
+            },
+          }),
+          db.orderItem.aggregate({
+            where: {
+              vendorId,
+              createdAt: { gte: startOfToday },
+              order: { vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } } },
+            },
+            _sum: { totalPrice: true },
+          }),
+        ])
+
+        // Vendor keeps their full item subtotal — no commission deducted.
+        const todayRevenue = parseFloat(
+          (revenueAgg._sum.totalPrice ?? 0).toFixed(2)
+        )
+
+        fireAndForgetFirebaseUpdate(
+          `fairs/${order.eventId}/vendorStats/${vendorId}`,
+          { todayOrders: orderCount, todayRevenue, updatedAt: Date.now() },
+          { orderId }
+        )
+      } catch (err) {
+        logger.error('[VendorStatus] Failed to push stats to Firebase', { orderId, error: String(err) })
+      }
     })
 
     return success({ vendorId, orderId, status: newStatus })

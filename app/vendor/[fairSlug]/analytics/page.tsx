@@ -12,7 +12,10 @@ import { useVendorMeta } from '@/lib/contexts/VendorContext'
 
 interface AnalyticsData {
   chartData: ChartDataPoint[]
-  totalRevenue: number
+  totalRevenue: number   // GROSS sales volume (customer-paid) — not take-home
+  earned: number         // settled take-home (in Stripe balance)
+  pending: number        // conservative estimate, not yet transferred
+  refunded: number
   totalOrders: number
   avgOrderValue: number
   completionRate: number
@@ -68,8 +71,7 @@ export default function VendorAnalyticsPage() {
   useEffect(() => {
     if (!vendorId) return
     setLoading(true)
-    const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
-    fetch(`/api/vendors/${vendorId}/analytics?days=${days}`)
+    fetch(`/api/vendors/${vendorId}/analytics?range=${period}`)
       .then(r => r.json())
       .then(json => { if (json.success) setAnalytics(json.data) })
       .catch(() => {})
@@ -77,7 +79,7 @@ export default function VendorAnalyticsPage() {
   }, [vendorId, period])
 
   const periodRevenue = analytics?.totalRevenue ?? 0
-  const completionRate = analytics ? `${(analytics.completionRate * 100).toFixed(1)}%` : '—'
+  const completionRate = analytics ? `${analytics.completionRate.toFixed(1)}%` : '—'
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[78rem] mx-auto">
@@ -97,19 +99,21 @@ export default function VendorAnalyticsPage() {
           period={period}
           onPeriodChange={setPeriod}
           loading={loading}
-          title="Revenue Overview"
+          title="Sales Volume (gross)"
         />
       </div>
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 desktop:grid-cols-4 gap-4 mb-8 animate-fadeIn [animation-delay:0.1s]">
         <StatCard
-          label={`${period} Revenue`}
-          value={`$${periodRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          label={`${period} Earned`}
+          value={`$${(analytics?.earned ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           icon={CurrencyDollarIcon}
-          accentColor="pink"
+          accentColor="emerald"
           loading={loading}
-          note="Excludes platform fees"
+          note={(analytics?.pending ?? 0) > 0
+            ? `~$${(analytics!.pending).toFixed(2)} pending · $${periodRevenue.toFixed(0)} gross sales`
+            : `take-home (settled) · $${periodRevenue.toFixed(0)} gross sales`}
         />
         <StatCard
           label="Today's Orders"
@@ -140,10 +144,10 @@ export default function VendorAnalyticsPage() {
           <h3 className="font-bebas text-xl tracking-wide text-white mb-5">Today&apos;s Snapshot</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { label: "Period Revenue", value: `$${(analytics.totalRevenue ?? 0).toFixed(2)}`, note: 'Excludes platform fees' },
-              { label: 'Total Orders',  value: String(analytics.totalOrders ?? 0) },
-              { label: 'Items Sold',    value: String(analytics.totalItemsSold ?? 0) },
-              { label: 'Completion Rate', value: completionRate },
+              { label: 'Earned (settled)', value: `$${(analytics.earned ?? 0).toFixed(2)}`, note: 'in your Stripe balance' },
+              { label: 'Pending (est.)',   value: `~$${(analytics.pending ?? 0).toFixed(2)}`, note: 'not yet transferred' },
+              { label: 'Gross Sales',      value: `$${(analytics.totalRevenue ?? 0).toFixed(2)}`, note: 'customer-paid subtotals' },
+              { label: 'Total Orders',     value: String(analytics.totalOrders ?? 0) },
             ].map(({ label, value, note }) => (
               <div key={label}>
                 <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>

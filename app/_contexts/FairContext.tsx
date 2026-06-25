@@ -18,6 +18,7 @@ export interface FulfillmentConfig {
   curbsideEnabled: boolean
   homeDeliveryEnabled: boolean
   homeDeliveryFee: number | null
+  curbsideFee: number
   curbsideZoneDescription: string | null
 }
 
@@ -104,7 +105,7 @@ function placeholderFair(fairSlug: string): FairData {
     branding: { accentColor: '#FF0077', gradientFrom: '#FF0077', gradientTo: '#7C3AED' },
     status: 'active',
     dates: { startDate: new Date().toISOString(), endDate: new Date().toISOString() },
-    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: false, homeDeliveryEnabled: false, homeDeliveryFee: null, curbsideZoneDescription: null },
+    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: false, homeDeliveryEnabled: false, homeDeliveryFee: null, curbsideFee: 0, curbsideZoneDescription: null },
     serviceChargeEnabled: false,
     serviceChargeAmount: null,
     location: { address: '', city: '', state: '' },
@@ -128,7 +129,7 @@ function normalizeMockFair(f: MockFair): FairData {
     },
     status: f.status === 'draft' || f.status === 'archived' ? 'upcoming' : f.status,
     dates: { startDate: f.dates.startDate, endDate: f.dates.endDate },
-    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true, homeDeliveryFee: 2.99, curbsideZoneDescription: null },
+    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true, homeDeliveryFee: 2.99, curbsideFee: 0, curbsideZoneDescription: null },
     serviceChargeEnabled: false,
     serviceChargeAmount: null,
     location: f.location,
@@ -183,6 +184,7 @@ function normalizeEvent(raw: any): FairData {
       curbsideEnabled: fc.curbsideEnabled,
       homeDeliveryEnabled: fc.homeDeliveryEnabled,
       homeDeliveryFee: fc.homeDeliveryFee ?? null,
+      curbsideFee: fc.curbsideFee ?? 0,
       curbsideZoneDescription: fc.curbsideZoneDescription ?? null,
     } : null,
     serviceChargeEnabled: raw.serviceChargeEnabled ?? false,

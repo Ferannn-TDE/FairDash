@@ -161,7 +161,7 @@ export default function MarketplaceNavbar() {
                 whileTap={{ scale: 0.97 }}
               >
                 <Link
-                  href="/login"
+                  href="/fairs"
                   className="inline-flex items-center px-5 py-2 rounded-xl bg-neon-pink text-white text-sm font-semibold leading-none hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors"
                 >
                   Get Started

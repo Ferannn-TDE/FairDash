@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 
 const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
 
@@ -35,7 +36,7 @@ async function fetchOrganizerFairs(organizerId: string) {
   const [vendorGroups, orderGroups] = await Promise.all([
     db.vendor.groupBy({
       by: ['eventId'],
-      where: { eventId: { in: eventIds } },
+      where: { eventId: { in: eventIds }, ...ACTIVE_VENDOR_WHERE },
       _count: { id: true },
     }),
     db.order.groupBy({

@@ -164,7 +164,7 @@ export default function FairNavbar() {
             {/* Sign in link (signed out) */}
             <SignedOut>
               <Link
-                href={`/sign-in?redirect_url=/fair/${fair.slug}`}
+                href={`/login?redirect=/fair/${fair.slug}`}
                 className="hidden md:inline-flex items-center px-4 py-1.5 rounded-full bg-neon-pink text-white text-sm font-semibold hover:bg-[#e0006b] transition-colors"
               >
                 Sign In

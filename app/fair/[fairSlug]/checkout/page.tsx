@@ -16,6 +16,7 @@ import { useUser, useAuth } from '@clerk/clerk-react'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
+import { calculateServiceFee } from '@/lib/constants'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 import AddressAutocomplete from '../../../_components/AddressAutocomplete'
@@ -78,7 +79,9 @@ interface OrderSummary {
   subtotal: number
   deliveryFee?: number | null
   serviceCharge?: number | null
+  tip?: number | null
   fairSynqFee: number
+  serviceFee: number
   total: number
 }
 
@@ -110,7 +113,8 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
   const [paying, setPaying] = useState(false)
   const payingRef = useRef(false)
 
-  const total = summary.total + summary.fairSynqFee
+  // summary.total already includes the service fee — matches the Stripe charge exactly.
+  const total = summary.total
 
   const handlePay = async () => {
     if (!stripe || !elements || payingRef.current) return
@@ -173,10 +177,16 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
               <span className="text-white">${(summary.serviceCharge ?? 0).toFixed(2)}</span>
             </div>
           )}
-          {summary.fairSynqFee > 0 && (
+          {summary.serviceFee > 0 && (
             <div className="flex justify-between">
-              <span className="text-[#A1A1A1]">Platform Fee</span>
-              <span className="text-white">${(summary.fairSynqFee ?? 0).toFixed(2)}</span>
+              <span className="text-[#A1A1A1]">Service Fee</span>
+              <span className="text-white">${(summary.serviceFee ?? 0).toFixed(2)}</span>
+            </div>
+          )}
+          {summary.tip != null && summary.tip > 0 && (
+            <div className="flex justify-between">
+              <span className="text-[#A1A1A1]">Tip (runner)</span>
+              <span className="text-white">${(summary.tip ?? 0).toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between pt-3 border-t border-white/10">
@@ -227,7 +237,7 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (authLoaded && !isSignedIn) {
       router.replace(
-        `/sign-in?redirect_url=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`
+        `/login?redirect=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`
       )
     }
   }, [authLoaded, isSignedIn, params.fairSlug, router])
@@ -248,6 +258,7 @@ export default function CheckoutPage() {
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>('BOOTH_PICKUP')
+  const [tip, setTip] = useState<number>(0) // dollars; runner-fulfilled only
   const [form, setForm] = useState({
     name: user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : '',
     phone: '',
@@ -277,25 +288,23 @@ export default function CheckoutPage() {
 
   const hasOrder = orderId !== null && clientSecret !== null
 
-  // Platform fee estimate (before order creation)
-  const [platformFeeRate, setPlatformFeeRate] = useState(0.10)
-  const primaryVendorId = items[0]?.vendorId ?? null
+  // Runner-fulfilled = delivery OR curbside; only these carry a fee + allow tips.
+  const isRunnerFulfilled = fulfillmentType === 'HOME_DELIVERY' || fulfillmentType === 'CURBSIDE'
+  const configCurbsideFee = fc?.curbsideFee ?? 0
 
-  useEffect(() => {
-    if (!primaryVendorId) return
-    fetch(`/api/vendors/${primaryVendorId}`)
-      .then(r => r.json())
-      .then(json => {
-        if (json.success && json.data?.commissionRate != null) {
-          setPlatformFeeRate(Number(json.data.commissionRate))
-        }
-      })
-      .catch(() => {})
-  }, [primaryVendorId])
-
-  const estimatedDeliveryFee = fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee : 0
-  const estimatedPlatformFee = Math.round(subtotal * platformFeeRate * 100) / 100
-  const estimatedTotal = parseFloat((subtotal + estimatedDeliveryFee + serviceChargeAmount + estimatedPlatformFee).toFixed(2))
+  // Service fee estimate (before order creation) — single source of truth.
+  // Must match the backend's calculateServiceFee and the final Stripe charge.
+  const estimatedDeliveryFee =
+    fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee
+    : fulfillmentType === 'CURBSIDE'    ? configCurbsideFee
+    : 0
+  const estimatedServiceFee = calculateServiceFee(subtotal)
+  // Tip — runner-fulfilled only; 100% the runner's; NO service fee, NO split.
+  const tipAmount = isRunnerFulfilled ? tip : 0
+  // 5-term identity: subtotal + serviceFee(10%) + deliveryFee + serviceCharge + tip.
+  const estimatedTotal = parseFloat(
+    (subtotal + estimatedDeliveryFee + serviceChargeAmount + estimatedServiceFee + tipAmount).toFixed(2),
+  )
 
   const estimatedReadyMin = useMemo(() => {
     const times = items.map(i => i.prepTime).filter((t): t is number => t != null)
@@ -355,7 +364,7 @@ export default function CheckoutPage() {
 
   const handlePlaceOrder = async () => {
     if (!isSignedIn) {
-      router.push(`/sign-in?redirect_url=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`)
+      router.push(`/login?redirect=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`)
       return
     }
     if (!validate()) return
@@ -369,6 +378,7 @@ export default function CheckoutPage() {
           fulfillmentType,
           customerName: form.name.trim(),
           customerPhone: form.phone.trim(),
+          tip: tipAmount > 0 ? tipAmount : undefined,
           items: items.map(i => ({
             menuItemId: i.menuItemId,
             vendorId: i.vendorId,
@@ -622,7 +632,7 @@ export default function CheckoutPage() {
                   {submitting ? (
                     <>
                       <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                      Creating Order…
+                      Loading…
                     </>
                   ) : (
                     <>
@@ -670,15 +680,54 @@ export default function CheckoutPage() {
                 </div>
               )}
 
+              {/* Tip — runner-fulfilled only (delivery + curbside). 100% the runner's. */}
+              {isRunnerFulfilled && !orderSummary && (
+                <div className="pb-4 mb-2 border-b border-white/10">
+                  <p className="text-sm text-white font-semibold mb-1">Add a tip for your runner</p>
+                  <p className="text-xs text-[#A1A1A1] mb-3">100% goes to your runner — optional.</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, 2, 3, 5].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setTip(preset)}
+                        className={`px-3 py-2 rounded-xl text-sm font-semibold border transition-colors
+                          ${tip === preset
+                            ? 'bg-[#FF0077]/15 border-[#FF0077]/40 text-[#FF0077]'
+                            : 'bg-white/5 border-white/10 text-[#A1A1A1] hover:text-white'}`}
+                      >
+                        {preset === 0 ? 'No tip' : `$${preset}`}
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl px-3">
+                      <span className="text-sm text-[#A1A1A1]">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={tip ? String(tip) : ''}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value)
+                          setTip(Number.isFinite(v) && v > 0 ? v : 0)
+                        }}
+                        placeholder="Custom"
+                        className="w-20 bg-transparent py-2 text-sm text-white outline-none placeholder:text-[#555]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2 pb-4 border-b border-white/10 text-sm">
                 <div className="flex justify-between">
                   <span className="text-[#A1A1A1]">Subtotal</span>
                   <span className="text-white">${(orderSummary?.subtotal ?? subtotal).toFixed(2)}</span>
                 </div>
-                {fulfillmentType === 'HOME_DELIVERY' && (
+                {isRunnerFulfilled && (
                   <div className="flex justify-between">
-                    <span className="text-[#A1A1A1]">Delivery Fee</span>
-                    <span className="text-white">${(orderSummary?.deliveryFee ?? configDeliveryFee).toFixed(2)}</span>
+                    <span className="text-[#A1A1A1]">{fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}</span>
+                    <span className="text-white">${(orderSummary?.deliveryFee ?? estimatedDeliveryFee).toFixed(2)}</span>
                   </div>
                 )}
                 {serviceChargeAmount > 0 && (
@@ -688,11 +737,17 @@ export default function CheckoutPage() {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-[#A1A1A1]">Platform Fee</span>
+                  <span className="text-[#A1A1A1]">Service Fee</span>
                   <span className="text-white">
-                    ${(orderSummary?.fairSynqFee ?? estimatedPlatformFee).toFixed(2)}
+                    ${(orderSummary?.serviceFee ?? estimatedServiceFee).toFixed(2)}
                   </span>
                 </div>
+                {((orderSummary?.tip ?? tipAmount) > 0) && (
+                  <div className="flex justify-between">
+                    <span className="text-[#A1A1A1]">Tip (runner)</span>
+                    <span className="text-white">${(orderSummary?.tip ?? tipAmount).toFixed(2)}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-between py-4">
@@ -701,7 +756,7 @@ export default function CheckoutPage() {
                 </span>
                 <span className="text-[#FF0077] font-bold text-xl">
                   ${orderSummary
-                    ? (orderSummary.total + orderSummary.fairSynqFee).toFixed(2)
+                    ? (orderSummary.total ?? 0).toFixed(2)
                     : (estimatedTotal ?? 0).toFixed(2)}
                 </span>
               </div>

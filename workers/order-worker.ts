@@ -12,7 +12,8 @@
  * never collide in the Realtime DB.
  */
 
-import { Worker, Job, ConnectionOptions } from 'bullmq'
+import dotenv from 'dotenv'
+import { Worker, Job, ConnectionOptions, UnrecoverableError } from 'bullmq'
 import { PrismaClient, OrderStatus, DisputeStatus } from '@prisma/client'
 import Stripe from 'stripe'
 import admin from 'firebase-admin'
@@ -27,17 +28,28 @@ import {
   JOB_POST_EVENT_REPORT,
   JOB_BULK_REFUND,
   JOB_VENDOR_PAYOUT,
+  JOB_RUNNER_PAYOUT,
+  JOB_ORGANIZER_PAYOUT,
   JOB_REFUND,
+  JOB_RECONCILE,
+  getQueuePrefix,
   JobData,
 } from '../lib/queues'
+import { Queue } from 'bullmq'
+import { runReconciliationSweep } from '../lib/reconciler'
 import {
   VENDOR_OFFLINE_HEARTBEAT_MS,
 } from '../lib/constants'
+import { processOrderPayout, PayoutReconciliationError } from '../lib/process-payout'
+import { processRunnerPayout } from '../lib/runner-payout'
+import { processEventOrganizerPayout } from '../lib/organizer-payout'
+import { refundVendorPortion } from '../lib/process-refund'
+import { reconcileMasterStatus } from '../lib/reconcile-order-status'
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
-require('dotenv').config({ path: '.env.local' })
-require('dotenv').config({ path: '.env' })
+dotenv.config({ path: '.env.local' })
+dotenv.config({ path: '.env' })
 
 // Use DIRECT_URL for the worker — avoids pgBouncer transaction mode restrictions
 const prisma = new PrismaClient({
@@ -46,7 +58,7 @@ const prisma = new PrismaClient({
 
 // Stripe — direct init (not the Next.js singleton)
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
-  apiVersion: '2023-10-16',
+  apiVersion: '2023-10-16' as any,
   typescript: true,
 })
 
@@ -107,26 +119,28 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
     return
   }
 
-  // Issue full Stripe refund
+  // Per-vendor refund through the SINGLE engine, FEE KEPT (the vendor failed to
+  // accept, but the platform service still ran). NOT a whole-order/fee-inclusive
+  // raw Stripe refund. CASE 1 — payout never fired, so no reversal.
   if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
-    try {
-      await stripe.refunds.create({ payment_intent: order.stripePaymentIntentId })
-    } catch (err) {
-      console.error(`[Worker] Stripe refund failed for order ${orderId}:`, err)
-      // Don't block the status update — log and continue
+    const items = await prisma.orderItem.findMany({ where: { orderId }, select: { vendorId: true } })
+    for (const vid of [...new Set(items.map(i => i.vendorId))]) {
+      try {
+        await refundVendorPortion({ orderId, vendorId: vid, reason: 'vendor_did_not_accept', actor: 'system:accept-timeout' })
+      } catch (err) {
+        console.error(`[Worker] accept-timeout per-vendor refund failed (reconciler will retry) order ${orderId} vendor ${vid}:`, err)
+      }
     }
   }
 
+  // Status via the aggregator (asserted timeout override, behind canAdvance — the
+  // TOCTOU re-fire is refused). Reconcile FIRST so a retry's top guard (status ===
+  // PLACED) short-circuits and never duplicates the audit rows below.
+  await reconcileMasterStatus(orderId, {
+    timeout: { status: 'CANCELLED', by: 'system', reason: 'Vendor did not accept within 2 minutes' },
+  })
+
   await prisma.$transaction([
-    prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status: OrderStatus.CANCELLED,
-        cancelledAt: new Date(),
-        cancelledBy: 'system',
-        cancellationReason: 'Vendor did not accept within 2 minutes',
-      },
-    }),
     prisma.cancellation.upsert({
       where: { orderId },
       create: {
@@ -174,23 +188,19 @@ async function handleMarkUncollected(job: Job<JobData>) {
     return
   }
 
-  await prisma.$transaction([
-    prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status: OrderStatus.UNCOLLECTED,
-        uncollectedAt: new Date(),
-      },
-    }),
-    prisma.orderEvent.create({
-      data: {
-        orderId,
-        eventType: 'uncollected',
-        actorRole: 'system',
-        metadata: { fulfillmentType: order.fulfillmentType },
-      },
-    }),
-  ])
+  // Status via the aggregator (asserted timeout override, behind canAdvance). Sets
+  // uncollectedAt. Reconcile first so a retry's top guard (status === READY)
+  // short-circuits before the audit OrderEvent.
+  await reconcileMasterStatus(orderId, { timeout: { status: 'UNCOLLECTED' } })
+
+  await prisma.orderEvent.create({
+    data: {
+      orderId,
+      eventType: 'uncollected',
+      actorRole: 'system',
+      metadata: { fulfillmentType: order.fulfillmentType },
+    },
+  })
 
   await updateOrderInFirebase(eventId, vendorId, orderId, order.customerId, {
     status: 'UNCOLLECTED',
@@ -217,19 +227,17 @@ async function handleMarkUndeliverable(job: Job<JobData>) {
     return
   }
 
-  await prisma.$transaction([
-    prisma.order.update({
-      where: { id: orderId },
-      data: { status: OrderStatus.UNDELIVERABLE },
-    }),
-    prisma.orderEvent.create({
-      data: {
-        orderId,
-        eventType: 'undeliverable',
-        actorRole: 'system',
-      },
-    }),
-  ])
+  // Status via the aggregator (asserted timeout override, behind canAdvance).
+  // Reconcile first so a retry's top guard (status === READY) short-circuits.
+  await reconcileMasterStatus(orderId, { timeout: { status: 'UNDELIVERABLE' } })
+
+  await prisma.orderEvent.create({
+    data: {
+      orderId,
+      eventType: 'undeliverable',
+      actorRole: 'system',
+    },
+  })
 
   await updateOrderInFirebase(eventId, vendorId, orderId, order.customerId, {
     status: 'UNDELIVERABLE',
@@ -307,30 +315,44 @@ async function handleIncidentAutoRefund(job: Job<JobData>) {
   }
 
   const order = incident.order
-
-  // Determine refund amount: entire order unless affectedItems specifies partials
   const isFullOrder = !incident.affectedItems
-  let refundAmount = order.total
+  let refundAmount = 0
 
-  if (!isFullOrder && Array.isArray(incident.affectedItems)) {
-    // Partial refund: sum subtotals of affected OrderItems
-    const affectedIds = incident.affectedItems as string[]
-    const affectedItems = await prisma.orderItem.findMany({
-      where: { id: { in: affectedIds }, orderId: order.id },
-    })
-    refundAmount = affectedItems.reduce((sum, i) => sum + i.subtotal, 0)
-  }
-
-  // Issue Stripe refund
+  // Incident refunds WAIVE THE FEE (genuine "something went wrong") — routed
+  // through the SINGLE engine, never raw Stripe.
   if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
-    try {
-      await stripe.refunds.create({
-        payment_intent: order.stripePaymentIntentId,
-        amount: Math.round(refundAmount * 100),
-      })
-    } catch (err) {
-      console.error(`[Worker] Stripe refund failed for incident ${incidentId}:`, err)
-      return
+    const allItems = await prisma.orderItem.findMany({ where: { orderId: order.id }, select: { id: true, vendorId: true, subtotal: true } })
+    const totalSubtotalCents = allItems.reduce((s, i) => s + Math.round(i.subtotal * 100), 0)
+    const serviceFeeCents = Math.round(order.fairSynqFee * 100)
+
+    if (isFullOrder) {
+      // Whole order broke → refund every vendor their slice + waived fee share.
+      for (const vid of [...new Set(allItems.map(i => i.vendorId))]) {
+        try {
+          const r = await refundVendorPortion({ orderId: order.id, vendorId: vid, reason: `incident:${incidentId}`, actor: 'system:incident', waiveFee: true })
+          refundAmount += r.sliceCents / 100
+        } catch (err) {
+          console.error(`[Worker] incident full refund failed order ${order.id} vendor ${vid}:`, err)
+        }
+      }
+    } else if (Array.isArray(incident.affectedItems)) {
+      // Only some items affected → refund just those vendors' affected slices
+      // (+ proportional fee, waived). Unaffected vendors keep their portions.
+      const affectedIds = new Set(incident.affectedItems as string[])
+      const affected = allItems.filter(i => affectedIds.has(i.id))
+      const byVendor: Record<string, number> = {}
+      for (const i of affected) byVendor[i.vendorId] = (byVendor[i.vendorId] ?? 0) + Math.round(i.subtotal * 100)
+      for (const [vid, affectedCents] of Object.entries(byVendor)) {
+        // affected portion's share of the service fee (proportional), also waived
+        const feeOnAffected = totalSubtotalCents > 0 ? Math.round(serviceFeeCents * affectedCents / totalSubtotalCents) : 0
+        const overrideCents = affectedCents + feeOnAffected
+        try {
+          const r = await refundVendorPortion({ orderId: order.id, vendorId: vid, reason: `incident:${incidentId}`, actor: 'system:incident', waiveFee: true, amountCentsOverride: overrideCents, markVendorStatus: false })
+          refundAmount += r.sliceCents / 100
+        } catch (err) {
+          console.error(`[Worker] incident partial refund failed order ${order.id} vendor ${vid}:`, err)
+        }
+      }
     }
   }
 
@@ -427,30 +449,26 @@ async function handleBulkRefundEvent(job: Job<JobData>) {
 
   const results = await Promise.allSettled(
     orders.map(async order => {
-      // Issue Stripe refund (best-effort — log failures but continue)
+      // Emergency "the event broke, refund everyone in full" → per-vendor through
+      // the SINGLE engine with FEE WAIVED (genuine emergency goodwill). Best-effort
+      // per vendor; the reconciler backstops any failure.
       if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
-        try {
-          await stripe.refunds.create({
-            payment_intent: order.stripePaymentIntentId,
-            metadata: { reason: 'emergency_event_cancel', eventId },
-          })
-        } catch (err) {
-          console.error(`[Worker] bulk-refund: Stripe refund failed for order ${order.id}:`, err)
-          // Don't skip the DB update — partial refund failure is better than leaving the order open
+        const items = await prisma.orderItem.findMany({ where: { orderId: order.id }, select: { vendorId: true } })
+        for (const vid of [...new Set(items.map(i => i.vendorId))]) {
+          try {
+            await refundVendorPortion({ orderId: order.id, vendorId: vid, reason: 'emergency_event_cancel', actor: 'system:emergency', waiveFee: true, markVendorStatus: false })
+          } catch (err) {
+            console.error(`[Worker] bulk-refund: engine refund failed order ${order.id} vendor ${vid}:`, err)
+          }
         }
       }
 
-      // Cancel the order and write audit records atomically
+      // Status via the aggregator (asserted timeout/operator override, behind
+      // canAdvance — won't regress an already-terminal order). Then audit rows.
+      await reconcileMasterStatus(order.id, {
+        timeout: { status: 'CANCELLED', by: 'system', reason: 'Event cancelled by operator' },
+      })
       await prisma.$transaction([
-        prisma.order.update({
-          where: { id: order.id },
-          data: {
-            status: OrderStatus.CANCELLED,
-            cancelledAt: new Date(),
-            cancelledBy: 'system',
-            cancellationReason: 'Event cancelled by operator',
-          },
-        }),
         prisma.cancellation.upsert({
           where: { orderId: order.id },
           create: {
@@ -493,88 +511,109 @@ async function handleBulkRefundEvent(job: Job<JobData>) {
 
 /**
  * process-vendor-payout
- * Executes the Stripe Connect transfer for a completed order.
- * Retries up to 3x with exponential backoff. Idempotent via Stripe idempotency key.
- * On final failure: logs and marks payoutStatus FAILED on the order.
+ * Per-vendor payout for a fulfilled order (separate charges & transfers).
+ * Delegates ALL fee/transfer math to the shared processOrderPayout():
+ *   - reads the REAL settled Stripe fee from the balance transaction
+ *   - splits it proportionally across all vendors on the cart (integer cents)
+ *   - sends one idempotent transfer per connected vendor (subtotal − feeShare)
+ *   - holds unconnected/zero-or-negative vendors; reconciles to the cent
+ *
+ * Retries (BullMQ backoff) when the balance txn hasn't settled yet
+ * (PayoutNotSettledError → rethrown). A reconciliation failure is permanent —
+ * thrown as UnrecoverableError so it halts for manual review instead of looping.
  */
 async function handleVendorPayout(job: Job<JobData>) {
-  const {
-    orderId,
-    vendorId,
-    eventId,
-    vendorStripeAccountId,
-    stripePaymentIntentId,
-    stripeChargeId: jobChargeId,
-    transferAmountCents,
-    payoutIdempotencyKey,
-  } = job.data
-
-  if (!orderId || !vendorId || !vendorStripeAccountId || !transferAmountCents || !payoutIdempotencyKey) {
-    console.error(`[Worker] process-vendor-payout: missing required fields in job ${job.id}`)
+  const { orderId } = job.data
+  if (!orderId) {
+    console.error(`[Worker] process-vendor-payout: missing orderId in job ${job.id}`)
     return
   }
 
-  console.log(`[Worker] process-vendor-payout → order ${orderId}, amount ${transferAmountCents}¢`)
+  console.log(`[Worker] process-vendor-payout → order ${orderId}`)
 
   // Test hook: simulate failure on first attempt to verify retry behaviour
   if (process.env.TEST_RETRY_FAILURE === 'true' && job.attemptsMade === 0) {
     throw new Error('Simulated failure — TEST_RETRY_FAILURE')
   }
 
-  // Retrieve chargeId if not supplied (needed for source_transaction)
-  let chargeId = jobChargeId ?? null
-  if (!chargeId && stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
-    try {
-      const pi = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
-        expand: ['latest_charge'],
-      })
-      const charge = pi.latest_charge
-      if (charge && typeof charge === 'object' && 'id' in charge) {
-        chargeId = charge.id as string
-        await prisma.order.update({ where: { id: orderId }, data: { stripeChargeId: chargeId } })
-      }
-    } catch (err) {
-      console.warn(`[Worker] process-vendor-payout: could not retrieve charge for order ${orderId}:`, err)
+  try {
+    const res = await processOrderPayout(orderId)
+    console.log(
+      `[Worker] payout complete for order ${orderId}: ${res.transfers.length} transfer(s), ` +
+      `${res.held.length} held, Stripe fee ${res.stripeFeeCents}¢`,
+    )
+  } catch (err) {
+    if (err instanceof PayoutReconciliationError) {
+      // Deterministic money-correctness failure — never retry, never send money.
+      console.error(`[Worker] RECONCILIATION HALT for order ${orderId}: ${err.message}`)
+      throw new UnrecoverableError(err.message)
     }
+    // Transient (e.g. balance txn not settled, no charge yet) → let BullMQ retry.
+    throw err
   }
+}
 
-  const transfer = await stripe.transfers.create(
-    {
-      amount: transferAmountCents,
-      currency: 'usd',
-      destination: vendorStripeAccountId,
-      ...(chargeId && { source_transaction: chargeId }),
-      metadata: { orderId, vendorId },
-    },
-    { idempotencyKey: payoutIdempotencyKey }
-  )
+/**
+ * process-runner-payout (Part B B2)
+ * Pays a runner their accrued earning for a delivered order. Delegates ALL logic
+ * to processRunnerPayout(): reads RunnerEarning.amountCents (the ledger, verbatim),
+ * sends one idempotent transfer (key runner_payout_${orderId}) to the runner's
+ * Connect account, marks the row paid + stamps the transfer id. Unconnected →
+ * held (no transfer, no error). Same error discipline as the vendor payout:
+ *   - PayoutReconciliationError (ledger drift) → UnrecoverableError (halt, no retry)
+ *   - transient (no charge yet) → rethrow → BullMQ retry
+ */
+async function handleRunnerPayout(job: Job<JobData>) {
+  const { orderId } = job.data
+  if (!orderId) {
+    console.error(`[Worker] process-runner-payout: missing orderId in job ${job.id}`)
+    return
+  }
+  console.log(`[Worker] process-runner-payout → order ${orderId}`)
+  try {
+    const res = await processRunnerPayout(orderId)
+    console.log(`[Worker] runner payout for order ${orderId}: ${res.outcome}` +
+      (res.amountCents != null ? ` (${res.amountCents}¢)` : '') +
+      (res.transferId ? ` transfer=${res.transferId}` : ''))
+  } catch (err) {
+    if (err instanceof PayoutReconciliationError) {
+      console.error(`[Worker] RUNNER RECONCILIATION HALT for order ${orderId}: ${err.message}`)
+      throw new UnrecoverableError(err.message)
+    }
+    // Transient (e.g. no charge yet) → let BullMQ retry.
+    throw err
+  }
+}
 
-  // Fetch the order to get eventId-scoped payout fields
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { subtotal: true, fairSynqFee: true, vendorPayout: true },
-  })
-
-  await prisma.$transaction([
-    prisma.order.update({
-      where: { id: orderId },
-      data: { stripeTransferId: transfer.id },
-    }),
-    prisma.payout.create({
-      data: {
-        eventId: eventId,
-        vendorId: vendorId,
-        grossAmount: order?.subtotal ?? 0,
-        fairSynqFee: order?.fairSynqFee ?? 0,
-        netAmount: order?.vendorPayout ?? transferAmountCents / 100,
-        stripeTransferId: transfer.id,
-        stripeStatus: 'pending',
-        processedAt: new Date(),
-      },
-    }),
-  ])
-
-  console.log(`[Worker] Transfer ${transfer.id} created for order ${orderId}`)
+/**
+ * process-organizer-payout (Part B B3)
+ * Pays an event's organizer their accrued share as ONE batched transfer.
+ * Delegates to processEventOrganizerPayout(): creates/reuses the batch record
+ * (idempotency anchor), sends one plain transfer (no source_transaction) to the
+ * organizer's Connect account keyed by the batch id, marks the batch + covered
+ * earnings paid. Same error discipline as the other payouts:
+ *   - PayoutReconciliationError (batch total ≠ covered sum) → UnrecoverableError
+ *   - transient → rethrow → BullMQ retry
+ */
+async function handleOrganizerPayout(job: Job<JobData>) {
+  const { eventId } = job.data
+  if (!eventId) {
+    console.error(`[Worker] process-organizer-payout: missing eventId in job ${job.id}`)
+    return
+  }
+  console.log(`[Worker] process-organizer-payout → event ${eventId}`)
+  try {
+    const res = await processEventOrganizerPayout(eventId)
+    console.log(`[Worker] organizer payout for event ${eventId}: ${res.outcome}` +
+      (res.totalCents != null ? ` (${res.totalCents}¢)` : '') +
+      (res.transferId ? ` transfer=${res.transferId}` : ''))
+  } catch (err) {
+    if (err instanceof PayoutReconciliationError) {
+      console.error(`[Worker] ORGANIZER RECONCILIATION HALT for event ${eventId}: ${err.message}`)
+      throw new UnrecoverableError(err.message)
+    }
+    throw err
+  }
 }
 
 /**
@@ -584,51 +623,44 @@ async function handleVendorPayout(job: Job<JobData>) {
  * Updates the Cancellation record with the issued refund amount on success.
  */
 async function handleRefund(job: Job<JobData>) {
-  const {
-    orderId,
-    vendorId,
-    cancellationVendorId,
-    stripePaymentIntentId,
-    stripeChargeId,
-    refundReason,
-    refundIdempotencyKey,
-    refundAmountCents,
-  } = job.data
+  const { orderId, vendorId, refundReason, refundAmountCents } = job.data
 
-  if (!orderId || !stripePaymentIntentId || !refundIdempotencyKey) {
-    console.error(`[Worker] process-refund: missing required fields in job ${job.id}`)
+  if (!orderId) {
+    console.error(`[Worker] process-refund: missing orderId in job ${job.id}`)
     return
   }
 
-  console.log(`[Worker] process-refund → order ${orderId}`)
+  // FOLDED INTO THE ENGINE. enqueueRefund has no callers post-migration, but any
+  // in-flight JOB_REFUND must still route through refundVendorPortion — NEVER raw
+  // Stripe. If a vendor is named, refund that portion (override = partial amount);
+  // otherwise refund every vendor's portion. Idempotent.
+  console.log(`[Worker] process-refund → order ${orderId} (via engine)`)
+  const vendorIds = vendorId
+    ? [vendorId]
+    : [...new Set((await prisma.orderItem.findMany({ where: { orderId }, select: { vendorId: true } })).map(i => i.vendorId))]
 
-  const baseParams = stripeChargeId
-    ? { charge: stripeChargeId, metadata: { orderId, reason: refundReason ?? 'cancelled' } }
-    : { payment_intent: stripePaymentIntentId, metadata: { orderId, reason: refundReason ?? 'cancelled' } }
-  const refundParams = refundAmountCents
-    ? { ...baseParams, amount: refundAmountCents }
-    : baseParams
+  for (const vid of vendorIds) {
+    try {
+      await refundVendorPortion({
+        orderId, vendorId: vid, reason: refundReason ?? 'cancelled', actor: 'system:job-refund',
+        ...(refundAmountCents && vendorId ? { amountCentsOverride: refundAmountCents } : {}),
+      })
+    } catch (err) {
+      console.error(`[Worker] process-refund engine call failed order ${orderId} vendor ${vid}:`, err)
+    }
+  }
+}
 
-  const refund = await stripe.refunds.create(
-    refundParams,
-    { idempotencyKey: refundIdempotencyKey }
-  )
-
-  const refundAmount = refund.amount / 100
-
-  await prisma.cancellation.upsert({
-    where: { orderId },
-    create: {
-      orderId,
-      vendorId: cancellationVendorId ?? vendorId ?? '',
-      reason: refundReason ?? null,
-      refundIssued: true,
-      refundAmount,
-    },
-    update: { refundIssued: true, refundAmount },
-  })
-
-  console.log(`[Worker] Refund ${refund.id} issued for order ${orderId} — $${(refundAmount ?? 0).toFixed(2)}`)
+/**
+ * reconcile-sweep (recurring, ~60s)
+ * Periodic backstop: compares Stripe (money-truth) against the DB (state-truth)
+ * and self-heals pipeline leaks the real-time paths missed — all via existing
+ * idempotent functions (lib/reconciler.ts). Pattern E (auto-cancel of stuck
+ * PLACED orders) is detect-and-alert by default; it only acts when
+ * RECONCILER_PATTERN_E_ENABLED=true.
+ */
+async function handleReconcile(_job: Job<JobData>) {
+  await runReconciliationSweep()
 }
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
@@ -689,14 +721,27 @@ export function startOrderWorker() {
         case JOB_VENDOR_PAYOUT:
           await handleVendorPayout(job)
           break
+        case JOB_RUNNER_PAYOUT:
+          await handleRunnerPayout(job)
+          break
+        case JOB_ORGANIZER_PAYOUT:
+          await handleOrganizerPayout(job)
+          break
         case JOB_REFUND:
           await handleRefund(job)
+          break
+        case JOB_RECONCILE:
+          await handleReconcile(job)
           break
         default:
           console.warn(`[Worker] Unknown job: ${job.name}`)
       }
     },
-    { connection, concurrency: 5 }
+    // prefix MUST match the producers (getOrderQueue uses getQueuePrefix()).
+    // Without this, a set TEST_REDIS_PREFIX leaves the worker consuming 'bull:'
+    // while every job is enqueued under that prefix — the worker goes deaf to
+    // all jobs (payouts, refunds, timeouts). They must always align.
+    { connection, prefix: getQueuePrefix(), concurrency: 5 }
   )
 
   worker.on('completed', async job => {
@@ -730,12 +775,27 @@ export function startOrderWorker() {
     console.error('[Worker] Connection error:', err)
   })
 
+  // ── Recurring reconciliation sweep (~60s) ────────────────────────────────
+  // Attached to the SAME queue/connection as a BullMQ repeatable job. The fixed
+  // jobId + repeat key means re-running the worker never stacks duplicate
+  // schedulers. Pattern E stays detect-and-alert unless RECONCILER_PATTERN_E_ENABLED.
+  const schedulerQueue = new Queue(ORDER_QUEUE_NAME, { connection, prefix: getQueuePrefix() })
+  schedulerQueue
+    .add(JOB_RECONCILE, { eventId: '__reconcile__' } as JobData, {
+      repeat: { every: 60_000 },
+      jobId: 'reconcile-sweep',
+      removeOnComplete: 50,
+      removeOnFail: 100,
+    })
+    .then(() => console.log('[Worker] Reconciliation sweep scheduled (every 60s)'))
+    .catch(e => console.error('[Worker] Failed to schedule reconciliation sweep:', e))
+
   console.log(`[Worker] Listening on queue: ${ORDER_QUEUE_NAME}`)
   console.log(`[Worker] Handlers: ${[
     JOB_UNACCEPTED, JOB_UNCOLLECTED, JOB_UNDELIVERABLE,
     JOB_HIDE_VENDOR, JOB_INCIDENT_REFUND, JOB_ESCALATE_DISPUTE,
     JOB_POST_EVENT_REPORT, JOB_BULK_REFUND,
-    JOB_VENDOR_PAYOUT, JOB_REFUND,
+    JOB_VENDOR_PAYOUT, JOB_RUNNER_PAYOUT, JOB_ORGANIZER_PAYOUT, JOB_REFUND, JOB_RECONCILE,
   ].join(', ')}`)
 
   return worker

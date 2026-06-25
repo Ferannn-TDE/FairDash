@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useQuery } from '@tanstack/react-query'
+import { fetchJson } from '@/lib/api-fetcher'
 
 interface Fair {
   id: string
@@ -64,35 +65,14 @@ function timeAgo(dateStr: string) {
 }
 
 export default function OrganizerDashboard() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [fairs, setFairs] = useState<Fair[]>([])
-  const [orders, setOrders] = useState<Order[]>([])
-  const [loading, setLoading] = useState(true)
+  const statsQuery  = useQuery({ queryKey: ['organizer-stats'],        queryFn: () => fetchJson<Stats>('/api/organizer/stats') })
+  const fairsQuery  = useQuery({ queryKey: ['organizer-fairs-sidebar'], queryFn: () => fetchJson<{ fairs: Fair[] }>('/api/organizer/fairs') })
+  const ordersQuery = useQuery({ queryKey: ['organizer-recent-orders'], queryFn: () => fetchJson<{ orders: Order[] }>('/api/organizer/orders?limit=10') })
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [statsRes, fairsRes, ordersRes] = await Promise.all([
-          fetch('/api/organizer/stats'),
-          fetch('/api/organizer/fairs'),
-          fetch('/api/organizer/orders?limit=10'),
-        ])
-        const [statsData, fairsData, ordersData] = await Promise.all([
-          statsRes.json(),
-          fairsRes.json(),
-          ordersRes.json(),
-        ])
-        if (statsData.data) setStats(statsData.data)
-        if (fairsData.data?.fairs) setFairs(fairsData.data.fairs)
-        if (ordersData.data?.orders) setOrders(ordersData.data.orders)
-      } catch {
-        // silently fail — show empty state
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [])
+  const stats   = statsQuery.data ?? null
+  const fairs   = fairsQuery.data?.fairs ?? []
+  const orders  = ordersQuery.data?.orders ?? []
+  const loading = statsQuery.isPending || fairsQuery.isPending || ordersQuery.isPending
 
   return (
     <div>

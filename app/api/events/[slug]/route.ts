@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
+import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 
 // GET /api/events/:slug
 // Returns a single event by its URL slug, with active vendor count.
@@ -17,7 +18,9 @@ export async function GET(
         _count: {
           select: {
             vendors: {
-              where: { status: 'ACTIVE', isOffline: false },
+              // Aligns with the marketplace gate: when enforcement is on the badge
+              // counts only orderable (ready) vendors — never "17" while 2 show.
+              where: { status: 'ACTIVE', isOffline: false, ...readinessWhereIfEnforced() },
             },
           },
         },

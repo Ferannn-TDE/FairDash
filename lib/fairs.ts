@@ -41,6 +41,7 @@ export const getFairBySlugCached = unstable_cache(
             curbsideEnabled: true,
             homeDeliveryEnabled: true,
             homeDeliveryFee: true,
+            curbsideFee: true,
             curbsideZoneDescription: true,
           },
         },
@@ -74,6 +75,7 @@ export const getFairBySlugCached = unstable_cache(
             curbsideEnabled: fc.curbsideEnabled,
             homeDeliveryEnabled: fc.homeDeliveryEnabled,
             homeDeliveryFee: fc.homeDeliveryFee ?? null,
+            curbsideFee: fc.curbsideFee ?? 0,
             curbsideZoneDescription: fc.curbsideZoneDescription ?? null,
           }
         : null,

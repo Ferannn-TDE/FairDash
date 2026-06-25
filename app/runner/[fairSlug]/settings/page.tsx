@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { User, Phone, Mail, Car, Bell, Clock, LogOut, ChevronRight } from 'lucide-react'
+import { User, Phone, Mail, Car, Bell, Clock, LogOut, ChevronRight, Wallet } from 'lucide-react'
+import StripeConnectCard from '../../../_components/StripeConnectCard'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -162,6 +163,17 @@ export default function RunnerSettingsPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Payouts */}
+      <div className="bg-bg-card border border-white/10 rounded-2xl p-5 space-y-4">
+        <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold flex items-center gap-2">
+          <Wallet className="w-3.5 h-3.5" /> Payouts
+        </p>
+        <StripeConnectCard
+          basePath="/api/runners/me/stripe"
+          description="Connect a Stripe account to receive your delivery earnings from FairSynq."
+        />
       </div>
 
       {/* Save */}

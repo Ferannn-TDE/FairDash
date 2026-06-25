@@ -3,6 +3,7 @@ import { Webhook } from 'svix'
 import { db } from '@/lib/db'
 import { handleApiError } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
+import { syncUserRoleMetadata } from '@/lib/role-sync'
 
 // POST /api/webhooks/clerk
 // Verifies the svix signature and syncs Clerk user lifecycle events to our DB.
@@ -71,6 +72,8 @@ async function syncUser(data: ClerkWebhookPayload['data'], isNew: boolean) {
       await db.orgMember.create({
         data: { organizerId: org.id, userId: user.id, role: 'owner' },
       })
+      // New OrgMember row → derive publicMetadata.roles[] from DB.
+      await syncUserRoleMetadata(user.id)
     }
   }
 
@@ -80,7 +83,7 @@ async function syncUser(data: ClerkWebhookPayload['data'], isNew: boolean) {
 export async function POST(req: Request) {
   const webhookSecret = process.env.CLERK_WEBHOOK_SECRET
   if (!webhookSecret) {
-    console.error('[Clerk Webhook] CLERK_WEBHOOK_SECRET not set')
+    logger.error('[Clerk Webhook] CLERK_WEBHOOK_SECRET not set')
     return Response.json({ error: 'Webhook secret not configured' }, { status: 500 })
   }
 
