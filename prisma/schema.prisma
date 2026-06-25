@@ -224,6 +224,21 @@ model Vendor {
   // Booth photos (array of URLs)
   boothPhotoUrls Json?
 
+  // Application contact — the vendor's contact for THIS application. Kept on
+  // Vendor (not duplicated onto User) because it may differ from the applicant's
+  // Clerk identity; the User row stays the single source of truth for their login.
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  // Legal consent — an AUDITABLE record, not a bare boolean: who signed, which
+  // terms version, when (server time), and from where (request IP). Set on
+  // application submit. Makes the agreement step's "Session IP logged" claim real.
+  termsAcceptedName String?
+  termsVersion      String?
+  termsAcceptedAt   DateTime?
+  termsAcceptedIp   String?
+
   // Stripe Connect
   stripeAccountId   String?
   stripeVerified    Boolean   @default(false)

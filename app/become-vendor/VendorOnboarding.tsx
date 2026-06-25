@@ -97,6 +97,11 @@ This Agreement is governed by the laws of the State of Illinois. Disputes shall 
 
 By typing your full legal name below, you confirm you have read, understood, and agree to be bound by this Agreement.`
 
+// Version identifier for VENDOR_TERMS (their "Last Updated" date). Sent with the
+// application so the consent record captures WHICH terms were agreed to. Bump this
+// whenever VENDOR_TERMS changes.
+const VENDOR_TERMS_VERSION = '2026-01-01'
+
 const INITIAL_ITEM: MenuItemData = { id: '1', name: '', description: '', price: '', prepTime: '', photo: null, photoPreview: null }
 
 const INITIAL: FormData = {
@@ -379,6 +384,13 @@ export default function VendorOnboarding() {
           name: data.businessName,
           description: data.description,
           cuisineType: data.cuisineType,
+          // Contact (the application's contact) + signed legal consent — now
+          // persisted, no longer collected-then-discarded.
+          contactName:  data.contactName,
+          contactEmail: data.email,
+          contactPhone: data.phone,
+          legalName:    data.legalName,
+          termsVersion: VENDOR_TERMS_VERSION,
         }),
       })
       if (!res.ok) {

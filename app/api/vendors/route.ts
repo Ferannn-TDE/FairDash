@@ -58,10 +58,18 @@ export async function POST(req: Request) {
   try {
     const clerkId = await requireAuth()
     const body = await req.json()
-    const { eventSlug, name, description, cuisineType, boothNumber } = body
+    const {
+      eventSlug, name, description, cuisineType, boothNumber,
+      contactName, contactEmail, contactPhone,
+      legalName, termsVersion,
+    } = body
 
     if (!eventSlug || !name || !cuisineType) {
       return apiError('eventSlug, name, and cuisineType are required', 400, 'VALIDATION_ERROR')
+    }
+    // Legal consent is mandatory to apply — the signed legal name is the signature.
+    if (!legalName || !String(legalName).trim()) {
+      return apiError('Legal agreement must be signed to submit an application', 400, 'CONSENT_REQUIRED')
     }
 
     const event = await db.event.findUnique({ where: { urlSlug: eventSlug } })
@@ -73,6 +81,10 @@ export async function POST(req: Request) {
 
     const slug = await uniqueVendorSlug(name, event.id)
 
+    // Auditable consent: name (signature) + version from the client (what they saw),
+    // timestamp + IP set server-side (authoritative — not client-supplied).
+    const acceptedIp = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? null
+
     const vendor = await db.vendor.create({
       data: {
         eventId: event.id,
@@ -82,6 +94,13 @@ export async function POST(req: Request) {
         cuisineType,
         boothNumber,
         status: 'PENDING',
+        contactName:  contactName  ?? null,
+        contactEmail: contactEmail ?? null,
+        contactPhone: contactPhone ?? null,
+        termsAcceptedName: String(legalName).trim(),
+        termsVersion:      termsVersion ?? null,
+        termsAcceptedAt:   new Date(),
+        termsAcceptedIp:   acceptedIp,
         vendorMembers: {
           create: { userId: user.id, role: 'owner' },
         },
