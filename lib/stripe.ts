@@ -20,7 +20,13 @@ function getStripe(): Stripe {
     console.warn('[Stripe] STRIPE_SECRET_KEY not set — Stripe features disabled')
   }
   _stripe = new Stripe(key ?? 'sk_test_placeholder', {
-    apiVersion: '2024-12-18.acacia' as any,
+    // Pinned to the SDK's native version (stripe-node 22.x → 2026-05-27.dahlia),
+    // matching lib/stripe-connect.ts. Was 2024-12-18.acacia, which warned on every
+    // call (pin below the SDK's native version). The Acacia→Basil→Clover→Dahlia
+    // breaking changes are all in Billing/Invoicing/Subscriptions/Issuing/Tax —
+    // none touch our v1 surface (PaymentIntents auto-capture, charges, transfers
+    // with source_transaction + idempotency, refunds.create).
+    apiVersion: '2026-05-27.dahlia' as any,
     typescript: true,
   })
   return _stripe

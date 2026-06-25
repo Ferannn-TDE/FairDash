@@ -34,17 +34,16 @@
 import Stripe from 'stripe'
 
 /**
- * DEDICATED V2 client for Connect calls.
+ * DEDICATED client for Connect V2 calls.
  *
- * The shared lib/stripe.ts client is pinned to an OLD apiVersion
- * (2024-12-18.acacia) that the existing v1 payment/checkout code depends on —
- * that version does not know the V2 account shape (configuration.recipient.
- * capabilities…), so requests through it are rejected with "Unknown field".
- *
- * We isolate the version bump here: this client pins the V2-capable version
- * ('2026-05-27.dahlia', the stripe-node 22.x default) and is used for ALL
- * v2.core.* calls (account create/retrieve, account links, event parsing/
- * retrieval). v1 code is left untouched.
+ * Both this client and lib/stripe.ts now pin the same version
+ * ('2026-05-27.dahlia', the stripe-node 22.x native version) — historically
+ * lib/stripe.ts lagged on acacia (which didn't know the V2 account shape), which
+ * is why this separate V2-capable client was introduced. They're aligned now, so
+ * this client could be consolidated into lib/stripe.ts in a future cleanup; kept
+ * separate for now to avoid coupling the v2.core.* surface to the v1 singleton.
+ * Used for ALL v2.core.* calls (account create/retrieve, account links, event
+ * parsing/retrieval).
  */
 export const stripeConnect = new Stripe(
   process.env.STRIPE_SECRET_KEY ?? 'sk_test_placeholder',
