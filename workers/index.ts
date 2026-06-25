@@ -11,8 +11,9 @@
  * The webhook server (npm run server) must be a SEPARATE service.
  */
 
-require('dotenv').config({ path: '.env.local' })
-require('dotenv').config({ path: '.env' })
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
+dotenv.config({ path: '.env' })
 
 import { startOrderWorker } from './order-worker'
 

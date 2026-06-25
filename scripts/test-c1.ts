@@ -27,7 +27,7 @@ import {
   JobData,
   getQueuePrefix,
 } from '../lib/queues.js'
-import { enqueueVendorPayout } from '../lib/order-side-effects.js'
+import { enqueueOrderPayout } from '../lib/order-side-effects.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ const prisma = new PrismaClient({
 })
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
-  apiVersion: '2023-10-16',
+  apiVersion: '2023-10-16' as any,
   typescript: true,
 })
 
@@ -134,12 +134,9 @@ async function test1() {
   const { vendor, event } = await getSeedData()
   const jobsBefore = await queue.getJobs(['waiting', 'delayed', 'active'])
 
-  await enqueueVendorPayout({
+  await enqueueOrderPayout({
     orderId: `test-payout-${Date.now()}`,
-    vendorId: vendor.id,
     eventId: event.id,
-    vendorStripeAccountId: vendor.stripeAccountId ?? 'acct_test',
-    vendorPayout: 9.30,
   })
 
   const jobsAfter = await queue.getJobs(['waiting', 'delayed', 'active'])

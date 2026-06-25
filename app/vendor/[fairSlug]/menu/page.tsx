@@ -26,6 +26,7 @@ interface PendingRequest {
   type: 'ADD' | 'EDIT' | 'DELETE'
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   name: string | null
+  menuItemId: string | null
   menuItem: { name: string } | null
   createdAt: string
 }
@@ -130,8 +131,9 @@ function AddItemForm({ categories, onSubmit, onCancel }: {
 
 // ─── Item row ─────────────────────────────────────────────────────────────────
 
-function ItemRow({ item, onToggle, onEdit, onDelete }: {
+function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
   item: MenuItem
+  hasPendingRequest: boolean
   onToggle: (id: string) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
@@ -149,6 +151,11 @@ function ItemRow({ item, onToggle, onEdit, onDelete }: {
           {!item.isAvailable && (
             <span className="px-1.5 py-0.5 bg-white/5 text-text-gray text-[0.6rem] font-bold rounded-full uppercase tracking-wider">Sold Out</span>
           )}
+          {hasPendingRequest && (
+            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 text-[0.6rem] font-bold rounded-full uppercase tracking-wider border border-amber-500/20">
+              Pending Approval
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-neon-pink font-semibold text-xs">${(item.price ?? 0).toFixed(2)}</span>
@@ -161,14 +168,27 @@ function ItemRow({ item, onToggle, onEdit, onDelete }: {
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <button onClick={() => onToggle(item.id)} title={item.isAvailable ? 'Mark as sold out' : 'Mark as available'}
-          className={`p-1.5 rounded-lg transition-all cursor-pointer border-0 ${item.isAvailable ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-red-400 hover:bg-red-500/10'}`}>
+        <button
+          onClick={() => onToggle(item.id)}
+          title={item.isAvailable ? 'Mark as sold out' : 'Mark as available'}
+          className={`p-1.5 rounded-lg transition-all cursor-pointer border-0 ${item.isAvailable ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-red-400 hover:bg-red-500/10'}`}
+        >
           {item.isAvailable ? <CheckCircleIcon className="w-4 h-4" /> : <XCircleIcon className="w-4 h-4" />}
         </button>
-        <button onClick={() => onEdit(item.id)} title="Request edit (needs approval)" className="p-1.5 text-text-gray hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer border-0">
+        <button
+          onClick={() => !hasPendingRequest && onEdit(item.id)}
+          disabled={hasPendingRequest}
+          title={hasPendingRequest ? 'Edit request already pending approval' : 'Request edit (needs approval)'}
+          className="p-1.5 text-text-gray hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer border-0 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
           <PencilIcon className="w-3.5 h-3.5" />
         </button>
-        <button onClick={() => onDelete(item.id)} title="Request removal (needs approval)" className="p-1.5 text-text-gray hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border-0">
+        <button
+          onClick={() => !hasPendingRequest && onDelete(item.id)}
+          disabled={hasPendingRequest}
+          title={hasPendingRequest ? 'Change request already pending approval' : 'Request removal (needs approval)'}
+          className="p-1.5 text-text-gray hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border-0 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
           <TrashIcon className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -314,6 +334,13 @@ export default function VendorMenuPage() {
     .map(cat => ({ cat, items: items.filter(i => i.category === cat) }))
     .filter(g => g.items.length > 0)
 
+  // Set of menuItemIds that have a pending change request — edit/delete disabled on these
+  const pendingItemIds = new Set(
+    pendingRequests
+      .map(r => r.menuItemId)
+      .filter((id): id is string => !!id)
+  )
+
   async function handleToggleAvailability(item: MenuItem) {
     const next = !item.isAvailable
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, isAvailable: next } : i))
@@ -352,7 +379,7 @@ export default function VendorMenuPage() {
       const json = await res.json()
       if (json.success) {
         setShowAdd(false)
-        setPendingRequests(prev => [{ id: json.data.id, type: 'ADD', status: 'PENDING', name: data.name, menuItem: null, createdAt: json.data.createdAt }, ...prev])
+        setPendingRequests(prev => [{ id: json.data.id, type: 'ADD', status: 'PENDING', name: data.name, menuItemId: null, menuItem: null, createdAt: json.data.createdAt }, ...prev])
         toast.success('Add request submitted — awaiting organizer approval')
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
@@ -373,7 +400,7 @@ export default function VendorMenuPage() {
       })
       const json = await res.json()
       if (json.success) {
-        setPendingRequests(prev => [{ id: json.data.id, type: 'EDIT', status: 'PENDING', name: updates.name ?? item?.name ?? null, menuItem: { name: item?.name ?? '' }, createdAt: json.data.createdAt }, ...prev])
+        setPendingRequests(prev => [{ id: json.data.id, type: 'EDIT', status: 'PENDING', name: updates.name ?? item?.name ?? null, menuItemId: id, menuItem: { name: item?.name ?? '' }, createdAt: json.data.createdAt }, ...prev])
         toast.success('Edit request submitted — awaiting organizer approval')
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
@@ -393,7 +420,7 @@ export default function VendorMenuPage() {
       })
       const json = await res.json()
       if (json.success) {
-        setPendingRequests(prev => [{ id: json.data.id, type: 'DELETE', status: 'PENDING', name: null, menuItem: { name: item.name }, createdAt: json.data.createdAt }, ...prev])
+        setPendingRequests(prev => [{ id: json.data.id, type: 'DELETE', status: 'PENDING', name: null, menuItemId: item.id, menuItem: { name: item.name }, createdAt: json.data.createdAt }, ...prev])
         toast.success('Removal request submitted — awaiting organizer approval')
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
@@ -464,6 +491,7 @@ export default function VendorMenuPage() {
                   <ItemRow
                     key={item.id}
                     item={item}
+                    hasPendingRequest={pendingItemIds.has(item.id)}
                     onToggle={handleAvailabilityClick}
                     onEdit={setEditingId}
                     onDelete={id => {

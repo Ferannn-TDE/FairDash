@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useClerk } from '@clerk/clerk-react'
 import {
   HomeIcon,
   BuildingStorefrontIcon,
@@ -16,6 +17,7 @@ import {
   ChevronRightIcon,
   ClipboardDocumentListIcon,
   ChartBarIcon,
+  ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
 import { mockAdminEvents } from '@/lib/mock/admin'
 
@@ -141,6 +143,7 @@ function SidebarContent({ currentSlug, onClose }: { currentSlug: string | null; 
 export default function AdminShell({ children, userName, userInitials, userEmail }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
+  const { signOut } = useClerk()
 
   // Extract slug from /admin/[eventSlug]/...
   const slugMatch = pathname.match(/^\/admin\/([^/]+)/)
@@ -176,6 +179,14 @@ export default function AdminShell({ children, userName, userInitials, userEmail
               <p className="text-xs text-[#555] font-inter mt-0.5 truncate">{userEmail}</p>
             </div>
           </div>
+          {/* Sign out — matches the app's signOut pattern; lands on "/" (Step 4 convention) */}
+          <button
+            onClick={() => signOut({ redirectUrl: '/' })}
+            className="mt-3 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-inter text-[#888] hover:text-white hover:bg-white/5 transition-colors"
+          >
+            <ArrowRightOnRectangleIcon className="w-4 h-4 shrink-0" />
+            Sign Out
+          </button>
         </div>
       </aside>
 

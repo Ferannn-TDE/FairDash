@@ -1,7 +1,10 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useClerk } from '@clerk/clerk-react'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
+import ConfirmModal from '../../_components/ui/ConfirmModal'
+import StripeConnectCard from '../../_components/StripeConnectCard'
 import {
   UserCircleIcon,
   BellIcon,
@@ -9,6 +12,7 @@ import {
   BuildingLibraryIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
+  ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -95,6 +99,9 @@ function SkeletonCard() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function OrganizerSettingsPage() {
+  const { signOut } = useClerk()
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false)
+
   // Profile state
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [profileLoading, setProfileLoading] = useState(true)
@@ -107,15 +114,6 @@ export default function OrganizerSettingsPage() {
 
   // Notification prefs
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs | null>(null)
-
-  // Platform fee
-  const [commissionRate, setCommissionRate] = useState<number | null>(null)
-
-  // Danger zone
-  const [showDanger, setShowDanger] = useState(false)
-  const [deleteInput, setDeleteInput] = useState('')
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // ── Load profile ────────────────────────────────────────────────────────────
 
@@ -133,26 +131,6 @@ export default function OrganizerSettingsPage() {
       // silently fail — user sees empty fields
     } finally {
       setProfileLoading(false)
-    }
-  }, [])
-
-  // ── Load commission rate from fairs ────────────────────────────────────────
-
-  const loadCommissionRate = useCallback(async () => {
-    try {
-      const res = await fetch('/api/organizer/fairs')
-      if (!res.ok) return
-      const json = await res.json()
-      // commissionRate lives on Vendor, not Event — fairs endpoint returns per-event stats only
-      // fall back to default 7%
-      if (json?.data?.fairs?.length > 0) {
-        // No commissionRate on events; use default
-        setCommissionRate(7)
-      } else {
-        setCommissionRate(7)
-      }
-    } catch {
-      setCommissionRate(7)
     }
   }, [])
 
@@ -176,8 +154,7 @@ export default function OrganizerSettingsPage() {
 
   useEffect(() => {
     loadProfile()
-    loadCommissionRate()
-  }, [loadProfile, loadCommissionRate])
+  }, [loadProfile])
 
   // ── Save notification prefs ────────────────────────────────────────────────
 
@@ -211,23 +188,6 @@ export default function OrganizerSettingsPage() {
       setSaveError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
       setSaving(false)
-    }
-  }
-
-  // ── Delete org ──────────────────────────────────────────────────────────────
-
-  const handleDelete = async () => {
-    if (deleteInput !== 'DELETE') return
-    setDeleting(true)
-    setDeleteError(null)
-    try {
-      const res = await fetch('/api/organizer/profile', { method: 'DELETE' })
-      const json = await res.json()
-      setDeleteError(json?.error?.message ?? 'Server error')
-    } catch {
-      setDeleteError('Request failed')
-    } finally {
-      setDeleting(false)
     }
   }
 
@@ -411,124 +371,48 @@ export default function OrganizerSettingsPage() {
         )}
       </Section>
 
-      {/* ── Section 3: Platform Fee ──────────────────────────────────────────── */}
-
-      <Section icon={CurrencyDollarIcon} title="Platform Fee">
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-neon-pink/10 border border-neon-pink/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-neon-pink text-xl font-bold font-bebas tracking-wide">
-              {commissionRate !== null ? `${commissionRate}%` : '—'}
-            </span>
-          </div>
-          <div>
-            <p className="text-white font-semibold text-sm">
-              Current FairSynq Platform Fee
-            </p>
-            <p className="text-white/40 text-xs mt-1 leading-relaxed max-w-sm">
-              This rate is automatically deducted from vendor payouts. To adjust your
-              platform fee, contact{' '}
-              <a
-                href="mailto:support@fairsynq.com"
-                className="text-neon-pink hover:text-neon-pink/80 transition-colors"
-              >
-                support@fairsynq.com
-              </a>
-              .
-            </p>
-          </div>
-        </div>
-      </Section>
-
-      {/* ── Section 4: Payout & Banking ─────────────────────────────────────── */}
+      {/* ── Section 3: Payout & Banking ─────────────────────────────────────── */}
 
       <Section icon={BuildingLibraryIcon} title="Payout & Banking">
+        <p className="text-white/30 text-xs mb-4 font-inter">
+          One Stripe account for your organization — reused across all your fairs.
+          Delivery-fee shares from your events are paid out here.
+        </p>
+        <StripeConnectCard
+          basePath="/api/organizer/stripe"
+          description="Connect a Stripe account to receive your organizer payouts from FairSynq."
+        />
+      </Section>
+
+      {/* ── Section 4: Account ──────────────────────────────────────────────── */}
+
+      <Section icon={ArrowRightOnRectangleIcon} title="Account">
         <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
-            <div>
-              <p className="text-white text-sm font-semibold">Stripe Connect — Connected</p>
-              <p className="text-white/40 text-xs mt-0.5">
-                Your account is verified and ready to receive payouts.
-              </p>
-            </div>
+          <div>
+            <p className="text-white text-sm font-semibold">Sign out</p>
+            <p className="text-white/40 text-xs mt-0.5">
+              You&apos;ll need to sign in again to access your organizer portal.
+            </p>
           </div>
-          <a
-            href="https://dashboard.stripe.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-5 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white text-sm rounded-xl transition-colors flex items-center gap-2"
+          <button
+            onClick={() => setShowSignOutConfirm(true)}
+            className="px-5 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white text-sm rounded-xl transition-colors"
           >
-            Open Stripe Dashboard
-            <span className="text-white/40">→</span>
-          </a>
+            Sign Out
+          </button>
         </div>
       </Section>
 
-      {/* ── Section 5: Danger Zone ───────────────────────────────────────────── */}
+      <ConfirmModal
+        open={showSignOutConfirm}
+        title="Sign out?"
+        message="You'll need to sign in again to access your organizer portal."
+        confirmLabel="Sign Out"
+        cancelLabel="Cancel"
+        onConfirm={() => signOut({ redirectUrl: '/' })}
+        onCancel={() => setShowSignOutConfirm(false)}
+      />
 
-      <div className="bg-[#1a1a1a] border border-red-500/20 rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-5">
-          <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
-          <h2 className="text-red-400 font-semibold text-base">Danger Zone</h2>
-        </div>
-
-        {!showDanger ? (
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <p className="text-white text-sm font-medium">Delete Organization</p>
-              <p className="text-white/40 text-xs mt-0.5">
-                Permanently removes your organization, all fairs, and associated data.
-                This cannot be undone.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowDanger(true)}
-              className="px-5 py-2 border border-red-500/40 text-red-400 hover:bg-red-500/10 text-sm rounded-xl transition-colors"
-            >
-              Delete Organization
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-white/60 text-sm">
-              Are you sure? Type{' '}
-              <span className="text-red-400 font-mono font-bold">DELETE</span> to
-              confirm.
-            </p>
-            <input
-              type="text"
-              value={deleteInput}
-              onChange={(e) => setDeleteInput(e.target.value)}
-              placeholder="Type DELETE"
-              className="w-full max-w-xs bg-white/[0.04] border border-red-500/30 rounded-xl px-4 py-2.5 text-white text-sm focus:border-red-500 outline-none transition-colors font-mono"
-            />
-
-            {deleteError && (
-              <p className="text-red-400 text-sm">{deleteError}</p>
-            )}
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleDelete}
-                disabled={deleteInput !== 'DELETE' || deleting}
-                className="px-6 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors"
-              >
-                {deleting ? 'Deleting…' : 'Confirm Delete'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowDanger(false)
-                  setDeleteInput('')
-                  setDeleteError(null)
-                }}
-                className="px-6 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white/70 text-sm rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   )
 }

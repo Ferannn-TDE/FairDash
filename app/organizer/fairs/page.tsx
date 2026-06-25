@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useQuery } from '@tanstack/react-query'
+import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 
 interface Fair {
@@ -25,16 +26,12 @@ function formatDate(dateStr: string) {
 }
 
 export default function OrganizerFairsPage() {
-  const [fairs, setFairs] = useState<Fair[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/organizer/fairs')
-      .then(r => r.json())
-      .then(d => { if (d.data?.fairs) setFairs(d.data.fairs) })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+  const query = useQuery({
+    queryKey: ['organizer-fairs-sidebar'],
+    queryFn: () => fetchJson<{ fairs: Fair[] }>('/api/organizer/fairs'),
+  })
+  const fairs = query.data?.fairs ?? []
+  const loading = query.isPending
 
   return (
     <div>

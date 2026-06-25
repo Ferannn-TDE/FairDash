@@ -1,6 +1,7 @@
 import { apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { logger } from '@/lib/logger'
 
 // POST /api/storage/upload
 // Returns a Supabase Storage presigned upload URL.
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
 
     if (!res.ok) {
       const body = await res.text()
-      console.error('[Storage] Supabase sign error:', body)
+      logger.error('[Storage] Supabase sign error', { body })
       return apiError('Could not generate upload URL', 500, 'STORAGE_ERROR')
     }
 

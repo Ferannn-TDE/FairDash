@@ -392,14 +392,14 @@ export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMulti
         )}
         {order.fairSynqFee > 0 && (
           <div className="flex justify-between text-sm">
-            <span className="text-[#A1A1A1]">Platform Fee</span>
+            <span className="text-[#A1A1A1]">Service Fee</span>
             <span className="text-white/60">${(order.fairSynqFee ?? 0).toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-1">
           <span className="text-white">Total</span>
           <span className="text-[#FF0077] text-base [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
-            ${(order.total + order.fairSynqFee).toFixed(2)}
+            ${(order.total ?? 0).toFixed(2)}
           </span>
         </div>
       </div>

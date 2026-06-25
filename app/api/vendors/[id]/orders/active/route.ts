@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
 import { logger } from '@/lib/logger'
 
 // Active VendorOrderStatus values (string field, not enum)
@@ -43,41 +44,42 @@ export async function GET(
       select: {
         id: true,
         status: true,
-        total: true,
-        subtotal: true,
-        vendorPayout: true,
         placedAt: true,
+        total: true,
         vendorOrderStatuses: {
           where: { vendorId },
-          select: { status: true },
+          select: { vendorId: true, status: true },
         },
+        payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true } },
+        refunds: { where: { vendorId }, select: { vendorId: true, status: true, amountCents: true } },
+        // ALL items — earnings helper needs the full split for the fee estimate.
         orderItems: {
-          where: { vendorId },
-          select: {
-            id: true,
-            quantity: true,
-            unitPrice: true,
-            itemName: true,
-          },
+          select: { id: true, quantity: true, unitPrice: true, subtotal: true, itemName: true, vendorId: true },
         },
       },
     })
 
-    // Expose per-vendor status rather than master order status
-    const result = orders.map(o => ({
-      id: o.id,
-      status: o.vendorOrderStatuses[0]?.status ?? o.status,
-      total: o.total,
-      subtotal: o.subtotal,
-      vendorPayout: o.vendorPayout,
-      placedAt: o.placedAt,
-      orderItems: o.orderItems.map(i => ({
-        id: i.id,
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-        itemName: i.itemName,
-      })),
-    }))
+    // Active orders are pre-payout → earnings are a conservative ESTIMATE
+    // (slice − estimated Stripe-fee share), via the one shared helper. vendorSubtotal
+    // is the gross slice (kept for line items); earnings is the take-home estimate.
+    const result = orders.map(o => {
+      const myItems = o.orderItems.filter(i => i.vendorId === vendorId)
+      const earn = computeVendorOrderEarnings(o, vendorId)
+      return {
+        id: o.id,
+        status: o.vendorOrderStatuses[0]?.status ?? o.status,
+        vendorSubtotal: parseFloat(myItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0).toFixed(2)),
+        earnings: parseFloat((earn.cents / 100).toFixed(2)),
+        earningsStatus: earn.status, // 'estimated' for active orders
+        placedAt: o.placedAt,
+        orderItems: myItems.map(i => ({
+          id: i.id,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          itemName: i.itemName,
+        })),
+      }
+    })
 
     logger.debug('[vendor/orders/active] served', {
       durationMs: Math.round(performance.now() - start),

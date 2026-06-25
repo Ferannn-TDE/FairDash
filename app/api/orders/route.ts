@@ -1,18 +1,17 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { currentUser } from '@clerk/nextjs/server'
 import Stripe from 'stripe'
 import { FulfillmentType, EventStatus, VendorStatus, OrderStatus } from '@prisma/client'
+import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
-import { fireAndForgetFirebaseSet } from '@/lib/firebase-sync'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { enforceRateLimit } from '@/lib/ratelimit'
-import { getOrderQueue, JOB_UNACCEPTED } from '@/lib/queues'
-import { enqueueJobSafely } from '@/lib/queue-safe'
-import { VENDOR_ACCEPT_TIMEOUT_MS } from '@/lib/constants'
+import { calculateServiceFee } from '@/lib/constants'
+import { logger } from '@/lib/logger'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -33,6 +32,7 @@ interface CreateOrderBody {
   items: CartItem[]
   customerName: string
   customerPhone: string
+  tip?: number // dollars; runner-fulfilled orders only; 100% the runner's
   // Curbside
   vehicleMake?: string
   vehicleColor?: string
@@ -89,6 +89,7 @@ export async function POST(req: NextRequest) {
       deliveryStreet,
       deliveryCity,
       deliveryZip,
+      tip: tipInput,
     } = body
 
     if (!eventId || !fulfillmentType || !customerName || !customerPhone) {
@@ -180,6 +181,7 @@ export async function POST(req: NextRequest) {
     const uniqueVendorIds = [...new Set(items.map(i => i.vendorId))]
     const vendors = await db.vendor.findMany({
       where: { id: { in: uniqueVendorIds } },
+      include: { _count: { select: { menuItems: { where: { isAvailable: true } } } } },
     })
 
     if (vendors.length !== uniqueVendorIds.length) {
@@ -205,6 +207,14 @@ export async function POST(req: NextRequest) {
       }
       if (vendor.isOffline) {
         throw new ApiError(`${vendor.name} is currently offline`, 409, 'VENDOR_OFFLINE')
+      }
+      // Phase 5 order backstop: when enforcement is on, reject an unready vendor
+      // (no Stripe / no available menu) — BEFORE any PaymentIntent is created
+      // below, so there's no charge and no half-order. Belt to the visibility
+      // gates' suspenders. OFF by default → unchanged. Shared predicate.
+      if (isVendorReadinessEnforced() &&
+          !vendorReady({ status: vendor.status, stripeVerified: vendor.stripeVerified, availableMenuCount: vendor._count.menuItems })) {
+        throw new ApiError(`${vendor.name} is not currently accepting orders`, 409, 'VENDOR_NOT_READY')
       }
       if (vendor.isBusy && vendor.busyUntil && vendor.busyUntil > new Date()) {
         throw new ApiError(
@@ -251,7 +261,6 @@ export async function POST(req: NextRequest) {
     const vendorMap = new Map(vendors.map(v => [v.id, v]))
 
     let subtotalAccumulator = 0
-    let fairSynqFeeAccumulator = 0
 
     const lineItems = items.map(cartItem => {
       const mi = menuItemMap.get(cartItem.menuItemId)
@@ -266,9 +275,7 @@ export async function POST(req: NextRequest) {
       }
       const unitPrice = mi.price
       const lineSubtotal = parseFloat((unitPrice * cartItem.quantity).toFixed(2))
-      const lineFee = parseFloat((lineSubtotal * vendor.commissionRate).toFixed(2))
       subtotalAccumulator += lineSubtotal
-      fairSynqFeeAccumulator += lineFee
       return {
         menuItemId: cartItem.menuItemId,
         itemName: mi.name,
@@ -282,20 +289,53 @@ export async function POST(req: NextRequest) {
     })
 
     const subtotal = parseFloat(subtotalAccumulator.toFixed(2))
-    const fairSynqFee = parseFloat(fairSynqFeeAccumulator.toFixed(2))
-    const vendorPayout = parseFloat((subtotal - fairSynqFee).toFixed(2))
 
+    // The applicable runner-fulfilled fee (delivery OR curbside), server-derived
+    // from config — never client-supplied. Stored in Order.deliveryFee (the fee
+    // line the reconciler already understands). Null for booth pickup.
     const deliveryFee: number | null =
       fulfillmentType === FulfillmentType.HOME_DELIVERY
         ? parseFloat((config?.homeDeliveryFee ?? DEFAULT_DELIVERY_FEE).toFixed(2))
-        : null
+        : fulfillmentType === FulfillmentType.CURBSIDE
+          ? parseFloat((config?.curbsideFee ?? 0).toFixed(2))
+          : null
+
+    // Tip: runner-fulfilled orders only (delivery + curbside). 100% the runner's;
+    // no service fee, no split. Forced to 0 for booth pickup (ignore client input).
+    const isRunnerFulfilled =
+      fulfillmentType === FulfillmentType.HOME_DELIVERY ||
+      fulfillmentType === FulfillmentType.CURBSIDE
+    if (tipInput != null && (!Number.isFinite(tipInput) || tipInput < 0)) {
+      throw new ApiError('Invalid tip amount', 400, 'VALIDATION_ERROR')
+    }
+    const tip = isRunnerFulfilled && tipInput && tipInput > 0
+      ? parseFloat(tipInput.toFixed(2))
+      : 0
 
     const serviceCharge =
       event.serviceChargeEnabled && event.serviceChargeAmount
         ? parseFloat(event.serviceChargeAmount.toFixed(2))
         : 0
 
-    const total = parseFloat((subtotal + (deliveryFee ?? 0) + serviceCharge).toFixed(2))
+    // ── Fee model ──────────────────────────────────────────────────────────
+    // FairSynq's sole revenue is the 10% service fee charged to the CUSTOMER on
+    // top of the subtotal, kept CLEAN (Stripe fees do NOT come out of it).
+    // Vendors absorb the Stripe processing fee: each vendor receives their
+    // subtotal slice minus their proportional share of the real settled fee.
+    // That per-vendor math runs in the PAYOUT WORKER at fulfillment, when the
+    // balance transaction has settled — NOT here and NOT at placement.
+    //
+    // `fairSynqFee` records FairSynq's revenue (= the service fee) for dashboards.
+    // `vendorPayout` is NOT meaningful per-order under multi-vendor; the real
+    // per-vendor payout amounts are recorded as Payout rows by the worker. We
+    // store 0 on the draft (column is non-null) — do not read it for payouts.
+    const serviceFee = calculateServiceFee(subtotal)
+    const fairSynqFee = serviceFee
+    const vendorPayout = 0
+
+    // Money identity (5 terms): subtotal + serviceFee(10%×subtotal) + deliveryFee
+    // + serviceCharge + tip. 10% is on subtotal ONLY — never on the fee or tip.
+    const total = parseFloat((subtotal + (deliveryFee ?? 0) + serviceCharge + serviceFee + tip).toFixed(2))
     const itemCount = lineItems.reduce((sum, i) => sum + i.quantity, 0)
 
     // Primary vendor — first item's vendor (used for Order.vendorId and RTDB routing)
@@ -333,19 +373,40 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Per-vendor subtotal breakdown (cents) — lets the payout worker / Stripe
+    // dashboard see the split source without trusting the client. The worker is
+    // authoritative from the DB; this is belt-and-suspenders. Max 5 vendors/order
+    // keeps this well under Stripe's 500-char metadata value limit.
+    const vendorSubtotalCents: Record<string, number> = {}
+    for (const l of lineItems) {
+      vendorSubtotalCents[l.vendorId] = (vendorSubtotalCents[l.vendorId] ?? 0) + Math.round(l.subtotal * 100)
+    }
+
+    // Separate charges & transfers: charge the FULL amount to the platform and
+    // tag it with a transfer_group. The charge inherits this group, so the
+    // worker reads charge.transfer_group and stamps it on each per-vendor
+    // transfer (binding is via source_transaction = the charge id).
+    const transferGroup = `order_grp_${globalThis.crypto.randomUUID()}`
+
     const piParams: Stripe.PaymentIntentCreateParams = {
       amount: Math.round(total * 100),
       currency: 'usd',
       automatic_payment_methods: { enabled: true },
+      transfer_group: transferGroup,
+      // NOTE: deliberately NO transfer_data.destination / application_fee_amount —
+      // those are for DESTINATION charges. We use separate charges & transfers.
       metadata: {
         primaryVendorId,
         eventId,
         customerId: dbUser.id,
         fulfillmentType,
         fairSynqFee: fairSynqFee.toFixed(2),
+        serviceFee: serviceFee.toFixed(2),
         deliveryFee: (deliveryFee ?? 0).toFixed(2),
         serviceCharge: serviceCharge.toFixed(2),
+        tip: tip.toFixed(2),
         vendorIds: uniqueVendorIds.join(','),
+        vendorSubtotalCents: JSON.stringify(vendorSubtotalCents),
       },
     }
 
@@ -362,6 +423,7 @@ export async function POST(req: NextRequest) {
           fulfillmentType,
           subtotal,
           deliveryFee,
+          tip: tip > 0 ? tip : null,
           serviceCharge: serviceCharge > 0 ? serviceCharge : null,
           total,
           fairSynqFee,
@@ -398,15 +460,9 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      // One VendorOrderStatus row per unique vendor — starts at PLACED
-      await tx.vendorOrderStatus.createMany({
-        data: uniqueVendorIds.map(vid => ({
-          orderId: created.id,
-          vendorId: vid,
-          status: 'PLACED',
-        })),
-      })
-
+      // NOTE: VendorOrderStatus rows are intentionally NOT created here. They are
+      // created by placePaidOrder() only after payment succeeds, so unpaid /
+      // abandoned checkouts never appear on a vendor's dashboard.
       return created
     })
 
@@ -419,59 +475,15 @@ export async function POST(req: NextRequest) {
         metadata: { ...paymentIntent.metadata, orderId: order.id },
       })
       .catch(err =>
-        console.error('[Orders] Failed to patch PI metadata with orderId:', err)
+        logger.error('[Orders] Failed to patch PI metadata with orderId', { error: String(err) })
       )
 
-    // ── 8. Firebase RTDB — push to each vendor's path ─────────────────────
-    const itemsByVendor: Record<string, string[]> = {}
-    for (const oi of order.orderItems) {
-      if (!itemsByVendor[oi.vendorId]) itemsByVendor[oi.vendorId] = []
-      itemsByVendor[oi.vendorId].push(`${oi.itemName || oi.menuItem.name} ×${oi.quantity}`)
-    }
+    // NOTE: No Firebase push and no accept-timeout job here. Both are
+    // vendor-visible side-effects and run only once payment succeeds, via
+    // placePaidOrder() (called from the Stripe webhook and the client confirm
+    // path). This is what prevents phantom orders from unpaid checkouts.
 
-    after(() => {
-      for (const [vid, itemLines] of Object.entries(itemsByVendor)) {
-        const vendorSubtotal = lineItems
-          .filter(l => l.vendorId === vid)
-          .reduce((s, l) => s + l.subtotal, 0)
-
-        fireAndForgetFirebaseSet(
-          `fairs/${eventId}/orders/${vid}/${order.id}`,
-          {
-            orderId: order.id,
-            status: 'PENDING_PAYMENT',
-            fulfillmentType,
-            customerName,
-            customerPhone,
-            subtotal: parseFloat(vendorSubtotal.toFixed(2)),
-            total: parseFloat(vendorSubtotal.toFixed(2)),
-            itemCount: lineItems.filter(l => l.vendorId === vid).reduce((s, l) => s + l.quantity, 0),
-            itemSummary: itemLines.join(', '),
-            placedAt: Date.now(),
-          },
-          { orderId: order.id }
-        )
-      }
-    })
-
-    // ── 9. Schedule accept-timeout for primary vendor ──────────────────────
-    const ordersQueue = getOrderQueue()
-    if (ordersQueue) {
-      const result = await enqueueJobSafely({
-        queue:    ordersQueue,
-        name:     JOB_UNACCEPTED,
-        data:     { orderId: order.id, vendorId: primaryVendorId, eventId },
-        jobId:    `unaccepted-${order.id}`,
-        delay:    VENDOR_ACCEPT_TIMEOUT_MS,
-        priority: 'normal',
-      })
-
-      if (result === 'dropped') {
-        console.error('[CRITICAL] Job dropped with no fallback', { jobName: JOB_UNACCEPTED, orderId: order.id })
-      }
-    }
-
-    // ── 10. Return to frontend ─────────────────────────────────────────────
+    // ── 8. Return to frontend ──────────────────────────────────────────────
     return success(
       {
         orderId: order.id,
@@ -481,7 +493,9 @@ export async function POST(req: NextRequest) {
           subtotal,
           deliveryFee,
           serviceCharge: serviceCharge > 0 ? serviceCharge : null,
+          tip: tip > 0 ? tip : null,
           fairSynqFee,
+          serviceFee,
           total,
           itemCount,
           fulfillmentType,

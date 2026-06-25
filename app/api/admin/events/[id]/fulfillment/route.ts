@@ -15,10 +15,12 @@ export async function GET(
   try {
     await requireAdminAuth()
 
-    const event = await db.event.findUnique({ where: { id: (await params).id } })
+    // The [id] segment may be the event id OR its urlSlug (admin pages pass slug).
+    const { id } = await params
+    const event = await db.event.findFirst({ where: { OR: [{ id }, { urlSlug: id }] }, select: { id: true } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
-    const config = await db.fulfillmentConfig.findUnique({ where: { eventId: (await params).id } })
+    const config = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id } })
     return success({ config })
   } catch (err) {
     return handleApiError(err)
@@ -40,6 +42,8 @@ interface FulfillmentBody {
   homeDeliveryFee?: number | null
   homeDeliveryRadiusKm?: number | null
   runnerTransportDescription?: string | null
+  curbsideFee?: number
+  runnerFeePercent?: number
 }
 
 export async function PATCH(
@@ -49,14 +53,42 @@ export async function PATCH(
   try {
     await requireAdminAuth()
 
-    const event = await db.event.findUnique({ where: { id: (await params).id } })
+    // The [id] segment may be the event id OR its urlSlug (admin pages pass slug).
+    const { id } = await params
+    const event = await db.event.findFirst({ where: { OR: [{ id }, { urlSlug: id }] }, select: { id: true } })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
 
     const body: FulfillmentBody = await req.json()
 
+    // Validation: fee split + curbside fee (Part A)
+    if (body.runnerFeePercent !== undefined) {
+      const p = body.runnerFeePercent
+      if (!Number.isInteger(p) || p < 0 || p > 100) {
+        throw new ApiError('runnerFeePercent must be an integer 0–100', 400, 'VALIDATION_ERROR')
+      }
+    }
+    if (body.curbsideFee !== undefined) {
+      if (!Number.isFinite(body.curbsideFee) || body.curbsideFee < 0) {
+        throw new ApiError('curbsideFee must be a non-negative number', 400, 'VALIDATION_ERROR')
+      }
+    }
+    if (body.homeDeliveryFee != null && (!Number.isFinite(body.homeDeliveryFee) || body.homeDeliveryFee < 0)) {
+      throw new ApiError('homeDeliveryFee must be a non-negative number', 400, 'VALIDATION_ERROR')
+    }
+
+    // At least one fulfillment method must remain enabled (when all three are sent).
+    if (
+      body.boothPickupEnabled !== undefined &&
+      body.curbsideEnabled !== undefined &&
+      body.homeDeliveryEnabled !== undefined &&
+      !body.boothPickupEnabled && !body.curbsideEnabled && !body.homeDeliveryEnabled
+    ) {
+      throw new ApiError('At least one fulfillment method must be enabled', 400, 'NO_METHOD_ENABLED')
+    }
+
     // Validation: if enabling curbside, coords + description are required
     if (body.curbsideEnabled === true) {
-      const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: (await params).id } })
+      const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id } })
       const lat = body.curbsideZoneLat ?? existing?.curbsideZoneLat
       const lng = body.curbsideZoneLng ?? existing?.curbsideZoneLng
       const desc = body.curbsideZoneDescription ?? existing?.curbsideZoneDescription
@@ -71,9 +103,9 @@ export async function PATCH(
     }
 
     const config = await db.fulfillmentConfig.upsert({
-      where: { eventId: (await params).id },
+      where: { eventId: event.id },
       create: {
-        eventId: (await params).id,
+        eventId: event.id,
         boothPickupEnabled: body.boothPickupEnabled ?? true,
         curbsideEnabled: body.curbsideEnabled ?? false,
         homeDeliveryEnabled: body.homeDeliveryEnabled ?? false,
@@ -84,6 +116,8 @@ export async function PATCH(
         homeDeliveryFee: body.homeDeliveryFee ?? null,
         homeDeliveryRadiusKm: body.homeDeliveryRadiusKm ?? null,
         runnerTransportDescription: body.runnerTransportDescription ?? null,
+        curbsideFee: body.curbsideFee ?? 0,
+        runnerFeePercent: body.runnerFeePercent ?? 0,
       },
       update: {
         ...(body.boothPickupEnabled !== undefined && { boothPickupEnabled: body.boothPickupEnabled }),
@@ -96,6 +130,8 @@ export async function PATCH(
         ...(body.homeDeliveryFee !== undefined && { homeDeliveryFee: body.homeDeliveryFee }),
         ...(body.homeDeliveryRadiusKm !== undefined && { homeDeliveryRadiusKm: body.homeDeliveryRadiusKm }),
         ...(body.runnerTransportDescription !== undefined && { runnerTransportDescription: body.runnerTransportDescription }),
+        ...(body.curbsideFee !== undefined && { curbsideFee: body.curbsideFee }),
+        ...(body.runnerFeePercent !== undefined && { runnerFeePercent: body.runnerFeePercent }),
       },
     })
 

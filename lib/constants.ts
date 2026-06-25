@@ -9,11 +9,40 @@
 
 // ── Payments ─────────────────────────────────────────────────────────────────
 
-/** FairSynq platform fee applied to order subtotal only (not delivery fee). */
-export const PLATFORM_FEE_RATE = 0.10
+/** Customer service fee applied to order subtotal only (not delivery fee). */
+export const SERVICE_FEE_RATE = 0.10
+
+/**
+ * Customer-facing service fee, added ON TOP of the subtotal.
+ * Computed in integer cents to avoid float drift. This is the ONLY service-fee
+ * calculation — used by the checkout estimate, the payment summary, and the
+ * Stripe PaymentIntent so all three quote and charge the identical amount.
+ *
+ * This 10% is FairSynq's ONLY revenue and it is kept CLEAN — Stripe processing
+ * fees do NOT come out of it. Instead, vendors absorb the Stripe fee: each
+ * vendor receives their subtotal slice minus their proportional share of the
+ * real settled Stripe fee (computed in the payout worker, not here). There is
+ * no vendor commission. (Vendor.commissionRate in the schema is a deprecated
+ * leftover from an abandoned model and must not be read anywhere.)
+ */
+export function calculateServiceFee(subtotal: number): number {
+  return Math.round(subtotal * 100 * SERVICE_FEE_RATE) / 100
+}
 
 /** Flat cancellation fee charged to customer if they cancel after vendor accepts. */
 export const ORDER_CANCELLATION_FEE_USD = 5.00
+
+/**
+ * Refund window: how long AFTER an order is COMPLETED before the vendor payout
+ * actually fires. The order completes immediately, but the payout is enqueued
+ * with this delay so a refund WITHIN the window needs no transfer reversal —
+ * the money is still in the platform balance, so the pending payout simply skips
+ * the refunded vendor (see lib/process-refund.ts CASE 1). Only refunds AFTER the
+ * payout has fired (past this window) require a Stripe transfer reversal (CASE 2).
+ * The reconciler's COMPLETED-without-payout check (Pattern C) only flags orders
+ * past completedAt + this window, so it never fires a payout early.
+ */
+export const REFUND_WINDOW_MS = 4 * 60 * 60 * 1000 // 4 hours
 
 /** On-site consulting rate, invoiced manually — not enforced in platform logic. */
 export const CONSULTING_RATE_USD = 1_500

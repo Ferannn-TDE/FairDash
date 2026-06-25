@@ -2,6 +2,7 @@ import { EventStatus, VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
+import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 
 // GET /api/fairs
 // Public endpoint — returns all non-draft events for the discover / fairs listing pages.
@@ -21,7 +22,7 @@ export async function GET() {
         primaryColor: true,
         startDate: true,
         endDate: true,
-        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE } } } },
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
       },
     })
 

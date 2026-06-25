@@ -184,18 +184,15 @@ async function test4_fallbackIdempotencyKey() {
     return { id: 'tr_test_fallback' }
   }
 
-  // Import enqueueVendorPayout after env is ready
-  const { enqueueVendorPayout } = await import('../lib/order-side-effects.js')
+  // Import enqueueOrderPayout after env is ready
+  const { enqueueOrderPayout } = await import('../lib/order-side-effects.js')
 
-  // Override the singleton queue so enqueueVendorPayout uses our throwing mock
+  // Override the singleton queue so enqueueOrderPayout uses our throwing mock
   __setOrderQueueForTest(throwingQueue)
 
-  await enqueueVendorPayout({
-    orderId:              `order-t4-${RUN_ID}`,
-    vendorId:             'vendor-1',
-    eventId:              'event-1',
-    vendorStripeAccountId: 'acct_test',
-    vendorPayout:         50,
+  await enqueueOrderPayout({
+    orderId: `order-t4-${RUN_ID}`,
+    eventId: 'event-1',
   })
 
   // Restore

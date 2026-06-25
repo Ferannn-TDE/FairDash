@@ -1,5 +1,6 @@
 import { currentUser, clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
+import { safeRedirect } from '@/lib/safe-redirect'
 
 const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type Role = (typeof VALID_ROLES)[number]
@@ -17,7 +18,7 @@ export default async function OnboardingPage({
   searchParams: { role?: string; redirect?: string }
 }) {
   const user = await currentUser()
-  if (!user) redirect('/login')
+  if (!user) redirect('/sign-in/customer')
 
   const raw = searchParams.role ?? 'customer'
   const role: Role = (VALID_ROLES as readonly string[]).includes(raw)
@@ -37,6 +38,6 @@ export default async function OnboardingPage({
     },
   })
 
-  const destination = searchParams.redirect || REDIRECT_MAP[role]
+  const destination = safeRedirect(searchParams.redirect, REDIRECT_MAP[role])
   redirect(destination)
 }

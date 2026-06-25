@@ -80,16 +80,16 @@ export default function AdminReportsPage() {
           color="text-emerald-400"
         />
         <StatCard
-          label="Platform Fee"
+          label="Service Fee"
           value={`$${(summary.platformFee ?? 0).toFixed(2)}`}
-          sub={`${mockAdminDashboard.platformFeeToday > 0 ? '10%' : '—'} of revenue`}
+          sub={`${mockAdminDashboard.platformFeeToday > 0 ? '10%' : '—'} of subtotal`}
           icon={TrendingUp}
           color="text-neon-pink"
         />
         <StatCard
           label="Vendor Payouts"
           value={`$${(summary.vendorPayouts ?? 0).toFixed(2)}`}
-          sub="After platform fee"
+          sub="Full order subtotals"
           icon={ShoppingBag}
           color="text-blue-400"
         />

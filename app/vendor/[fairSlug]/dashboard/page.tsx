@@ -1,16 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { UserAvatar } from '../_components/VendorPortalShell'
 import {
-  Clock, CheckCircle, Bell, ChevronRight, AlertCircle,
+  CheckCircle, Bell, ChevronRight, AlertCircle, RefreshCw, Clock,
 } from 'lucide-react'
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { getFirebaseApp } from '@/lib/firebase-client'
 import { StatusPill } from '@/components/ui/StatusPill'
+import { EarningsBadge } from '@/app/_components/EarningsBadge'
+import { isCompleted, isFailed } from '@/lib/order-status'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,10 +35,14 @@ export interface VendorOrder {
   fulfillmentType: FulfillmentType
   customerName: string
   customerPhone: string
-  total: number
-  subtotal: number
+  // This vendor's own slice (sum of their items) — gross, kept for reference.
+  vendorSubtotal: number
+  // Take-home + honesty status from the shared earnings helper (what cards show).
+  earnings?: number
+  earningsStatus?: import('@/app/_components/EarningsBadge').EarningsStatus
   orderItems: OrderItem[]
   placedAt: string
+  version?: number
   // curbside
   vehicleMake?: string | null
   vehicleColor?: string | null
@@ -46,41 +52,53 @@ export interface VendorOrder {
   deliveryCity?: string | null
 }
 
-// ─── Lane bucketing ───────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const BUCKET: Record<string, 'incoming' | 'active' | 'ready' | 'completed'> = {
-  PLACED:           'incoming',
-  ACCEPTED:         'active',
-  PREPARING:        'active',
-  READY:            'ready',
-  RUNNER_COLLECTED: 'ready',
-  COMPLETED:        'completed',
-  DELIVERED:        'completed',
-  DECLINED:         'completed',
-  CANCELLED:        'completed',
-  UNCOLLECTED:      'completed',
-  UNDELIVERABLE:    'completed',
+function formatAge(date: Date): string {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (secs < 10)  return 'just now'
+  if (secs < 60)  return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60)  return `${mins}m ago`
+  return `${Math.floor(mins / 60)}h ago`
 }
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 
-async function fetchFullOrder(orderId: string): Promise<VendorOrder | null> {
+// /api/orders/[id] returns the FULL multi-vendor order (all vendors' items +
+// order.total). For this vendor's dashboard card we must scope it down: keep
+// only this vendor's items and compute THIS vendor's subtotal slice — never the
+// full order total. Mirrors what /api/vendors/[id]/orders/active returns.
+async function fetchFullOrder(orderId: string, vendorId: string): Promise<VendorOrder | null> {
   try {
     const res = await fetch(`/api/orders/${orderId}`)
     const json = await res.json()
-    return json.success ? json.data : null
+    if (!json.success) return null
+    const o = json.data
+    const mine = (o.orderItems ?? []).filter((i: { vendorId?: string }) => i.vendorId === vendorId)
+    const vendorSubtotal = parseFloat(
+      mine.reduce((s: number, i: { unitPrice: number; quantity: number }) => s + i.unitPrice * i.quantity, 0).toFixed(2),
+    )
+    return {
+      ...o,
+      vendorSubtotal,
+      orderItems: mine.map((i: { itemName: string; quantity: number; unitPrice: number }) => ({
+        itemName: i.itemName, quantity: i.quantity, unitPrice: i.unitPrice,
+      })),
+    }
   } catch {
     return null
   }
 }
 
+// 409 = already in target state (idempotent) — treat as success
 async function transitionOrder(orderId: string, status: string): Promise<void> {
   const res = await fetch(`/api/orders/${orderId}/vendor-status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
   })
-  if (!res.ok) {
+  if (!res.ok && res.status !== 409) {
     const json = await res.json().catch(() => ({}))
     throw new Error(json?.error?.message ?? 'Status update failed')
   }
@@ -103,9 +121,10 @@ function fmtDeliveryDetail(order: VendorOrder) {
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, color = 'pink' }: {
+function StatCard({ label, value, color = 'pink', hint }: {
   label: string; value: string | number
   color?: 'pink' | 'blue' | 'emerald' | 'amber'
+  hint?: string
 }) {
   const c = {
     pink:    { text: 'text-neon-pink',   border: 'border-neon-pink/20'   },
@@ -117,6 +136,7 @@ function StatCard({ label, value, color = 'pink' }: {
     <div className={`bg-bg-card rounded-xl border ${c.border} px-4 py-3`}>
       <p className="text-[0.6rem] uppercase tracking-wider text-text-gray font-semibold mb-1">{label}</p>
       <p className={`font-bebas text-2xl tracking-wide leading-none ${c.text}`}>{value}</p>
+      {hint && <p className="text-[0.6rem] text-amber-400/70 font-semibold mt-1">{hint}</p>}
     </div>
   )
 }
@@ -162,7 +182,7 @@ function IncomingCard({ order, onAccept, onDecline, accepting }: {
       <p className="text-white/80 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
       {detail && <p className="text-text-gray text-[0.65rem] mb-2.5">{detail}</p>}
       <div className="flex items-center justify-between mt-2.5">
-        <span className="font-bold text-neon-pink text-sm">${(order.total ?? 0).toFixed(2)}</span>
+        <EarningsBadge amount={order.earnings ?? order.vendorSubtotal} status={order.earningsStatus ?? 'estimated'} />
         <div className="flex gap-1.5">
           <button
             onClick={() => onDecline(order)}
@@ -186,10 +206,11 @@ function IncomingCard({ order, onAccept, onDecline, accepting }: {
 
 // ─── Active Order Card ─────────────────────────────────────────────────────────
 
-function ActiveCard({ order, onStartPreparing, onMarkReady }: {
+function ActiveCard({ order, onStartPreparing, onMarkReady, submitting }: {
   order: VendorOrder
   onStartPreparing: (o: VendorOrder) => void
   onMarkReady: (o: VendorOrder) => void
+  submitting?: boolean
 }) {
   const detail = fmtDeliveryDetail(order)
   const isAccepted = order.status === 'ACCEPTED'
@@ -206,20 +227,22 @@ function ActiveCard({ order, onStartPreparing, onMarkReady }: {
       <p className="text-white/70 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
       {detail && <p className="text-text-gray text-[0.65rem] mb-2">{detail}</p>}
       <div className="flex items-center justify-between mt-2.5">
-        <span className="text-neon-pink font-bold text-sm">${(order.total ?? 0).toFixed(2)}</span>
+        <EarningsBadge amount={order.earnings ?? order.vendorSubtotal} status={order.earningsStatus ?? 'estimated'} />
         {isAccepted ? (
           <button
             onClick={() => onStartPreparing(order)}
-            className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-lg text-[0.65rem] font-semibold hover:bg-blue-500/20 transition-all cursor-pointer"
+            disabled={submitting}
+            className="px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-lg text-[0.65rem] font-semibold hover:bg-blue-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Start Preparing
+            {submitting ? 'Updating…' : 'Start Preparing'}
           </button>
         ) : (
           <button
             onClick={() => onMarkReady(order)}
-            className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-lg text-[0.65rem] font-semibold hover:bg-amber-500/20 transition-all cursor-pointer"
+            disabled={submitting}
+            className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-lg text-[0.65rem] font-semibold hover:bg-amber-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Mark Ready
+            {submitting ? 'Updating…' : 'Mark Ready'}
           </button>
         )}
       </div>
@@ -229,9 +252,10 @@ function ActiveCard({ order, onStartPreparing, onMarkReady }: {
 
 // ─── Ready Card ────────────────────────────────────────────────────────────────
 
-function ReadyCard({ order, onComplete }: {
+function ReadyCard({ order, onComplete, submitting }: {
   order: VendorOrder
   onComplete: (o: VendorOrder) => void
+  submitting?: boolean
 }) {
   const detail = fmtDeliveryDetail(order)
 
@@ -240,9 +264,7 @@ function ReadyCard({ order, onComplete }: {
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <div className="flex items-center gap-1.5">
           <span className="font-bold text-white text-xs">{fmtId(order.id)}</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[0.6rem] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            Ready
-          </span>
+          <StatusPill status={order.status} />
         </div>
         <span className="text-text-gray text-[0.65rem] shrink-0">{fmtFulfillment(order.fulfillmentType)}</span>
       </div>
@@ -252,9 +274,10 @@ function ReadyCard({ order, onComplete }: {
         <span className="text-text-gray text-xs">Waiting for pickup</span>
         <button
           onClick={() => onComplete(order)}
-          className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[0.65rem] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer"
+          disabled={submitting}
+          className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[0.65rem] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Mark Picked Up
+          {submitting ? 'Updating…' : 'Mark Picked Up'}
         </button>
       </div>
     </div>
@@ -272,33 +295,157 @@ function EmptyLane({ message }: { message: string }) {
   )
 }
 
+// ─── Completed Order Row ──────────────────────────────────────────────────────
+
+function CompletedOrderRow({ order }: { order: VendorOrder }) {
+  return (
+    <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/[0.04] last:border-0">
+      <div className="min-w-0 flex-1">
+        <span className="text-xs font-semibold text-white">{fmtId(order.id)}</span>
+        <p className="text-text-gray text-[0.6rem] mt-0.5 truncate max-w-[130px]">{fmtItems(order)}</p>
+      </div>
+      <span className="shrink-0 ml-2"><EarningsBadge amount={order.earnings ?? order.vendorSubtotal} status={order.earningsStatus ?? 'estimated'} /></span>
+    </div>
+  )
+}
+
+// ─── Declined Order Row ────────────────────────────────────────────────────────
+
+function DeclinedOrderRow({ order }: { order: VendorOrder }) {
+  const label = order.status === 'DECLINED' ? 'Declined'
+    : order.status === 'CANCELLED' ? 'Cancelled'
+    : order.status === 'UNCOLLECTED' ? 'Uncollected'
+    : 'Failed'
+
+  return (
+    <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/[0.04] last:border-0">
+      <div className="min-w-0 flex-1">
+        <span className="text-xs font-semibold text-white/60">{fmtId(order.id)}</span>
+        <p className="text-text-gray text-[0.6rem] mt-0.5 truncate max-w-[130px]">{fmtItems(order)}</p>
+      </div>
+      <span className="text-[0.6rem] font-semibold text-red-400 shrink-0 ml-2">{label}</span>
+    </div>
+  )
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
-type Tab = 'incoming' | 'active' | 'ready'
+type Tab = 'incoming' | 'active' | 'ready' | 'done'
 
 export default function VendorDashboardPage() {
   const params = useParams<{ fairSlug: string }>()
   const { vendorId, eventId, vendorName } = useVendorMeta()
 
-  const [isOnline, setIsOnline] = useState(true)
-  const [activeTab, setActiveTab] = useState<Tab>('incoming')
-  const [loading, setLoading] = useState(true)
+  const [isOnline,          setIsOnline]          = useState(true)
+  const [activeTab,         setActiveTab]         = useState<Tab>('incoming')
+  const [loading,           setLoading]           = useState(true)
+  const [declineTarget,     setDeclineTarget]     = useState<VendorOrder | null>(null)
+  const [todayOrders,       setTodayOrders]       = useState<number>(0)
+  const [todayRevenue,      setTodayRevenue]      = useState<number>(0)
+  const [todayEarned,       setTodayEarned]       = useState<number>(0)
+  const [todayPending,      setTodayPending]      = useState<number>(0)
+  const [statsLoading,      setStatsLoading]      = useState(false)
+  const [lastVerifiedAt,    setLastVerifiedAt]    = useState<Date>(() => new Date())
+  const [firebaseConnected, setFirebaseConnected] = useState(true)
+  const [lastUpdated,       setLastUpdated]       = useState<Date>(() => new Date())
+  // Ticker re-renders the "X ago" label without touching any order state.
+  // Fires every 15s — cheap enough and keeps the label accurate.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 15_000)
+    return () => clearInterval(id)
+  }, [])
 
-  const [declineTarget, setDeclineTarget] = useState<VendorOrder | null>(null)
-  const [incoming,  setIncoming]  = useState<VendorOrder[]>([])
-  const [active,    setActive]    = useState<VendorOrder[]>([])
-  const [ready,     setReady]     = useState<VendorOrder[]>([])
-  const [completed, setCompleted] = useState<VendorOrder[]>([])
-  // Guard against double-clicking Accept — stores IDs currently in-flight
+  // ── Readiness gate ────────────────────────────────────────────────────────────
+  // Reads the SAME readiness endpoint as the checklist (Phase 1 single source of
+  // truth) — no parallel "is ready" computation here. Drives the "not live yet"
+  // banner. Re-reads on focus so finishing setup removes the banner without reload.
+  type RStep = { key: string; label: string; done: boolean; required: boolean; waiting?: boolean }
+  const [readiness, setReadiness] = useState<{ ready: boolean; steps: RStep[] } | null>(null)
+  useEffect(() => {
+    if (!vendorId) return
+    let cancelled = false
+    const loadReadiness = async () => {
+      try {
+        const res = await fetch(`/api/vendors/${vendorId}/readiness`, { cache: 'no-store' })
+        const json = await res.json()
+        if (!cancelled && json.success) setReadiness(json.data)
+      } catch { /* non-fatal — the banner just won't render */ }
+    }
+    loadReadiness()
+    const onFocus = () => loadReadiness()
+    const onVis = () => { if (document.visibilityState === 'visible') loadReadiness() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [vendorId])
+
+  // ── Normalized order store ────────────────────────────────────────────────────
+  // Single source of truth. Lanes are derived via useMemo — no duplicate state,
+  // no multi-array fan-out. Any update (optimistic, rollback, or Firebase push)
+  // is a single setOrdersById call.
+  const [ordersById, setOrdersById] = useState<Record<string, VendorOrder>>({})
+
+  const incoming     = useMemo(() => Object.values(ordersById).filter(o => o.status === 'PLACED'),                                   [ordersById])
+  const active       = useMemo(() => Object.values(ordersById).filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)),            [ordersById])
+  const ready        = useMemo(() => Object.values(ordersById).filter(o => ['READY', 'RUNNER_COLLECTED'].includes(o.status)),        [ordersById])
+  const completed    = useMemo(() => Object.values(ordersById).filter(o => isCompleted(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()), [ordersById])
+  const failedOrders = useMemo(() => Object.values(ordersById).filter(o => isFailed(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()),   [ordersById])
+  const inQueue      = incoming.length + active.length + ready.length
+
+  // ── In-flight guard ──────────────────────────────────────────────────────────
+  const inFlightRef    = useRef<Set<string>>(new Set())
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
 
-  // Stats pulled from analytics endpoint — same source as analytics page
-  const [todayOrders,  setTodayOrders]  = useState<number>(0)
-  const [todayRevenue, setTodayRevenue] = useState<number>(0)
+  function startProcessing(id: string): boolean {
+    if (inFlightRef.current.has(id)) return false
+    inFlightRef.current.add(id)
+    setProcessingIds(prev => new Set(prev).add(id))
+    return true
+  }
+  function stopProcessing(id: string) {
+    inFlightRef.current.delete(id)
+    setProcessingIds(prev => { const n = new Set(prev); n.delete(id); return n })
+  }
 
+  // Patch a single order's status in the map
+  function patchStatus(id: string, status: VendorOrder['status'], extra?: Partial<VendorOrder>) {
+    setOrdersById(prev => {
+      if (!prev[id]) return prev
+      return { ...prev, [id]: { ...prev[id], status, ...extra } }
+    })
+  }
 
-  // Track Firebase order IDs we've already fetched to avoid duplicate fetches
+  // Track Firebase order IDs we've already fetched
   const seenOrderIds = useRef<Set<string>>(new Set())
+
+  // ── Data fetchers (stable refs so useEffect deps stay clean) ────────────────
+
+  const refetchActiveOrders = useCallback(() => {
+    if (!vendorId) return
+    Promise.all([
+      fetch(`/api/vendors/${vendorId}/orders/active`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/orders/history?status=COMPLETED,DELIVERED,DECLINED,CANCELLED,UNCOLLECTED,UNDELIVERABLE&range=today&take=20`).then(r => r.json()),
+    ])
+      .then(([ordersJson, historyJson]) => {
+        const activeOrders:    VendorOrder[] = ordersJson.data?.orders  ?? []
+        const completedOrders: VendorOrder[] = historyJson.data?.orders ?? []
+        const all = [...activeOrders, ...completedOrders]
+        all.forEach(o => seenOrderIds.current.add(o.id))
+        // Merge into map — preserves any orders that arrived via Firebase
+        // after the last REST fetch and aren't in the fresh response yet.
+        setOrdersById(prev => {
+          const next = { ...prev }
+          all.forEach(o => { next[o.id] = o })
+          return next
+        })
+      })
+      .catch(() => {})
+  }, [vendorId])
 
   // ── Initial REST load ────────────────────────────────────────────────────────
 
@@ -306,153 +453,316 @@ export default function VendorDashboardPage() {
     if (!vendorId) return
     Promise.all([
       fetch(`/api/vendors/${vendorId}/orders/active`).then(r => r.json()),
-      fetch(`/api/vendors/${vendorId}/analytics?days=1`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/analytics?range=today`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/orders/history?status=COMPLETED,DELIVERED,DECLINED,CANCELLED,UNCOLLECTED,UNDELIVERABLE&range=today&take=20`).then(r => r.json()),
     ])
-      .then(([ordersJson, analyticsJson]) => {
-        const orders: VendorOrder[] = ordersJson.data?.orders ?? []
-        orders.forEach(o => seenOrderIds.current.add(o.id))
-        setIncoming( orders.filter(o => BUCKET[o.status] === 'incoming'))
-        setActive(   orders.filter(o => BUCKET[o.status] === 'active'))
-        setReady(    orders.filter(o => BUCKET[o.status] === 'ready'))
-        setCompleted(orders.filter(o => BUCKET[o.status] === 'completed'))
+      .then(([ordersJson, analyticsJson, historyJson]) => {
+        const activeOrders:    VendorOrder[] = ordersJson.data?.orders   ?? []
+        const completedOrders: VendorOrder[] = historyJson.data?.orders  ?? []
+        const all = [...activeOrders, ...completedOrders]
+        all.forEach(o => seenOrderIds.current.add(o.id))
+        setOrdersById(Object.fromEntries(all.map(o => [o.id, o])))
 
         if (analyticsJson.success) {
-          setTodayOrders(analyticsJson.data.totalOrders ?? analyticsJson.data.todayOrders ?? 0)
-          setTodayRevenue(analyticsJson.data.totalRevenue ?? analyticsJson.data.todayRevenue ?? 0)
+          setTodayOrders(analyticsJson.data.totalOrders  ?? 0)
+          setTodayRevenue(analyticsJson.data.totalRevenue ?? 0)
+          setTodayEarned(analyticsJson.data.earned ?? 0)
+          setTodayPending(analyticsJson.data.pending ?? 0)
+          setLastVerifiedAt(new Date())
         }
       })
-      .catch(() => {/* keep empty state */})
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [vendorId])
 
-  // ── Firebase RTDB listener ───────────────────────────────────────────────────
-  // Listens on fairs/{eventId}/orders/{vendorId} for real-time pushes.
-  // New PLACED orders trigger a full REST fetch to get the complete shape.
-  // Status changes on existing orders are handled by optimistic local updates
-  // (the buttons), so Firebase here serves as a multi-device/multi-tab sync.
+  // ── Firebase connection state + browser online recovery ─────────────────────
+  // .info/connected is a special Firebase path that mirrors the WebSocket state.
+  // On reconnect we immediately refetch from Postgres to catch any orders or
+  // status changes that arrived while the socket was down — Firebase queues
+  // writes but child listeners don't replay missed events on reconnect.
+  // The browser 'online' event covers the case where the device had no network
+  // at all (WiFi drop, sleep) and Firebase never had a chance to detect it.
 
   useEffect(() => {
     if (!eventId || !vendorId) return
-
     const app = getFirebaseApp()
-    if (!app) return // no Firebase config — REST-only mode
+    if (!app) return
 
-    let unsubscribe: (() => void) | null = null
+    let cleanupFn: (() => void) | null = null
 
     import('firebase/database').then(({ getDatabase, ref, onValue, off }) => {
-      const db = getDatabase(app)
-      const ordersRef = ref(db, `fairs/${eventId}/orders/${vendorId}`)
+      const db           = getDatabase(app)
+      const connectedRef = ref(db, '.info/connected')
 
-      const handler = onValue(ordersRef, async (snapshot) => {
-        const data = snapshot.val() as Record<string, { status: string; placedAt: number }> | null
-        if (!data) return
-
-        for (const [orderId, payload] of Object.entries(data)) {
-          // Only handle new PLACED orders not already in state
-          if (payload.status === 'PLACED' && !seenOrderIds.current.has(orderId)) {
-            seenOrderIds.current.add(orderId)
-            const fullOrder = await fetchFullOrder(orderId)
-            if (fullOrder) {
-              setIncoming(prev => {
-                if (prev.some(o => o.id === orderId)) return prev
-                return [fullOrder, ...prev]
-              })
-            }
-          }
-        }
+      const handler = onValue(connectedRef, (snap) => {
+        const connected = snap.val() === true
+        setFirebaseConnected(connected)
+        if (connected) refetchActiveOrders()
       })
 
-      unsubscribe = () => off(ordersRef, 'value', handler)
-    }).catch(() => {/* firebase/database not available */})
+      cleanupFn = () => off(connectedRef, 'value', handler)
+    }).catch(() => {})
 
-    return () => { unsubscribe?.() }
+    const handleBrowserOnline = () => refetchActiveOrders()
+    window.addEventListener('online', handleBrowserOnline)
+
+    return () => {
+      cleanupFn?.()
+      window.removeEventListener('online', handleBrowserOnline)
+    }
+  }, [eventId, vendorId, refetchActiveOrders])
+
+  // ── Stats: Firebase live updates + 60s polling fallback ─────────────────────
+  // Firebase listener on vendorStats/{vendorId} receives a push every time the
+  // vendor-status route increments counts after a COMPLETED or DECLINED transition.
+  // The 60s interval is a safety net: it re-syncs from Postgres if Firebase is
+  // down or the push arrives out of order. Both sources write the same state,
+  // so whichever fires last wins — both are authoritative Postgres-derived values.
+
+  useEffect(() => {
+    if (!vendorId) return
+    const interval = setInterval(() => {
+      fetch(`/api/vendors/${vendorId}/analytics?range=today`)
+        .then(r => r.json())
+        .then(json => {
+          if (!json.success) return
+          setTodayOrders(json.data.totalOrders  ?? 0)
+          setTodayRevenue(json.data.totalRevenue ?? 0)
+          setTodayEarned(json.data.earned ?? 0)
+          setTodayPending(json.data.pending ?? 0)
+          setLastVerifiedAt(new Date())
+        })
+        .catch(() => {})
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [vendorId])
+
+  useEffect(() => {
+    if (!eventId || !vendorId) return
+    const app = getFirebaseApp()
+    if (!app) return
+
+    type StatsPayload = { todayOrders?: number; todayRevenue?: number; updatedAt?: number }
+    let cleanupFn: (() => void) | null = null
+
+    import('firebase/database').then(({ getDatabase, ref, onValue, off }) => {
+      const db       = getDatabase(app)
+      const statsRef = ref(db, `fairs/${eventId}/vendorStats/${vendorId}`)
+      const handler  = onValue(statsRef, (snapshot) => {
+        const data = snapshot.val() as StatsPayload | null
+        if (!data) return
+        if (data.todayOrders  !== undefined) setTodayOrders(data.todayOrders)
+        if (data.todayRevenue !== undefined) setTodayRevenue(data.todayRevenue)
+        setLastVerifiedAt(new Date())
+      })
+      cleanupFn = () => off(statsRef, 'value', handler)
+    }).catch(() => {})
+
+    return () => { cleanupFn?.() }
   }, [eventId, vendorId])
 
-  // ── Patching helpers ─────────────────────────────────────────────────────────
+  // ── Firebase RTDB listeners ──────────────────────────────────────────────────
+  // onChildAdded  → new PLACED orders: fetch full REST shape, insert into map
+  // onChildChanged → status changes: single patchStatus call, cross-tab sync
+
+  useEffect(() => {
+    if (!eventId || !vendorId) return
+    const app = getFirebaseApp()
+    if (!app) return
+
+    type OrderPayload = { id?: string; status: string; updatedAt?: number; version?: number }
+    let cleanupFn: (() => void) | null = null
+
+    import('firebase/database').then(({ getDatabase, ref, onChildAdded, onChildChanged, off }) => {
+      const db        = getDatabase(app)
+      const ordersRef = ref(db, `fairs/${eventId}/orders/${vendorId}`)
+
+      const addedHandler = onChildAdded(ordersRef, (snapshot) => {
+        const data = snapshot.val() as OrderPayload | null
+        if (!data || data.status !== 'PLACED') return
+        const orderId = snapshot.key!
+        if (seenOrderIds.current.has(orderId)) return
+        if (inFlightRef.current.has(orderId)) return
+        seenOrderIds.current.add(orderId)
+        fetchFullOrder(orderId, vendorId).then(order => {
+          if (!order) return
+          startTransition(() => {
+            setOrdersById(prev => prev[orderId] ? prev : { ...prev, [orderId]: order })
+            setLastUpdated(new Date())
+          })
+        })
+      })
+
+      const changedHandler = onChildChanged(ordersRef, (snapshot) => {
+        const data = snapshot.val() as OrderPayload | null
+        if (!data?.status) return
+        const orderId = snapshot.key!
+        if (inFlightRef.current.has(orderId)) return
+        startTransition(() => {
+          setOrdersById(prev => {
+            const existing = prev[orderId]
+            if (!existing) return prev
+            // Discard stale pushes — version is a DB integer, incremented on every transition
+            if (data.version !== undefined && data.version <= (existing.version ?? 0)) return prev
+            return { ...prev, [orderId]: { ...existing, status: data.status as VendorOrder['status'], version: data.version } }
+          })
+          setLastUpdated(new Date())
+        })
+      })
+
+      cleanupFn = () => {
+        off(ordersRef, 'child_added',   addedHandler)
+        off(ordersRef, 'child_changed', changedHandler)
+      }
+    }).catch(() => {})
+
+    return () => { cleanupFn?.() }
+  }, [eventId, vendorId])
+
+  // ── Transition handlers ──────────────────────────────────────────────────────
 
   const handleAccept = useCallback(async (order: VendorOrder) => {
-    // Prevent double-click — if already in-flight, ignore
-    if (processingIds.has(order.id)) return
-    setProcessingIds(prev => new Set(prev).add(order.id))
+    if (!startProcessing(order.id)) return
+    patchStatus(order.id, 'ACCEPTED')
     try {
-      const res = await fetch(`/api/orders/${order.id}/vendor-status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'ACCEPTED' }),
-      })
-      if (!res.ok) throw new Error(`${res.status}`)
-      // API confirmed — now move the card
-      setIncoming(prev => prev.filter(o => o.id !== order.id))
-      setActive(prev => [{ ...order, status: 'ACCEPTED' }, ...prev])
+      await transitionOrder(order.id, 'ACCEPTED')
     } catch (err) {
       console.error('Accept failed:', err)
+      patchStatus(order.id, order.status)
     } finally {
-      setProcessingIds(prev => { const next = new Set(prev); next.delete(order.id); return next })
+      stopProcessing(order.id)
     }
-  }, [processingIds])
+  }, [])
 
-  const handleDecline = useCallback((order: VendorOrder) => {
-    setIncoming(prev => prev.filter(o => o.id !== order.id))
-    setCompleted(prev => [{ ...order, status: 'DECLINED' }, ...prev])
-    transitionOrder(order.id, 'DECLINED').catch(() => {
-      setCompleted(prev => prev.filter(o => o.id !== order.id))
-      setIncoming(prev => [order, ...prev])
-    })
+  const handleDecline = useCallback(async (order: VendorOrder) => {
+    if (!startProcessing(order.id)) return
+    patchStatus(order.id, 'DECLINED')
+    try {
+      await transitionOrder(order.id, 'DECLINED')
+    } catch (err) {
+      console.error('Decline failed:', err)
+      patchStatus(order.id, order.status)
+    } finally {
+      stopProcessing(order.id)
+    }
   }, [])
 
   const handleStartPreparing = useCallback(async (order: VendorOrder) => {
-    // Wait for API before updating status — prevents race where user clicks Mark Ready
-    // before ACCEPTED→PREPARING commits, causing a 409 on the READY transition
+    if (!startProcessing(order.id)) return
     try {
-      const res = await fetch(`/api/orders/${order.id}/vendor-status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'PREPARING' }),
-      })
-      if (!res.ok) throw new Error(`${res.status}`)
-      setActive(prev => prev.map(o => o.id === order.id ? { ...o, status: 'PREPARING' } : o))
+      await transitionOrder(order.id, 'PREPARING')
+      patchStatus(order.id, 'PREPARING')
     } catch (err) {
       console.error('Start preparing failed:', err)
+    } finally {
+      stopProcessing(order.id)
     }
   }, [])
 
   const handleMarkReady = useCallback(async (order: VendorOrder) => {
-    // Wait for API before moving — avoids 409 flash when order isn't PREPARING yet
+    if (!startProcessing(order.id)) return
     try {
-      const res = await fetch(`/api/orders/${order.id}/vendor-status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'READY' }),
-      })
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}))
-        console.error('Mark ready rejected:', res.status, errBody)
-        throw new Error(`${res.status}`)
-      }
-      setActive(prev => prev.filter(o => o.id !== order.id))
-      setReady(prev => [{ ...order, status: 'READY' }, ...prev])
+      await transitionOrder(order.id, 'READY')
+      patchStatus(order.id, 'READY')
     } catch (err) {
       console.error('Mark ready failed:', err)
+    } finally {
+      stopProcessing(order.id)
     }
   }, [])
 
-  const handleComplete = useCallback((order: VendorOrder) => {
-    setReady(prev => prev.filter(o => o.id !== order.id))
-    setCompleted(prev => [{ ...order, status: 'COMPLETED' }, ...prev])
-    transitionOrder(order.id, 'COMPLETED').catch(() => {
-      setCompleted(prev => prev.filter(o => o.id !== order.id))
-      setReady(prev => [order, ...prev])
-    })
+  const handleComplete = useCallback(async (order: VendorOrder) => {
+    if (!startProcessing(order.id)) return
+    patchStatus(order.id, 'COMPLETED')
+    try {
+      await transitionOrder(order.id, 'COMPLETED')
+    } catch (err) {
+      console.error('Complete failed:', err)
+      patchStatus(order.id, order.status)
+    } finally {
+      stopProcessing(order.id)
+    }
   }, [])
+
+  // ── Manual stats refresh ─────────────────────────────────────────────────────
+
+  const refreshStats = useCallback(async () => {
+    if (!vendorId || statsLoading) return
+    setStatsLoading(true)
+    try {
+      const res  = await fetch(`/api/vendors/${vendorId}/analytics?range=today&bust=${Date.now()}`)
+      const json = await res.json()
+      if (json.success) {
+        setTodayOrders(json.data.totalOrders   ?? 0)
+        setTodayRevenue(json.data.totalRevenue ?? 0)
+          setTodayEarned(json.data.earned ?? 0)
+          setTodayPending(json.data.pending ?? 0)
+        setLastVerifiedAt(new Date())
+      }
+    } catch { /* silent */ } finally {
+      setStatsLoading(false)
+    }
+  }, [vendorId, statsLoading])
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   const tabs: { id: Tab; label: string; count: number }[] = [
     { id: 'incoming', label: 'Incoming',  count: incoming.length },
     { id: 'active',   label: 'Preparing', count: active.length   },
     { id: 'ready',    label: 'Ready',     count: ready.length    },
+    { id: 'done',     label: 'Done',      count: completed.length + failedOrders.length },
   ]
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)]">
+
+      {/* Firebase disconnection banner */}
+      {!firebaseConnected && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500/90 backdrop-blur-sm text-black text-xs text-center py-1.5 font-medium">
+          ⚠️ Live updates paused — reconnecting…
+        </div>
+      )}
+
+      {/* Readiness gate — only when NOT ready (a ready vendor sees no nag). Copy is
+          about being LIVE/visible, not "completeness", so the not-yet-connected
+          cohort understands they're invisible to customers until they finish. */}
+      {readiness && !readiness.ready && (() => {
+        const appStep = readiness.steps.find(s => s.key === 'application')
+        const pending = Boolean(appStep?.waiting)
+        const remaining = readiness.steps.filter(s => s.required && !s.done && !s.waiting)
+        return (
+          <div className="shrink-0 px-4 sm:px-5 pt-3">
+            {pending ? (
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25">
+                <Clock className="w-5 h-5 text-amber-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-300">Application under review</p>
+                  <p className="text-xs text-text-gray">You&apos;ll be able to finish setup and go live once the organizer approves you.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-neon-pink/10 border border-neon-pink/30">
+                <AlertCircle className="w-5 h-5 text-neon-pink shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white">You&apos;re not live yet</p>
+                  <p className="text-xs text-text-gray">
+                    Customers can&apos;t see or order from you until you finish setup
+                    {remaining.length > 0 && (
+                      <> — {remaining.length} step{remaining.length === 1 ? '' : 's'} left: {remaining.map(s => s.label).join(', ')}</>
+                    )}.
+                  </p>
+                </div>
+                <Link
+                  href={`/vendor/${params.fairSlug}/onboarding`}
+                  className="shrink-0 px-3.5 py-2 bg-neon-pink text-white text-xs font-semibold rounded-xl hover:bg-[#e0006b] transition-colors no-underline"
+                >
+                  Finish setup →
+                </Link>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Top bar */}
       <div className="shrink-0 px-4 sm:px-5 pt-4 pb-3 border-b border-white/[0.04]">
@@ -490,8 +800,34 @@ export default function VendorDashboardPage() {
 
         <div className="grid grid-cols-3 gap-2">
           <StatCard label="Orders Today" value={loading ? '…' : todayOrders} color="blue" />
-          <StatCard label="Revenue"      value={loading ? '…' : `$${(todayRevenue ?? 0).toFixed(0)}`} color="pink" />
-          <StatCard label="In Queue"     value={loading ? '…' : incoming.length + active.length + ready.length} color="amber" />
+          <div className="relative">
+            <StatCard
+              label="Earned Today"
+              value={loading ? '…' : `$${(todayEarned ?? 0).toFixed(0)}`}
+              color="emerald"
+              hint={!loading && todayPending > 0 ? `~$${todayPending.toFixed(0)} pending` : undefined}
+            />
+            <button
+              onClick={refreshStats}
+              disabled={statsLoading}
+              title="Refresh revenue"
+              className="absolute top-2.5 right-2.5 text-white/20 hover:text-white/60 transition-colors cursor-pointer disabled:opacity-40 border-0 bg-transparent p-0"
+            >
+              <RefreshCw className={`w-3 h-3 ${statsLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+          <StatCard label="In Queue" value={loading ? '…' : inQueue} color="amber" />
+        </div>
+
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-[0.6rem] text-white/30">
+            Revenue verified {formatAge(lastVerifiedAt)}
+          </p>
+          <p className="text-[0.6rem] text-white/30">
+            {firebaseConnected
+              ? `Live · ${formatAge(lastUpdated)}`
+              : '⚠️ Reconnecting…'}
+          </p>
         </div>
       </div>
 
@@ -520,8 +856,8 @@ export default function VendorDashboardPage() {
       {/* Kanban body */}
       <div className="flex-1 overflow-hidden">
 
-        {/* Desktop: 3-column kanban */}
-        <div className="hidden sm:grid sm:grid-cols-3 h-full divide-x divide-white/[0.04]">
+        {/* Desktop: 4-column kanban */}
+        <div className="hidden sm:grid sm:grid-cols-4 h-full divide-x divide-white/[0.04]">
 
           {/* Incoming lane */}
           <div className="flex flex-col h-full overflow-hidden">
@@ -560,6 +896,7 @@ export default function VendorDashboardPage() {
                     order={order}
                     onStartPreparing={handleStartPreparing}
                     onMarkReady={handleMarkReady}
+                    submitting={processingIds.has(order.id)}
                   />
                 ))
               )}
@@ -580,40 +917,53 @@ export default function VendorDashboardPage() {
                     key={order.id}
                     order={order}
                     onComplete={handleComplete}
+                    submitting={processingIds.has(order.id)}
                   />
                 ))
               )}
+            </div>
+          </div>
 
-              {/* Completed summary */}
-              {!loading && completed.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-white/[0.04]">
-                  <p className="text-[0.65rem] uppercase tracking-wider text-text-gray font-semibold mb-2">
-                    Completed Today — {completed.filter(o => o.status !== 'CANCELLED').length}
-                  </p>
-                  <div className="bg-bg-card border border-white/5 rounded-xl divide-y divide-white/5 overflow-hidden">
-                    {completed.slice(0, 4).map(order => (
-                      <div key={order.id} className="flex items-center justify-between px-3 py-2">
-                        <div>
-                          <span className="text-xs font-medium text-white">{fmtId(order.id)}</span>
-                          <p className="text-text-gray text-[0.6rem] mt-0.5 truncate max-w-[120px]">{fmtItems(order)}</p>
-                        </div>
-                        <span className={`font-bold text-xs ${order.status === 'CANCELLED' ? 'text-red-400' : 'text-emerald-400'}`}>
-                          {order.status === 'CANCELLED' ? 'Cancelled' : `$${(order.total ?? 0).toFixed(2)}`}
-                        </span>
-                      </div>
-                    ))}
-                    {completed.length > 4 && (
-                      <div className="px-3 py-2">
-                        <Link
-                          href={`/vendor/${params.fairSlug}/orders`}
-                          className="text-neon-pink text-[0.65rem] font-semibold flex items-center gap-1 no-underline hover:underline"
-                        >
-                          View all {completed.length} <ChevronRight className="w-3 h-3" />
-                        </Link>
-                      </div>
-                    )}
-                  </div>
+          {/* Completed / Failed lane */}
+          <div className="flex flex-col h-full overflow-hidden">
+            <LaneHeader label="Completed Today" count={completed.length + failedOrders.length} />
+            <div className="flex-1 overflow-y-auto">
+              {loading ? (
+                <div className="p-3 space-y-2">
+                  {[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-white/5 rounded-xl animate-pulse" />)}
                 </div>
+              ) : completed.length === 0 && failedOrders.length === 0 ? (
+                <EmptyLane message="No completed orders yet" />
+              ) : (
+                <>
+                  {completed.length > 0 && (
+                    <div className="bg-bg-card border border-white/5 rounded-xl mx-3 mt-3 overflow-hidden">
+                      {completed.map(order => (
+                        <CompletedOrderRow key={order.id} order={order} />
+                      ))}
+                    </div>
+                  )}
+                  {failedOrders.length > 0 && (
+                    <div className="mx-3 mt-3">
+                      <p className="text-[0.6rem] uppercase tracking-wider text-text-gray font-semibold mb-2 px-1">
+                        Declined / Cancelled
+                      </p>
+                      <div className="bg-bg-card border border-red-500/10 rounded-xl overflow-hidden">
+                        {failedOrders.map(order => (
+                          <DeclinedOrderRow key={order.id} order={order} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="px-3 py-3">
+                    <Link
+                      href={`/vendor/${params.fairSlug}/orders`}
+                      className="text-neon-pink text-[0.65rem] font-semibold flex items-center gap-1 no-underline hover:underline"
+                    >
+                      Full order history <ChevronRight className="w-3 h-3" />
+                    </Link>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -643,6 +993,7 @@ export default function VendorDashboardPage() {
                     order={order}
                     onStartPreparing={handleStartPreparing}
                     onMarkReady={handleMarkReady}
+                    submitting={processingIds.has(order.id)}
                   />
                 ))
           )}
@@ -654,8 +1005,28 @@ export default function VendorDashboardPage() {
                     key={order.id}
                     order={order}
                     onComplete={handleComplete}
+                    submitting={processingIds.has(order.id)}
                   />
                 ))
+          )}
+          {activeTab === 'done' && (
+            completed.length === 0 && failedOrders.length === 0
+              ? <EmptyLane message="No completed orders yet" />
+              : <>
+                  {completed.length > 0 && (
+                    <div className="bg-bg-card border border-white/5 rounded-xl overflow-hidden">
+                      {completed.map(order => <CompletedOrderRow key={order.id} order={order} />)}
+                    </div>
+                  )}
+                  {failedOrders.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[0.6rem] uppercase tracking-wider text-text-gray font-semibold mb-2 px-1">Declined / Cancelled</p>
+                      <div className="bg-bg-card border border-red-500/10 rounded-xl overflow-hidden">
+                        {failedOrders.map(order => <DeclinedOrderRow key={order.id} order={order} />)}
+                      </div>
+                    </div>
+                  )}
+                </>
           )}
         </div>
       </div>

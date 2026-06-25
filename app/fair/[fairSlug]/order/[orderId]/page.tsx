@@ -31,7 +31,7 @@ export default function OrderTrackingPage() {
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
-      router.replace(`/sign-in?redirect_url=/fair/${fairSlug}/order/${orderId}`)
+      router.replace(`/login?redirect=/fair/${fairSlug}/order/${orderId}`)
     }
   }, [isLoaded, isSignedIn, fairSlug, orderId, router])
 

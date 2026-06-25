@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
 import { logger } from '@/lib/logger'
 
 // Terminal VendorOrderStatus values + master order CANCELLED
@@ -34,13 +35,24 @@ export async function GET(
     const take   = Math.min(Math.max(1, parseInt(searchParams.get('take') ?? '50', 10)), 50)
     const cursor = searchParams.get('cursor') ?? undefined
 
+    // Optional filters
+    const statusParam = searchParams.get('status')
+    const statuses    = statusParam ? statusParam.split(',').map(s => s.trim()).filter(Boolean) : []
+    const rangeParm   = searchParams.get('range')
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+
     const orders = await db.order.findMany({
       where: {
         orderItems: { some: { vendorId } },
+        ...(rangeParm === 'today' ? { placedAt: { gte: startOfToday } } : {}),
         OR: [
           {
             vendorOrderStatuses: {
-              some: { vendorId, status: { in: TERMINAL_VENDOR_STATUSES } },
+              some: {
+                vendorId,
+                status: { in: statuses.length ? statuses : TERMINAL_VENDOR_STATUSES },
+              },
             },
           },
           { status: 'CANCELLED' },
@@ -53,40 +65,57 @@ export async function GET(
       select: {
         id: true,
         status: true,
-        total: true,
-        subtotal: true,
-        vendorPayout: true,
         placedAt: true,
+        fulfillmentType: true,
+        customerName: true,
+        customerPhone: true,
+        total: true,
         vendorOrderStatuses: {
           where: { vendorId },
-          select: { status: true },
+          select: { vendorId: true, status: true },
         },
+        payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true } },
+        refunds: { where: { vendorId }, select: { vendorId: true, status: true, amountCents: true } },
+        // ALL items (every vendor) — the earnings helper needs the full per-vendor
+        // split to compute this vendor's proportional Stripe-fee share.
         orderItems: {
-          where: { vendorId },
           select: {
-            id: true,
-            quantity: true,
-            unitPrice: true,
-            itemName: true,
+            id: true, quantity: true, unitPrice: true, totalPrice: true, subtotal: true,
+            itemName: true, vendorId: true,
           },
         },
       },
     })
 
-    const result = orders.map(o => ({
-      id: o.id,
-      status: o.vendorOrderStatuses[0]?.status ?? o.status,
-      total: o.total,
-      subtotal: o.subtotal,
-      vendorPayout: o.vendorPayout,
-      placedAt: o.placedAt,
-      orderItems: o.orderItems.map(i => ({
-        id: i.id,
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-        itemName: i.itemName,
-      })),
-    }))
+    // EARNINGS = take-home, via the single shared helper (lib/vendor-earnings).
+    // settled = Payout.netAmount; estimated = slice − conservative Stripe-fee
+    // share; $0 if refunded/reversed/declined. Never the gross subtotal.
+    const result = orders.map(o => {
+      const myItems = o.orderItems.filter(i => i.vendorId === vendorId)
+      const vendorSubtotal = myItems.reduce((s, i) => s + (i.totalPrice ?? i.unitPrice * i.quantity), 0)
+      const earn = computeVendorOrderEarnings(o, vendorId)
+
+      return {
+        id:           o.id,
+        status:       o.vendorOrderStatuses[0]?.status ?? o.status,
+        fulfillmentType: o.fulfillmentType,
+        customerName:  o.customerName,
+        customerPhone: o.customerPhone,
+        // Gross slice (what the customer paid for this vendor's items) — kept for
+        // the line-item breakdown, clearly NOT the take-home figure.
+        vendorSubtotal: parseFloat(vendorSubtotal.toFixed(2)),
+        // Take-home + its honesty status. Displays show this, not the gross.
+        earnings:       parseFloat((earn.cents / 100).toFixed(2)),
+        earningsStatus: earn.status, // settled | estimated | refunded | reversed | declined
+        placedAt:     o.placedAt,
+        orderItems:   myItems.map(i => ({
+          id:        i.id,
+          quantity:  i.quantity,
+          unitPrice: i.unitPrice,
+          itemName:  i.itemName,
+        })),
+      }
+    })
 
     const nextCursor = orders.length === take ? orders[orders.length - 1].id : null
 

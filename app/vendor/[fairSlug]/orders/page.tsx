@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { StatusPill } from '@/components/ui/StatusPill'
+import { EarningsBadge } from '@/app/_components/EarningsBadge'
+import { getStatusMeta, TAB_STATUS_MAP } from '@/lib/order-status'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,7 +29,9 @@ interface Order {
   customerPhone?: string | null
   total: number
   subtotal: number
-  vendorPayout: number
+  vendorSubtotal: number
+  earnings: number
+  earningsStatus: import('@/app/_components/EarningsBadge').EarningsStatus
   orderItems: OrderItem[]
   placedAt: string
   estimatedReadyAt?: string | null
@@ -102,7 +106,7 @@ function OrderCard({ order }: { order: Order }) {
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span className="font-bold text-neon-pink text-sm">${(order.vendorPayout ?? 0).toFixed(2)}</span>
+          <EarningsBadge amount={order.earnings} status={order.earningsStatus} />
           {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
         </div>
       </button>
@@ -124,12 +128,12 @@ function OrderCard({ order }: { order: Order }) {
             </div>
             <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
               <div className="flex justify-between">
-                <span className="text-xs text-text-gray">Subtotal</span>
-                <span className="text-xs text-white">${(order.subtotal ?? 0).toFixed(2)}</span>
+                <span className="text-xs text-text-gray">Your Items Subtotal</span>
+                <span className="text-xs text-white">${(order.vendorSubtotal ?? order.subtotal ?? 0).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-xs text-text-gray">Your Earnings</span>
-                <span className="text-xs font-semibold text-emerald-400">${(order.vendorPayout ?? 0).toFixed(2)}</span>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-text-gray">Your Take-Home</span>
+                <EarningsBadge amount={order.earnings} status={order.earningsStatus} />
               </div>
             </div>
           </div>
@@ -183,18 +187,16 @@ function OrderCard({ order }: { order: Order }) {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {order.status === 'COMPLETED'
-              ? <CheckCircle className="w-4 h-4 text-emerald-400" />
-              : order.status === 'CANCELLED'
-              ? <XCircle className="w-4 h-4 text-red-400" />
-              : <Package className="w-4 h-4 text-neon-pink" />}
-            <span className="text-xs text-text-gray">
-              {order.status === 'COMPLETED' ? 'Order fulfilled successfully'
-                : order.status === 'CANCELLED' ? 'Order was cancelled'
-                : 'Order in progress'}
-            </span>
-          </div>
+          {(() => {
+            const meta = getStatusMeta(order.status)
+            const Icon = meta.iconType === 'check' ? CheckCircle : meta.iconType === 'x' ? XCircle : Package
+            return (
+              <div className="flex items-center gap-2">
+                <Icon className={`w-4 h-4 ${meta.color}`} />
+                <span className="text-xs text-text-gray">{meta.label}</span>
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>
@@ -223,21 +225,18 @@ export default function VendorOrdersPage() {
 
   const tabCounts = useMemo(() => ({
     all:       orders.length,
-    PLACED:    orders.filter(o => o.status === 'PLACED').length,
-    PREPARING: orders.filter(o => o.status === 'ACCEPTED' || o.status === 'PREPARING').length,
-    READY:     orders.filter(o => o.status === 'READY').length,
-    COMPLETED: orders.filter(o => o.status === 'COMPLETED').length,
-    CANCELLED: orders.filter(o => o.status === 'CANCELLED').length,
+    PLACED:    orders.filter(o => TAB_STATUS_MAP['PLACED'].includes(o.status)).length,
+    PREPARING: orders.filter(o => TAB_STATUS_MAP['PREPARING'].includes(o.status)).length,
+    READY:     orders.filter(o => TAB_STATUS_MAP['READY'].includes(o.status)).length,
+    COMPLETED: orders.filter(o => TAB_STATUS_MAP['COMPLETED'].includes(o.status)).length,
+    CANCELLED: orders.filter(o => TAB_STATUS_MAP['CANCELLED'].includes(o.status)).length,
   }), [orders])
 
   const filtered = useMemo(() => {
     let list = orders
     if (filter !== 'all') {
-      if (filter === 'PREPARING') {
-        list = list.filter(o => o.status === 'ACCEPTED' || o.status === 'PREPARING')
-      } else {
-        list = list.filter(o => o.status === filter)
-      }
+      const allowed = TAB_STATUS_MAP[filter] ?? [filter]
+      list = list.filter(o => allowed.includes(o.status))
     }
     return [...list].sort((a, b) => {
       const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()

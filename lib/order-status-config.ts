@@ -29,3 +29,29 @@ export function getStatusConfig(status: string) {
     dotColor: 'bg-white/40',
   }
 }
+
+// ── Vendor status config ──────────────────────────────────────────────────────
+
+export const VENDOR_STATUS_CONFIG: Record<string, {
+  label: string
+  color: string
+  textColor: string
+  borderColor: string
+  dotColor: string
+}> = {
+  ACTIVE:    { label: 'Approved',   color: 'bg-green-500/10',   textColor: 'text-green-400',   borderColor: 'border-green-400/20',   dotColor: 'bg-green-400'   },
+  PENDING:   { label: 'Pending',    color: 'bg-amber-500/10',   textColor: 'text-amber-400',   borderColor: 'border-amber-400/20',   dotColor: 'bg-amber-400'   },
+  PAUSED:    { label: 'Paused',     color: 'bg-sky-500/10',     textColor: 'text-sky-400',     borderColor: 'border-sky-400/20',     dotColor: 'bg-sky-400'     },
+  SUSPENDED: { label: 'Suspended',  color: 'bg-orange-500/10',  textColor: 'text-orange-400',  borderColor: 'border-orange-400/20',  dotColor: 'bg-orange-400'  },
+  REJECTED:  { label: 'Rejected',   color: 'bg-red-500/10',     textColor: 'text-red-400',     borderColor: 'border-red-400/20',     dotColor: 'bg-red-400'     },
+}
+
+export function getVendorStatusConfig(status: string) {
+  return VENDOR_STATUS_CONFIG[status] ?? {
+    label: status,
+    color: 'bg-white/10',
+    textColor: 'text-white/60',
+    borderColor: 'border-white/20',
+    dotColor: 'bg-white/40',
+  }
+}

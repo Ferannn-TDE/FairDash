@@ -13,7 +13,10 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAdminAuth } from '@/lib/auth'
-import { getOrderQueue, ORDER_QUEUE_NAME } from '@/lib/queues'
+import { getOrderQueue, ORDER_QUEUE_NAME, JOB_VENDOR_PAYOUT } from '@/lib/queues'
+import { notifyQueueDepthAlert } from '@/lib/notify'
+
+const QUEUE_DEPTH_THRESHOLD = parseInt(process.env.QUEUE_DEPTH_THRESHOLD ?? '50', 10)
 
 export async function GET() {
   try {
@@ -38,7 +41,12 @@ export async function GET() {
       queue.getDelayedCount(),
     ])
 
-    // Recent failed jobs — last 20 for triage
+    // Depth alert — fire-and-forget Slack notification if waiting jobs exceed threshold
+    if (waiting >= QUEUE_DEPTH_THRESHOLD) {
+      void notifyQueueDepthAlert(waiting, QUEUE_DEPTH_THRESHOLD)
+    }
+
+    // Recent failed jobs — last 20 for triage; flag payout failures for financial visibility
     const failedJobs = await queue.getFailed(0, 19)
     const recentFailed = failedJobs.map(j => ({
       id: j.id,
@@ -46,6 +54,7 @@ export async function GET() {
       attemptsMade: j.attemptsMade,
       failedReason: j.failedReason,
       orderId: j.data.orderId ?? null,
+      isPayoutJob: j.name === JOB_VENDOR_PAYOUT,
       timestamp: j.timestamp,
     }))
 
@@ -62,6 +71,7 @@ export async function GET() {
     return success({
       queue: ORDER_QUEUE_NAME,
       counts: { waiting, active, completed, failed, delayed },
+      alerts: { depthThreshold: QUEUE_DEPTH_THRESHOLD, depthAlert: waiting >= QUEUE_DEPTH_THRESHOLD },
       recentFailed,
       recentDelayed,
       bullBoardQueues: [ORDER_QUEUE_NAME],
