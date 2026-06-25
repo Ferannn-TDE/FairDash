@@ -1,30 +1,20 @@
 'use client'
 
-import { useState, useRef, useCallback, Fragment } from 'react'
+import { useState, useCallback, Fragment } from 'react'
 import Link from 'next/link'
 import {
   BuildingStorefrontIcon,
   CheckIcon,
   ChevronRightIcon,
   ChevronLeftIcon,
-  XMarkIcon,
-  PlusIcon,
   LockClosedIcon,
-  DocumentArrowUpIcon,
-  PhotoIcon,
-  ClockIcon,
-  CreditCardIcon,
   CheckCircleIcon,
   ShieldCheckIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline'
-import { CheckCircleIcon as CheckCircleSolid } from '@heroicons/react/24/solid'
 import toast from 'react-hot-toast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type BoothSize = 'small' | 'medium' | 'large' | 'xl'
-type UtilityNeed = 'electricity' | 'water' | 'gas' | 'waste' | 'wifi'
 
 interface MenuItemData {
   id: string
@@ -48,8 +38,6 @@ interface FormData {
   email: string
   phone: string
   cuisineType: string
-  boothSize: BoothSize | ''
-  utilityNeeds: UtilityNeed[]
   description: string
   foodHandlerPermit: File | null
   liabilityInsurance: File | null
@@ -65,21 +53,6 @@ const CUISINE_OPTIONS = [
   'BBQ & Grilled', 'American', 'Mexican', 'Italian', 'Asian Fusion',
   'Japanese', 'Seafood', 'Vegan / Vegetarian', 'Desserts & Sweets',
   'Fried Food', 'Drinks & Beverages', 'Fair Classics', 'Merchandise', 'Other',
-]
-
-const BOOTH_SIZES: { value: BoothSize; label: string; desc: string }[] = [
-  { value: 'small',  label: 'Small',  desc: '10×10 ft' },
-  { value: 'medium', label: 'Medium', desc: '10×20 ft' },
-  { value: 'large',  label: 'Large',  desc: '20×20 ft' },
-  { value: 'xl',     label: 'XL',     desc: '20×40 ft' },
-]
-
-const UTILITY_OPTIONS: { value: UtilityNeed; label: string; icon: string }[] = [
-  { value: 'electricity', label: 'Electricity', icon: '⚡' },
-  { value: 'water',       label: 'Water',        icon: '💧' },
-  { value: 'gas',         label: 'Natural Gas',  icon: '🔥' },
-  { value: 'waste',       label: 'Waste/Grease', icon: '🗑️' },
-  { value: 'wifi',        label: 'WiFi / POS',   icon: '📶' },
 ]
 
 // Leaned to ONLY what the application persists + the legal gate. The application
@@ -128,7 +101,7 @@ const INITIAL_ITEM: MenuItemData = { id: '1', name: '', description: '', price: 
 
 const INITIAL: FormData = {
   businessName: '', contactName: '', email: '', phone: '',
-  cuisineType: '', boothSize: '', utilityNeeds: [], description: '',
+  cuisineType: '', description: '',
   foodHandlerPermit: null, liabilityInsurance: null,
   menuItems: [{ ...INITIAL_ITEM }],
   boothPhotos: [], legalName: '', stripeConnected: false,
@@ -157,66 +130,6 @@ function HardBlockBanner({ satisfied, label }: { satisfied: boolean; label: stri
     <div className="flex items-center gap-2.5 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
       <LockClosedIcon className="w-4 h-4 text-amber-400 shrink-0" />
       <p className="text-sm text-amber-400"><span className="font-semibold">{label}</span> — Required to continue</p>
-    </div>
-  )
-}
-
-function DocUploadBox({ label, hint, file, onFile, onClear }: {
-  label: string; hint: string; file: File | null
-  onFile: (f: File) => void; onClear: () => void
-}) {
-  const ref = useRef<HTMLInputElement>(null)
-  return (
-    <div>
-      <Label required>{label}</Label>
-      {!file ? (
-        <div
-          onClick={() => ref.current?.click()}
-          className="group flex flex-col items-center justify-center py-8 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-neon-pink/40 hover:bg-white/[0.02] transition-all"
-        >
-          <DocumentArrowUpIcon className="w-7 h-7 text-text-gray group-hover:text-neon-pink transition-colors mb-2" />
-          <p className="text-sm text-text-gray group-hover:text-white transition-colors text-center">
-            <span className="text-neon-pink font-semibold">Click to upload</span> or drag & drop
-          </p>
-          <p className="text-xs text-white/25 mt-1">{hint}</p>
-          <input ref={ref} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
-            onChange={e => e.target.files?.[0] && onFile(e.target.files[0])} />
-        </div>
-      ) : (
-        <div className="flex items-center gap-3 px-4 py-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-          <CheckCircleSolid className="w-5 h-5 text-emerald-400 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-white font-medium truncate">{file.name}</p>
-            <p className="text-xs text-text-gray">{(file.size / 1024).toFixed(0)} KB · Uploaded</p>
-          </div>
-          <button onClick={onClear} className="p-1.5 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0">
-            <XMarkIcon className="w-4 h-4 text-text-gray" />
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function MenuPhotoUpload({ preview, onFile, onClear }: { preview: string | null; onFile: (f: File) => void; onClear: () => void }) {
-  const ref = useRef<HTMLInputElement>(null)
-  if (!preview) return (
-    <div onClick={() => ref.current?.click()} className="group flex items-center justify-center h-24 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-neon-pink/30 hover:bg-white/[0.02] transition-all">
-      <div className="text-center">
-        <PhotoIcon className="w-6 h-6 text-text-gray group-hover:text-neon-pink transition-colors mx-auto mb-1" />
-        <span className="text-xs text-text-gray group-hover:text-white transition-colors">Add photo</span>
-        <span className="text-neon-pink ml-1 text-xs font-semibold">*</span>
-      </div>
-      <input ref={ref} type="file" accept="image/*" className="hidden"
-        onChange={e => e.target.files?.[0] && onFile(e.target.files[0])} />
-    </div>
-  )
-  return (
-    <div className="relative h-24">
-      <img src={preview} alt="Item preview" className="w-full h-full object-cover rounded-xl border border-white/10" />
-      <button onClick={onClear} className="absolute top-1.5 right-1.5 p-1 bg-bg-dark/80 border border-white/10 rounded-lg cursor-pointer bg-transparent">
-        <XMarkIcon className="w-3.5 h-3.5 text-text-gray" />
-      </button>
     </div>
   )
 }
