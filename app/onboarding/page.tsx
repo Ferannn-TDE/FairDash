@@ -29,6 +29,20 @@ export default async function OnboardingPage({
     ? (user.publicMetadata.roles as string[])
     : []
 
+  // We write BOTH singular `role` and `roles[]` here, deliberately:
+  //   • roles[]  — the GATING source of truth (lib/roles.ts, RoleContext, every
+  //                portal guard read this). Written directly here (not via the
+  //                membership-derived syncUserRoleMetadata) so it's present from
+  //                signup, before any membership row exists.
+  //   • role     — RETAINED as the SIGNUP-BOOTSTRAP SIGNAL. The Clerk webhook
+  //                (app/api/webhooks/clerk/route.ts:48,62) reads singular role to
+  //                bootstrap a FairOrganizer for new organizers. It is NOT used for
+  //                gating. Do NOT remove the singular `role` without re-architecting
+  //                the onboarding→webhook signup pair (the webhook would lose its
+  //                signal). NOTE: the webhook's bootstrap TRIGGER is under
+  //                investigation — it's gated on isNew (user.created) but this write
+  //                fires user.updated, so the bootstrap may not actually run here.
+  //                See the webhook's comment before deriving any conclusions.
   const client = await clerkClient()
   await client.users.updateUser(user.id, {
     publicMetadata: {
