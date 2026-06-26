@@ -619,6 +619,11 @@ model Cancellation {
 
   reason       String?
   cancelledAt  DateTime @default(now())
+  // DEPRECATED — no longer written (Cancellation is now a pure audit row: who/when/
+  // why). Refund money-truth lives in the Refund rows; all readers derive from
+  // Σ Refund.amountCents (status=COMPLETED). These columns drifted on ~80% of
+  // historical rows (four writers, four meanings). Kept nullable as dead history;
+  // drop in a later sweep once a deploy cycle confirms nothing reads them.
   refundIssued Boolean  @default(false)
   refundAmount Float?
 

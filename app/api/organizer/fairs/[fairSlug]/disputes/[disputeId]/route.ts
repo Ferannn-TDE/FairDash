@@ -35,7 +35,6 @@ export async function PATCH(
           select: {
             id: true, eventId: true, vendorId: true, total: true,
             stripePaymentIntentId: true, stripeChargeId: true,
-            cancellation: { select: { refundIssued: true } },
           },
         },
       },

@@ -107,7 +107,9 @@ export async function PATCH(
     if (rec.wrote) {
       await db.cancellation.upsert({
         where: { orderId },
-        create: { orderId, vendorId: order.vendorOrderStatuses[0]?.vendorId ?? '', reason, refundIssued: refunded.length > 0, refundAmount: null },
+        // Pure audit (who/when/why). Refund truth lives in Refund rows — the
+        // deprecated refundIssued/refundAmount are no longer written (readers derive).
+        create: { orderId, vendorId: order.vendorOrderStatuses[0]?.vendorId ?? '', reason },
         update: { reason },
       })
     }
