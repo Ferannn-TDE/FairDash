@@ -3,7 +3,6 @@ import { Webhook } from 'svix'
 import { db } from '@/lib/db'
 import { handleApiError } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
-import { syncUserRoleMetadata } from '@/lib/role-sync'
 
 // POST /api/webhooks/clerk
 // Verifies the svix signature and syncs Clerk user lifecycle events to our DB.
@@ -33,7 +32,7 @@ type ClerkWebhookPayload = {
 const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type AppRole = (typeof VALID_ROLES)[number]
 
-async function syncUser(data: ClerkWebhookPayload['data'], isNew: boolean) {
+async function syncUser(data: ClerkWebhookPayload['data']) {
   const primaryEmail = data.email_addresses?.find(
     (e) => e.id === data.primary_email_address_id
   )?.email_address
@@ -45,12 +44,10 @@ async function syncUser(data: ClerkWebhookPayload['data'], isNew: boolean) {
   const avatarUrl = data.image_url ?? null
   const isActive = !data.banned
 
-  // SINGULAR role — the SIGNUP-BOOTSTRAP SIGNAL (NOT gating; gating reads roles[]
-  // via lib/roles.ts). The onboarding page (app/onboarding/page.tsx) writes
-  // publicMetadata.role at signup; we read it here to bootstrap a FairOrganizer for
-  // new organizers (below). This is the ONE live consumer of singular role — do NOT
-  // retire singular role / DB user.role without re-architecting this pair, or the
-  // bootstrap loses its signal.
+  // Legacy singular role — mirrored into DB user.role for continuity only. It is NO
+  // LONGER a signal: organizer provisioning is now synchronous in
+  // app/onboarding/page.tsx (see lib/organizer-bootstrap.ts), and gating reads roles[]
+  // via lib/roles.ts. Nothing live reads this field; slated for a separate retirement.
   const rawRole = data.public_metadata?.role as string | undefined
   const role: AppRole = (VALID_ROLES as readonly string[]).includes(rawRole ?? '')
     ? (rawRole as AppRole)
@@ -62,34 +59,10 @@ async function syncUser(data: ClerkWebhookPayload['data'], isNew: boolean) {
     update: { email: primaryEmail, name, phone, avatarUrl, isActive, role },
   })
 
-  // Bootstrap FairOrganizer for new organizer accounts.
-  // Vendor + Runner records require an eventId and are created when the user
-  // joins a specific event — not at signup.
-  //
-  // ⚠️ TRIGGER UNDER INVESTIGATION: this is gated on isNew (fires on user.created),
-  // but the role signal is written by the onboarding page AFTER signup, which fires
-  // user.updated (isNew=false). The static trace suggests this branch may never run
-  // for a standard client signup (no publicMetadata.role at user.created; isNew=false
-  // at user.updated) — i.e. organizers may be provisioned only by the backfill
-  // script / admin, not here. Confirm with runtime evidence before changing this;
-  // if real, it's a separate signup bug (fix deliberately, with its own test).
-  if (isNew && role === 'organizer') {
-    const existing = await db.orgMember.findFirst({ where: { userId: user.id } })
-    if (!existing) {
-      const org = await db.fairOrganizer.create({
-        data: {
-          name: name ?? primaryEmail,
-          contactEmail: primaryEmail,
-          ...(phone ? { contactPhone: phone } : {}),
-        },
-      })
-      await db.orgMember.create({
-        data: { organizerId: org.id, userId: user.id, role: 'owner' },
-      })
-      // New OrgMember row → derive publicMetadata.roles[] from DB.
-      await syncUserRoleMetadata(user.id)
-    }
-  }
+  // NOTE: organizer bootstrap (FairOrganizer + owner OrgMember) is NOT done here.
+  // It runs synchronously in app/onboarding/page.tsx so the OrgMember exists before
+  // the portal's DB authority check — the webhook only mirrors Clerk lifecycle → DB.
+  // (Vendor/Runner records are event-scoped and created when joining an event.)
 
   return user
 }
@@ -127,13 +100,13 @@ export async function POST(req: Request) {
   try {
     switch (event.type) {
       case 'user.created': {
-        await syncUser(event.data, true)
+        await syncUser(event.data)
         logger.info('[Clerk Webhook] user.created synced', { userId: event.data.id })
         break
       }
 
       case 'user.updated': {
-        await syncUser(event.data, false)
+        await syncUser(event.data)
         logger.info('[Clerk Webhook] user.updated synced', { userId: event.data.id })
         break
       }
