@@ -50,13 +50,23 @@ export async function GET(
           select: { id: true, status: true, reason: true, evidence: true, submittedAt: true, resolution: true, resolvedAt: true },
         },
         cancellation: {
-          select: { reason: true, refundIssued: true, refundAmount: true },
+          // Pure audit now — refund truth is derived from Refund rows below, not
+          // the deprecated refundIssued/refundAmount columns (which drifted on ~80%
+          // of historical rows; Refund rows are the money record).
+          select: { reason: true },
         },
       },
     })
 
     if (!order) return apiError('Order not found', 404, 'NOT_FOUND')
     if (order.eventId !== event.id) return apiError('Access denied', 403, 'FORBIDDEN')
+
+    // Refund truth derived from Refund rows (the money record) — replaces the
+    // deprecated Cancellation.refundIssued/refundAmount. Sum the COMPLETED refunds
+    // (PENDING/FAILED haven't moved money). This is what the detail modal renders.
+    const refundedCents = order.refunds
+      .filter(r => r.status === 'COMPLETED')
+      .reduce((s, r) => s + r.amountCents, 0)
 
     return success({
       id: order.id,
@@ -140,8 +150,14 @@ export async function GET(
       })),
       // Disputes
       disputes: order.disputes,
-      // Cancellation/refund
-      cancellation: order.cancellation,
+      // Cancellation audit (reason) + refund summary DERIVED from Refund rows.
+      cancellation: order.cancellation
+        ? {
+            reason: order.cancellation.reason,
+            refundIssued: refundedCents > 0,
+            refundAmount: refundedCents / 100,
+          }
+        : null,
     })
   } catch (err) {
     return handleApiError(err)

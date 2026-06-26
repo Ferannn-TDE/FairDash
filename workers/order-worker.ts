@@ -143,14 +143,14 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
   await prisma.$transaction([
     prisma.cancellation.upsert({
       where: { orderId },
+      // Pure audit (who/when/why). Refund truth lives in Refund rows — the
+      // deprecated refundIssued/refundAmount are no longer written.
       create: {
         orderId,
         vendorId: order.vendorId,
         reason: 'Vendor did not accept within 2 minutes',
-        refundIssued: true,
-        refundAmount: order.total,
       },
-      update: { refundIssued: true, refundAmount: order.total },
+      update: { reason: 'Vendor did not accept within 2 minutes' },
     }),
     prisma.orderEvent.create({
       data: {
@@ -471,14 +471,14 @@ async function handleBulkRefundEvent(job: Job<JobData>) {
       await prisma.$transaction([
         prisma.cancellation.upsert({
           where: { orderId: order.id },
+          // Pure audit (who/when/why). Refund truth lives in Refund rows — the
+          // deprecated refundIssued/refundAmount are no longer written.
           create: {
             orderId: order.id,
             vendorId: order.vendorId,
             reason: 'Event cancelled by operator',
-            refundIssued: true,
-            refundAmount: order.total,
           },
-          update: { refundIssued: true, refundAmount: order.total },
+          update: { reason: 'Event cancelled by operator' },
         }),
         prisma.orderEvent.create({
           data: {

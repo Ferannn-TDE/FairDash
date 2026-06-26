@@ -389,7 +389,7 @@ async function handleCancelled(
   // Write the cancellation audit record (money-truth lives in Refund rows).
   await db.cancellation.upsert({
     where: { orderId: order.id },
-    create: { orderId: order.id, vendorId: order.vendorId, reason: reason ?? null, refundIssued: false, refundAmount: null },
+    create: { orderId: order.id, vendorId: order.vendorId, reason: reason ?? null },
     update: { reason: reason ?? null },
   })
 
