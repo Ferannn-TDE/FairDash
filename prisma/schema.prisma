@@ -175,6 +175,7 @@ model User {
   vendorMembers VendorMember[]
   adminUsers    AdminUser[]
   runner        Runner?
+  runnerApplications RunnerApplication[]
   orgMembers    OrgMember[]
   favoriteItems FavoriteItem[]
   vendorAuditLogs VendorAuditLog[]
@@ -1014,6 +1015,65 @@ model RunnerEarning {
   @@index([runnerId])
   @@index([eventId])
   @@index([status])
+}
+
+// ============================================================================
+// RUNNER APPLICATION: a platform-level "apply to drive" record from
+// /become-driver. NOT a Runner row — Runner is event-scoped (Runner.eventId is
+// required, userId @unique), created by an admin when a driver is assigned to a
+// specific fair. This is the pending-review application that precedes that, the
+// runner analog of how a Vendor application persists with status=PENDING.
+// Personal/contact fields live here (the application's contact, may differ from
+// the applicant's Clerk identity) — not duplicated onto User. The optional
+// userId links the application to the signed-in applicant (POST is auth-optional).
+// ============================================================================
+
+model RunnerApplication {
+  id String @id @default(cuid())
+
+  // Optional link to the authenticated applicant (the form also works signed-out).
+  // SetNull (not Cascade): a reviewable application shouldn't vanish if the half-
+  // finished account is deleted.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Personal — the application's contact (kept here, not on User).
+  firstName   String
+  lastName    String
+  email       String
+  phone       String
+  dateOfBirth DateTime
+  city        String?
+
+  // Vehicle.
+  vehicleType  String
+  vehicleMake  String
+  vehicleModel String
+  vehicleYear  String
+  vehicleColor String?
+  vehiclePlate String?
+
+  // Legal consent — an AUDITABLE record, not bare booleans: which affirmations,
+  // which terms version, when (server time), and from where (request IP). The
+  // applicant's signed identity is the firstName/lastName above. Makes the
+  // confirmation screen's "a background check will be initiated" claim real.
+  termsAgreed            Boolean
+  backgroundCheckConsent Boolean
+  termsVersion           String?
+  termsAcceptedAt        DateTime
+  termsAcceptedIp        String?
+
+  status    RunnerApplicationStatus @default(PENDING)
+  createdAt DateTime                @default(now())
+
+  @@index([status])
+  @@index([email])
+}
+
+enum RunnerApplicationStatus {
+  PENDING  // Submitted, awaiting review
+  APPROVED // Accepted — an admin may now create an event-scoped Runner
+  REJECTED // Declined (e.g. failed background check)
 }
 
 // Organizer's accrued share of the runner-fulfilled fee: (100 − runnerFeePercent)

@@ -50,6 +50,11 @@ This Agreement is governed by the laws of the State of Illinois. Disputes shall 
 
 By checking "I agree to the Driver Terms & Conditions," you confirm that you have read, understood, and agree to this Agreement in full, including consent to a background check.`
 
+// Version identifier for DRIVER_TERMS (its "Last Updated" date). Sent with the
+// application so the consent record captures WHICH terms were agreed to. Bump this
+// whenever DRIVER_TERMS changes.
+const DRIVER_TERMS_VERSION = '2026-01-01'
+
 interface Personal {
   firstName: string; lastName: string; email: string
   phone: string; dob: string; city: string
@@ -88,7 +93,7 @@ export default function BecomeDriverPage() {
       const res = await fetch('/api/drivers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personal, vehicle, agreed, bgConsent }),
+        body: JSON.stringify({ personal, vehicle, agreed, bgConsent, termsVersion: DRIVER_TERMS_VERSION }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error?.message || 'Submission failed')
