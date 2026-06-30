@@ -2,8 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
-import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { requireVendorMembershipById } from '@/lib/auth'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 
 const ALLOWED_MIME = new Set([
@@ -35,14 +34,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const clerkId  = await requireAuth()
     const vendorId = (await params).id
-
-    const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
-
-    const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    const { userId } = await requireVendorMembershipById(vendorId, req)
 
     const form = await req.formData()
     const docType = form.get('docType')
@@ -105,7 +98,7 @@ export async function POST(
       },
     })
 
-    logVendorAction(vendorId, dbUser.id, AUDIT_ACTIONS.SETTINGS_DOC_UPLOADED, { docType })
+    logVendorAction(vendorId, userId, AUDIT_ACTIONS.SETTINGS_DOC_UPLOADED, { docType })
 
     return success({
       docType,
@@ -127,14 +120,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const clerkId  = await requireAuth()
     const vendorId = (await params).id
-
-    const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
-
-    const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    await requireVendorMembershipById(vendorId, req)
 
     const vendor = await db.vendor.findUnique({
       where: { id: vendorId },

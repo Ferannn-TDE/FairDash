@@ -1,12 +1,11 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { success, apiError } from '@/lib/api-response'
+import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { sumVendorEarnings } from '@/lib/vendor-earnings'
 import { logger } from '@/lib/logger'
-import { requireAuth } from '@/lib/auth'
-import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { requireVendorMembershipById } from '@/lib/auth'
 import { isCompleted, isFailed } from '@/lib/order-status'
 
 // GET /api/vendors/:id/analytics
@@ -134,14 +133,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const clerkId = await requireAuth()
     const { id } = await params
-
-    const dbUser = await db.user.findUnique({ where: { clerkId } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
-
-    const isMember = await getVendorAuth(dbUser.id, id, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    await requireVendorMembershipById(id, req)
 
     const { startDate, endDate } = buildDateRange(req.nextUrl.searchParams)
     const bust = req.nextUrl.searchParams.has('bust')

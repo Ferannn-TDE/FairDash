@@ -1,9 +1,8 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { success, apiError } from '@/lib/api-response'
+import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
-import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { requireVendorMembershipById } from '@/lib/auth'
 import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
 import { logger } from '@/lib/logger'
 
@@ -23,14 +22,8 @@ export async function GET(
   const start = performance.now()
 
   try {
-    const clerkId  = await requireAuth()
     const vendorId = (await params).id
-
-    const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
-
-    const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    await requireVendorMembershipById(vendorId, req)
 
     const orders = await db.order.findMany({
       where: {
