@@ -74,7 +74,12 @@ export async function requireRunnerAuth(): Promise<string> {
   return userId
 }
 
-/** Require auth + membership in a specific vendor. Returns { user, membership }. */
+/** Require auth + membership in a specific vendor. Returns { user, membership }.
+ *  ERROR CONTRACT: no DB user → 401 "Unauthorized" UNAUTHORIZED; not a member →
+ *  403 "Forbidden" FORBIDDEN. Caller supplies clerkId (it runs requireAuth /
+ *  requireVendorAuth first). Used by stats / revenue / vendors/[id] PATCH.
+ *  ⚠️ DIFFERENT error contract than requireVendorMembershipById() below
+ *  (404 "User not found" / 403 "Access denied") — do not swap one for the other. */
 export async function requireVendorMembership(
   clerkId:  string,
   vendorId: string,
@@ -85,6 +90,26 @@ export async function requireVendorMembership(
   const membership = await getVendorAuth(user.id, vendorId, req)
   if (!membership) throw new ApiError('Forbidden', 403, 'FORBIDDEN')
   return { user, membership }
+}
+
+/** Require auth + membership in the vendor named by a route's [id] param.
+ *  ERROR CONTRACT (verbatim match to the inline triad these routes used, so the
+ *  swap is byte-identical): not signed in → 401 "Unauthorized" UNAUTHORIZED (via
+ *  requireAuth); no DB user → 404 "User not found" NOT_FOUND; not a member →
+ *  403 "Access denied" FORBIDDEN. This is the contract for the app/api/vendors/[id]/*
+ *  routes. Runs requireAuth internally and returns the resolved ids.
+ *  ⚠️ DIFFERENT error contract than requireVendorMembership() above (401/Forbidden)
+ *  — pick by the contract the route already emits; do not swap them. */
+export async function requireVendorMembershipById(
+  vendorId: string,
+  req?:     object
+): Promise<{ clerkId: string; userId: string; membership: VendorAuthPayload }> {
+  const clerkId = await requireAuth()
+  const user = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
+  if (!user) throw new ApiError('User not found', 404, 'NOT_FOUND')
+  const membership = await getVendorAuth(user.id, vendorId, req)
+  if (!membership) throw new ApiError('Access denied', 403, 'FORBIDDEN')
+  return { clerkId, userId: user.id, membership }
 }
 
 /** Require auth + admin role. Returns Clerk userId.

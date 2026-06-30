@@ -3,8 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
-import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { requireVendorMembershipById } from '@/lib/auth'
 import { assertStripeConfigured, getConnectStatus } from '@/lib/stripe-connect'
 
 // GET /api/vendors/:id/stripe/status
@@ -25,14 +24,8 @@ export async function GET(
   try {
     assertStripeConfigured()
 
-    const clerkId = await requireAuth()
     const vendorId = (await params).id
-
-    const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
-    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
-
-    const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    await requireVendorMembershipById(vendorId, req)
 
     const vendor = await db.vendor.findUnique({
       where: { id: vendorId },
