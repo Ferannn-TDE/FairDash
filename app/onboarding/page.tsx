@@ -27,7 +27,15 @@ export default async function OnboardingPage({
   const user = await currentUser()
   if (!user) redirect('/sign-in/customer')
 
-  const raw = roleParam ?? 'customer'
+  // Role intent, in priority order:
+  //   1. ?role= — the explicit hint from the redirect.
+  //   2. unsafeMetadata.intendedRole — written atomically at SignUp; survives even
+  //      if the query is ever lost (Clerk redirect, cookie timing). The authority.
+  //   3. 'customer' — only when neither is present (a plain customer signup).
+  const intendedRole = typeof user.unsafeMetadata?.intendedRole === 'string'
+    ? (user.unsafeMetadata.intendedRole as string)
+    : undefined
+  const raw = roleParam ?? intendedRole ?? 'customer'
   const role: Role = (VALID_ROLES as readonly string[]).includes(raw)
     ? (raw as Role)
     : 'customer'
