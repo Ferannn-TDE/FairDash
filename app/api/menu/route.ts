@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorAuth } from '@/lib/auth'
+import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { getGroupedMenuItemsByEvent } from '@/lib/menu/getGroupedMenuItems'
 
 // GET /api/menu?eventSlug=&vendorId=
@@ -35,7 +36,7 @@ export async function GET(req: Request) {
 // Creates a menu item. Vendor auth required.
 export async function POST(req: Request) {
   try {
-    await requireVendorAuth()
+    const clerkId = await requireVendorAuth()
     const body = await req.json()
     const { vendorId, name, description, price, category, imageUrl, prepTime, variantGroup, variantLabel } = body
 
@@ -45,6 +46,14 @@ export async function POST(req: Request) {
 
     const vendor = await db.vendor.findUnique({ where: { id: vendorId } })
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
+
+    // Authorize against THIS vendor: requireVendorAuth() only proves membership of
+    // SOME vendor, so without this a vendor member could create items on any other
+    // vendor (IDOR). Mirrors the per-vendor check in menu-items/[id]/availability.
+    const dbUser = await db.user.findUnique({ where: { clerkId } })
+    if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
+    const isMember = await getVendorAuth(dbUser.id, vendorId, req)
+    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
 
     const item = await db.menuItem.create({
       data: {
