@@ -4,6 +4,7 @@
  */
 import { clerkClient } from '@clerk/nextjs/server'
 import { db } from '../lib/db'
+import { ensureOrganizerBootstrap } from '../lib/organizer-bootstrap'
 
 const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type AppRole = (typeof VALID_ROLES)[number]
@@ -49,22 +50,19 @@ async function main() {
         update: { email: primaryEmail, name, phone, avatarUrl, isActive, role },
       })
 
-      // Bootstrap organizer org if one doesn't exist yet
-      if (role === 'organizer') {
-        const existing = await db.orgMember.findFirst({ where: { userId: user.id } })
-        if (!existing) {
-          const org = await db.fairOrganizer.create({
-            data: {
-              name: name ?? primaryEmail,
-              contactEmail: primaryEmail,
-              ...(phone ? { contactPhone: phone } : {}),
-            },
-          })
-          await db.orgMember.create({
-            data: { organizerId: org.id, userId: user.id, role: 'owner' },
-          })
-          console.log(`  created FairOrganizer for ${primaryEmail}`)
-        }
+      // Bootstrap organizer org via the single shared helper (idempotent). Key on the
+      // organizer signal from EITHER metadata field — legacy rows may carry singular
+      // `role`, newer rows carry roles[].
+      const roles = Array.isArray(clerkUser.publicMetadata?.roles)
+        ? (clerkUser.publicMetadata.roles as string[])
+        : []
+      if (role === 'organizer' || roles.includes('organizer')) {
+        const { created } = await ensureOrganizerBootstrap(user.id, {
+          name,
+          email: primaryEmail,
+          phone,
+        })
+        if (created) console.log(`  created FairOrganizer for ${primaryEmail}`)
       }
 
       totalSynced++

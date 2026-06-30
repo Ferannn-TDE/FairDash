@@ -12,12 +12,11 @@ import { enforceRateLimit } from '@/lib/ratelimit'
 // login pages (RoleAuthCard) to decide: send the user in, or show a terminal
 // "no access" state — so login and guard can never disagree and loop.
 //
-// Strategy (post Step-3 unification): METADATA-FIRST, DB-VERIFY.
-//   - publicMetadata.roles[] is the fast gate. If it already grants the role, done.
-//   - Otherwise fall back to the DB membership row (the authority) — this catches
-//     users whose metadata hasn't been backfilled/synced yet. After backfill the
-//     two agree, so the DB read is rarely hit.
-// admin is metadata-only (no DB membership model).
+// Strategy: DB IS THE SINGLE AUTHORITY (vendor/runner/organizer read their
+// membership row; customer is ungated). The login card and the portal layout now
+// read the SAME source, so they can never disagree and ping-pong. There is no
+// metadata fast-path — publicMetadata.roles[] is the navbar's hint, not an auth
+// gate. admin is the documented exception: metadata-only (no DB membership model).
 
 export async function GET(req: NextRequest) {
   try {
@@ -43,17 +42,17 @@ export async function GET(req: NextRequest) {
 
     if (!clerkId) return success({ hasAccess: false })
 
-    const user = await currentUser()
-
-    // admin → metadata only (no DB membership model).
+    // admin → metadata only (no DB membership model — the documented single-source
+    // -of-truth exception for the admin family).
     if (role === 'admin') {
+      const user = await currentUser()
       return success({ hasAccess: hasRole(user?.publicMetadata, 'admin') })
     }
 
-    // Fast path: metadata already grants the role.
-    if (hasRole(user?.publicMetadata, role)) return success({ hasAccess: true })
-
-    // Authority fallback: the DB membership row.
+    // All other roles → the DB membership row is the SINGLE authority. No metadata
+    // fast-path: login (this endpoint) and the portal layout now read the identical
+    // source, so they can never disagree and loop. (The metadata roles[] still
+    // exists for the navbar, but it is no longer an auth gate.)
     const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
     if (!dbUser) return success({ hasAccess: false })
 

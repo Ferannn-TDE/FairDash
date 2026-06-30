@@ -111,6 +111,16 @@ function RoleAuthInner({
   // so a customer who creates an account at checkout still lands back at checkout.
   // Only forward it if it's a safe in-app path (dest already validated above).
   const redirectParam = dest !== redirectTo ? dest : null;
+  // Role intent rides on the Clerk user (unsafeMetadata), NOT the query param.
+  // Clerk's post-verify redirect can drop/normalize ?role= through the CAPTCHA +
+  // email-verification hops, which silently defaulted organizer signups to
+  // customer (they then never provisioned). unsafeMetadata is written atomically
+  // as part of user creation and is readable server-side regardless of redirects
+  // or cookie timing — onboarding reads it as the authority. We still pass ?role=
+  // on the redirect as a belt-and-suspenders hint, but correctness no longer
+  // depends on it. (Precedent: this tree already used unsafeMetadata.isVendor for
+  // the same signup-time role signal.)
+  const signUpUnsafeMetadata = { intendedRole: role };
   const afterSignUp = `/onboarding?role=${role}${
     redirectParam ? `&redirect=${encodeURIComponent(redirectParam)}` : ""
   }`;
@@ -197,7 +207,7 @@ function RoleAuthInner({
               {mode === "sign-in" ? (
                 <SignIn routing="hash" forceRedirectUrl={dest} appearance={{ elements: clerkElements }} />
               ) : (
-                <SignUp routing="hash" forceRedirectUrl={afterSignUp} appearance={{ elements: clerkElements }} />
+                <SignUp routing="hash" forceRedirectUrl={afterSignUp} unsafeMetadata={signUpUnsafeMetadata} appearance={{ elements: clerkElements }} />
               )}
             </div>
 
