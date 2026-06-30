@@ -17,12 +17,17 @@ const REDIRECT_MAP: Record<Role, string> = {
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: { role?: string; redirect?: string }
+  searchParams: Promise<{ role?: string; redirect?: string }>
 }) {
+  // Next 16: searchParams is async — must be awaited before property access.
+  // (Reading it synchronously silently yields undefined, which is why ?role=
+  // appeared to "drop" on our own side.)
+  const { role: roleParam, redirect: redirectParam } = await searchParams
+
   const user = await currentUser()
   if (!user) redirect('/sign-in/customer')
 
-  const raw = searchParams.role ?? 'customer'
+  const raw = roleParam ?? 'customer'
   const role: Role = (VALID_ROLES as readonly string[]).includes(raw)
     ? (raw as Role)
     : 'customer'
@@ -80,6 +85,6 @@ export default async function OnboardingPage({
     await ensureOrganizerBootstrap(dbUserId, { name, email: primaryEmail, phone })
   }
 
-  const destination = safeRedirect(searchParams.redirect, REDIRECT_MAP[role])
+  const destination = safeRedirect(redirectParam, REDIRECT_MAP[role])
   redirect(destination)
 }
