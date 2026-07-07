@@ -1,19 +1,43 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, use } from 'react'
 import { Search, ChevronDown, ChevronUp, Package, User, Store, Clock, ArrowUpDown } from 'lucide-react'
-import { mockAdminOrders, type MockAdminOrder, type AdminOrderStatus } from '@/lib/mock/admin'
+
+// ─── Types (was lib/mock/admin — now the real /api/admin/events/[id]/orders shape) ─
+
+type AdminOrderStatus =
+  | 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'RUNNER_COLLECTED'
+  | 'COMPLETED' | 'DELIVERED' | 'CANCELLED' | 'UNCOLLECTED' | 'UNDELIVERABLE'
+  | 'REFUNDED'
+
+interface AdminOrderItem { id?: string; name: string; quantity: number }
+
+interface AdminOrder {
+  id: string
+  status: AdminOrderStatus
+  fulfillmentType: string
+  customerName: string
+  vendorName: string
+  total: number
+  placedAt: string
+  items: AdminOrderItem[]
+  cancellationReason?: string | null
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<AdminOrderStatus, { label: string; cls: string }> = {
-  PLACED:    { label: 'New',       cls: 'bg-neon-pink/10 text-neon-pink border-neon-pink/20' },
-  ACCEPTED:  { label: 'Accepted',  cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  PREPARING: { label: 'Preparing', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  READY:     { label: 'Ready',     cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  COMPLETED: { label: 'Completed', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  CANCELLED: { label: 'Cancelled', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
-  REFUNDED:  { label: 'Refunded',  cls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+  PLACED:           { label: 'New',           cls: 'bg-neon-pink/10 text-neon-pink border-neon-pink/20' },
+  ACCEPTED:         { label: 'Accepted',      cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  PREPARING:        { label: 'Preparing',     cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  READY:            { label: 'Ready',         cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  RUNNER_COLLECTED: { label: 'En Route',      cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  COMPLETED:        { label: 'Completed',     cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  DELIVERED:        { label: 'Delivered',     cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  CANCELLED:        { label: 'Cancelled',     cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  UNCOLLECTED:      { label: 'Uncollected',   cls: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+  UNDELIVERABLE:    { label: 'Undeliverable', cls: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+  REFUNDED:         { label: 'Refunded',      cls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
 }
 
 const FULFILLMENT_LABEL: Record<string, string> = {
@@ -30,12 +54,21 @@ const FILTER_TABS = [
   { value: 'REFUNDED',  label: 'Refunded' },
 ] as const
 
-const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
+const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED'])
+const COMPLETED_STATUSES = new Set(['COMPLETED', 'DELIVERED'])
+
+// Map a filter tab to the set of order statuses it should show.
+function matchesTab(status: string, tab: string): boolean {
+  if (tab === 'all') return true
+  if (tab === 'active') return ACTIVE_STATUSES.has(status)
+  if (tab === 'COMPLETED') return COMPLETED_STATUSES.has(status)
+  return status === tab
+}
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: AdminOrderStatus }) {
-  const meta = STATUS_META[status]
+  const meta = STATUS_META[status] ?? { label: status, cls: 'bg-white/10 text-text-gray border-white/20' }
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${meta.cls}`}>
       {meta.label}
@@ -43,7 +76,7 @@ function StatusBadge({ status }: { status: AdminOrderStatus }) {
   )
 }
 
-function OrderRow({ order }: { order: MockAdminOrder }) {
+function OrderRow({ order }: { order: AdminOrder }) {
   const [expanded, setExpanded] = useState(false)
   const placedTime = new Date(order.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -56,7 +89,7 @@ function OrderRow({ order }: { order: MockAdminOrder }) {
         <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
           <span className="font-bold text-white text-sm">#{order.id.slice(-8).toUpperCase()}</span>
           <StatusBadge status={order.status} />
-          <span className="text-xs text-text-gray hidden sm:inline">{FULFILLMENT_LABEL[order.fulfillmentType]}</span>
+          <span className="text-xs text-text-gray hidden sm:inline">{FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}</span>
         </div>
         <div className="hidden sm:flex items-center gap-4 text-sm shrink-0">
           <span className="text-text-gray text-xs flex items-center gap-1">
@@ -95,7 +128,7 @@ function OrderRow({ order }: { order: MockAdminOrder }) {
             </div>
             <div>
               <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-0.5">Fulfillment</p>
-              <p className="text-white">{FULFILLMENT_LABEL[order.fulfillmentType]}</p>
+              <p className="text-white">{FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}</p>
             </div>
           </div>
 
@@ -103,7 +136,7 @@ function OrderRow({ order }: { order: MockAdminOrder }) {
             <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Items</p>
             <div className="space-y-1">
               {order.items.map((item, i) => (
-                <p key={i} className="text-sm text-white">
+                <p key={item.id ?? i} className="text-sm text-white">
                   <span className="text-neon-pink font-semibold">{item.quantity}×</span> {item.name}
                 </p>
               ))}
@@ -124,26 +157,42 @@ function OrderRow({ order }: { order: MockAdminOrder }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function AdminOrdersPage() {
+export default function AdminOrdersPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
+  const params = use(paramsPromise)
+  const [orders, setOrders] = useState<AdminOrder[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const [filter, setFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [sortNewest, setSortNewest] = useState(true)
 
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    fetch(`/api/admin/events/${params.eventSlug}/orders?take=100`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!active) return
+        if (!json.success) { setError(json.error?.message ?? 'Failed to load orders'); return }
+        setOrders((json.data.orders ?? []) as AdminOrder[])
+      })
+      .catch(() => { if (active) setError('Failed to load orders') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [params.eventSlug])
+
   const tabCounts = useMemo(() => ({
-    all:       mockAdminOrders.length,
-    active:    mockAdminOrders.filter((o) => ACTIVE_STATUSES.has(o.status)).length,
-    COMPLETED: mockAdminOrders.filter((o) => o.status === 'COMPLETED').length,
-    CANCELLED: mockAdminOrders.filter((o) => o.status === 'CANCELLED').length,
-    REFUNDED:  mockAdminOrders.filter((o) => o.status === 'REFUNDED').length,
-  }), [])
+    all:       orders.length,
+    active:    orders.filter((o) => ACTIVE_STATUSES.has(o.status)).length,
+    COMPLETED: orders.filter((o) => COMPLETED_STATUSES.has(o.status)).length,
+    CANCELLED: orders.filter((o) => o.status === 'CANCELLED').length,
+    REFUNDED:  orders.filter((o) => o.status === 'REFUNDED').length,
+  }), [orders])
 
   const filtered = useMemo(() => {
-    let list = mockAdminOrders
-    if (filter === 'active') {
-      list = list.filter((o) => ACTIVE_STATUSES.has(o.status))
-    } else if (filter !== 'all') {
-      list = list.filter((o) => o.status === filter)
-    }
+    let list = orders.filter((o) => matchesTab(o.status, filter))
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter((o) =>
@@ -156,7 +205,7 @@ export default function AdminOrdersPage() {
       const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
       return sortNewest ? diff : -diff
     })
-  }, [filter, search, sortNewest])
+  }, [orders, filter, search, sortNewest])
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
@@ -166,7 +215,7 @@ export default function AdminOrdersPage() {
           <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
             Order <span className="text-neon-pink">Log</span>
           </h1>
-          <p className="text-text-gray text-sm mt-0.5">{mockAdminOrders.length} orders today</p>
+          <p className="text-text-gray text-sm mt-0.5">{loading ? 'Loading…' : `${orders.length} orders`}</p>
         </div>
         <button
           onClick={() => setSortNewest((v) => !v)}
@@ -211,7 +260,18 @@ export default function AdminOrdersPage() {
       </div>
 
       {/* Order list */}
-      {filtered.length === 0 ? (
+      {error ? (
+        <div className="bg-bg-card border border-red-500/20 rounded-2xl py-16 text-center">
+          <Package className="w-10 h-10 text-red-400/40 mx-auto mb-3" />
+          <p className="text-white font-semibold text-sm mb-1">Couldn’t load orders</p>
+          <p className="text-text-gray text-xs">{error}</p>
+        </div>
+      ) : loading ? (
+        <div className="bg-bg-card border border-white/10 rounded-2xl py-16 text-center">
+          <Package className="w-10 h-10 text-white/10 mx-auto mb-3 animate-pulse" />
+          <p className="text-text-gray text-xs">Loading orders…</p>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-bg-card border border-white/10 rounded-2xl py-16 text-center">
           <Package className="w-10 h-10 text-white/10 mx-auto mb-3" />
           <p className="text-white font-semibold text-sm mb-1">No orders found</p>
