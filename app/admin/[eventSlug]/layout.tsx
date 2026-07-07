@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import AdminShell from '../_components/AdminShell'
-import { mockAdminProfile } from '@/lib/mock/admin'
 import { hasRole } from '@/lib/roles'
 
 // SECURITY GATE: the admin portal requires a signed-in user with an admin role.
@@ -24,9 +23,9 @@ export default async function AdminPortalLayout({ children }: { children: React.
 
   const first = user.firstName ?? ''
   const last = user.lastName ?? ''
-  const userName = ([first, last].filter(Boolean).join(' ') || user.emailAddresses[0]?.emailAddress) ?? mockAdminProfile.name
-  const userInitials = (((first[0] ?? '') + (last[0] ?? '')).toUpperCase() || userName[0]?.toUpperCase()) ?? 'A'
-  const userEmail = user.emailAddresses[0]?.emailAddress ?? mockAdminProfile.email
+  const userName = ([first, last].filter(Boolean).join(' ') || user.emailAddresses[0]?.emailAddress) ?? 'Organizer'
+  const userInitials = (((first[0] ?? '') + (last[0] ?? '')).toUpperCase() || userName[0]?.toUpperCase()) ?? 'O'
+  const userEmail = user.emailAddresses[0]?.emailAddress ?? ''
 
   return (
     <AdminShell userName={userName} userInitials={userInitials} userEmail={userEmail}>

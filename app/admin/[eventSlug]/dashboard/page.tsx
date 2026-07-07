@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, use } from 'react'
+import OrganizerControl, { type OrganizerState } from '../../_components/OrganizerControl'
 import {
   CheckCircleIcon,
   XCircleIcon,
@@ -8,12 +9,7 @@ import {
   PlayIcon,
   PauseIcon,
 } from '@heroicons/react/24/outline'
-import {
-  mockAdminDashboard,
-  mockAdminVendors,
-  mockFulfillmentConfig,
-  computeGoLiveChecklist,
-} from '@/lib/mock/admin'
+import type { GoLiveChecklist } from '@/lib/go-live-checklist'
 
 // ─── API response types ───────────────────────────────────────────────────────
 
@@ -25,6 +21,15 @@ interface DashboardStats {
   activeVendors: number
   totalVendors: number
   activeRunners: number
+}
+
+// Zero-state until the dashboard fetch resolves — replaces the old mock fallback.
+const ZERO_STATS: DashboardStats = {
+  liveOrders: 0, ordersToday: 0, revenueToday: 0, platformFeeToday: 0,
+  activeVendors: 0, totalVendors: 0, activeRunners: 0,
+}
+const EMPTY_CHECKLIST: GoLiveChecklist = {
+  hasActiveVendor: false, hasStripeVendor: false, hasFulfillmentMode: false, hasCoords: false, canGoLive: false,
 }
 
 interface DashboardEvent {
@@ -58,6 +63,8 @@ interface DashboardData {
   event: DashboardEvent
   stats: DashboardStats
   vendorGrid: VendorGridItem[]
+  organizer?: OrganizerState | null
+  checklist: GoLiveChecklist
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -115,10 +122,14 @@ function VendorStatusBadge({ vendor }: { vendor: VendorGridItem }) {
 
 function GoLiveChecklist({
   checklist,
+  busy,
+  error,
   onConfirm,
   onClose,
 }: {
-  checklist: ReturnType<typeof computeGoLiveChecklist>
+  checklist: GoLiveChecklist
+  busy: boolean
+  error: string | null
   onConfirm: () => void
   onClose: () => void
 }) {
@@ -128,6 +139,7 @@ function GoLiveChecklist({
     { label: 'Fulfillment config has ≥1 mode enabled', pass: checklist.hasFulfillmentMode },
     { label: 'Event location coordinates set', pass: checklist.hasCoords },
   ]
+  const canGo = checklist.canGoLive && !busy
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
@@ -146,24 +158,26 @@ function GoLiveChecklist({
               <span className={`text-sm font-inter ${item.pass ? 'text-white' : 'text-[#666]'}`}>{item.label}</span>
             </div>
           ))}
+          {error && <p className="text-sm text-red-400 font-inter pt-1">{error}</p>}
         </div>
         <div className="p-6 pt-0 flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white hover:bg-white/5 transition-colors"
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
-            onClick={checklist.canGoLive ? onConfirm : undefined}
-            disabled={!checklist.canGoLive}
+            onClick={canGo ? onConfirm : undefined}
+            disabled={!canGo}
             className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors
-              ${checklist.canGoLive
+              ${canGo
                 ? 'bg-[#FF0077] text-white hover:bg-[#e0006b]'
                 : 'bg-white/5 text-[#555] cursor-not-allowed'
               }`}
           >
-            {checklist.canGoLive ? 'Go Live' : 'Fix Issues First'}
+            {busy ? 'Going Live…' : checklist.canGoLive ? 'Go Live' : 'Fix Issues First'}
           </button>
         </div>
       </div>
@@ -175,10 +189,14 @@ function GoLiveChecklist({
 
 function PauseModal({
   isPaused,
+  busy,
+  error,
   onConfirm,
   onClose,
 }: {
   isPaused: boolean
+  busy: boolean
+  error: string | null
   onConfirm: () => void
   onClose: () => void
 }) {
@@ -200,25 +218,83 @@ function PauseModal({
                   : 'This will block all new orders. Orders currently in progress will continue to completion.'
                 }
               </p>
+              {error && <p className="text-sm text-red-400 font-inter mt-2">{error}</p>}
             </div>
           </div>
         </div>
         <div className="px-6 pb-6 flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white hover:bg-white/5 transition-colors"
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors
+            disabled={busy}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50
               ${isPaused
                 ? 'bg-green-600 text-white hover:bg-green-500'
                 : 'bg-yellow-600 text-white hover:bg-yellow-500'
               }`}
           >
-            {isPaused ? 'Resume Orders' : 'Pause Orders'}
+            {busy ? 'Working…' : isPaused ? 'Resume Orders' : 'Pause Orders'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Close Event Modal ────────────────────────────────────────────────────────
+// Closing (→ INACTIVE) is the Part B event-close trigger: it fires the per-event
+// organizer payout batch. Confirmed here so an admin knows money will move.
+
+function CloseModal({
+  busy,
+  error,
+  onConfirm,
+  onClose,
+}: {
+  busy: boolean
+  error: string | null
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-[#161616] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="p-6">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center shrink-0">
+              <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <h2 className="font-bebas text-xl text-white tracking-wide mb-1">Close this event?</h2>
+              <p className="text-sm text-[#888] font-inter leading-relaxed">
+                This ends the fair — no new orders can be placed. It also triggers the
+                organizer’s per-event payout batch (their accrued share is paid out).
+                This can’t be undone from here.
+              </p>
+              {error && <p className="text-sm text-red-400 font-inter mt-2">{error}</p>}
+            </div>
+          </div>
+        </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+          >
+            {busy ? 'Closing…' : 'Close Event'}
           </button>
         </div>
       </div>
@@ -235,6 +311,9 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
   const [isPaused, setIsPaused] = useState(false)
   const [showGoLive, setShowGoLive] = useState(false)
   const [showPause, setShowPause] = useState(false)
+  const [showClose, setShowClose] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Fetch real dashboard data; fall back to mock if unavailable (dev without DB)
   useEffect(() => {
@@ -249,29 +328,72 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
       .catch(() => {})
   }, [params.eventSlug])
 
-  // Use real data when available, otherwise fall back to mock for dev
-  const stats = dashboardData?.stats ?? mockAdminDashboard
-  const vendorGrid = dashboardData?.vendorGrid ?? mockAdminVendors
+  // Real data only — zero/empty state until the fetch resolves (no mock).
+  const stats = dashboardData?.stats ?? ZERO_STATS
+  const vendorGrid = dashboardData?.vendorGrid ?? []
   const eventName = dashboardData?.event.name ?? params.eventSlug
   const eventDates = dashboardData
     ? `${new Date(dashboardData.event.startDate).toLocaleDateString()} – ${new Date(dashboardData.event.endDate).toLocaleDateString()}`
     : ''
 
-  const checklist = computeGoLiveChecklist(
-    null,
-    null,
-    mockAdminVendors,
-    mockFulfillmentConfig
-  )
+  // Go-live readiness — the SAME checklist the status route enforces (server-computed).
+  const checklist = dashboardData?.checklist ?? EMPTY_CHECKLIST
 
-  const handleGoLive = () => {
-    setEventStatus('ACTIVE')
-    setShowGoLive(false)
+  // ── Real platform-control actions ──────────────────────────────────────────
+  // Each awaits the secured admin endpoint (through the chokepoint) and reflects
+  // the TRUE returned state — never an optimistic flip. Errors surface the reason.
+
+  // Go Live / Close → PATCH /status. The server ENFORCES the go-live checklist
+  // (409 GO_LIVE_CHECKLIST_FAILED) — the same core the dashboard displays.
+  async function patchStatus(status: 'ACTIVE' | 'INACTIVE'): Promise<boolean> {
+    setActionBusy(true); setActionError(null)
+    try {
+      const res = await fetch(`/api/admin/events/${params.eventSlug}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      const json = await res.json()
+      if (!json.success) { setActionError(json.error?.message ?? 'Action failed'); return false }
+      setEventStatus(json.data.event.status)
+      setIsPaused(json.data.event.isPaused)
+      return true
+    } catch {
+      setActionError('Network error — please retry')
+      return false
+    } finally {
+      setActionBusy(false)
+    }
   }
 
-  const handleTogglePause = () => {
-    setIsPaused(p => !p)
-    setShowPause(false)
+  const handleGoLive = async () => { if (await patchStatus('ACTIVE'))  setShowGoLive(false) }
+  const handleClose  = async () => { if (await patchStatus('INACTIVE')) setShowClose(false) }
+
+  // Pause / Resume → PATCH /pause. Reflects the true isPaused from the response.
+  async function handleTogglePause() {
+    setActionBusy(true); setActionError(null)
+    try {
+      const res = await fetch(`/api/admin/events/${params.eventSlug}/pause`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPaused: !isPaused }),
+      })
+      const json = await res.json()
+      if (!json.success) { setActionError(json.error?.message ?? 'Action failed'); return }
+      setIsPaused(json.data.event.isPaused)
+      setShowPause(false)
+    } catch {
+      setActionError('Network error — please retry')
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  function openModal(which: 'golive' | 'pause' | 'close') {
+    setActionError(null)
+    if (which === 'golive') setShowGoLive(true)
+    if (which === 'pause')  setShowPause(true)
+    if (which === 'close')  setShowClose(true)
   }
 
   return (
@@ -280,6 +402,8 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
       {showGoLive && (
         <GoLiveChecklist
           checklist={checklist}
+          busy={actionBusy}
+          error={actionError}
           onConfirm={handleGoLive}
           onClose={() => setShowGoLive(false)}
         />
@@ -289,8 +413,20 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
       {showPause && (
         <PauseModal
           isPaused={isPaused}
+          busy={actionBusy}
+          error={actionError}
           onConfirm={handleTogglePause}
           onClose={() => setShowPause(false)}
+        />
+      )}
+
+      {/* Close modal — closing fires the per-event organizer payout batch (Part B) */}
+      {showClose && (
+        <CloseModal
+          busy={actionBusy}
+          error={actionError}
+          onConfirm={handleClose}
+          onClose={() => setShowClose(false)}
         />
       )}
 
@@ -320,7 +456,7 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
             {/* Pause / Resume — only when event is ACTIVE */}
             {eventStatus === 'ACTIVE' && (
               <button
-                onClick={() => setShowPause(true)}
+                onClick={() => openModal('pause')}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors
                   ${isPaused
                     ? 'bg-green-600/20 border border-green-600/30 text-green-400 hover:bg-green-600/30'
@@ -337,7 +473,7 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
             {/* Go Live — only when UPCOMING */}
             {eventStatus === 'UPCOMING' && (
               <button
-                onClick={() => setShowGoLive(true)}
+                onClick={() => openModal('golive')}
                 className="flex items-center gap-2 px-4 py-2.5 bg-[#FF0077] text-white text-sm font-semibold rounded-xl hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
               >
                 <PlayIcon className="w-4 h-4" />
@@ -348,7 +484,7 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
             {/* Close Event — when ACTIVE */}
             {eventStatus === 'ACTIVE' && (
               <button
-                onClick={() => setEventStatus('INACTIVE')}
+                onClick={() => openModal('close')}
                 className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold rounded-xl hover:bg-red-500/20 transition-colors"
               >
                 Close Event
@@ -374,6 +510,13 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
           <StatCard label="Revenue Today" value={`$${Number(stats.revenueToday).toLocaleString()}`} sub={`$${Number(stats.platformFeeToday).toFixed(2)} platform fee`} />
           <StatCard label="Active Vendors" value={`${stats.activeVendors}/${stats.totalVendors}`} sub={`${stats.activeRunners} runners active`} />
         </div>
+
+        {/* A6 kill-switch — organizer suspension control (admin-only mutating action) */}
+        {dashboardData?.organizer && (
+          <div className="mb-8">
+            <OrganizerControl organizer={dashboardData.organizer} />
+          </div>
+        )}
 
         {/* Vendor status grid */}
         <section>

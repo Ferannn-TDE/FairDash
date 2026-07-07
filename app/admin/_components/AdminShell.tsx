@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useClerk } from '@clerk/clerk-react'
@@ -19,13 +19,20 @@ import {
   ChartBarIcon,
   ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
-import { mockAdminEvents } from '@/lib/mock/admin'
-
 interface Props {
   children: React.ReactNode
   userName: string
   userInitials: string
   userEmail: string
+}
+
+// The shell's fair switcher is backed by the strict-gated /api/admin/fairs (all
+// fairs, all organizers) — the same list the picker uses — NOT mock data.
+interface ShellFair {
+  id: string
+  name: string
+  urlSlug: string
+  status: 'ACTIVE' | 'UPCOMING' | 'INACTIVE'
 }
 
 function SidebarLink({
@@ -61,17 +68,19 @@ function SidebarLink({
   )
 }
 
-function EventNav({ slug, onClose }: { slug: string; onClose?: () => void }) {
+function EventNav({ slug, fairs, onClose }: { slug: string; fairs: ShellFair[]; onClose?: () => void }) {
   const [open, setOpen] = useState(true)
-  const event = mockAdminEvents.find(e => e.slug === slug)
-  if (!event) return null
+  const fair = fairs.find(e => e.urlSlug === slug)
+  // Before the fairs list loads (or for a slug not in the list), fall back to the
+  // slug itself so the per-fair nav still renders.
+  const name = fair?.name ?? slug
   return (
     <div className="mt-4 pt-3 border-t border-white/5">
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-[#555] uppercase tracking-widest hover:text-[#888] transition-colors"
       >
-        <span className="truncate">{event.name}</span>
+        <span className="truncate">{name}</span>
         {open ? <ChevronDownIcon className="w-3 h-3 shrink-0" /> : <ChevronRightIcon className="w-3 h-3 shrink-0" />}
       </button>
       {open && (
@@ -89,7 +98,7 @@ function EventNav({ slug, onClose }: { slug: string; onClose?: () => void }) {
   )
 }
 
-function SidebarContent({ currentSlug, onClose }: { currentSlug: string | null; onClose?: () => void }) {
+function SidebarContent({ currentSlug, fairs, onClose }: { currentSlug: string | null; fairs: ShellFair[]; onClose?: () => void }) {
   return (
     <>
       {/* Logo */}
@@ -113,16 +122,16 @@ function SidebarContent({ currentSlug, onClose }: { currentSlug: string | null; 
         <SidebarLink href="/admin" icon={HomeIcon} label="All Events" exact onClick={onClose} />
 
         {/* Per-event nav */}
-        {currentSlug && <EventNav slug={currentSlug} onClose={onClose} />}
+        {currentSlug && <EventNav slug={currentSlug} fairs={fairs} onClose={onClose} />}
 
-        {/* If no event selected, show all events */}
+        {/* If no event selected, show all fairs */}
         {!currentSlug && (
           <div className="mt-4 pt-3 border-t border-white/5 space-y-0.5">
-            <p className="px-3 mb-2 text-[10px] font-semibold text-[#555] uppercase tracking-widest">Events</p>
-            {mockAdminEvents.map(ev => (
+            <p className="px-3 mb-2 text-[10px] font-semibold text-[#555] uppercase tracking-widest">Fairs</p>
+            {fairs.map(ev => (
               <Link
                 key={ev.id}
-                href={`/admin/${ev.slug}/dashboard`}
+                href={`/admin/${ev.urlSlug}/dashboard`}
                 onClick={onClose}
                 className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-inter text-[#888] hover:text-white hover:bg-white/5 transition-colors"
               >
@@ -142,8 +151,19 @@ function SidebarContent({ currentSlug, onClose }: { currentSlug: string | null; 
 
 export default function AdminShell({ children, userName, userInitials, userEmail }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [fairs, setFairs] = useState<ShellFair[]>([])
   const pathname = usePathname()
   const { signOut } = useClerk()
+
+  // Fair switcher list — strict-gated /api/admin/fairs, shared with the picker.
+  useEffect(() => {
+    let active = true
+    fetch('/api/admin/fairs')
+      .then(r => r.json())
+      .then(json => { if (active && json.success) setFairs((json.data.fairs ?? []) as ShellFair[]) })
+      .catch(() => { /* switcher falls back to the current slug */ })
+    return () => { active = false }
+  }, [])
 
   // Extract slug from /admin/[eventSlug]/...
   const slugMatch = pathname.match(/^\/admin\/([^/]+)/)
@@ -166,7 +186,7 @@ export default function AdminShell({ children, userName, userInitials, userEmail
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
       >
-        <SidebarContent currentSlug={currentSlug} onClose={() => setSidebarOpen(false)} />
+        <SidebarContent currentSlug={currentSlug} fairs={fairs} onClose={() => setSidebarOpen(false)} />
 
         {/* Profile */}
         <div className="p-4 border-t border-white/5 shrink-0">

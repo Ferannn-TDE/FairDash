@@ -1,14 +1,30 @@
 'use client'
 
-import { useState } from 'react'
-import { mockAdminRunners } from '@/lib/mock/admin'
+import { useState, useEffect, use } from 'react'
+import { Truck, AlertTriangle } from 'lucide-react'
 
 type RunnerStatus = 'ACTIVE' | 'OFFLINE' | 'ON_DELIVERY'
+
+interface AdminRunner {
+  id: string
+  status: RunnerStatus
+  completionRate: number
+  totalDispatched: number
+  totalCompleted: number
+  user: { name: string | null; email: string | null }
+}
 
 const STATUS_STYLES: Record<RunnerStatus, string> = {
   ACTIVE:      'bg-green-500/15 text-green-400',
   OFFLINE:     'bg-white/5 text-[#888]',
   ON_DELIVERY: 'bg-sky-500/15 text-sky-400',
+}
+
+function initialsOf(name: string | null, email: string | null) {
+  const src = (name ?? email ?? '?').trim()
+  const parts = src.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return src.slice(0, 2).toUpperCase()
 }
 
 function CompletionBar({ rate }: { rate: number }) {
@@ -26,19 +42,29 @@ function CompletionBar({ rate }: { rate: number }) {
   )
 }
 
-export default function RunnersPage() {
-  const [runners, setRunners] = useState(
-    mockAdminRunners.map(r => ({ ...r, status: r.status as RunnerStatus }))
-  )
+export default function RunnersPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
+  const params = use(paramsPromise)
+  const [runners, setRunners] = useState<AdminRunner[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const toggleStatus = (id: string) => {
-    setRunners(rs => rs.map(r => {
-      if (r.id !== id) return r
-      return { ...r, status: r.status === 'ACTIVE' ? 'OFFLINE' : 'ACTIVE' }
-    }))
-  }
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    fetch(`/api/admin/events/${params.eventSlug}/runners?take=200`)
+      .then(r => r.json())
+      .then(json => {
+        if (!active) return
+        if (!json.success) { setError(json.error?.message ?? 'Failed to load runners'); return }
+        setRunners((json.data.runners ?? []) as AdminRunner[])
+      })
+      .catch(() => { if (active) setError('Failed to load runners') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [params.eventSlug])
 
-  const active = runners.filter(r => r.status === 'ACTIVE').length
+  const activeCount = runners.filter(r => r.status === 'ACTIVE').length
 
   return (
     <div>
@@ -46,16 +72,13 @@ export default function RunnersPage() {
         <div>
           <h1 className="font-bebas text-3xl text-white tracking-wide">Runners</h1>
           <p className="text-sm text-[#666] font-inter mt-1">
-            {active} of {runners.length} runners currently active
+            {loading ? 'Loading…' : `${activeCount} of ${runners.length} runners currently active`}
           </p>
         </div>
-        <button className="w-full sm:w-auto px-4 py-2.5 bg-[#FF0077] text-white text-sm font-semibold rounded-xl hover:bg-[#e0006b] transition-colors">
-          + Add Runner
-        </button>
       </div>
 
       {/* Warning for low completion rates */}
-      {runners.some(r => r.completionRate < 0.90) && (
+      {!loading && runners.some(r => r.completionRate < 0.90) && (
         <div className="mb-5 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
           <p className="text-sm text-yellow-300 font-inter">
             <span className="font-semibold">Warning:</span> Some runners are below the 90% completion rate threshold and may need to be reviewed.
@@ -63,58 +86,59 @@ export default function RunnersPage() {
         </div>
       )}
 
-      <div className="bg-[#111111] rounded-xl border border-white/5 divide-y divide-white/5">
-        {runners.map(runner => (
-          <div key={runner.id} className="flex items-center justify-between gap-3 p-4 hover:bg-white/[0.02] transition-colors">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="w-10 h-10 rounded-full bg-[#FF0077]/10 flex items-center justify-center shrink-0">
-                <span className="text-sm font-semibold text-[#FF0077] font-inter">{runner.initials}</span>
+      {error ? (
+        <div className="bg-[#111111] border border-red-500/20 rounded-xl py-12 text-center">
+          <AlertTriangle className="w-8 h-8 text-red-400/40 mx-auto mb-2" />
+          <p className="text-white font-semibold text-sm mb-1">Couldn’t load runners</p>
+          <p className="text-[#666] text-xs">{error}</p>
+        </div>
+      ) : loading ? (
+        <div className="bg-[#111111] border border-white/5 rounded-xl py-12 text-center">
+          <Truck className="w-8 h-8 text-white/10 mx-auto mb-2 animate-pulse" />
+          <p className="text-[#666] text-xs">Loading runners…</p>
+        </div>
+      ) : (
+        <div className="bg-[#111111] rounded-xl border border-white/5 divide-y divide-white/5">
+          {runners.map(runner => (
+            <div key={runner.id} className="flex items-center justify-between gap-3 p-4 hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="w-10 h-10 rounded-full bg-[#FF0077]/10 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-semibold text-[#FF0077] font-inter">{initialsOf(runner.user.name, runner.user.email)}</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-inter font-medium text-white truncate">{runner.user.name ?? '— unnamed —'}</p>
+                  <p className="text-xs text-[#666] font-inter truncate">{runner.user.email ?? ''}</p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-inter font-medium text-white truncate">{runner.name}</p>
-                <p className="text-xs text-[#666] font-inter truncate">{runner.email}</p>
+
+              {/* Completion rate */}
+              <div className="hidden sm:block w-28 shrink-0">
+                <p className="text-[10px] text-[#555] font-inter uppercase tracking-wider mb-1">Completion</p>
+                <CompletionBar rate={runner.completionRate} />
               </div>
+
+              {/* Dispatch stats */}
+              <div className="hidden md:block shrink-0 text-right">
+                <p className="text-sm text-white font-inter tabular-nums">
+                  {runner.totalCompleted}/{runner.totalDispatched}
+                </p>
+                <p className="text-[10px] text-[#555] font-inter">dispatched</p>
+              </div>
+
+              {/* Status badge */}
+              <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${STATUS_STYLES[runner.status]}`}>
+                {runner.status}
+              </span>
             </div>
+          ))}
 
-            {/* Completion rate */}
-            <div className="hidden sm:block w-28 shrink-0">
-              <p className="text-[10px] text-[#555] font-inter uppercase tracking-wider mb-1">Completion</p>
-              <CompletionBar rate={runner.completionRate} />
+          {runners.length === 0 && (
+            <div className="py-12 text-center">
+              <p className="text-sm text-[#555] font-inter">No runners registered for this event.</p>
             </div>
-
-            {/* Dispatch stats */}
-            <div className="hidden md:block shrink-0 text-right">
-              <p className="text-sm text-white font-inter tabular-nums">
-                {runner.totalCompleted}/{runner.totalDispatched}
-              </p>
-              <p className="text-[10px] text-[#555] font-inter">dispatched</p>
-            </div>
-
-            {/* Status badge */}
-            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${STATUS_STYLES[runner.status]}`}>
-              {runner.status}
-            </span>
-
-            {/* Activate/Deactivate toggle */}
-            <button
-              onClick={() => toggleStatus(runner.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold font-inter transition-colors shrink-0
-                ${runner.status === 'ACTIVE'
-                  ? 'bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20'
-                  : 'bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20'
-                }`}
-            >
-              {runner.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-            </button>
-          </div>
-        ))}
-
-        {runners.length === 0 && (
-          <div className="py-12 text-center">
-            <p className="text-sm text-[#555] font-inter">No runners registered for this event.</p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
