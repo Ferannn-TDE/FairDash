@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation'
 import FairShell from '../../_components/FairShell'
 import { getFairBySlugCached, getVendorsBySlugCached } from '@/lib/fairs'
-import { getFairBySlug, getVendorsByFairSlug } from '@/lib/mock'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { Metadata } from 'next'
 
@@ -21,28 +20,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       }
     }
   } catch {
-    // DB unavailable — fall through to mock
+    // DB unavailable
   }
-  const mockFair = getFairBySlug(fairSlug)
-  if (mockFair) return { title: `${mockFair.name} — FairSynq` }
   return { title: 'Fair not found — FairSynq' }
-}
-
-function normalizeMock(slug: string, dbFair: FairData): FairData {
-  const mock = getFairBySlug(slug)
-  if (!mock) return dbFair
-  return {
-    ...dbFair,
-    tagline: dbFair.tagline ?? mock.tagline,
-    location: dbFair.location.address ? dbFair.location : mock.location,
-    operatingHours: dbFair.operatingHours.open ? dbFair.operatingHours : mock.operatingHours,
-    hours: dbFair.hours ?? mock.hours,
-    admission: dbFair.admission ?? mock.admission,
-    contact: dbFair.contact ?? mock.contact,
-    admissionFree: dbFair.admissionFree || mock.admissionFree,
-    contactEmail: dbFair.contactEmail ?? mock.contactEmail,
-    website: dbFair.website ?? mock.website,
-  }
 }
 
 export default async function FairLayout({ params, children }: Props) {
@@ -57,20 +37,15 @@ export default async function FairLayout({ params, children }: Props) {
     ])
 
     if (dbFair) {
-      initialFair = normalizeMock(fairSlug, dbFair)
+      initialFair = dbFair
       initialVendors = dbVendors
     }
   } catch (err) {
     console.error('[FairLayout] DB error for slug "%s":', fairSlug, err)
-    // Fall through to mock check
   }
 
-  // If DB has no data, try mock; if no mock either → 404
-  if (!initialFair) {
-    const mockFair = getFairBySlug(fairSlug)
-    if (!mockFair) notFound()
-    // Layout renders — FairContext client-side will hydrate from mock
-  }
+  // No such fair in the DB → 404 (no mock fallback).
+  if (!initialFair) notFound()
 
   return (
     <FairShell

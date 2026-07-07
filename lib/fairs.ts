@@ -1,7 +1,15 @@
+import 'server-only' // hard-fail the build if a client component ever imports this (it pulls lib/db)
 import { unstable_cache } from 'next/cache'
 import { EventStatus, VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
+import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
+import type { FairListItem } from '@/lib/fair-view'
+
+// Re-export the browser-safe view types for server-side callers' convenience.
+// (Client components must import these from '@/lib/fair-view' directly — importing
+// them from here would drag lib/db into the browser bundle.)
+export type { FairListItem, PublicFairCard, PublicFairStatus } from '@/lib/fair-view'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +108,9 @@ export const getVendorsBySlugCached = unstable_cache(
       where: {
         event: { urlSlug: fairSlug },
         status: VendorStatus.ACTIVE,
+        // Same readiness gate the /api/vendors endpoint applies, so the SSR vendor
+        // list matches the hydrated one (no 17→2 flash when enforcement is on).
+        ...readinessWhereIfEnforced(),
       },
       select: {
         id: true,
@@ -131,18 +142,8 @@ export const getVendorsBySlugCached = unstable_cache(
 )
 
 // ─── Fair list (public) ───────────────────────────────────────────────────────
-
-export interface FairListItem {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  primaryColor: string
-  status: string
-  startDate: string
-  endDate: string
-  vendorCount: number
-}
+// FairListItem + the pure view helpers (toPublicFairCard/toPublicFairStatus) now
+// live in the browser-safe '@/lib/fair-view'. This module keeps only DB fetchers.
 
 export const getAllFairsCached = unstable_cache(
   async (): Promise<FairListItem[]> => {
@@ -158,7 +159,9 @@ export const getAllFairsCached = unstable_cache(
         primaryColor: true,
         startDate: true,
         endDate: true,
-        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE } } } },
+        // Gated count — matches /api/fairs so the discovery card never shows "17
+        // vendors" while only the ready ones are browsable.
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
       },
     })
 
