@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { success, apiError } from '@/lib/api-response'
-import { ApiError, handleApiError } from '@/lib/api-error'
-import { requireAdminAuth } from '@/lib/auth'
+import { success } from '@/lib/api-response'
+import { handleApiError } from '@/lib/api-error'
+import { requireAdminFairContext } from '@/lib/admin-fair-context'
+import { getGoLiveChecklist } from '@/lib/go-live-checklist'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { OrderStatus } from '@prisma/client'
 
@@ -12,22 +13,25 @@ import { OrderStatus } from '@prisma/client'
 // Aggregate stats cached 30s per event — vendor heartbeats fetched live every request.
 
 async function getEventStats(eventId: string, todayStart: Date) {
+  // voidedAt: null on every aggregate — voided orders (test junk) must not inflate
+  // live counts or revenue. Mirrors the reconciler/payout filters.
   const [todayOrders, liveOrders, totalRevenue, platformFee] = await Promise.all([
     db.order.count({
-      where: { eventId, placedAt: { gte: todayStart } },
+      where: { eventId, voidedAt: null, placedAt: { gte: todayStart } },
     }),
     db.order.count({
       where: {
         eventId,
+        voidedAt: null,
         status: { in: [OrderStatus.PLACED, OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY] },
       },
     }),
     db.order.aggregate({
-      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      where: { eventId, voidedAt: null, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
       _sum: { total: true },
     }),
     db.order.aggregate({
-      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      where: { eventId, voidedAt: null, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
       _sum: { fairSynqFee: true },
     }),
   ])
@@ -39,26 +43,30 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdminAuth()
-
     const { id } = await params
+    const { event } = await requireAdminFairContext(id)
 
-    const event = await db.event.findFirst({
-      where: { OR: [{ id }, { urlSlug: id }] },
-      select: {
-        id: true, name: true, urlSlug: true, status: true, isPaused: true,
-        eventLat: true, eventLng: true, startDate: true, endDate: true,
-        vendors: {
-          select: {
-            id: true, name: true, cuisineType: true, boothNumber: true,
-            status: true, isOffline: true, isBusy: true,
-            stripeVerified: true, lastHeartbeatAt: true,
-          },
+    // Vendors + organizer sourced via their own models (keyed by the resolved
+    // ids), NOT by re-resolving Event — the chokepoint owns the single Event
+    // resolution. Organizer carries the A6 suspension state for the kill-switch UI.
+    const [vendors, organizer, checklist] = await Promise.all([
+      db.vendor.findMany({
+        where: { eventId: event.id },
+        select: {
+          id: true, name: true, cuisineType: true, boothNumber: true,
+          status: true, isOffline: true, isBusy: true,
+          stripeVerified: true, lastHeartbeatAt: true,
         },
-      },
-    })
-
-    if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
+      }),
+      event.organizerId
+        ? db.fairOrganizer.findUnique({
+            where: { id: event.organizerId },
+            select: { id: true, name: true, suspendedAt: true, suspendedReason: true },
+          })
+        : Promise.resolve(null),
+      // Same shared core the status route GATES on — display == enforcement.
+      getGoLiveChecklist(event.id, { eventLat: event.eventLat, eventLng: event.eventLng }),
+    ])
 
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
@@ -85,14 +93,14 @@ export async function GET(
     }
 
     const now = Date.now()
-    const vendorGrid = event.vendors.map(v => {
+    const vendorGrid = vendors.map(v => {
       const lastHeartbeat = heartbeats[v.id] ?? (v.lastHeartbeatAt ? v.lastHeartbeatAt.getTime() : 0)
       const connected = now - lastHeartbeat < 60_000
       const liveStatus = v.isOffline ? 'OFFLINE' : v.isBusy ? 'BUSY' : v.status
       return { ...v, lastHeartbeat, connectionStatus: connected ? 'CONNECTED' : 'DISCONNECTED', liveStatus }
     })
 
-    const activeVendors = event.vendors.filter(v => v.status === 'ACTIVE' && !v.isOffline).length
+    const activeVendors = vendors.filter(v => v.status === 'ACTIVE' && !v.isOffline).length
     const activeRunners = await db.runner.count({ where: { eventId: event.id, status: 'ACTIVE' } })
 
     return success({
@@ -111,10 +119,18 @@ export async function GET(
         revenueToday: totalRevenue._sum.total ?? 0,
         platformFeeToday: platformFee._sum.fairSynqFee ?? 0,
         activeVendors,
-        totalVendors: event.vendors.length,
+        totalVendors: vendors.length,
         activeRunners,
       },
       vendorGrid,
+      organizer: organizer && {
+        id: organizer.id,
+        name: organizer.name,
+        suspended: !!organizer.suspendedAt,
+        suspendedAt: organizer.suspendedAt,
+        suspendedReason: organizer.suspendedReason,
+      },
+      checklist,
     })
   } catch (err) {
     return handleApiError(err)

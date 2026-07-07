@@ -2,7 +2,8 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 import { ApiError } from './api-error'
 import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
-import { hasRole } from './roles'
+import { hasRole, hasStrictAdminRole } from './roles'
+import { organizerSuspensionError } from './organizer-suspension'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -46,7 +47,10 @@ export async function requireVendorAuth(): Promise<string> {
   return userId
 }
 
-/** Require auth + organizer role + DB orgMember. Returns { clerkId, organizerId }. */
+/** Require auth + organizer role + DB orgMember. Returns { clerkId, organizerId }.
+ *  A6 kill-switch: the resolved organizer's suspension state is read FRESH here on
+ *  every request, so an admin suspension takes effect on the organizer's NEXT
+ *  request with no token lag. A suspended org → 403 ORGANIZER_SUSPENDED. */
 export async function requireOrganizerAuth(): Promise<{ clerkId: string; organizerId: string }> {
   const { userId: clerkId } = await auth()
   if (!clerkId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
@@ -54,8 +58,19 @@ export async function requireOrganizerAuth(): Promise<{ clerkId: string; organiz
   const dbUser = await db.user.findUnique({ where: { clerkId } })
   if (!dbUser) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
-  const orgMember = await db.orgMember.findFirst({ where: { userId: dbUser.id } })
+  // Resolve membership + the org's suspension state in one read (fresh per request).
+  const orgMember = await db.orgMember.findFirst({
+    where: { userId: dbUser.id },
+    select: {
+      organizerId: true,
+      organizer: { select: { suspendedAt: true, suspendedReason: true } },
+    },
+  })
   if (!orgMember) throw new ApiError('Forbidden — organizer access required', 403, 'FORBIDDEN')
+
+  // A6: immediate-effect suspension gate — distinct code from the not-authorized 403.
+  const suspended = organizerSuspensionError(orgMember.organizer)
+  if (suspended) throw suspended
 
   return { clerkId, organizerId: orgMember.organizerId }
 }
@@ -121,6 +136,23 @@ export async function requireAdminAuth(): Promise<string> {
 
   const user = await currentUser()
   if (!hasRole(user?.publicMetadata, 'admin')) {
+    throw new ApiError('Forbidden — admin access required', 403, 'FORBIDDEN')
+  }
+
+  return userId
+}
+
+/** Require auth + STRICT platform admin (admin | super_admin — NOT event_operator).
+ *  Read via a FRESH currentUser() call, not JWT sessionClaims, so a revoked admin
+ *  loses access on the next request. This is the gate for cross-fair / cross-org
+ *  authority: the fair chokepoint (requireAdminFairContext) and the organizer
+ *  kill-switch write both sit behind it. Returns Clerk userId. */
+export async function requireStrictAdminAuth(): Promise<string> {
+  const { userId } = await auth()
+  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+
+  const user = await currentUser()
+  if (!hasStrictAdminRole(user?.publicMetadata)) {
     throw new ApiError('Forbidden — admin access required', 403, 'FORBIDDEN')
   }
 

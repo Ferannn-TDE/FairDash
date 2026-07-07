@@ -1,19 +1,20 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
-import { ApiError, handleApiError } from '@/lib/api-error'
-import { requireAdminAuth } from '@/lib/auth'
+import { handleApiError } from '@/lib/api-error'
+import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { OrderStatus } from '@prisma/client'
 
 // GET /api/admin/events/[id]/revenue?period=7d|30d|90d
 // Returns daily revenue aggregated across ALL vendors in the event.
-// Accepts event UUID or urlSlug as [id]. Used by organizer analytics chart.
+// Accepts event UUID or urlSlug as [id].
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdminAuth()
+    const { id } = await params
+    const { event } = await requireAdminFairContext(id)
 
     const { searchParams } = new URL(req.url)
     const rawPeriod = searchParams.get('period') ?? '7d'
@@ -24,13 +25,6 @@ export async function GET(
 
     const days = rawPeriod === '90d' ? 90 : rawPeriod === '30d' ? 30 : 7
 
-    // Accept both UUID and urlSlug
-    const event = await db.event.findFirst({
-      where: { OR: [{ id: (await params).id }, { urlSlug: (await params).id }] },
-      select: { id: true },
-    })
-    if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
-
     const periodStart = new Date()
     periodStart.setUTCHours(0, 0, 0, 0)
     periodStart.setUTCDate(periodStart.getUTCDate() - (days - 1))
@@ -38,6 +32,7 @@ export async function GET(
     const orders = await db.order.findMany({
       where: {
         eventId: event.id,
+        voidedAt: null, // exclude voided (test junk) orders from the revenue chart
         status: { in: [OrderStatus.COMPLETED, OrderStatus.DELIVERED] },
         placedAt: { gte: periodStart },
       },

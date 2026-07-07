@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
-import { requireAdminAuth } from '@/lib/auth'
+import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { CurbsideMethod } from '@prisma/client'
 
 // GET /api/admin/events/[id]/fulfillment
@@ -13,12 +13,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdminAuth()
-
-    // The [id] segment may be the event id OR its urlSlug (admin pages pass slug).
     const { id } = await params
-    const event = await db.event.findFirst({ where: { OR: [{ id }, { urlSlug: id }] }, select: { id: true } })
-    if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
+    const { event } = await requireAdminFairContext(id)
 
     const config = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id } })
     return success({ config })
@@ -51,12 +47,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdminAuth()
-
-    // The [id] segment may be the event id OR its urlSlug (admin pages pass slug).
     const { id } = await params
-    const event = await db.event.findFirst({ where: { OR: [{ id }, { urlSlug: id }] }, select: { id: true } })
-    if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
+    const { event } = await requireAdminFairContext(id)
 
     const body: FulfillmentBody = await req.json()
 
