@@ -87,7 +87,7 @@ export async function GET(
       async (vid: string, sinceIso: string) => {
         const sinceDate = new Date(sinceIso)
 
-        const [revenueAgg, [totalOrders, cancelledOrders], avgOrder, topItems, pendingCount] = await Promise.all([
+        const [revenueAgg, [totalOrders, cancelledOrders], avgResult, topItems, pendingCount] = await Promise.all([
           // Total revenue from COMPLETED items within range
           db.orderItem.aggregate({
             where: {
@@ -99,17 +99,30 @@ export async function GET(
             _count: { id: true },
           }),
 
-          // Total and cancelled order counts within range (for rates)
+          // Total and cancelled order counts within range (for rates).
+          // Scoped by OrderItem participation (orderItems.some) — NOT Order.vendorId —
+          // so multi-vendor orders count for every vendor that has a line item, and
+          // orders whose primary stamp has no matching items don't inflate counts.
           Promise.all([
-            db.order.count({ where: { vendorId: vid, placedAt: { gte: sinceDate } } }),
-            db.order.count({ where: { vendorId: vid, status: 'CANCELLED', placedAt: { gte: sinceDate } } }),
+            db.order.count({ where: { orderItems: { some: { vendorId: vid } }, placedAt: { gte: sinceDate } } }),
+            db.order.count({ where: { orderItems: { some: { vendorId: vid } }, status: 'CANCELLED', placedAt: { gte: sinceDate } } }),
           ]),
 
-          // Average order value (COMPLETED only)
-          db.order.aggregate({
-            where:  { vendorId: vid, status: { in: ['COMPLETED', 'DELIVERED'] }, placedAt: { gte: sinceDate } },
-            _avg:   { total: true },
-          }),
+          // Average order value (COMPLETED only) — average of this vendor's per-order
+          // SLICE (SUM of its OrderItem.totalPrice), not the whole Order.total which
+          // includes other vendors' items + fees. SUM-then-AVG needs raw SQL.
+          db.$queryRaw<{ avg: number }[]>`
+            SELECT COALESCE(AVG(sub.slice), 0) AS avg
+            FROM (
+              SELECT SUM(oi."totalPrice") AS slice
+              FROM "OrderItem" oi
+              JOIN "Order" o ON o.id = oi."orderId"
+              WHERE oi."vendorId" = ${vid}
+                AND o.status     IN ('COMPLETED', 'DELIVERED')
+                AND o."placedAt" >= ${sinceDate}
+              GROUP BY oi."orderId"
+            ) sub
+          `,
 
           // Top 5 selling items by revenue
           db.orderItem.groupBy({
@@ -120,9 +133,10 @@ export async function GET(
             take: 5,
           }),
 
-          // Currently active orders (real-time — not cached separately)
+          // Currently active orders (real-time — not cached separately).
+          // Also scoped by OrderItem participation, matching the counts above.
           db.order.count({
-            where: { vendorId: vid, status: { in: ['PLACED', 'ACCEPTED', 'PREPARING'] } },
+            where: { orderItems: { some: { vendorId: vid } }, status: { in: ['PLACED', 'ACCEPTED', 'PREPARING'] } },
           }),
         ])
 
@@ -135,7 +149,7 @@ export async function GET(
           : 1
 
         const todayRevenue  = parseFloat((revenueAgg._sum.totalPrice ?? 0).toFixed(2))
-        const avgOrderValue = parseFloat((avgOrder._avg.total ?? 0).toFixed(2))
+        const avgOrderValue = parseFloat(Number(avgResult[0]?.avg ?? 0).toFixed(2))
 
         // Count orders (all statuses) within range
         const todayOrders = totalOrders
