@@ -2,59 +2,32 @@ import MarketplaceNavbar from '../_components/MarketplaceNavbar'
 import FairCard from '../_components/FairCard'
 import WelcomeBanner from '../_components/WelcomeBanner'
 import { getAllFairsCached } from '@/lib/fairs'
-import { mockFairs } from '@/lib/mock'
-import type { Fair, FairStatus } from '@/lib/mock'
+import { toPublicFairCard, type PublicFairCard, type PublicFairStatus } from '@/lib/fair-view'
 
 export const metadata = {
   title: 'Discover Fairs — FairSynq',
 }
 
-const STATUS_ORDER: FairStatus[] = ['active', 'upcoming', 'completed', 'archived', 'draft']
+// Only publicly-listed statuses (the endpoint already filters to ACTIVE/UPCOMING;
+// 'completed' kept for the section map in case an INACTIVE fair is ever surfaced).
+const STATUS_ORDER: PublicFairStatus[] = ['active', 'upcoming', 'completed']
 
-const SECTION_LABELS: Partial<Record<FairStatus, string>> = {
+const SECTION_LABELS: Record<PublicFairStatus, string> = {
   active:    'Happening Now',
   upcoming:  'Coming Soon',
   completed: 'Past Events',
 }
 
-function normalizeFairStatus(s: string): FairStatus {
-  const map: Record<string, FairStatus> = {
-    ACTIVE: 'active', UPCOMING: 'upcoming',
-    INACTIVE: 'completed', COMPLETED: 'completed',
-    DRAFT: 'draft',
-  }
-  return map[s] ?? 'upcoming'
-}
-
 export default async function FairsPage() {
-  let fairs: Fair[] = mockFairs
-
+  let fairs: PublicFairCard[] = []
   try {
-    const live = await getAllFairsCached()
-    if (live.length > 0) {
-      fairs = live.map(e => ({
-        id: e.id,
-        name: e.name,
-        slug: e.slug,
-        description: e.description ?? undefined,
-        location: { city: 'Collinsville', state: 'IL', address: '', coordinates: { lat: 0, lng: 0 } },
-        dates: { startDate: e.startDate, endDate: e.endDate },
-        status: normalizeFairStatus(e.status),
-        operatingHours: { open: '', close: '' },
-        branding: {
-          accentColor: e.primaryColor,
-          gradientFrom: e.primaryColor,
-          gradientTo: '#7C3AED',
-        },
-        vendorCount: e.vendorCount,
-        admissionFree: false,
-      }))
-    }
+    fairs = (await getAllFairsCached()).map(toPublicFairCard)
   } catch {
-    // DB unavailable — fall through to mock data
+    // DB unavailable — render the empty state rather than fake fairs.
+    fairs = []
   }
 
-  const grouped = STATUS_ORDER.reduce<Record<string, Fair[]>>((acc, status) => {
+  const grouped = STATUS_ORDER.reduce<Record<string, PublicFairCard[]>>((acc, status) => {
     const section = fairs.filter(f => f.status === status)
     if (section.length > 0) acc[status] = section
     return acc
@@ -75,19 +48,26 @@ export default async function FairsPage() {
             </p>
           </div>
 
-          {/* Grouped sections */}
-          {Object.entries(grouped).map(([status, section]) => (
-            <section key={status} className="mb-14">
-              <h2 className="font-bebas text-2xl text-white tracking-wide mb-6">
-                {SECTION_LABELS[status as FairStatus] ?? status}
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {section.map((fair) => (
-                  <FairCard key={fair.id} fair={fair} />
-                ))}
-              </div>
-            </section>
-          ))}
+          {fairs.length === 0 ? (
+            <div className="bg-bg-card border border-white/10 rounded-2xl py-20 text-center">
+              <p className="text-white font-semibold mb-1">No fairs are live right now</p>
+              <p className="text-text-gray text-sm">Check back soon — new fairs are added regularly.</p>
+            </div>
+          ) : (
+            /* Grouped sections */
+            Object.entries(grouped).map(([status, section]) => (
+              <section key={status} className="mb-14">
+                <h2 className="font-bebas text-2xl text-white tracking-wide mb-6">
+                  {SECTION_LABELS[status as PublicFairStatus] ?? status}
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {section.map((fair) => (
+                    <FairCard key={fair.id} fair={fair} />
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
         </div>
       </div>
     </>

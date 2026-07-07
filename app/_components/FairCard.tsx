@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { MapPinIcon, CalendarIcon, UsersIcon } from '@heroicons/react/24/outline'
 import StatusBadge from './StatusBadge'
 import { EASE } from '@/components/animations/motion'
-import type { Fair } from '@/lib/mock'
+import type { PublicFairCard } from '@/lib/fair-view'
 
 function formatDateRange(startDate: string, endDate: string) {
   const start = new Date(startDate)
@@ -17,13 +17,13 @@ function formatDateRange(startDate: string, endDate: string) {
 }
 
 interface FairCardProps {
-  fair: Fair
+  fair: PublicFairCard
 }
 
 export default function FairCard({ fair }: FairCardProps) {
-  const gradientFrom = fair.branding?.gradientFrom ?? '#FF0077'
-  const gradientTo   = fair.branding?.gradientTo   ?? '#7C3AED'
-  const isClickable  = fair.status !== 'archived'
+  const gradientFrom = fair.primaryColor || '#FF0077'
+  const gradientTo   = '#7C3AED'
+  const hasLocation  = !!(fair.city && fair.state)
 
   const cardInner = (
     <>
@@ -33,11 +33,6 @@ export default function FairCard({ fair }: FairCardProps) {
         style={{ background: `linear-gradient(135deg, ${gradientFrom}, ${gradientTo})` }}
       >
         <StatusBadge status={fair.status} className="shadow-lg" />
-        {fair.admissionFree && (
-          <span className="ml-auto text-[0.6875rem] font-semibold bg-black/30 backdrop-blur-sm text-white px-2.5 py-1 rounded-full">
-            Free entry
-          </span>
-        )}
       </div>
 
       {/* Body */}
@@ -50,13 +45,15 @@ export default function FairCard({ fair }: FairCardProps) {
         )}
 
         <div className="mt-4 space-y-2">
-          <div className="flex items-center gap-2 text-text-gray text-sm">
-            <MapPinIcon className="w-4 h-4 shrink-0" />
-            <span>{fair.location.city}, {fair.location.state}</span>
-          </div>
+          {hasLocation && (
+            <div className="flex items-center gap-2 text-text-gray text-sm">
+              <MapPinIcon className="w-4 h-4 shrink-0" />
+              <span>{fair.city}, {fair.state}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 text-text-gray text-sm">
             <CalendarIcon className="w-4 h-4 shrink-0" />
-            <span>{formatDateRange(fair.dates.startDate, fair.dates.endDate)}</span>
+            <span>{formatDateRange(fair.startDate, fair.endDate)}</span>
           </div>
           <div className="flex items-center gap-2 text-text-gray text-sm">
             <UsersIcon className="w-4 h-4 shrink-0" />
@@ -64,24 +61,14 @@ export default function FairCard({ fair }: FairCardProps) {
           </div>
         </div>
 
-        {isClickable && (
-          <div className="mt-5 pt-4 border-t border-white/10">
-            <span className="text-sm font-semibold" style={{ color: gradientFrom }}>
-              {fair.status === 'active' ? 'Order now →' : 'View details →'}
-            </span>
-          </div>
-        )}
+        <div className="mt-5 pt-4 border-t border-white/10">
+          <span className="text-sm font-semibold" style={{ color: gradientFrom }}>
+            {fair.status === 'active' ? 'Order now →' : 'View details →'}
+          </span>
+        </div>
       </div>
     </>
   )
-
-  if (!isClickable) {
-    return (
-      <div className="opacity-50 cursor-default bg-bg-card border border-white/10 rounded-2xl overflow-hidden">
-        {cardInner}
-      </div>
-    )
-  }
 
   return (
     <motion.div

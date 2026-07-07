@@ -8,9 +8,6 @@ import {
   useMemo,
   type ReactNode,
 } from 'react'
-import { getFairBySlug, getVendorsByFairSlug } from '@/lib/mock'
-import type { Fair as MockFair, MockVendor } from '@/lib/mock'
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FulfillmentConfig {
@@ -114,52 +111,6 @@ function placeholderFair(fairSlug: string): FairData {
   }
 }
 
-function normalizeMockFair(f: MockFair): FairData {
-  return {
-    id: f.id,
-    name: f.name,
-    slug: f.slug,
-    tagline: f.tagline,
-    description: f.description ?? null,
-    primaryColor: f.branding?.accentColor ?? '#FF0077',
-    branding: {
-      accentColor: f.branding?.accentColor ?? '#FF0077',
-      gradientFrom: f.branding?.gradientFrom ?? '#FF0077',
-      gradientTo: f.branding?.gradientTo ?? '#7C3AED',
-    },
-    status: f.status === 'draft' || f.status === 'archived' ? 'upcoming' : f.status,
-    dates: { startDate: f.dates.startDate, endDate: f.dates.endDate },
-    fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true, homeDeliveryFee: 2.99, curbsideFee: 0, curbsideZoneDescription: null },
-    serviceChargeEnabled: false,
-    serviceChargeAmount: null,
-    location: f.location,
-    operatingHours: f.operatingHours,
-    hours: f.hours,
-    admission: f.admission,
-    contact: f.contact,
-    admissionFree: f.admissionFree,
-    contactEmail: f.contactEmail,
-    website: f.website,
-  }
-}
-
-function normalizeMockVendor(v: MockVendor): VendorData {
-  return {
-    id: v.id,
-    name: v.name,
-    slug: v.slug,
-    cuisineType: v.cuisineType,
-    description: v.description ?? null,
-    boothNumber: v.boothNumber ?? null,
-    logoUrl: v.logoUrl ?? null,
-    isBusy: v.isBusy ?? false,
-    isOffline: false,
-    featured: v.featured,
-    featuredReason: v.featuredReason,
-    _count: { menuItems: v.menu?.length ?? 0 },
-  }
-}
-
 function normalizeEvent(raw: any): FairData {
   const color = raw.primaryColor ?? '#FF0077'
   const fc = raw.fulfillmentConfig ?? null
@@ -240,33 +191,9 @@ export function FairProvider({ fairSlug, children, initialFair, initialVendors }
     fetch(`/api/events/${fairSlug}`)
       .then(r => r.ok ? r.json() : null)
       .then(json => {
-        if (json?.data) {
-          const normalized = normalizeEvent(json.data)
-          // Supplement sparse DB data with mock fields (hours, admission, contact, location)
-          const mockFair = getFairBySlug(fairSlug)
-          if (mockFair) {
-            const mock = normalizeMockFair(mockFair)
-            setFair({
-              ...normalized,
-              location: normalized.location.address ? normalized.location : mock.location,
-              operatingHours: normalized.operatingHours.open ? normalized.operatingHours : mock.operatingHours,
-              hours: normalized.hours ?? mock.hours,
-              admission: normalized.admission ?? mock.admission,
-              contact: normalized.contact ?? mock.contact,
-              tagline: normalized.tagline ?? mock.tagline,
-            })
-          } else {
-            setFair(normalized)
-          }
-        } else {
-          const mockFair = getFairBySlug(fairSlug)
-          if (mockFair) setFair(normalizeMockFair(mockFair))
-        }
+        if (json?.data) setFair(normalizeEvent(json.data))
       })
-      .catch(() => {
-        const mockFair = getFairBySlug(fairSlug)
-        if (mockFair) setFair(normalizeMockFair(mockFair))
-      })
+      .catch(() => { /* keep SSR/placeholder fair — no mock */ })
       .finally(() => setFairLoading(false))
   }, [fairSlug])
 
@@ -275,17 +202,9 @@ export function FairProvider({ fairSlug, children, initialFair, initialVendors }
     fetch(`/api/vendors?eventSlug=${fairSlug}&limit=100`)
       .then(r => r.ok ? r.json() : null)
       .then(json => {
-        if (json?.data?.length) {
-          setVendors(json.data.map(normalizeVendor))
-        } else {
-          const mockVendorList = getVendorsByFairSlug(fairSlug)
-          setVendors(mockVendorList.map(normalizeMockVendor))
-        }
+        setVendors(json?.data?.length ? json.data.map(normalizeVendor) : [])
       })
-      .catch(() => {
-        const mockVendorList = getVendorsByFairSlug(fairSlug)
-        setVendors(mockVendorList.map(normalizeMockVendor))
-      })
+      .catch(() => { /* keep SSR vendors — no mock */ })
       .finally(() => setVendorsLoading(false))
   }, [fairSlug])
 

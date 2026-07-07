@@ -8,8 +8,7 @@ import { EASE, TIMING, Reveal, Stagger, StaggerItem } from '@/components/animati
 import MarketplaceNavbar from './_components/MarketplaceNavbar'
 import FairCard from './_components/FairCard'
 import HowItWorksSection from './_components/HowItWorksSection'
-import { mockFairs, getActiveFairs } from '@/lib/mock'
-import type { Fair } from '@/lib/mock'
+import { toPublicFairStatus, type PublicFairCard } from '@/lib/fair-view'
 import { useUser } from '@clerk/clerk-react'
 import { useState, useEffect } from 'react'
 import { useRole } from './_contexts/RoleContext'
@@ -333,24 +332,15 @@ function SiteFooter() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-function normalizeFairStatus(s: string): Fair['status'] {
-  const map: Record<string, Fair['status']> = {
-    ACTIVE: 'active', UPCOMING: 'upcoming',
-    INACTIVE: 'completed', COMPLETED: 'completed',
-    DRAFT: 'draft',
-  }
-  return map[s] ?? 'upcoming'
-}
-
 export default function MarketplaceLanding() {
-  const [liveFairs, setLiveFairs] = useState<Fair[] | null>(null)
+  const [liveFairs, setLiveFairs] = useState<PublicFairCard[] | null>(null)
 
   useEffect(() => {
     fetch('/api/fairs')
       .then(r => r.json())
       .then(json => {
         if (!json?.success) return
-        const fairs: Fair[] = json.data.map((e: {
+        const fairs: PublicFairCard[] = json.data.map((e: {
           id: string; name: string; slug: string; description: string | null;
           primaryColor: string; status: string; startDate: string; endDate: string;
           vendorCount: number;
@@ -358,25 +348,19 @@ export default function MarketplaceLanding() {
           id: e.id,
           name: e.name,
           slug: e.slug,
-          description: e.description,
-          location: { city: 'Collinsville', state: 'IL', address: '' },
-          dates: { startDate: e.startDate, endDate: e.endDate },
-          status: normalizeFairStatus(e.status),
-          operatingHours: { open: '', close: '' },
-          branding: {
-            accentColor: e.primaryColor,
-            gradientFrom: e.primaryColor,
-            gradientTo: '#7C3AED',
-          },
+          tagline: e.description,
+          status: toPublicFairStatus(e.status),
+          startDate: e.startDate,
+          endDate: e.endDate,
           vendorCount: e.vendorCount,
-          admissionFree: false,
+          primaryColor: e.primaryColor,
         }))
         setLiveFairs(fairs)
       })
-      .catch(() => {/* fall through to mock */})
+      .catch(() => {/* leave as empty — no fake fairs */})
   }, [])
 
-  const allFairs    = liveFairs ?? mockFairs
+  const allFairs    = liveFairs ?? []
   const activeFairs = allFairs.filter(f => f.status === 'active' || f.status === 'upcoming')
 
   return (

@@ -86,12 +86,13 @@ function FairComingSoon({ accentColor, gradientFrom, gradientTo }: {
             {formatCountdown(fair.dates.startDate)}
           </div>
 
-          {/* Info cards */}
+          {/* Info cards — only render cards backed by real data (Hours/Location
+              aren't stored on the Event, so they're omitted rather than shown blank). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
             {[
               { icon: CalendarIcon, label: 'Start Date', value: formatDate(fair.dates.startDate) },
-              { icon: ClockIcon, label: 'Hours', value: `${fair.operatingHours.open} – ${fair.operatingHours.close}` },
-              { icon: MapPinIcon, label: 'Location', value: fair.location.address },
+              ...(fair.operatingHours.open ? [{ icon: ClockIcon, label: 'Hours', value: `${fair.operatingHours.open} – ${fair.operatingHours.close}` }] : []),
+              ...(fair.location.address || fair.location.city ? [{ icon: MapPinIcon, label: 'Location', value: fair.location.address || `${fair.location.city}${fair.location.state ? `, ${fair.location.state}` : ''}` }] : []),
               { icon: TicketIcon, label: 'Admission', value: fair.admissionFree ? 'Free entry' : 'Paid entry' },
             ].map(({ icon: Icon, label, value }) => (
               <div key={label} className="bg-bg-card border border-white/10 rounded-2xl p-4 flex gap-3">
@@ -237,16 +238,20 @@ export default function FairHomePage() {
             <p className="text-white/75 text-sm sm:text-base mb-4">{fair.tagline}</p>
           )}
 
-          {/* Meta pills */}
+          {/* Meta pills — location/hours only when the fair has them (not on the Event model). */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-white/70 text-xs">
-            <span className="flex items-center gap-1">
-              <MapPinIcon className="w-3.5 h-3.5 shrink-0" />
-              {fair.location.city}
-            </span>
-            <span className="flex items-center gap-1">
-              <ClockIcon className="w-3.5 h-3.5 shrink-0" />
-              {fair.operatingHours.open} – {fair.operatingHours.close}
-            </span>
+            {fair.location.city && (
+              <span className="flex items-center gap-1">
+                <MapPinIcon className="w-3.5 h-3.5 shrink-0" />
+                {fair.location.city}
+              </span>
+            )}
+            {fair.operatingHours.open && (
+              <span className="flex items-center gap-1">
+                <ClockIcon className="w-3.5 h-3.5 shrink-0" />
+                {fair.operatingHours.open} – {fair.operatingHours.close}
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <TicketIcon className="w-3.5 h-3.5 shrink-0" />
               {fair.admissionFree ? 'Free entry' : 'Paid entry'}
