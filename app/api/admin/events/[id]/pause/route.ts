@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
-import { requireAdminAuth } from '@/lib/auth'
+import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { EventStatus } from '@prisma/client'
 
 // PATCH /api/admin/events/[id]/pause
@@ -15,7 +15,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdminAuth()
+    const { id } = await params
+    const { event } = await requireAdminFairContext(id)
 
     const { isPaused }: { isPaused: boolean } = await req.json()
 
@@ -23,15 +24,12 @@ export async function PATCH(
       throw new ApiError('isPaused must be a boolean', 400, 'VALIDATION_ERROR')
     }
 
-    const event = await db.event.findUnique({ where: { id: (await params).id } })
-    if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
-
     if (event.status !== EventStatus.ACTIVE) {
       throw new ApiError('Only ACTIVE events can be paused or resumed', 409, 'EVENT_NOT_ACTIVE')
     }
 
     const updated = await db.event.update({
-      where: { id: (await params).id },
+      where: { id: event.id },
       data: { isPaused },
       select: { id: true, name: true, status: true, isPaused: true },
     })
