@@ -1,6 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const { unstable_cache } = require('next/cache') as { unstable_cache: typeof import('next/cache').unstable_cache }
 import { db } from '@/lib/db'
+import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 
 export interface MenuVariant {
   id: string
@@ -94,7 +95,10 @@ async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMe
     where: { urlSlug: eventSlug },
     select: {
       vendors: {
-        where: { status: 'ACTIVE', isOffline: false },
+        // Same readiness gate every other customer surface applies — when
+        // enforcement is on, only ready vendors' items (and therefore vendor
+        // tabs, which are derived from these items) appear on browse/menu.
+        where: { status: 'ACTIVE', isOffline: false, ...readinessWhereIfEnforced() },
         select: { id: true },
       },
     },
