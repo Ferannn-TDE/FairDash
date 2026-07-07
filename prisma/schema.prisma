@@ -912,6 +912,14 @@ model FairOrganizer {
   stripeVerified    Boolean   @default(false)
   stripeConnectedAt DateTime?
 
+  // A6 kill-switch — org-wide suspension (D4). When suspendedAt is set, EVERY
+  // request through requireOrganizerAuth for a member of this organizer is denied
+  // (403 ORGANIZER_SUSPENDED). Deliberately DB state, not Clerk metadata: because
+  // requireOrganizerAuth reads fresh per request, suspension takes effect on the
+  // NEXT request — no token lag. Set/cleared only via the admin-gated write.
+  suspendedAt     DateTime?
+  suspendedReason String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -921,6 +929,7 @@ model FairOrganizer {
 
   @@index([stripeVerified])
   @@index([stripeAccountId])
+  @@index([suspendedAt])
 }
 
 model OrgMember {
