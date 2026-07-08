@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, Fragment } from 'react'
+import { useState, useCallback, useEffect, Fragment } from 'react'
 import Link from 'next/link'
 import {
   BuildingStorefrontIcon,
@@ -37,7 +37,8 @@ interface FormData {
   contactName: string
   email: string
   phone: string
-  cuisineType: string
+  cuisineTypes: string[]     // multi-select; joined into the server's cuisineType string on submit
+  customCuisine: string      // free text when "Other" is selected
   description: string
   foodHandlerPermit: File | null
   liabilityInsurance: File | null
@@ -106,7 +107,7 @@ const INITIAL_ITEM: MenuItemData = { id: '1', name: '', description: '', price: 
 
 const INITIAL: FormData = {
   businessName: '', contactName: '', email: '', phone: '',
-  cuisineType: '', description: '',
+  cuisineTypes: [], customCuisine: '', description: '',
   foodHandlerPermit: null, liabilityInsurance: null,
   menuItems: [{ ...INITIAL_ITEM }],
   boothPhotos: [], legalName: '', stripeConnected: false,
@@ -187,13 +188,38 @@ function ProgressBar({ step }: { step: number }) {
 
 // ─── Step components ──────────────────────────────────────────────────────────
 
-function Step1({ data, update }: { data: FormData; update: (p: Partial<FormData>) => void }) {
+function Step1({ data, update, fairs, eventSlug, setEventSlug }: {
+  data: FormData
+  update: (p: Partial<FormData>) => void
+  fairs: { slug: string; name: string }[]
+  eventSlug: string | null
+  setEventSlug: (s: string) => void
+}) {
   return (
     <div className="bg-bg-card border border-white/10 rounded-2xl p-6 space-y-5">
       <div>
         <h2 className="font-bebas text-2xl tracking-wide text-white mb-1">Account Setup</h2>
         <p className="text-text-gray text-sm">Your business identity on FairSynq.</p>
       </div>
+
+      {/* Which fair — a Vendor application is per-fair, so this must be set (was the
+          missing eventSlug that 400'd on submit). Auto-selected when there's one fair. */}
+      <div>
+        <Label required>Which fair are you applying to?</Label>
+        {fairs.length === 0 ? (
+          <p className="text-sm text-text-gray">Loading fairs…</p>
+        ) : (
+          <select
+            className={`${iCls} cursor-pointer`}
+            value={eventSlug ?? ''}
+            onChange={e => setEventSlug(e.target.value)}
+          >
+            <option value="" disabled>Select a fair…</option>
+            {fairs.map(f => <option key={f.slug} value={f.slug}>{f.name}</option>)}
+          </select>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <Label required>Business Name</Label>
@@ -230,21 +256,35 @@ function Step2({ data, update }: { data: FormData; update: (p: Partial<FormData>
         <p className="text-text-gray text-sm">Tell fair-goers what you serve. Booth, menu &amp; payouts come after approval.</p>
       </div>
 
-      {/* Cuisine type */}
+      {/* Cuisine type — multi-select (pick as many as apply) */}
       <div>
-        <Label required>Cuisine Type</Label>
+        <Label required>Cuisine Type <span className="text-text-gray font-normal normal-case">(select all that apply)</span></Label>
         <div className="flex flex-wrap gap-2 mt-1">
-          {CUISINE_OPTIONS.map(c => (
-            <button key={c} onClick={() => update({ cuisineType: c })}
-              className={`px-3.5 py-2 rounded-full text-sm font-medium border cursor-pointer transition-all duration-200 ${
-                data.cuisineType === c
-                  ? 'bg-neon-pink border-neon-pink text-white shadow-[0_2px_8px_rgba(255,0,119,0.3)]'
-                  : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
-              }`}>
-              {c}
-            </button>
-          ))}
+          {CUISINE_OPTIONS.map(c => {
+            const selected = data.cuisineTypes.includes(c)
+            return (
+              <button key={c} type="button"
+                onClick={() => {
+                  const next = selected
+                    ? data.cuisineTypes.filter(x => x !== c)
+                    : [...data.cuisineTypes, c]
+                  update({ cuisineTypes: next, ...(c === 'Other' && selected ? { customCuisine: '' } : {}) })
+                }}
+                className={`px-3.5 py-2 rounded-full text-sm font-medium border cursor-pointer transition-all duration-200 ${
+                  selected
+                    ? 'bg-neon-pink border-neon-pink text-white shadow-[0_2px_8px_rgba(255,0,119,0.3)]'
+                    : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
+                }`}>
+                {c}
+              </button>
+            )
+          })}
         </div>
+        {/* "Other" reveals a free-text field for a custom cuisine */}
+        {data.cuisineTypes.includes('Other') && (
+          <input className={`${iCls} mt-3`} placeholder="Enter your cuisine type (e.g. Ethiopian, Filipino)"
+            value={data.customCuisine} onChange={e => update({ customCuisine: e.target.value })} />
+        )}
       </div>
 
       {/* Description */}
@@ -300,7 +340,7 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
             <ShieldCheckIcon className="w-4 h-4 text-emerald-400 shrink-0" />
             <p className="text-sm text-emerald-400">
               Signed by <span className="font-semibold text-white">{data.legalName}</span>
-              <span className="text-emerald-500/70"> · {new Date().toLocaleDateString()} · Session IP logged</span>
+              <span className="text-emerald-500/70"> · {new Date().toLocaleDateString()}</span>
             </p>
           </div>
         )}
@@ -360,22 +400,50 @@ export default function VendorOnboarding() {
   const [step, setStep] = useState(1)
   const [data, setData] = useState<FormData>(INITIAL)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [fairs, setFairs] = useState<{ slug: string; name: string }[]>([])
+  const [eventSlug, setEventSlug] = useState<string | null>(null)
+
+  // Resolve which fair to apply to (a Vendor is per-fair). Prefer the ?event URL
+  // param; else load the public fair list and auto-pick when there's exactly one.
+  // This replaces the old "read ?event or send null" that 400'd every submission.
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('event')
+    fetch('/api/fairs')
+      .then(r => r.json())
+      .then(json => {
+        const list: { slug: string; name: string }[] = (json?.success ? json.data : [])
+          .map((f: { slug: string; name: string }) => ({ slug: f.slug, name: f.name }))
+        setFairs(list)
+        if (fromUrl) setEventSlug(fromUrl)
+        else if (list.length === 1) setEventSlug(list[0].slug)
+      })
+      .catch(() => { if (fromUrl) setEventSlug(fromUrl) })
+  }, [])
 
   const update = useCallback((patch: Partial<FormData>) => setData(d => ({ ...d, ...patch })), [])
 
+  const cuisineChosen = data.cuisineTypes.length > 0 &&
+    (!data.cuisineTypes.includes('Other') || data.customCuisine.trim().length > 0)
+
   const canProceed = (() => {
     switch (step) {
-      case 1: return !!(data.businessName.trim() && data.contactName.trim() && data.email.trim() && data.phone.trim())
-      case 2: return !!(data.cuisineType && data.description.trim().length >= 20)
+      case 1: return !!(eventSlug && data.businessName.trim() && data.contactName.trim() && data.email.trim() && data.phone.trim())
+      case 2: return !!(cuisineChosen && data.description.trim().length >= 20)
       case 3: return data.legalName.trim().length >= 3
       default: return true
     }
   })()
 
   const handleSubmit = async () => {
+    if (!eventSlug) { toast.error('Please select a fair to apply to.'); return }
+    // Join the multi-select into the single cuisineType string the server stores,
+    // substituting the custom value where "Other" was chosen.
+    const cuisineType = data.cuisineTypes
+      .map(c => (c === 'Other' ? data.customCuisine.trim() : c))
+      .filter(Boolean)
+      .join(', ')
     setIsSubmitting(true)
     try {
-      const eventSlug = new URLSearchParams(window.location.search).get('event')
       const res = await fetch('/api/vendors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -383,7 +451,7 @@ export default function VendorOnboarding() {
           eventSlug,
           name: data.businessName,
           description: data.description,
-          cuisineType: data.cuisineType,
+          cuisineType,
           // Contact (the application's contact) + signed legal consent — now
           // persisted, no longer collected-then-discarded.
           contactName:  data.contactName,
@@ -426,7 +494,7 @@ export default function VendorOnboarding() {
 
         {/* Step content with key for animation re-trigger */}
         <div key={step} className="animate-fadeIn">
-          {step === 1 && <Step1 data={data} update={update} />}
+          {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} />}
           {step === 2 && <Step2 data={data} update={update} />}
           {step === 3 && <Step6 data={data} update={update} />}
           {step === 4 && <Step8 data={data} />}
