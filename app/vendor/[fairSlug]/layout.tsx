@@ -43,7 +43,9 @@ export default function VendorFairLayout({ params: paramsPromise, children }: Pr
   const [error, setError] = useState(false)
 
   useEffect(() => {
-    fetch('/api/vendors/me')
+    // Fair-scoped: resolve the vendor this user owns AT THIS fair (not their newest
+    // globally). Without this param the portal could show the wrong own-vendor.
+    fetch(`/api/vendors/me?fairSlug=${encodeURIComponent(params.fairSlug)}`)
       .then(r => r.json())
       .then(json => {
         if (!json.success) { setError(true); return }
