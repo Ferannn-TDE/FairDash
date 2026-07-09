@@ -4,6 +4,9 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorMembershipById } from '@/lib/auth'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
+import { logger } from '@/lib/logger'
+
+const STORAGE_BUCKET = 'vendor-documents'
 
 const ALLOWED_MIME = new Set([
   'application/pdf',
@@ -54,38 +57,31 @@ export async function POST(
       return apiError('File must be 10 MB or smaller', 400, 'FILE_TOO_LARGE')
     }
 
-    // ── Storage upload ─────────────────────────────────────────────────────────
-    // Replace this block with your storage provider:
-    //
-    // Supabase:
-    //   const { createClient } = await import('@supabase/supabase-js')
-    //   const supabase = createClient(
-    //     process.env.SUPABASE_URL!,
-    //     process.env.SUPABASE_SERVICE_ROLE_KEY!
-    //   )
-    //   const fileName = `${Date.now()}-${(file as File).name ?? docType}`
-    //   const path = `vendors/${vendorId}/${docType}/${fileName}`
-    //   const { error } = await supabase.storage
-    //     .from('vendor-documents')
-    //     .upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type, upsert: true })
-    //   if (error) throw new Error(error.message)
-    //   const { data } = supabase.storage.from('vendor-documents').getPublicUrl(path)
-    //   const fileUrl = data.publicUrl
-    //
-    // For now, return 501 until storage is configured.
-    const storageConfigured =
-      !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY
-
-    if (!storageConfigured) {
-      return apiError(
-        'Document storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
-        501,
-        'STORAGE_NOT_CONFIGURED'
-      )
+    // ── Storage upload (real — Supabase Storage REST, server-side, service key) ──
+    // Uploads the file to the vendor-documents bucket and stores its URL. Never
+    // "succeeds" without actually storing the file (the old placeholder wrote an
+    // empty URL and silently discarded uploads).
+    const supabaseUrl = process.env.SUPABASE_URL
+    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !serviceKey) {
+      return apiError('Document storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.', 503, 'STORAGE_NOT_CONFIGURED')
     }
 
-    // Placeholder — replace with actual upload result URL above
-    const fileUrl = ''
+    const safeName = ((file as File).name ?? docType).replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path     = `${vendorId}/${docType}/${Date.now()}_${safeName}`
+
+    const upload = await fetch(`${supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${path}`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey, 'Content-Type': file.type, 'x-upsert': 'true' },
+      body:    Buffer.from(await file.arrayBuffer()),
+    })
+    if (!upload.ok) {
+      const body = await upload.text()
+      logger.error('[Documents] Supabase upload failed', { vendorId, docType, status: upload.status, body: body.slice(0, 200) })
+      return apiError('Upload failed — please try again', 502, 'STORAGE_UPLOAD_FAILED')
+    }
+
+    const fileUrl = `${supabaseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`
 
     const dbField = DOC_FIELD[docType]
     const vendor = await db.vendor.update({
