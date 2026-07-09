@@ -222,6 +222,10 @@ model Vendor {
   // Operating hours — JSON: Record<Day, { open: string; close: string; enabled: boolean }>
   operatingHours Json?
 
+  // Vendor-operator notification preferences — JSON:
+  // { newOrder: bool, orderReady: bool, dailySummary: bool, marketing: bool }
+  notificationPrefs Json?
+
   // Booth photos (array of URLs)
   boothPhotoUrls Json?
 

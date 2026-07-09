@@ -172,10 +172,33 @@ export default function VendorSettingsPage() {
     }
   }, [loadStripeStatus])
 
-  // ── Notifications (local only until notification prefs API is added) ──────
+  // ── Notifications — persisted to Vendor.notificationPrefs via PATCH ───────
   const [notifs, setNotifs] = useState({
     newOrder: true, orderReady: true, dailySummary: false, marketing: false,
   })
+  const [savingNotifs, setSavingNotifs] = useState(false)
+
+  // Toggle one pref, optimistically, then persist the full set. On failure, revert.
+  const toggleNotif = useCallback(async (key: keyof typeof notifs) => {
+    if (!vendorId) return
+    const next = { ...notifs, [key]: !notifs[key] }
+    setNotifs(next)
+    setSavingNotifs(true)
+    try {
+      const res = await fetch(`/api/vendors/${vendorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationPrefs: next }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error?.message ?? 'Failed to save')
+    } catch {
+      setNotifs(notifs)  // revert the optimistic toggle
+      toast.error('Couldn’t save notification preference')
+    } finally {
+      setSavingNotifs(false)
+    }
+  }, [vendorId, notifs])
 
   // ── Initial fetch ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -194,6 +217,9 @@ export default function VendorSettingsPage() {
           setBoothNumber(v.boothNumber ?? null)
           if (v.operatingHours) {
             setHours(v.operatingHours as Record<Day, DayHours>)
+          }
+          if (v.notificationPrefs) {
+            setNotifs(p => ({ ...p, ...(v.notificationPrefs as Partial<typeof p>) }))
           }
         }
         if (docsJson.success) {
@@ -231,6 +257,15 @@ export default function VendorSettingsPage() {
   // ── Hours save ────────────────────────────────────────────────────────────
   async function handleSaveHours() {
     if (!vendorId) return
+    // Validate the text HH:MM fields for every enabled day before persisting.
+    const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
+    const bad = (Object.entries(hours) as [Day, DayHours][])
+      .filter(([, h]) => h.enabled && (!HHMM.test(h.open) || !HHMM.test(h.close)))
+      .map(([d]) => d)
+    if (bad.length) {
+      toast.error(`Enter times as HH:MM (24-hour) for: ${bad.join(', ')}`)
+      return
+    }
     setSavingHours(true)
     try {
       const res  = await fetch(`/api/vendors/${vendorId}`, {
@@ -381,7 +416,7 @@ export default function VendorSettingsPage() {
                   <p className="text-text-gray text-xs mt-0.5">{sub}</p>
                 </div>
                 <button
-                  onClick={() => setNotifs(p => ({ ...p, [key]: !p[key] }))}
+                  onClick={() => toggleNotif(key)}
                   className={`relative rounded-full transition-colors duration-300 cursor-pointer border-0 shrink-0 ${notifs[key] ? 'bg-neon-pink' : 'bg-white/20'}`}
                   style={{ height: '22px', width: '40px' }}
                 >
@@ -407,15 +442,24 @@ export default function VendorSettingsPage() {
                 <span className={`w-8 text-xs font-semibold shrink-0 ${hours[day].enabled ? 'text-white' : 'text-text-gray'}`}>{day}</span>
                 {hours[day].enabled ? (
                   <div className="flex items-center gap-2 flex-1">
+                    {/* Plain text HH:MM inputs — always click-and-type editable, unlike
+                        native type="time" (which only edits via segment/spinner and reads
+                        as "uneditable" to many users). Validated to HH:MM on Save. */}
                     <input
-                      type="time"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={5}
+                      placeholder="HH:MM"
                       value={hours[day].open}
                       onChange={e => setHours(p => ({ ...p, [day]: { ...p[day], open: e.target.value } }))}
                       className="flex-1 bg-bg-dark border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors"
                     />
                     <span className="text-text-gray text-xs shrink-0">–</span>
                     <input
-                      type="time"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={5}
+                      placeholder="HH:MM"
                       value={hours[day].close}
                       onChange={e => setHours(p => ({ ...p, [day]: { ...p[day], close: e.target.value } }))}
                       className="flex-1 bg-bg-dark border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors"
