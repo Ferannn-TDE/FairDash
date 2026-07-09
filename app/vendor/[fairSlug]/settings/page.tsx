@@ -100,7 +100,7 @@ function AccountSection() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function VendorSettingsPage() {
-  const { vendorId } = useVendorMeta()
+  const { vendorId, fairSlug } = useVendorMeta()
 
   // ── Business profile ──────────────────────────────────────────────────────
   const [loadingProfile, setLoadingProfile] = useState(true)
@@ -204,15 +204,18 @@ export default function VendorSettingsPage() {
   useEffect(() => {
     if (!vendorId) return
 
-    // Load vendor profile + documents + Stripe status in parallel
+    // Load vendor profile + documents + Stripe status in parallel.
+    // Profile comes from the MEMBER endpoint /api/vendors/me?fairSlug= (ungated,
+    // fair-scoped) — NOT the customer-facing GET /api/vendors/[id], which applies
+    // the readiness gate and 404s not-ready vendors, blanking the owner's own form.
     Promise.all([
-      fetch(`/api/vendors/${vendorId}`).then(r => r.json()),
+      fetch(`/api/vendors/me?fairSlug=${encodeURIComponent(fairSlug)}`).then(r => r.json()),
       fetch(`/api/vendors/${vendorId}/documents`).then(r => r.json()),
       fetch(`/api/vendors/${vendorId}/stripe/status`).then(r => r.json()),
     ])
       .then(([vendorJson, docsJson, stripeJson]) => {
         if (vendorJson.success) {
-          const v = vendorJson.data
+          const v = vendorJson.data.vendor
           setForm({ name: v.name ?? '', cuisineType: v.cuisineType ?? '', description: v.description ?? '' })
           setBoothNumber(v.boothNumber ?? null)
           if (v.operatingHours) {
@@ -237,6 +240,13 @@ export default function VendorSettingsPage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     if (!vendorId) return
+    // Destructive-blank guard: never PATCH an empty profile over real data. If the
+    // form is empty (e.g. it failed to load), block the save instead of wiping the
+    // vendor's real name/cuisine/description with empty strings.
+    if (!form.name.trim() || !form.cuisineType.trim() || !form.description.trim()) {
+      toast.error('Business name, cuisine, and description can’t be empty.')
+      return
+    }
     setSaving(true)
     try {
       const res  = await fetch(`/api/vendors/${vendorId}`, {
