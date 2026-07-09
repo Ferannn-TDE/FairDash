@@ -38,6 +38,7 @@ export async function GET(
         status: true,
         eventId: true,
         operatingHours: true,
+        notificationPrefs: true,
         foodHandlerPermitUrl: true,
         insuranceUrl: true,
         businessLicenseUrl: true,
@@ -101,7 +102,7 @@ export async function PATCH(
     const body = await req.json()
     // `status` is intentionally excluded — vendors cannot deactivate themselves.
     // Status changes require admin or organizer auth (see /api/admin/vendors/:id).
-    const { isBusy, isOffline, boothNumber, description, name, cuisineType, operatingHours } = body
+    const { isBusy, isOffline, boothNumber, description, name, cuisineType, operatingHours, notificationPrefs } = body
 
     const vendor = await db.vendor.update({
       where: { id },
@@ -116,6 +117,7 @@ export async function PATCH(
         ...(name !== undefined && { name: String(name) }),
         ...(cuisineType !== undefined && { cuisineType: String(cuisineType) }),
         ...(operatingHours !== undefined && { operatingHours }),
+        ...(notificationPrefs !== undefined && { notificationPrefs }),
       },
     })
 
