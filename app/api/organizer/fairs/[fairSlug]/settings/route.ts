@@ -39,7 +39,11 @@ const BOOLEAN_FIELDS = new Set([
   'serviceChargeEnabled',
 ])
 
-const ALLOWED_STATUSES: EventStatus[] = ['UPCOMING', 'ACTIVE', 'INACTIVE']
+// Containment gate (until the admin approval workflow lands): an organizer may set
+// their fair UPCOMING (prep) or INACTIVE (take offline) themselves, but NOT ACTIVE —
+// ACTIVE is what makes a fair publicly discoverable/orderable, so self-publishing is
+// disallowed. Going live becomes a deliberate approval step outside organizer self-serve.
+const ALLOWED_STATUSES: EventStatus[] = ['UPCOMING', 'INACTIVE']
 
 // GET /api/organizer/fairs/[fairSlug]/settings
 export async function GET(
