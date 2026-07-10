@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { refundVendorPortion } from '@/lib/process-refund'
 import { logger } from '@/lib/logger'
 
@@ -25,11 +26,10 @@ export async function POST(
     const { organizerId, clerkId } = await requireOrganizerAuth()
     const { fairSlug, orderId } = await params
 
-    const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
-      select: { id: true },
-    })
-    if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
+    // MONEY CARVE-OUT: refunds must stay reachable AFTER a fair is soft-deleted,
+    // so this resolves with includeArchived — it must NOT adopt the default
+    // (archived-excluding) resolver, or deleting a fair would strand its refunds.
+    const event = await resolveOwnedFair(fairSlug, organizerId, { includeArchived: true })
 
     const order = await db.order.findUnique({
       where: { id: orderId },

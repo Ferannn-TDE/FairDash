@@ -78,6 +78,12 @@ model Event {
   organizerId String?
   organizer   FairOrganizer? @relation(fields: [organizerId], references: [id])
 
+  // Soft-delete. null = live; a set timestamp hides the fair from ALL customer +
+  // organizer views while preserving the row and every attached financial record
+  // (orders, payouts, vendors). Money/audit/integrity paths deliberately ignore
+  // this flag so a deleted fair keeps settling.
+  archivedAt DateTime?
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -93,6 +99,7 @@ model Event {
 
   @@index([urlSlug])
   @@index([status])
+  @@index([status, archivedAt])
 }
 
 enum EventStatus {

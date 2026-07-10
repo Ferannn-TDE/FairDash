@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { logger } from '@/lib/logger'
 
 // PATCH /api/organizer/fairs/[fairSlug]/chargebacks/[chargebackId]
@@ -21,8 +22,10 @@ export async function PATCH(
     const { organizerId } = await requireOrganizerAuth()
     const { fairSlug, chargebackId } = await params
 
-    const event = await db.event.findFirst({ where: { urlSlug: fairSlug, organizerId }, select: { id: true } })
-    if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
+    // MONEY CARVE-OUT: chargeback fault-assignment must stay reachable AFTER a fair
+    // is soft-deleted (a bank dispute can land post-delete), so this resolves with
+    // includeArchived — it must NOT adopt the default (archived-excluding) resolver.
+    const event = await resolveOwnedFair(fairSlug, organizerId, { includeArchived: true })
 
     const cb = await db.chargeback.findUnique({
       where: { id: chargebackId },
