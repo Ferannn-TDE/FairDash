@@ -50,6 +50,12 @@ export default async function OrganizerLayout({ children }: { children: React.Re
     // Clerk not configured — use mock profile
   }
 
+  // Auth pages (login / unauthorized) render STANDALONE — no portal chrome. You're
+  // not in the console yet, so the sidebar (Dashboard/My Fairs/Settings) must not show.
+  if (exempt) {
+    return <QueryProvider>{children}</QueryProvider>
+  }
+
   return (
     <QueryProvider>
       <OrganizerShell userName={userName} userInitials={userInitials} userEmail={userEmail}>
