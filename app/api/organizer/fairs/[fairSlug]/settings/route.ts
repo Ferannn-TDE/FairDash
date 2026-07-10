@@ -125,7 +125,7 @@ export async function PATCH(
     })
 
     revalidateTag(`organizer-fairs-${organizerId}`, 'default')
-    revalidateTag(`fair-${fairSlug}`, 'default')
+    revalidateTag('fair', 'default')
 
     return success(updated)
   } catch (err) {
