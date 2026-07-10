@@ -199,7 +199,11 @@ function SidebarContent({
 export default function OrganizerShell({ children, userInitials, userName, userEmail }: Props) {
   const pathname = usePathname()
   const fairIdMatch = pathname.match(/\/organizer\/fairs\/([^/]+)/)
-  const currentFairId = fairIdMatch?.[1] ?? null
+  // "new" is the create-fair route, not a fair slug — don't treat it as a fair
+  // (otherwise the shell fetches /api/organizer/fairs/new/badges → 404 loop).
+  const RESERVED_SEGMENTS = new Set(['new'])
+  const seg = fairIdMatch?.[1] ?? null
+  const currentFairId = seg && !RESERVED_SEGMENTS.has(seg) ? seg : null
 
   const fairsQuery = useQuery({
     queryKey: ['organizer-fairs-sidebar'],
