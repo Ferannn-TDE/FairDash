@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
+import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
@@ -54,11 +55,7 @@ export async function GET(
       return apiError('period must be 7d, 30d, or 90d', 400, 'VALIDATION_ERROR')
     }
 
-    const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
-      select: { id: true },
-    })
-    if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
+    const event = await resolveOwnedFair(fairSlug, organizerId)
 
     const days = rawPeriod === '90d' ? 90 : rawPeriod === '30d' ? 30 : 7
 

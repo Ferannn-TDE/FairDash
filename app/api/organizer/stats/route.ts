@@ -8,7 +8,7 @@ import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 
 async function computeOrganizerStats(organizerId: string) {
   const events = await db.event.findMany({
-    where: { organizerId },
+    where: { organizerId, archivedAt: null },
     select: { id: true, status: true },
   })
 

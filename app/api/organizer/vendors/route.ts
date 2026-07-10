@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest) {
     const { organizerId } = await requireOrganizerAuth()
 
     const events = await db.event.findMany({
-      where: { organizerId },
+      where: { organizerId, archivedAt: null },
       select: { id: true, name: true },
     })
     const eventIds = events.map(e => e.id)

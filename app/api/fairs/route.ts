@@ -10,7 +10,10 @@ import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 export async function GET() {
   try {
     const events = await db.event.findMany({
-      where: { status: { in: [EventStatus.ACTIVE, EventStatus.UPCOMING] } },
+      // Public discovery: only truly-live fairs. UPCOMING is NOT public (a fair
+      // goes public when deliberately taken ACTIVE), and archived (soft-deleted)
+      // fairs vanish even if still ACTIVE.
+      where: { status: EventStatus.ACTIVE, archivedAt: null },
       take: 50,
       orderBy: { startDate: 'asc' },
       select: {

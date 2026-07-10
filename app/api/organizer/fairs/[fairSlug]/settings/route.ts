@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
+import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
@@ -50,7 +51,9 @@ export async function GET(
     const { fairSlug } = await params
 
     const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
+      // Archived fair's settings are not viewable (relation-heavy read, so inline
+      // archivedAt rather than the scalar-only resolveOwnedFair).
+      where: { urlSlug: fairSlug, organizerId, archivedAt: null },
       include: { fulfillmentConfig: true },
     })
     if (!event) return apiError('Fair not found', 404, 'NOT_FOUND')
@@ -79,11 +82,7 @@ export async function PATCH(
     const { organizerId } = await requireOrganizerAuth()
     const { fairSlug } = await params
 
-    const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
-      select: { id: true },
-    })
-    if (!event) return apiError('Fair not found', 404, 'NOT_FOUND')
+    const event = await resolveOwnedFair(fairSlug, organizerId)
 
     const body = await req.json() as Record<string, unknown>
 
@@ -131,10 +130,4 @@ export async function PATCH(
   } catch (err) {
     return handleApiError(err)
   }
-}
-
-// POST /api/organizer/fairs/[fairSlug]/settings — archive disabled for organizers.
-// Fair archival is a platform-admin action handled out-of-band (support ticket).
-export async function POST() {
-  return apiError('Fair archival must be requested via support', 403, 'FORBIDDEN')
 }
