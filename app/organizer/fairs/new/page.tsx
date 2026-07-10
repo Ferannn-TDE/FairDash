@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import toast from 'react-hot-toast'
 import { ChevronLeftIcon } from '@heroicons/react/24/outline'
 
 const STEPS = ['Basic Info', 'Dates & Location', 'Branding', 'Settings', 'Review']
@@ -172,8 +174,38 @@ function Step5({ data }: { data: FairDraft }) {
 }
 
 export default function CreateFairPage() {
+  const router = useRouter()
   const [step, setStep] = useState(0)
   const [data, setData] = useState<FairDraft>(INITIAL)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function createFair() {
+    if (!data.name.trim()) { toast.error('Fair name is required'); setStep(0); return }
+    if (!data.startDate || !data.endDate) { toast.error('Start and end dates are required'); setStep(1); return }
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/organizer/fairs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: data.name, slug: data.slug, description: data.description,
+          startDate: data.startDate, endDate: data.endDate,
+          venueAddress: data.address, venueCity: data.city, venueState: data.state, venueZip: data.zip,
+          openTime: data.openTime, closeTime: data.closeTime, timezone: data.timezone,
+          accentColor: data.accentColor, maxVendors: data.maxVendors,
+          deliveryEnabled: data.deliveryEnabled, pickupEnabled: data.pickupEnabled, admissionFree: data.admissionFree,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error?.message ?? 'Failed to create fair')
+      toast.success('Fair created')
+      router.push('/organizer/fairs')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create fair')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div>
@@ -224,8 +256,11 @@ export default function CreateFairPage() {
             ← Back
           </button>
           <div className="flex items-center gap-3">
-            <button className="px-4 py-2 text-sm font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors">
-              Save Draft
+            <button
+              onClick={createFair}
+              disabled={submitting}
+              className="px-4 py-2 text-sm font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              {submitting ? 'Saving…' : 'Save Draft'}
             </button>
             {step < STEPS.length - 1 ? (
               <button onClick={() => setStep(s => s + 1)}
@@ -233,8 +268,11 @@ export default function CreateFairPage() {
                 Next →
               </button>
             ) : (
-              <button className="px-6 py-2 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors">
-                Publish Fair
+              <button
+                onClick={createFair}
+                disabled={submitting}
+                className="px-6 py-2 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                {submitting ? 'Publishing…' : 'Publish Fair'}
               </button>
             )}
           </div>
