@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
+import { revalidateTag } from 'next/cache'
 import { EventStatus } from '@prisma/client'
 
 // PATCH /api/admin/events/[id]/pause
@@ -33,6 +34,12 @@ export async function PATCH(
       data: { isPaused },
       select: { id: true, name: true, status: true, isPaused: true },
     })
+
+    // Pause/resume is public-facing (whether the fair accepts orders) and changes
+    // the organizer's fair view. organizerId comes from the already-resolved event,
+    // so no extra query and the response shape is untouched.
+    revalidateTag('fair', 'default')
+    revalidateTag(`organizer-fairs-${event.organizerId}`, 'default')
 
     return success({ event: updated })
   } catch (err) {

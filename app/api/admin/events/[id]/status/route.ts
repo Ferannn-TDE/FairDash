@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
+import { revalidateTag } from 'next/cache'
 import { getGoLiveChecklist, GO_LIVE_KEYS } from '@/lib/go-live-checklist'
 import { EventStatus } from '@prisma/client'
 
@@ -64,6 +65,12 @@ export async function PATCH(
         logger.error('[EventClose] organizer payout enqueue failed (reconciler Pattern Q backstops)', { eventId: updated.id, error: String(err) })
       }
     }
+
+    // Status flip is a public-facing change (to/from ACTIVE ⇒ discovery visibility)
+    // AND changes the organizer's fair-list card. organizerId comes from the already-
+    // resolved event, so no extra query and the response shape is untouched.
+    revalidateTag('fair', 'default')
+    revalidateTag(`organizer-fairs-${event.organizerId}`, 'default')
 
     return success({ event: updated })
   } catch (err) {

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { unstable_cache } from 'next/cache'
+import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
@@ -167,6 +167,12 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, name: true, urlSlug: true, status: true },
     })
+
+    // Refresh the organizer's fair-list cache (this endpoint's own GET tag) so the
+    // new fair shows immediately, and the public discovery cache — new fairs start
+    // UPCOMING, which getAllFairsCached includes.
+    revalidateTag(`organizer-fairs-${organizerId}`, 'default')
+    revalidateTag('fair', 'default')
 
     return success(event, 201)
   } catch (err) {
