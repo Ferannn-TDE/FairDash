@@ -1,3 +1,4 @@
+import { EventStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
@@ -12,7 +13,9 @@ export async function GET(
   try {
     // Accept both URL slug and raw UUID so callers with only an eventId can also use this route
     const event = await db.event.findFirst({
-      where: { OR: [{ urlSlug: (await params).slug }, { id: (await params).slug }] },
+      // Detail hydration for the public fair page — gate to live, non-archived so a
+      // non-live fair is unreachable by slug OR raw id (matches getFairBySlugCached).
+      where: { OR: [{ urlSlug: (await params).slug }, { id: (await params).slug }], status: EventStatus.ACTIVE, archivedAt: null },
       include: {
         fulfillmentConfig: true,
         _count: {

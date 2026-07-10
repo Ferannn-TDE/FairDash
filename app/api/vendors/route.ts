@@ -21,7 +21,10 @@ export async function GET(req: Request) {
 
     if (!eventSlug) return apiError('eventSlug query param is required', 400, 'VALIDATION_ERROR')
 
-    const event = await db.event.findUnique({ where: { urlSlug: eventSlug } })
+    // Archived (soft-deleted) fairs vanish from the customer vendor list. Not
+    // ACTIVE-gated: this hydrates a fair's vendors and the fair page itself already
+    // 404s non-live fairs, so status gating here would be redundant.
+    const event = await db.event.findFirst({ where: { urlSlug: eventSlug, archivedAt: null } })
     if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
 
     const where = {
@@ -72,7 +75,9 @@ export async function POST(req: Request) {
       return apiError('Legal agreement must be signed to submit an application', 400, 'CONSENT_REQUIRED')
     }
 
-    const event = await db.event.findUnique({ where: { urlSlug: eventSlug } })
+    // Can't apply to a soft-deleted fair. UPCOMING is allowed — vendors apply before
+    // a fair goes live — so this is archivedAt-gated only, not ACTIVE-gated.
+    const event = await db.event.findFirst({ where: { urlSlug: eventSlug, archivedAt: null } })
     if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
 
     // Resolve internal user

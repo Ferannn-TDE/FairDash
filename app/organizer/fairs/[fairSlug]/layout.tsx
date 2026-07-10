@@ -26,7 +26,8 @@ export default async function FairLayout({
   if (!orgMember) redirect('/organizer/unauthorized')
 
   const event = await db.event.findFirst({
-    where: { urlSlug: fairSlug, organizerId: orgMember.organizerId },
+    // Soft-deleted fair → its management shell is unreachable (redirects out).
+    where: { urlSlug: fairSlug, organizerId: orgMember.organizerId, archivedAt: null },
     select: { id: true },
   })
   if (!event) redirect('/organizer/unauthorized')

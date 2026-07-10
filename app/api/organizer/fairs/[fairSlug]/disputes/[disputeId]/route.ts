@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
+import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
@@ -21,11 +22,7 @@ export async function PATCH(
     const { organizerId, clerkId } = await requireOrganizerAuth()
     const { fairSlug, disputeId } = await params
 
-    const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
-      select: { id: true },
-    })
-    if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
+    const event = await resolveOwnedFair(fairSlug, organizerId)
 
     const dispute = await db.dispute.findUnique({
       where: { id: disputeId },

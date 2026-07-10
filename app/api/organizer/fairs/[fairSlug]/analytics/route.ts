@@ -44,7 +44,8 @@ export async function GET(
     const { fairSlug } = await params
 
     const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
+      // Relation-heavy read (pulls vendors) → inline archivedAt rather than resolveOwnedFair.
+      where: { urlSlug: fairSlug, organizerId, archivedAt: null },
       select: {
         id: true, name: true, urlSlug: true, status: true, isPaused: true,
         startDate: true, endDate: true,

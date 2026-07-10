@@ -26,14 +26,14 @@ export async function GET(req: NextRequest) {
     let eventIds: string[]
     if (fairId) {
       const event = await db.event.findFirst({
-        where: { id: fairId, organizerId },
+        where: { id: fairId, organizerId, archivedAt: null },
         select: { id: true },
       })
       if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
       eventIds = [fairId]
     } else {
       const events = await db.event.findMany({
-        where: { organizerId },
+        where: { organizerId, archivedAt: null },
         select: { id: true },
       })
       eventIds = events.map(e => e.id)

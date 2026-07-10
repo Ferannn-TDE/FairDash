@@ -28,7 +28,10 @@ function normalizeStatus(s: string): FairData['status'] {
 export const getFairBySlugCached = unstable_cache(
   async (fairSlug: string): Promise<FairData | null> => {
     const raw = await db.event.findFirst({
-      where: { urlSlug: fairSlug },
+      // Public detail page: only a live, non-archived fair resolves. Returning null
+      // for UPCOMING/INACTIVE/archived makes the fair genuinely unreachable by direct
+      // URL (the layout fires notFound() on null) — hidden means 404, not just unlinked.
+      where: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null },
       select: {
         id: true,
         name: true,
@@ -106,7 +109,8 @@ export const getVendorsBySlugCached = unstable_cache(
   async (fairSlug: string): Promise<VendorData[]> => {
     const vendors = await db.vendor.findMany({
       where: {
-        event: { urlSlug: fairSlug },
+        // Only surface vendors for a live, non-archived fair (mirrors the detail-page gate).
+        event: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null },
         status: VendorStatus.ACTIVE,
         // Same readiness gate the /api/vendors endpoint applies, so the SSR vendor
         // list matches the hydrated one (no 17→2 flash when enforcement is on).
@@ -148,7 +152,8 @@ export const getVendorsBySlugCached = unstable_cache(
 export const getAllFairsCached = unstable_cache(
   async (): Promise<FairListItem[]> => {
     const events = await db.event.findMany({
-      where: { status: { in: [EventStatus.ACTIVE, EventStatus.UPCOMING] } },
+      // Public discovery list: ACTIVE-only (UPCOMING is not public) and never archived.
+      where: { status: EventStatus.ACTIVE, archivedAt: null },
       orderBy: { startDate: 'asc' },
       select: {
         id: true,

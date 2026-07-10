@@ -88,7 +88,8 @@ export async function GET(req: NextRequest) {
 
     if (eventId) {
       // Verify organizer membership
-      const event = await db.event.findUnique({ where: { id: eventId }, select: { organizerId: true } })
+      // Soft-deleted fair's menu-requests are not accessible.
+      const event = await db.event.findFirst({ where: { id: eventId, archivedAt: null }, select: { organizerId: true } })
       if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
       if (event.organizerId) {
         const isOrg = await db.orgMember.findFirst({ where: { organizerId: event.organizerId, userId: dbUser.id } })

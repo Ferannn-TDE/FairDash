@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { success, apiError } from '@/lib/api-response'
+import { resolveOwnedFair } from '@/lib/organizer-fair-context'
+import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 
@@ -16,11 +17,7 @@ export async function GET(
     const { organizerId } = await requireOrganizerAuth()
     const { fairSlug } = await params
 
-    const event = await db.event.findFirst({
-      where: { urlSlug: fairSlug, organizerId },
-      select: { id: true },
-    })
-    if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
+    const event = await resolveOwnedFair(fairSlug, organizerId)
 
     const take = Math.min(Math.max(1, parseInt(req.nextUrl.searchParams.get('take') ?? '10', 10)), 25)
 

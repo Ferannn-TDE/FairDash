@@ -22,7 +22,8 @@ const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
 
 async function fetchOrganizerFairs(organizerId: string) {
   const events = await db.event.findMany({
-    where: { organizerId },
+    // My Fairs list hides soft-deleted fairs (archived ones vanish from the organizer's view).
+    where: { organizerId, archivedAt: null },
     orderBy: { startDate: 'desc' },
     select: {
       id: true,

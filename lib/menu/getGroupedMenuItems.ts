@@ -91,8 +91,9 @@ export function getGroupedMenuItemsByVendor(
 }
 
 async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMenuItem[]> {
-  const event = await db.event.findUnique({
-    where: { urlSlug: eventSlug },
+  const event = await db.event.findFirst({
+    // Can't browse a soft-deleted fair's menu.
+    where: { urlSlug: eventSlug, archivedAt: null },
     select: {
       vendors: {
         // Same readiness gate every other customer surface applies — when

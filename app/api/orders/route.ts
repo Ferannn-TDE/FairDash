@@ -142,8 +142,10 @@ export async function POST(req: NextRequest) {
 
     // ── 2. DB validation ───────────────────────────────────────────────────
 
-    const event = await db.event.findUnique({
-      where: { id: eventId },
+    const event = await db.event.findFirst({
+      // No new orders (money-in) into a soft-deleted fair. Existing orders still
+      // settle via the INCLUDE-archived payout/reconciler paths.
+      where: { id: eventId, archivedAt: null },
       include: { fulfillmentConfig: true },
     })
 
