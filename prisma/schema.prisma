@@ -41,6 +41,16 @@ model Event {
   description String?
   timezone    String  @default("America/Chicago")
 
+  // Venue + fair details captured by the organizer create-fair wizard.
+  venueAddress String?
+  venueCity    String?
+  venueState   String?
+  venueZip     String?
+  openTime     String?   // fair daily open  "HH:MM"
+  closeTime    String?   // fair daily close "HH:MM"
+  maxVendors   Int?      // cap on vendors at this fair (distinct from maxVendorsPerOrder cart cap)
+  admissionFree Boolean  @default(true)
+
   // Platform controls
   isPaused Boolean @default(false) // one-button platform pause — blocks new orders
 
