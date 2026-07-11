@@ -30,8 +30,16 @@ import { PayoutNotSettledError, PayoutReconciliationError } from './process-payo
 import { REFUND_WINDOW_MS } from './constants'
 import { logger } from './logger'
 
-export type RunnerPayoutOutcome = 'pay' | 'hold' | 'already_paid' | 'no_earning'
+export type RunnerPayoutOutcome = 'pay' | 'hold' | 'blocked' | 'already_paid' | 'no_earning'
 export type RunnerHoldReason = 'unconnected' | 'non_positive'
+/**
+ * C1 — why the ADMIN GATE refused. Distinct from a hold: a hold is "can't pay yet"
+ * (the reconciler will retry and eventually pay); a block is "admin says no" and
+ * only an admin can lift it. reconcileRunnerPayouts filters status:'tracked', so
+ * held/cancelled rows are excluded there too — but this gate is the AUTHORITATIVE
+ * one, because every path to transfers.create passes through processRunnerPayout.
+ */
+export type RunnerBlockReason = 'admin_hold' | 'admin_cancelled' | 'payouts_frozen'
 
 export interface RunnerPayoutDecision {
   orderId: string
@@ -39,6 +47,8 @@ export interface RunnerPayoutDecision {
   runnerId: string | null
   outcome: RunnerPayoutOutcome
   holdReason: RunnerHoldReason | null
+  /** C1 — set only when outcome === 'blocked'. */
+  blockReason: RunnerBlockReason | null
   /** What we WOULD transfer — RunnerEarning.amountCents verbatim. null if no earning. */
   ledgerAmountCents: number | null
   /** Independent recompute (runnerShare + tip) — a DRIFT CHECK only, never paid. */
@@ -86,7 +96,7 @@ export async function planRunnerPayout(orderId: string): Promise<RunnerPayoutDec
 
   if (!earning) {
     return {
-      ...base, runnerId: null, outcome: 'no_earning', holdReason: null,
+      ...base, runnerId: null, outcome: 'no_earning', holdReason: null, blockReason: null,
       ledgerAmountCents: null, recomputeCents: null, ledgerMatchesRecompute: null,
       connected: false, earningStatus: null, accruedAt: null,
     }
@@ -101,9 +111,10 @@ export async function planRunnerPayout(orderId: string): Promise<RunnerPayoutDec
   const recomputeCents = runnerShareCents + tipCents
 
   // The runner (Connect status via DB mirror — same flag vendors use).
+  // C1: payoutsFrozenAt — the runner-wide admin kill-switch.
   const runner = await db.runner.findUnique({
     where: { id: earning.runnerId },
-    select: { stripeAccountId: true, stripeVerified: true },
+    select: { stripeAccountId: true, stripeVerified: true, payoutsFrozenAt: true },
   })
   const connected = !!(runner?.stripeAccountId && runner.stripeVerified)
 
@@ -117,12 +128,26 @@ export async function planRunnerPayout(orderId: string): Promise<RunnerPayoutDec
     connected,
     earningStatus: earning.status,
     accruedAt: earning.createdAt,
+    blockReason: null as RunnerBlockReason | null,
   }
 
   // Idempotency front line: a paid row is never touched again.
   if (earning.status === 'paid') {
     return { ...common, outcome: 'already_paid', holdReason: null }
   }
+  // ── C1 ADMIN GATE — checked BEFORE connectivity, so an admin can hold a runner
+  // who isn't connected yet (otherwise the hold would be invisible until they
+  // onboarded, and then race the pay-on-connect reconciler).
+  if (earning.status === 'cancelled') {
+    return { ...common, outcome: 'blocked', holdReason: null, blockReason: 'admin_cancelled' }
+  }
+  if (earning.status === 'held') {
+    return { ...common, outcome: 'blocked', holdReason: null, blockReason: 'admin_hold' }
+  }
+  if (runner?.payoutsFrozenAt) {
+    return { ...common, outcome: 'blocked', holdReason: null, blockReason: 'payouts_frozen' }
+  }
+  // ── end gate ──────────────────────────────────────────────────────────────────
   // Hold-if-unconnected: leave the ledger row as the hold; reconciler pays on connect.
   if (!connected) {
     return { ...common, outcome: 'hold', holdReason: 'unconnected' }
@@ -138,7 +163,7 @@ export async function planRunnerPayout(orderId: string): Promise<RunnerPayoutDec
 
 export interface RunnerPayoutResult {
   orderId: string
-  outcome: 'paid' | 'held' | 'already_paid' | 'no_earning'
+  outcome: 'paid' | 'held' | 'blocked' | 'already_paid' | 'no_earning'
   amountCents?: number
   transferId?: string
   reason?: string
@@ -171,6 +196,16 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
     // Short-circuit BEFORE Stripe — the first idempotency guard.
     logger.info('[RunnerPayout] already paid — skip (no Stripe call)', { orderId })
     return { orderId, outcome: 'already_paid' }
+  }
+
+  if (plan.outcome === 'blocked') {
+    // C1 ADMIN GATE — no transfer. The ledger row (status held/cancelled) or the
+    // runner's freeze flag holds the money in the platform balance. Only an admin
+    // lifts this; no reconciler sweep can pay it.
+    logger.warn('[RunnerPayout] BLOCKED by admin gate — no transfer', {
+      orderId, runnerId: plan.runnerId, reason: plan.blockReason, amountCents: plan.ledgerAmountCents,
+    })
+    return { orderId, outcome: 'blocked', reason: plan.blockReason ?? 'blocked', amountCents: plan.ledgerAmountCents ?? 0 }
   }
 
   if (plan.outcome === 'hold') {
@@ -208,8 +243,27 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
   // plan). If gone → hold, never error.
   const runner = await db.runner.findUnique({
     where: { id: plan.runnerId as string },
-    select: { stripeAccountId: true, stripeVerified: true },
+    select: { stripeAccountId: true, stripeVerified: true, payoutsFrozenAt: true },
   })
+
+  // C1 — re-check the gate at EXECUTE time. An admin freeze/hold landing between
+  // plan and transfer must still win; otherwise a long-running job could pay money
+  // the admin froze seconds earlier. Cheap read, closes the race.
+  if (runner?.payoutsFrozenAt) {
+    logger.warn('[RunnerPayout] runner FROZEN at execute — no transfer', { orderId, runnerId: plan.runnerId })
+    return { orderId, outcome: 'blocked', reason: 'payouts_frozen', amountCents }
+  }
+  const fresh = await db.runnerEarning.findUnique({ where: { orderId }, select: { status: true } })
+  if (fresh?.status === 'held' || fresh?.status === 'cancelled') {
+    logger.warn('[RunnerPayout] earning held/cancelled at execute — no transfer', {
+      orderId, runnerId: plan.runnerId, status: fresh.status,
+    })
+    return {
+      orderId, outcome: 'blocked', amountCents,
+      reason: fresh.status === 'cancelled' ? 'admin_cancelled' : 'admin_hold',
+    }
+  }
+
   if (!(runner?.stripeAccountId && runner.stripeVerified)) {
     logger.warn('[RunnerPayout] runner unconnected at execute — holding', { orderId, runnerId: plan.runnerId })
     return { orderId, outcome: 'held', reason: 'unconnected', amountCents }
@@ -245,6 +299,7 @@ export interface RunnerReconcileSummary {
   scanned: number
   paid: number
   held: number
+  blocked: number
   alreadyPaid: number
   alerts: string[]
 }
@@ -262,21 +317,23 @@ export async function reconcileRunnerPayouts(opts?: { maxPerRun?: number }): Pro
 
   const eligible = await db.runnerEarning.findMany({
     where: {
-      status: 'tracked',
+      status: 'tracked', // C1: 'held'/'cancelled' are excluded here by construction —
+                         // but processRunnerPayout's gate is the authoritative stop.
       createdAt: { lt: windowClosedBefore }, // window CLOSED — never pay in-window
       order: { voidedAt: null },
-      runner: { stripeVerified: true, stripeAccountId: { not: null } },
+      runner: { stripeVerified: true, stripeAccountId: { not: null }, payoutsFrozenAt: null },
     },
     select: { orderId: true },
     take: max,
   })
 
-  const summary: RunnerReconcileSummary = { scanned: eligible.length, paid: 0, held: 0, alreadyPaid: 0, alerts: [] }
+  const summary: RunnerReconcileSummary = { scanned: eligible.length, paid: 0, held: 0, blocked: 0, alreadyPaid: 0, alerts: [] }
   for (const e of eligible) {
     try {
       const r = await processRunnerPayout(e.orderId)
       if (r.outcome === 'paid') summary.paid++
       else if (r.outcome === 'held') summary.held++
+      else if (r.outcome === 'blocked') summary.blocked++
       else if (r.outcome === 'already_paid') summary.alreadyPaid++
     } catch (err) {
       summary.alerts.push(`runner payout failed for ${e.orderId}: ${err instanceof Error ? err.message : String(err)}`)

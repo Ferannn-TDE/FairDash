@@ -117,7 +117,7 @@ void PayoutNotSettledError
 
 export interface OrganizerPayoutResult {
   eventId: string
-  outcome: 'paid' | 'held' | 'nothing'
+  outcome: 'paid' | 'held' | 'blocked' | 'nothing'
   batchId?: string
   totalCents?: number
   transferId?: string
@@ -146,18 +146,59 @@ export interface OrganizerPayoutResult {
 export async function processEventOrganizerPayout(eventId: string): Promise<OrganizerPayoutResult> {
   const event = await db.event.findUnique({
     where: { id: eventId },
-    select: { organizerId: true, organizer: { select: { stripeAccountId: true, stripeVerified: true } } },
+    select: {
+      organizerId: true,
+      // C1: payoutsFrozenAt — the organizer-wide admin kill-switch. DISTINCT from
+      // suspendedAt (which blocks portal REQUESTS); this blocks their MONEY.
+      organizer: { select: { stripeAccountId: true, stripeVerified: true, payoutsFrozenAt: true } },
+    },
   })
   if (!event) throw new Error(`processEventOrganizerPayout: event ${eventId} not found`)
   const destination = event.organizer?.stripeAccountId ?? null
   const connected = !!(destination && event.organizer?.stripeVerified)
+
+  // ── C1 ADMIN GATE (a) — organizer-wide freeze. Checked FIRST, before any batch is
+  // formed, so a frozen organizer never even accumulates a payable batch.
+  if (event.organizer?.payoutsFrozenAt) {
+    logger.warn('[OrganizerPayout] organizer FROZEN — no batch, no transfer', { eventId })
+    return { eventId, outcome: 'blocked', reason: 'payouts_frozen' }
+  }
+
+  // ── C1 ADMIN GATE (b) — a HELD batch.
+  // THE TRAP THIS AVOIDS: step (1) below reuses a batch by looking for status
+  // 'pending'. A held batch is NOT 'pending', so that lookup returns null and the
+  // executor would cheerfully form a BRAND NEW batch from the remaining accrued
+  // earnings and pay it — routing straight around the admin's hold. Checking for a
+  // held batch BEFORE the pending lookup is what makes the hold real.
+  const heldBatch = await db.organizerPayout.findFirst({ where: { eventId, status: 'held' } })
+  if (heldBatch) {
+    logger.warn('[OrganizerPayout] BLOCKED — batch is admin-held', { eventId, batchId: heldBatch.id })
+    return {
+      eventId, outcome: 'blocked', reason: 'admin_hold',
+      batchId: heldBatch.id, totalCents: heldBatch.totalCents,
+    }
+  }
 
   // (1) Reuse an existing pending batch (crash recovery) BEFORE creating a new one.
   let batch = await db.organizerPayout.findFirst({ where: { eventId, status: 'pending' } })
 
   if (!batch) {
     const plan = await planOrganizerPayout(eventId)
-    if (plan.outcome === 'nothing') return { eventId, outcome: 'nothing' }
+    if (plan.outcome === 'nothing') {
+      // ── C1 ADMIN GATE (c) — held EARNINGS with no batch yet.
+      // planOrganizerPayout selects only status='accrued', so admin-held rows are
+      // already excluded and the plan comes back empty. Reporting that as 'nothing'
+      // would be a LIE to the admin who just held them ("nothing to pay" vs "you are
+      // holding it"). The money is safe either way; the ADMIN-FACING TRUTH is not.
+      const heldCount = await db.organizerEarning.count({
+        where: { eventId, status: { in: ['held', 'cancelled'] } },
+      })
+      if (heldCount > 0) {
+        logger.warn('[OrganizerPayout] BLOCKED — accrued earnings are admin-held', { eventId, heldCount })
+        return { eventId, outcome: 'blocked', reason: 'admin_hold' }
+      }
+      return { eventId, outcome: 'nothing' }
+    }
     if (plan.outcome === 'hold' || !connected) {
       logger.warn('[OrganizerPayout] HELD (organizer unconnected; ledger rows are the hold)', {
         eventId, totalCents: plan.batchTotalCents,
@@ -227,6 +268,7 @@ export interface OrganizerReconcileSummary {
   scannedEvents: number
   paid: number
   held: number
+  blocked: number
   nothing: number
   alerts: string[]
 }
@@ -240,9 +282,11 @@ export interface OrganizerReconcileSummary {
 export async function reconcileOrganizerPayouts(opts?: { maxPerRun?: number }): Promise<OrganizerReconcileSummary> {
   const max = opts?.maxPerRun ?? 100
   const windowClosedBefore = new Date(Date.now() - REFUND_WINDOW_MS)
-  const summary: OrganizerReconcileSummary = { scannedEvents: 0, paid: 0, held: 0, nothing: 0, alerts: [] }
+  const summary: OrganizerReconcileSummary = { scannedEvents: 0, paid: 0, held: 0, blocked: 0, nothing: 0, alerts: [] }
 
-  // Stuck pending batches first (a dropped finalize / crash mid-flight).
+  // Stuck pending batches first (a dropped finalize / crash mid-flight). status
+  // 'held' is excluded by construction here — and processEventOrganizerPayout's gate
+  // stops it anyway, which is the authoritative guarantee.
   const pending = await db.organizerPayout.findMany({ where: { status: 'pending' }, select: { eventId: true }, take: max })
   // Candidate events: any with accrued + window-closed earnings. Connectedness is
   // decided per-event inside processEventOrganizerPayout (unconnected → held), so we
@@ -265,6 +309,7 @@ export async function reconcileOrganizerPayouts(opts?: { maxPerRun?: number }): 
       const r = await processEventOrganizerPayout(eventId)
       if (r.outcome === 'paid') summary.paid++
       else if (r.outcome === 'held') summary.held++
+      else if (r.outcome === 'blocked') summary.blocked++
       else summary.nothing++
     } catch (err) {
       summary.alerts.push(`organizer payout failed for event ${eventId}: ${err instanceof Error ? err.message : String(err)}`)

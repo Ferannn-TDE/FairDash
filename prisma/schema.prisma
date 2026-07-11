@@ -266,6 +266,16 @@ model Vendor {
   stripeVerified    Boolean   @default(false)
   stripeConnectedAt DateTime?
 
+  // ── Admin payout freeze (C1) ────────────────────────────────────────────────
+  // The kill-switch pattern (mirrors FairOrganizer.suspendedAt): admin-only write,
+  // immediate DB-state effect, no self-rescue. Set → the payout executor holds
+  // EVERY payout for this vendor, on every order, until an admin clears it. This is
+  // the blunt "freeze a bad actor" lever; the surgical per-order lever is
+  // VendorEarning.status='held'. Both are checked in the SAME executor gate.
+  payoutsFrozenAt     DateTime?
+  payoutsFrozenReason String?
+  payoutsFrozenBy     String? // admin Clerk id (the AdminMoneyAction row has the full audit)
+
   // Commission
   commissionRate Float @default(0.10) // DEPRECATED — abandoned vendor-commission model; not read anywhere. Drop in a future migration.
 
@@ -288,6 +298,7 @@ model Vendor {
   payoutHolds        PayoutHold[]
   refunds            Refund[]
   refundRequests     RefundRequest[]
+  vendorEarnings     VendorEarning[]
 
   @@unique([eventId, slug], map: "uq_vendor_event_slug")
   @@index([eventId, status],   map: "idx_vendor_event_status")
@@ -526,6 +537,7 @@ model Order {
   chargebacks         Chargeback[]
   runnerEarning       RunnerEarning?
   organizerEarning    OrganizerEarning?
+  vendorEarnings      VendorEarning[] // N per order (one per payable vendor)
 
   @@unique([placedAt, id],                   map: "uq_order_placed_id")
   @@index([customerId, placedAt(sort: Desc)], map: "idx_order_customer_placed")
@@ -941,6 +953,14 @@ model FairOrganizer {
   suspendedAt     DateTime?
   suspendedReason String?
 
+  // ── Admin payout freeze (C1) ────────────────────────────────────────────────
+  // DISTINCT from suspendedAt: suspension blocks the organizer's REQUESTS (portal
+  // access); this blocks their MONEY (batch payouts) while leaving the portal
+  // usable. An admin investigating a fair may want one without the other.
+  payoutsFrozenAt     DateTime?
+  payoutsFrozenReason String?
+  payoutsFrozenBy     String? // admin Clerk id
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -951,6 +971,7 @@ model FairOrganizer {
   @@index([stripeVerified])
   @@index([stripeAccountId])
   @@index([suspendedAt])
+  @@index([payoutsFrozenAt])
 }
 
 model OrgMember {
@@ -1010,6 +1031,14 @@ model Runner {
   stripeVerified    Boolean   @default(false)
   stripeConnectedAt DateTime?
 
+  // ── Admin payout freeze (C1) ────────────────────────────────────────────────
+  // Same kill-switch shape as Vendor.payoutsFrozenAt. Set → every RunnerEarning for
+  // this runner is held by the executor gate, on every order, until an admin clears
+  // it. The surgical per-order lever is RunnerEarning.status='held'.
+  payoutsFrozenAt     DateTime?
+  payoutsFrozenReason String?
+  payoutsFrozenBy     String? // admin Clerk id
+
   // ── Runner-editable settings (persisted from the Settings page; me-scoped) ────
   // Identity name/email remain Clerk-owned (single source of truth); only the
   // runner-specific fields live here.
@@ -1048,6 +1077,7 @@ model Runner {
   @@index([stripeVerified])
   @@index([stripeAccountId])
   @@index([approvalStatus])
+  @@index([payoutsFrozenAt])
 }
 
 // ============================================================================
@@ -1070,7 +1100,17 @@ model RunnerEarning {
   runner   Runner @relation(fields: [runnerId], references: [id], onDelete: Cascade)
 
   amountCents Int      // = runnerShare (runner% × applicable fee) + tip, in cents. RECORDED, not paid (payout deferred to Part B).
-  status      String   @default("tracked") // tracked | paid (Part B B2 executor sets paid)
+  // tracked | held | cancelled | paid
+  //   tracked   — payable once the window closes (the default accrual state)
+  //   held      — C1 admin hold: the executor gate refuses to pay. REVERSIBLE
+  //               (release → back to 'tracked'). The reconciler's `status: 'tracked'`
+  //               filter already excludes it, but the EXECUTOR is the authoritative
+  //               gate — no enqueue path can pay a held row.
+  //   cancelled — C1 admin cancel: TERMINAL. Never paid, and never re-picked by any
+  //               reconciler sweep (this is what stops a cancelled payout coming back
+  //               as an "unpaid straggler" forever).
+  //   paid      — the B2 executor transferred it.
+  status      String   @default("tracked")
 
   // Part B B2 payout record. The ledger row DOUBLES as the payout record (just as
   // the unpaid row IS the hold) — no separate RunnerPayout table. On a successful
@@ -1159,7 +1199,10 @@ model OrganizerEarning {
 
   amountCents Int    // = organizerShare (applicable fee − runnerShare), in cents
   source      String // delivery_fee_share | curbside_fee_share
-  status      String @default("accrued") // accrued | paid (Part B B3 batch executor sets paid)
+  // accrued | held | cancelled | paid  (C1 adds held/cancelled — see RunnerEarning.status)
+  // planOrganizerPayout's batch set filters `status: 'accrued'`, so a held or
+  // cancelled row simply drops OUT of the next batch — the cleanest possible hold.
+  status      String @default("accrued")
 
   // Part B B3 batch audit. N earnings : 1 batch payout (unlike runner's 1:1), so
   // the batch needs its OWN record (OrganizerPayout) — the ledger row can't double
@@ -1197,7 +1240,12 @@ model OrganizerPayout {
   organizerId String? // the FairOrganizer paid (resolved via the event)
 
   totalCents       Int     // = Σ amountCents of the covered earnings (the proven set sum)
-  status           String  @default("pending") // pending | paid | failed
+  // pending | held | paid | failed
+  //   held — C1 admin hold on an ALREADY-FORMED batch. Distinct from holding the
+  //          individual earnings: once a batch exists it is the idempotency anchor,
+  //          so the hold must live on the batch too or the executor would re-attempt
+  //          it via the crash-recovery "reuse pending batch" path.
+  status           String  @default("pending")
   stripeTransferId String? @unique // the batch transfer (idempotency-keyed by this row's id)
 
   createdAt DateTime  @default(now())
@@ -1208,6 +1256,110 @@ model OrganizerPayout {
 
   @@index([eventId])
   @@index([status])
+}
+
+// ============================================================================
+// VENDOR EARNING (C1) — the vendor's accrued, HELD claim on an order.
+//
+// WHY THIS EXISTS. Runners and organizers each had an earnings ledger; vendors did
+// NOT. The vendor's money was always platform-held (separate charges & transfers,
+// paid by a delayed job behind the refund window — same as everyone else), but
+// between checkout and payout there was NO ROW representing it: `Payout` is written
+// AFTER transfers.create, so it's a receipt, not a claim. That left admin with
+// nothing to hold. This table is the missing anchor — it makes the vendor path
+// structurally identical to the runner path ("the unpaid ledger row IS the hold").
+//
+// PROVISIONAL AMOUNT, BY DESIGN. subtotalCents is the vendor's claim BEFORE their
+// share of the Stripe fee. The real fee is not knowable at accrual time — it's read
+// from the settled balance transaction at payout (process-payout.ts refuses to
+// guess it, deliberately). So this row NEVER feeds the transfer amount: the executor
+// still computes the authoritative net via splitStripeFee at payout time and stamps
+// the result back here (feeShareCents/netCents). This ledger is the HOLD ANCHOR and
+// the audit record — it is not a second source of truth for the money.
+// ============================================================================
+
+model VendorEarning {
+  id      String @id @default(cuid())
+  eventId String
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  /// The vendor's claim before the Stripe fee share (= Σ their OrderItem subtotals).
+  subtotalCents Int
+
+  // accrued | held | cancelled | paid — same vocabulary as RunnerEarning.status.
+  status String @default("accrued")
+
+  // Filled by the executor at payout — the AUTHORITATIVE numbers (subtotal − the
+  // real settled fee share). Null until paid.
+  feeShareCents    Int?
+  netCents         Int?
+  stripeTransferId String?   @unique
+  paidAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, vendorId], map: "uq_vendorearning_order_vendor")
+  @@index([eventId])
+  @@index([vendorId, status])
+  @@index([status])
+}
+
+// ============================================================================
+// ADMIN MONEY ACTION (C1) — the durable audit trail for every admin money action.
+//
+// WHY A NEW TABLE. Neither existing audit surface can carry this:
+//   - the admin chokepoint's audit (admin-fair-context.ts) is a logger.info line —
+//     ephemeral stdout, not a record you can produce months later in a dispute.
+//   - VendorAuditLog REQUIRES a vendorId, so it structurally cannot log an action
+//     against a runner or an organizer.
+// Money actions get contested ("you took my money"). This row IS the defense: who,
+// what, whose money, which fair, how much, when, and why. Append-only by convention —
+// a release does not mutate the hold row, it appends a RELEASE row.
+// ============================================================================
+
+model AdminMoneyAction {
+  id String @id @default(cuid())
+
+  /// The acting platform admin (Clerk id, from requireAdminFairContext).
+  adminClerkId String
+
+  /// HOLD | RELEASE | CANCEL | FREEZE | UNFREEZE
+  action String
+
+  /// vendor | runner | organizer
+  payeeType String
+  payeeId   String
+
+  /// Always set — every admin money action is scoped to ONE fair by the chokepoint.
+  eventId String
+
+  /// Set for per-order actions (HOLD/RELEASE/CANCEL); null for entity FREEZE/UNFREEZE.
+  orderId String?
+
+  /// The ledger row acted on, when there is one.
+  earningId String?
+
+  /// What was at stake, in cents, at the moment of the action (informational).
+  amountCents Int?
+
+  /// The admin's stated justification. Required by the API — never optional in practice.
+  reason String
+
+  /// Free-form context (before/after status, batch id, …). Stored, never queried by content.
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId, createdAt])
+  @@index([payeeType, payeeId])
+  @@index([adminClerkId])
+  @@index([action])
 }
 
 enum RunnerStatus {

@@ -21,12 +21,25 @@
  *   - Unconnected / zero-or-negative vendors are HELD (logged, not paid); their
  *     slice stays in the platform balance and is still counted in the split so
  *     FairSynq's 10% stays exact.
+ *
+ * C1 — ADMIN GATE. This executor is the ONE place a vendor transfer can happen, so
+ * it is where admin control is enforced. Every path that can pay a vendor (the
+ * delayed job, the inline fallback, reconciler patterns B and D) funnels through
+ * here, which means no enqueue path can route around an admin hold. The gate reads
+ * VendorEarning.status ('held'/'cancelled') and Vendor.payoutsFrozenAt and produces
+ * outcome 'blocked' — distinct from 'hold', because a blocked slice must NOT get a
+ * PayoutHold row (that table means "waiting to be paid once the vendor connects",
+ * and reconciler Pattern D exists to DRAIN it — writing an admin hold there would
+ * make the reconciler pay it out on the next sweep).
  */
 
 import { db } from './db'
 import { stripe } from './stripe'
 import { splitStripeFee } from './payout-split'
 import { logger } from './logger'
+
+/** Why the admin gate refused to pay a slice. Never gets a PayoutHold row. */
+export type PayoutBlockReason = 'admin_hold' | 'admin_cancelled' | 'payouts_frozen'
 
 /** Thrown when the money identity doesn't hold — payout is halted, no transfers. */
 export class PayoutReconciliationError extends Error {
@@ -52,9 +65,57 @@ export interface PayoutResult {
   // Vendors who DECLINED — never paid, never held; their slice is the customer's
   // refund (handled by the decline/refund flow, not here).
   skippedDeclined: { vendorId: string; sliceCents: number }[]
+  // C1 — slices the ADMIN GATE refused (held / cancelled / frozen). No transfer, no
+  // PayoutHold row; the money stays in the platform balance under admin control.
+  blocked: { vendorId: string; sliceCents: number; reason: PayoutBlockReason }[]
+}
+
+/**
+ * C1 — accrue the vendor's HELD CLAIM on an order (the hold anchor).
+ *
+ * Runners and organizers accrue an earnings row the moment they earn; vendors did
+ * not, so there was no row for an admin to hold between checkout and payout. This
+ * creates it. Idempotent (upsert on orderId+vendorId), so it is safe to call from
+ * the completion side-effect AND defensively from the executor (self-heals orders
+ * that predate this table, and any accrual that got dropped).
+ *
+ * subtotalCents is the vendor's claim BEFORE the Stripe fee share, which is not
+ * knowable until settlement. It is deliberately NOT what gets paid — the executor
+ * still computes the authoritative net from the real settled fee and stamps it back.
+ * Never overwrites a paid/held/cancelled row's status.
+ */
+export async function accrueVendorEarnings(orderId: string): Promise<number> {
+  const order = await db.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, eventId: true, orderItems: { select: { vendorId: true, subtotal: true } } },
+  })
+  if (!order) return 0
+
+  const subtotals: Record<string, number> = {}
+  for (const item of order.orderItems) {
+    subtotals[item.vendorId] = (subtotals[item.vendorId] ?? 0) + Math.round(item.subtotal * 100)
+  }
+
+  let accrued = 0
+  for (const [vendorId, subtotalCents] of Object.entries(subtotals)) {
+    await db.vendorEarning.upsert({
+      where: { orderId_vendorId: { orderId, vendorId } },
+      create: { eventId: order.eventId, orderId, vendorId, subtotalCents, status: 'accrued' },
+      // Refresh the claim amount only. status is NOT touched — an admin hold, a
+      // cancel, or a completed payout must survive re-accrual.
+      update: { subtotalCents },
+    })
+    accrued++
+  }
+  return accrued
 }
 
 export async function processOrderPayout(orderId: string): Promise<PayoutResult> {
+  // C1 — make sure the hold anchor exists before we decide anything. Self-healing:
+  // legacy orders (pre-VendorEarning) get their rows here, so the admin gate below
+  // is never silently skipped for want of a row.
+  await accrueVendorEarnings(orderId)
+
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: {
@@ -125,24 +186,35 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   const lines = splitStripeFee(vendorSubtotalsCents, stripeFeeCents)
 
   const vendorIds = lines.map(l => l.vendorId)
-  const [vendors, statuses] = await Promise.all([
+  const [vendors, statuses, earnings] = await Promise.all([
     db.vendor.findMany({
       where: { id: { in: vendorIds } },
-      select: { id: true, stripeAccountId: true, stripeVerified: true },
+      // C1: payoutsFrozenAt — the vendor-wide admin kill-switch.
+      select: { id: true, stripeAccountId: true, stripeVerified: true, payoutsFrozenAt: true },
     }),
     db.vendorOrderStatus.findMany({
       where: { orderId },
       select: { vendorId: true, status: true },
     }),
+    // C1: the hold anchor — accrued above, so a row exists for every payable vendor.
+    db.vendorEarning.findMany({
+      where: { orderId },
+      select: { id: true, vendorId: true, status: true },
+    }),
   ])
   const vendorMap = new Map(vendors.map(v => [v.id, v]))
   const statusMap = new Map(statuses.map(s => [s.vendorId, s.status]))
+  const earningMap = new Map(earnings.map(e => [e.vendorId, e]))
 
   // Decide outcome per vendor BEFORE moving any money.
-  //   pay  — connected, completed, positive slice → transfer
-  //   hold — completed but unconnected / non-positive → persist a PayoutHold
-  //   skip — DECLINED → never paid, never held; their slice is the customer's
-  //          refund, owned by the decline/refund flow (not here)
+  //   pay     — connected, completed, positive slice → transfer
+  //   hold    — completed but unconnected / non-positive → persist a PayoutHold
+  //             (a WAITING ROOM: reconciler Pattern D drains it when they connect)
+  //   skip    — DECLINED/REFUNDED → never paid, never held; their slice is the
+  //             customer's refund, owned by the decline/refund flow (not here)
+  //   blocked — C1 ADMIN GATE: held / cancelled / frozen. No transfer AND no
+  //             PayoutHold row — a blocked slice must never land in the waiting
+  //             room, or Pattern D would pay it out on the next sweep.
   const plan = lines.map(line => {
     const v = vendorMap.get(line.vendorId)
     const connected = !!(v?.stripeAccountId && v.stripeVerified)
@@ -153,35 +225,68 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     // skips them and still pays every other vendor on the cart.
     const status = statusMap.get(line.vendorId)
     const declined = status === 'DECLINED' || status === 'REFUNDED'
-    let outcome: 'pay' | 'hold' | 'skip'
+    const earning = earningMap.get(line.vendorId)
+
+    let outcome: 'pay' | 'hold' | 'skip' | 'blocked'
     let heldReason: 'unconnected' | 'non_positive' | null = null
+    let blockedReason: PayoutBlockReason | null = null
+
+    // Customer's money first — a refunded/declined slice is never the vendor's to
+    // hold or block; it already belongs back to the customer.
     if (declined) outcome = 'skip'
+    // ── C1 ADMIN GATE ────────────────────────────────────────────────────────
+    else if (earning?.status === 'cancelled') { outcome = 'blocked'; blockedReason = 'admin_cancelled' }
+    else if (earning?.status === 'held')      { outcome = 'blocked'; blockedReason = 'admin_hold' }
+    else if (v?.payoutsFrozenAt)              { outcome = 'blocked'; blockedReason = 'payouts_frozen' }
+    // ── end gate ─────────────────────────────────────────────────────────────
     else if (!connected) { outcome = 'hold'; heldReason = 'unconnected' }
     else if (line.transferCents <= 0) { outcome = 'hold'; heldReason = 'non_positive' }
     else outcome = 'pay'
-    return { ...line, stripeAccountId: v?.stripeAccountId ?? null, outcome, heldReason }
+
+    return {
+      ...line,
+      stripeAccountId: v?.stripeAccountId ?? null,
+      earningId: earning?.id ?? null,
+      outcome,
+      heldReason,
+      blockedReason,
+    }
   })
 
   const sentCents    = plan.filter(p => p.outcome === 'pay').reduce((s, p) => s + p.transferCents, 0)
   const heldCents    = plan.filter(p => p.outcome === 'hold').reduce((s, p) => s + p.transferCents, 0)
   const skippedCents = plan.filter(p => p.outcome === 'skip').reduce((s, p) => s + p.transferCents, 0)
+  const blockedCents = plan.filter(p => p.outcome === 'blocked').reduce((s, p) => s + p.transferCents, 0)
 
   // ── Reconciliation 2: payout side ─────────────────────────────────────────
-  //   Σ(sent) + Σ(held) + Σ(skipped/declined→refundable) + serviceFee
+  //   Σ(sent) + Σ(held) + Σ(blocked) + Σ(skipped/declined→refundable) + serviceFee
   //     + delivery + serviceCharge + tip + stripeFee === charge
   //   tip is platform-held-owed-to-runner (like delivery/serviceCharge: retained,
   //   not transferred in this phase). Runner/organizer payouts are Part B.
-  const payoutSide = sentCents + heldCents + skippedCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + stripeFeeCents
+  //   blocked is retained in the platform balance under admin control — it MUST be
+  //   in the identity, or an admin hold would look like money that vanished.
+  const payoutSide = sentCents + heldCents + blockedCents + skippedCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + stripeFeeCents
   if (payoutSide !== totalCents) {
     throw new PayoutReconciliationError(
-      `order ${orderId}: payout-side mismatch — ${payoutSide}¢ ≠ charge ${totalCents}¢ (sent ${sentCents}, held ${heldCents}, skipped ${skippedCents}, serviceFee ${serviceFeeCents}, delivery ${deliveryCents}, serviceCharge ${serviceChargeCents}, tip ${tipCents}, stripeFee ${stripeFeeCents})`,
+      `order ${orderId}: payout-side mismatch — ${payoutSide}¢ ≠ charge ${totalCents}¢ (sent ${sentCents}, held ${heldCents}, blocked ${blockedCents}, skipped ${skippedCents}, serviceFee ${serviceFeeCents}, delivery ${deliveryCents}, serviceCharge ${serviceChargeCents}, tip ${tipCents}, stripeFee ${stripeFeeCents})`,
     )
   }
 
   // ── Apply (idempotent per order+vendor) ───────────────────────────────────
-  const result: PayoutResult = { orderId, stripeFeeCents, transfers: [], held: [], skippedDeclined: [] }
+  const result: PayoutResult = { orderId, stripeFeeCents, transfers: [], held: [], skippedDeclined: [], blocked: [] }
 
   for (const p of plan) {
+    if (p.outcome === 'blocked') {
+      // NO transfer, NO PayoutHold row. The VendorEarning row (status held/cancelled)
+      // or the vendor's freeze flag IS the hold; the money stays in the platform
+      // balance where the admin can release or cancel it.
+      logger.warn('[Payout] vendor slice BLOCKED by admin gate — no transfer', {
+        orderId, vendorId: p.vendorId, sliceCents: p.transferCents, reason: p.blockedReason,
+      })
+      result.blocked.push({ vendorId: p.vendorId, sliceCents: p.transferCents, reason: p.blockedReason! })
+      continue
+    }
+
     if (p.outcome === 'skip') {
       logger.warn('[Payout] vendor slice SKIPPED — declined (refund owned by decline flow)', {
         orderId, vendorId: p.vendorId, sliceCents: p.transferCents,
@@ -242,6 +347,21 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       data: { resolved: true, resolvedAt: new Date() },
     })
 
+    // C1 — close out the ledger row with the AUTHORITATIVE numbers (the accrual only
+    // ever held the provisional subtotal; the real fee share is known only now).
+    // Conditional on not-already-paid, mirroring the runner executor's concurrency
+    // guard. Invariant this establishes: status='paid' ⟺ stripeTransferId set.
+    await db.vendorEarning.updateMany({
+      where: { orderId, vendorId: p.vendorId, status: { not: 'paid' } },
+      data: {
+        status: 'paid',
+        feeShareCents: p.feeShareCents,
+        netCents: p.transferCents,
+        stripeTransferId: transfer.id,
+        paidAt: new Date(),
+      },
+    })
+
     result.transfers.push({ vendorId: p.vendorId, amountCents: p.transferCents, transferId: transfer.id })
   }
 
@@ -250,6 +370,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     stripeFeeCents,
     transfers: result.transfers.length,
     held: result.held.length,
+    blocked: result.blocked.length,
     skippedDeclined: result.skippedDeclined.length,
   })
   return result

@@ -12,7 +12,7 @@
 
 import { getOrderQueue, JOB_VENDOR_PAYOUT, JOB_RUNNER_PAYOUT, JOB_ORGANIZER_PAYOUT } from './queues'
 import { enqueueJobSafely } from './queue-safe'
-import { processOrderPayout } from './process-payout'
+import { processOrderPayout, accrueVendorEarnings } from './process-payout'
 import { logger } from './logger'
 import { notifyPayoutDropped } from './notify'
 
@@ -41,6 +41,21 @@ export interface OrderPayoutInput {
  */
 export async function enqueueOrderPayout(input: OrderPayoutInput): Promise<boolean> {
   const delayMs = input.delayMs ?? 0
+
+  // C1 — accrue the vendors' HELD CLAIMS now, at completion, NOT at payout time.
+  // This is what gives the admin the whole refund window to hold/cancel: the rows
+  // exist from the moment the order completes, so they are visible and holdable
+  // during the delay before the payout job fires. (The executor re-accrues
+  // defensively, so a failure here degrades to the old behaviour rather than
+  // losing money — it never blocks the payout.)
+  try {
+    await accrueVendorEarnings(input.orderId)
+  } catch (err) {
+    logger.error('[SideEffects] vendor earning accrual failed (executor will self-heal)', {
+      orderId: input.orderId, error: String(err),
+    })
+  }
+
   const queue = getOrderQueue()
   if (!queue) {
     if (delayMs > 0) {
