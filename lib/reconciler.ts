@@ -330,6 +330,11 @@ async function patternC(
       payoutHolds: { select: { vendorId: true } },
       refunds: { select: { vendorId: true } },
       vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      // C1: admin-gated slices. An admin hold writes NO PayoutHold row (that table is
+      // the "pay me when I connect" waiting room that Pattern D drains), so without
+      // this the gap check below would see a held vendor as an unpaid gap and
+      // re-enqueue the payout on EVERY sweep.
+      vendorEarnings: { select: { vendorId: true, status: true } },
     },
     orderBy: { completedAt: 'asc' },
     take: o.maxPerPattern,
@@ -346,11 +351,21 @@ async function patternC(
         .filter(s => s.status === 'DECLINED' || s.status === 'REFUNDED')
         .map(s => s.vendorId),
     )
+    // C1 — admin-blocked vendors. NOT a gap: the money is deliberately parked in the
+    // platform balance. This is an ANTI-CHURN optimisation only; correctness does not
+    // depend on it, because processOrderPayout's gate refuses these slices even if
+    // this pattern does enqueue them. Belt (gate) and braces (this).
+    const adminBlocked = new Set(
+      ord.vendorEarnings
+        .filter(e => e.status === 'held' || e.status === 'cancelled')
+        .map(e => e.vendorId),
+    )
 
-    // A gap = a payable vendor with no payout, no hold, not declined, NOT refunded.
-    // (A refunded vendor must never be paid — their slice went back to the customer.)
+    // A gap = a payable vendor with no payout, no hold, not admin-blocked, not
+    // declined, NOT refunded. (A refunded vendor must never be paid — their slice
+    // went back to the customer.)
     const gap = [...payableVendors].some(
-      v => !paid.has(v) && !held.has(v) && !declined.has(v) && !refunded.has(v),
+      v => !paid.has(v) && !held.has(v) && !adminBlocked.has(v) && !declined.has(v) && !refunded.has(v),
     )
     if (!gap) continue
 
@@ -397,7 +412,10 @@ async function patternD(
   const holds = await db.payoutHold.findMany({
     where: {
       resolved: false,
-      vendor: { stripeVerified: true, stripeAccountId: { not: null } },
+      // C1: a frozen vendor's holds are NOT drained. Anti-churn only — an admin hold
+      // never lands in this table in the first place, and processOrderPayout's gate
+      // is the authoritative stop either way.
+      vendor: { stripeVerified: true, stripeAccountId: { not: null }, payoutsFrozenAt: null },
       order: { voidedAt: null },
     },
     select: { orderId: true, eventId: true, vendorId: true },
