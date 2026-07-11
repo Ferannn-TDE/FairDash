@@ -982,14 +982,25 @@ model Runner {
 
   status RunnerStatus @default(OFFLINE)
 
+  // ── Admin approval gate ──────────────────────────────────────────────────────
+  // A runner cannot go online OR claim a delivery until an admin approves them.
+  // New rows default to PENDING; the grandfather migration promoted pre-existing
+  // rows to APPROVED so the gate doesn't lock out current runners. These audit
+  // fields are the shared shape organizer approval (#7) will mirror.
+  approvalStatus  ApprovalStatus @default(PENDING)
+  approvedAt      DateTime?
+  approvedBy      String?        // admin User.id who approved/rejected
+  rejectionReason String?
+
   // Performance — used to enforce 90% minimum completion rate
   completionRate  Float @default(1.0) // 0.0–1.0
   totalDispatched Int   @default(0)
   totalCompleted  Int   @default(0)
 
-  // Live GPS (written every 5s during active HOME_DELIVERY)
+  // Live GPS (written every ~10s during active RUNNER_COLLECTED delivery)
   currentLat        Float?
   currentLng        Float?
+  currentAccuracy   Float?    // GPS accuracy in meters (Phase 3: stale/precision UX)
   locationUpdatedAt DateTime?
 
   // Stripe Connect (Part B payout destination — net-new for runners; mirrors
@@ -998,6 +1009,33 @@ model Runner {
   stripeAccountId   String?
   stripeVerified    Boolean   @default(false)
   stripeConnectedAt DateTime?
+
+  // ── Runner-editable settings (persisted from the Settings page; me-scoped) ────
+  // Identity name/email remain Clerk-owned (single source of truth); only the
+  // runner-specific fields live here.
+  phone        String? // delivery-contact phone
+  vehicleMake  String?
+  vehicleModel String?
+  vehicleColor String?
+  vehiclePlate String?
+
+  // ── Driver's licence (SENSITIVE PII) ─────────────────────────────────────────
+  // Stores the STORAGE OBJECT PATH inside the PRIVATE `runner-documents` bucket —
+  // deliberately NOT a URL. The vendor-document pattern persists a public URL
+  // (…/object/public/…), which for a driver's licence would publish someone's photo,
+  // DOB, and home address to anyone who guesses or leaks the link. Reads here go
+  // through /api/runners/me/license (self) or /api/admin/runners/[id]/license (admin),
+  // each of which mints a short-lived signed URL. Nothing renders this path directly.
+  licensePath       String?
+  licenseUploadedAt DateTime?
+
+  // Runner-portal notification preferences
+  notifyNewDelivery  Boolean @default(true)
+  notifyOrderUpdates Boolean @default(true)
+  notifyEarnings     Boolean @default(false)
+
+  // Availability — weekday short-names the runner marks available, e.g. ["Fri","Sat","Sun"]
+  availableDays String[] @default([])
 
   createdAt DateTime @default(now())
 
@@ -1009,6 +1047,7 @@ model Runner {
   @@index([status])
   @@index([stripeVerified])
   @@index([stripeAccountId])
+  @@index([approvalStatus])
 }
 
 // ============================================================================
@@ -1175,6 +1214,14 @@ enum RunnerStatus {
   OFFLINE     // Not active / off shift
   ACTIVE      // Checked in and available for dispatch
   ON_DELIVERY // Currently fulfilling an order
+}
+
+// Generic, shared approval lifecycle. Named generically (NOT RunnerApprovalStatus)
+// because organizer approval (#7) reuses this exact enum + audit-field shape.
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // ============================================================================

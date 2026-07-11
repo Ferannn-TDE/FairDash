@@ -26,12 +26,20 @@ export async function GET(req: NextRequest) {
     const orderId = searchParams.get('orderId')
 
     if (orderId) {
-      // Single order detail for the delivery page
+      // Single order detail for the delivery page. Scoped to THIS runner: their own
+      // order (any status), or a still-claimable unassigned READY one they may preview
+      // before claiming. This mirrors the list scoping below — without it, any runner in
+      // the fair could read another runner's active-delivery detail (customer name,
+      // phone, address) by passing its orderId. (Proven by scripts/runner-boundary-proof.ts.)
       const order = await db.order.findFirst({
         where: {
           id: orderId,
           eventId: runner.eventId,
           fulfillmentType: { in: [FulfillmentType.HOME_DELIVERY, FulfillmentType.CURBSIDE] },
+          OR: [
+            { runnerId: runner.id },
+            { status: OrderStatus.READY, runnerId: null },
+          ],
         },
         include: {
           vendor: { select: { name: true, boothNumber: true } },

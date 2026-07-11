@@ -1,13 +1,17 @@
 'use client'
 
-import { useState, useEffect, use } from 'react'
+import { useState, useEffect, use, useCallback } from 'react'
 import { Truck, AlertTriangle } from 'lucide-react'
+import ApprovalQueue, { type ApprovalItem } from '../../_components/ApprovalQueue'
 
 type RunnerStatus = 'ACTIVE' | 'OFFLINE' | 'ON_DELIVERY'
+type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
 
 interface AdminRunner {
   id: string
   status: RunnerStatus
+  approvalStatus: ApprovalStatus
+  rejectionReason: string | null
   completionRate: number
   totalDispatched: number
   totalCompleted: number
@@ -48,7 +52,7 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let active = true
     setLoading(true)
     setError(null)
@@ -64,6 +68,10 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
     return () => { active = false }
   }, [params.eventSlug])
 
+  useEffect(() => load(), [load])
+
+  const pending = runners.filter(r => r.approvalStatus === 'PENDING')
+  const pendingItems: ApprovalItem[] = pending.map(r => ({ id: r.id, name: r.user.name, detail: r.user.email }))
   const activeCount = runners.filter(r => r.status === 'ACTIVE').length
 
   return (
@@ -76,6 +84,18 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
           </p>
         </div>
       </div>
+
+      {/* Pending-approval queue — a runner cannot go online or claim until approved */}
+      {!loading && (
+        <ApprovalQueue
+          title="Runners awaiting approval"
+          items={pendingItems}
+          approveUrl={id => `/api/admin/runners/${id}/approve`}
+          rejectUrl={id => `/api/admin/runners/${id}/reject`}
+          onResolved={load}
+          emptyLabel="No runners awaiting approval."
+        />
+      )}
 
       {/* Warning for low completion rates */}
       {!loading && runners.some(r => r.completionRate < 0.90) && (
@@ -124,6 +144,15 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
                 </p>
                 <p className="text-[10px] text-[#555] font-inter">dispatched</p>
               </div>
+
+              {/* Approval badge — only shown when not APPROVED (grandfathered/approved runners stay uncluttered) */}
+              {runner.approvalStatus !== 'APPROVED' && (
+                <span
+                  title={runner.rejectionReason ?? undefined}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${runner.approvalStatus === 'REJECTED' ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
+                  {runner.approvalStatus}
+                </span>
+              )}
 
               {/* Status badge */}
               <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${STATUS_STYLES[runner.status]}`}>

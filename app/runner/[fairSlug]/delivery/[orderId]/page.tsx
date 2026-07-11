@@ -38,6 +38,9 @@ export default function DeliveryPage() {
   const [order, setOrder] = useState<DeliveryOrder | null>(null)
   const [loading, setLoading] = useState(true)
   const [pickedUp, setPickedUp] = useState(false)
+  // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
+  const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
+  const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -65,6 +68,45 @@ export default function DeliveryPage() {
     return () => { window.removeEventListener('focus', refetch); window.removeEventListener('online', refetch) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId])
+
+  // LIVE LOCATION CAPTURE — while this order is RUNNER_COLLECTED (active delivery),
+  // watch GPS and POST each fix to the server, which relays it to the customer.
+  // The server independently re-verifies ownership + state on every write; this is
+  // just the client feeding it. No wake lock yet (Phase 2) — hence the on-screen note.
+  useEffect(() => {
+    if (!order || order.status !== 'RUNNER_COLLECTED') return
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('unavailable')
+      return
+    }
+
+    let cancelled = false
+    async function post(pos: GeolocationPosition) {
+      try {
+        const res = await fetch('/api/runners/me/location', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: pos.timestamp,
+          }),
+        })
+        if (!cancelled && res.ok) { setGeoStatus('sharing'); setLastSharedAt(Date.now()) }
+      } catch { /* transient network drop — watchPosition keeps firing */ }
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      pos => { if (!cancelled) post(pos) },
+      err => {
+        if (cancelled) return
+        setGeoStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable')
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    )
+
+    return () => { cancelled = true; navigator.geolocation.clearWatch(watchId) }
+  }, [order?.status])
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -130,6 +172,29 @@ export default function DeliveryPage() {
         </div>
         <span className="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20">{FULFILLMENT_LABEL[order.fulfillmentType]}</span>
       </div>
+
+      {/* Live-location share status (Phase 1: no wake lock — keep-screen-on note) */}
+      {order.status === 'RUNNER_COLLECTED' && (
+        <div className={`rounded-2xl p-3 border text-sm flex items-start gap-2.5 ${
+          geoStatus === 'sharing' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+          : geoStatus === 'denied' ? 'bg-red-500/10 border-red-500/20 text-red-300'
+          : geoStatus === 'unavailable' ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+          : 'bg-white/5 border-white/10 text-text-gray'
+        }`}>
+          <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            {geoStatus === 'sharing' && (
+              <p className="font-semibold">Sharing your location with the customer
+                {lastSharedAt && <span className="font-normal text-emerald-400/80"> · updated {Math.max(0, Math.round((Date.now() - lastSharedAt) / 1000))}s ago</span>}
+              </p>
+            )}
+            {geoStatus === 'denied' && <p className="font-semibold">Location permission needed to share your position. Enable location for this site in your browser settings, then reload.</p>}
+            {geoStatus === 'unavailable' && <p className="font-semibold">Location is unavailable on this device right now.</p>}
+            {geoStatus === 'off' && <p className="font-semibold">Starting location sharing…</p>}
+            <p className="text-xs mt-0.5 opacity-80">Keep this screen on — sharing pauses if your phone sleeps.</p>
+          </div>
+        </div>
+      )}
 
       {/* Step 1: pick up from the vendor */}
       <div className={`bg-bg-card border rounded-2xl p-4 ${pickedUp ? 'border-emerald-500/30' : 'border-white/10'}`}>

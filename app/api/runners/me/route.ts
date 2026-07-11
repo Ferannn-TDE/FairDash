@@ -40,29 +40,76 @@ export async function PATCH(req: NextRequest) {
     const runner = await db.runner.findUnique({ where: { userId: dbUser.id } })
     if (!runner) return apiError('No runner record found', 404, 'RUNNER_NOT_FOUND')
 
-    const body = await req.json()
-    const { status } = body as { status: RunnerStatus }
+    const body = await req.json() as Record<string, unknown>
 
-    if (!status || !Object.values(RunnerStatus).includes(status)) {
-      throw new ApiError(
-        `status must be one of: ${Object.values(RunnerStatus).join(', ')}`,
-        400,
-        'VALIDATION_ERROR'
-      )
+    // The endpoint serves two write shapes: the online/offline STATUS flip, and the
+    // runner's SETTINGS (vehicle / notifications / availability / contact phone). A
+    // request may carry either or both. Every field is whitelisted — no mass-assign.
+    const data: Record<string, unknown> = {}
+
+    // ── Status (optional) ──────────────────────────────────────────────────────
+    if ('status' in body) {
+      const status = body.status as RunnerStatus
+      if (!status || !Object.values(RunnerStatus).includes(status)) {
+        throw new ApiError(`status must be one of: ${Object.values(RunnerStatus).join(', ')}`, 400, 'VALIDATION_ERROR')
+      }
+      // Runners on active delivery cannot go OFFLINE
+      if (runner.status === RunnerStatus.ON_DELIVERY && status === RunnerStatus.OFFLINE) {
+        throw new ApiError('Cannot go offline while on an active delivery', 409, 'RUNNER_ON_DELIVERY')
+      }
+      // Approval gate: only an APPROVED runner may leave OFFLINE. Going OFFLINE is
+      // always allowed (a PENDING/REJECTED runner can still be off-shift).
+      if (status !== RunnerStatus.OFFLINE && runner.approvalStatus !== 'APPROVED') {
+        throw new ApiError('Your runner account is awaiting admin approval', 403, 'RUNNER_NOT_APPROVED')
+      }
+      data.status = status
     }
 
-    // Runners on active delivery cannot go OFFLINE
-    if (runner.status === RunnerStatus.ON_DELIVERY && status === RunnerStatus.OFFLINE) {
-      throw new ApiError(
-        'Cannot go offline while on an active delivery',
-        409,
-        'RUNNER_ON_DELIVERY'
-      )
+    // ── Settings (all optional) ────────────────────────────────────────────────
+    // Nullable free-text: trim, cap length, empty → null. Only assign if the key
+    // was actually present, so a partial PATCH never clobbers unrelated fields.
+    const STRING_FIELDS = ['phone', 'vehicleMake', 'vehicleModel', 'vehicleColor', 'vehiclePlate'] as const
+    for (const key of STRING_FIELDS) {
+      if (!(key in body)) continue
+      const raw = body[key]
+      if (raw !== null && typeof raw !== 'string') {
+        throw new ApiError(`${key} must be a string or null`, 400, 'VALIDATION_ERROR')
+      }
+      const trimmed = typeof raw === 'string' ? raw.trim().slice(0, 120) : ''
+      data[key] = trimmed.length ? trimmed : null
+    }
+
+    const BOOL_FIELDS = ['notifyNewDelivery', 'notifyOrderUpdates', 'notifyEarnings'] as const
+    for (const key of BOOL_FIELDS) {
+      if (!(key in body)) continue
+      if (typeof body[key] !== 'boolean') {
+        throw new ApiError(`${key} must be a boolean`, 400, 'VALIDATION_ERROR')
+      }
+      data[key] = body[key]
+    }
+
+    // Availability — array of weekday short-names, whitelisted + deduped, order fixed.
+    if ('availableDays' in body) {
+      const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+      const raw = body.availableDays
+      if (!Array.isArray(raw) || raw.some(d => typeof d !== 'string')) {
+        throw new ApiError('availableDays must be an array of weekday strings', 400, 'VALIDATION_ERROR')
+      }
+      const set = new Set(raw as string[])
+      const invalid = [...set].filter(d => !WEEKDAYS.includes(d))
+      if (invalid.length) {
+        throw new ApiError(`availableDays contains invalid day(s): ${invalid.join(', ')}`, 400, 'VALIDATION_ERROR')
+      }
+      data.availableDays = WEEKDAYS.filter(d => set.has(d)) // canonical order
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new ApiError('No updatable fields provided', 400, 'VALIDATION_ERROR')
     }
 
     const updated = await db.runner.update({
       where: { id: runner.id },
-      data: { status },
+      data,
       include: { event: { select: { id: true, name: true, urlSlug: true } } },
     })
 
