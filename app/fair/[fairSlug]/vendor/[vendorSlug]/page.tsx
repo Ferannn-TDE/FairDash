@@ -89,9 +89,12 @@ export default function VendorMenuPage() {
     if (!params.vendorSlug || !params.fairSlug) return
     setLoading(true)
 
+    // Pass the fair so the slug resolves within THIS fair (slug is unique per fair,
+    // not globally) — otherwise a slug shared across fairs could return the wrong one.
+    const fq = `?fair=${encodeURIComponent(params.fairSlug)}`
     Promise.all([
-      fetch(`/api/vendors/${params.vendorSlug}`).then(r => r.json()),
-      fetch(`/api/vendors/${params.vendorSlug}/menu`).then(r => r.json()),
+      fetch(`/api/vendors/${params.vendorSlug}${fq}`).then(r => r.json()),
+      fetch(`/api/vendors/${params.vendorSlug}/menu${fq}`).then(r => r.json()),
     ])
       .then(([vendorJson, menuJson]) => {
         if (!vendorJson.success) { setNotFound(true); setLoading(false); return }

@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { resolveVendorWhere } from '@/lib/resolve-vendor'
 
 // GET /api/organizer/vendors/:id/audit-log?take=50&skip=0&action=ORDER_DECLINED
 // Returns the audit trail for a vendor belonging to this organizer's event.
@@ -14,9 +15,10 @@ export async function GET(
     const { organizerId } = await requireOrganizerAuth()
     const { id: vendorParam } = await params
 
-    // Accept cuid or per-event slug
+    // Accept cuid or per-fair slug, scoped to ?fair=<fairSlug>; ownership check follows.
+    const fairSlug = req.nextUrl.searchParams.get('fair')
     const vendor = await db.vendor.findFirst({
-      where: { OR: [{ id: vendorParam }, { slug: vendorParam }] },
+      where: await resolveVendorWhere(vendorParam, fairSlug),
       select: { id: true, event: { select: { organizerId: true } } },
     })
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')

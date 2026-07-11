@@ -8,6 +8,7 @@ import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
+import { resolveVendorWhere } from '@/lib/resolve-vendor'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -23,8 +24,11 @@ export async function GET(
     }
 
     const { id } = await params
+    // Per-fair slug resolution: a bare slug no longer identifies one vendor, so scope
+    // it to the fair the page already carries (?fair=<fairSlug>). id stays unambiguous.
+    const fairSlug = new URL(req.url).searchParams.get('fair')
     const vendor = await db.vendor.findFirst({
-      where: { OR: [{ id }, { slug: id }] },
+      where: await resolveVendorWhere(id, fairSlug),
       select: {
         id: true,
         name: true,

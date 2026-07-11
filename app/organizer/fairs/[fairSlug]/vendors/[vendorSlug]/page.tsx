@@ -151,11 +151,13 @@ export default function VendorDetailPage({
   const [menuFilter, setMenuFilter] = useState<string>('ALL')
 
   const fetchVendor = useCallback(async (cursor?: string) => {
-    const url = `/api/organizer/vendors/${vendorSlug}${cursor ? `?orderCursor=${cursor}` : ''}`
-    const res  = await fetch(url)
+    // Pass the fair so the slug resolves within THIS fair (slug is unique per fair).
+    const qs = new URLSearchParams({ fair: fairSlug })
+    if (cursor) qs.set('orderCursor', cursor)
+    const res  = await fetch(`/api/organizer/vendors/${vendorSlug}?${qs.toString()}`)
     const json = await res.json()
     return json.data as VendorDetail | null
-  }, [vendorSlug])
+  }, [vendorSlug, fairSlug])
 
   useEffect(() => {
     fetchVendor().then(data => {
@@ -191,7 +193,7 @@ export default function VendorDetailPage({
     if (!vendor) return
     setActing(true)
     try {
-      const res  = await fetch(`/api/organizer/vendors/${vendorSlug}`, {
+      const res  = await fetch(`/api/organizer/vendors/${vendorSlug}?fair=${encodeURIComponent(fairSlug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),

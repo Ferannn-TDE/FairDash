@@ -5,6 +5,7 @@ import { getGroupedMenuItemsByVendor } from '@/lib/menu/getGroupedMenuItems'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { getOptionalUserId } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { resolveVendorWhere } from '@/lib/resolve-vendor'
 
 // GET /api/vendors/:id/menu
 // Returns pre-grouped menu items for a single vendor. Grouping is server-side.
@@ -18,8 +19,10 @@ export async function GET(
 ) {
   try {
     const { id } = await params
+    // Per-fair slug scoping — same as the vendor page (?fair=<fairSlug>). See resolveVendorWhere.
+    const fairSlug = new URL(req.url).searchParams.get('fair')
     const vendor = await db.vendor.findFirst({
-      where: { OR: [{ id }, { slug: id }] },
+      where: await resolveVendorWhere(id, fairSlug),
       select: {
         id: true, isOffline: true, status: true, stripeVerified: true,
         _count: { select: { menuItems: { where: { isAvailable: true } } } },
