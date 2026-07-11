@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { revalidateTag } from 'next/cache'
-import { OrderStatus, FulfillmentType } from '@prisma/client'
+import { OrderStatus, FulfillmentType, RunnerStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
 import { placePaidOrder } from '@/lib/place-order'
@@ -164,6 +164,19 @@ export async function PATCH(
       const runner = await db.runner.findUnique({ where: { userId: dbUser.id } })
       if (!runner || runner.eventId !== order.eventId) {
         return apiError('Access denied — not a runner for this event', 403, 'FORBIDDEN')
+      }
+
+      // Approval gate — re-verified INDEPENDENTLY here; never assume the go-online
+      // gate already ran (the claim route must stand on its own).
+      if (runner.approvalStatus !== 'APPROVED') {
+        return apiError('Runner account is not approved', 403, 'RUNNER_NOT_APPROVED')
+      }
+      // ACTIVE gate — closes the "OFFLINE runner claims via direct API" hole. Applies
+      // to the CLAIM (READY -> RUNNER_COLLECTED) ONLY — NEVER to DELIVERED, so a
+      // runner who claimed then went offline/was rejected can still complete the
+      // delivery instead of stranding the customer's food.
+      if (newStatus === OrderStatus.RUNNER_COLLECTED && runner.status !== RunnerStatus.ACTIVE) {
+        return apiError('Must be online (ACTIVE) to claim a delivery', 403, 'RUNNER_NOT_ACTIVE')
       }
 
       const allowedRunnerNext = RUNNER_TRANSITIONS[order.status]

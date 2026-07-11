@@ -1,16 +1,42 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useUser } from '@clerk/clerk-react'
 import Link from 'next/link'
 import { TruckIcon, CheckIcon, ChevronRightIcon, ChevronLeftIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import MarketplaceNavbar from '../_components/MarketplaceNavbar'
+import { validateApplication, STEP_FIELDS } from '@/lib/runner-application-validation'
 
+// Per-field error message. Rendered only once the field is touched.
+function FieldError({ msg }: { msg?: string }) {
+  if (!msg) return null
+  return <p role="alert" className="text-red-400 text-xs mt-1.5">{msg}</p>
+}
+
+// Shared input classes — red ring when the field is in error, so the invalid field is
+// obvious without reading the message.
+const inputCls = (invalid?: string) =>
+  `w-full bg-bg-dark border rounded-xl px-4 py-3 text-white text-sm outline-none transition-colors placeholder:text-text-gray/40 ${
+    invalid ? 'border-red-500/70 focus:border-red-500' : 'border-white/10 focus:border-neon-pink'
+  }`
+
+// Step 0 (FAIR_STEP) is conditional — see needsFairStep below. Steps 1–3 are the
+// classic application; step 4 is the confirmation screen.
+const FAIR_STEP = { id: 0, label: 'Your Fair' }
 const STEPS = [
   { id: 1, label: 'Personal Info' },
   { id: 2, label: 'Vehicle Info' },
   { id: 3, label: 'Terms' },
 ]
+
+interface FairOption {
+  id: string
+  name: string
+  slug: string
+  vendorCount: number
+}
 
 const DRIVER_TERMS = `FAIRSYNQ DRIVER AGREEMENT
 
@@ -55,6 +81,13 @@ By checking "I agree to the Driver Terms & Conditions," you confirm that you hav
 // whenever DRIVER_TERMS changes.
 const DRIVER_TERMS_VERSION = '2026-01-01'
 
+// DOB is entered as Month/Day/Year selects — a calendar picker is the wrong tool for
+// a birth date (it forces paging back decades to reach a 1994). Order: Month, Day, Year.
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
 interface Personal {
   firstName: string; lastName: string; email: string
   phone: string; dob: string; city: string
@@ -65,7 +98,68 @@ interface Vehicle {
 }
 
 export default function BecomeDriverPage() {
+  // ── Fair context ────────────────────────────────────────────────────────────
+  // A Runner is event-scoped (Runner.eventId) and Runner.userId is @unique — one row
+  // per user, so the fair picked here is the fair they drive for, permanently. Without
+  // a fair there is nothing to scope a Runner to, so no Runner can be minted and no
+  // portal exists to land in.
+  //
+  // The fair can arrive two ways:
+  //   1. ?fair=<slug> — carried by the runner door (app/runner/[fairSlug]/layout.tsx).
+  //   2. Step 0, the picker below — for every OTHER door (the /onboarding role picker,
+  //      bare /runner, the nav link), which pass no fair. Previously those doors left
+  //      fairSlug null forever, so the mint never fired and every signed-in applicant
+  //      fell through to the signed-out "we'll be in touch" screen.
+  //
+  // Signed-OUT applicants never see the picker: they have no account to attach a Runner
+  // to, so they keep the classic application-only path.
+  const searchParams = useSearchParams()
+  const urlFairSlug = searchParams.get('fair')?.trim() || null
+
+  const { isLoaded: authLoaded, isSignedIn } = useUser()
+  const [pickedFair, setPickedFair] = useState<string | null>(null)
+  const fairSlug = urlFairSlug ?? pickedFair
+
+  // Only a signed-in applicant with no fair in the URL needs to pick one.
+  const needsFairStep = authLoaded && !!isSignedIn && !urlFairSlug
+
+  const [fairs, setFairs] = useState<FairOption[]>([])
+  const [fairsLoading, setFairsLoading] = useState(false)
+  const [fairsError, setFairsError] = useState(false)
+  const [fairsReloadKey, setFairsReloadKey] = useState(0) // bumped by "Try again"
+
   const [step, setStep] = useState(1)
+
+  // Clerk resolves async, so the wizard opens on step 1 and drops back to the picker
+  // once we know the user is signed in. Guarded on step === 1 so a user who has already
+  // advanced (only possible if they filled the form before Clerk loaded) is never yanked
+  // backwards mid-application.
+  useEffect(() => {
+    if (needsFairStep && !pickedFair) setStep(s => (s === 1 ? 0 : s))
+  }, [needsFairStep, pickedFair])
+
+  // Public ACTIVE, non-archived fairs — the same list the discovery page shows.
+  useEffect(() => {
+    if (!needsFairStep) return
+    let cancelled = false
+    setFairsLoading(true)
+    setFairsError(false)
+    fetch('/api/fairs')
+      .then(r => r.json())
+      .then(json => {
+        if (cancelled) return
+        if (!json.success) throw new Error('failed')
+        setFairs(json.data ?? [])
+      })
+      .catch(() => { if (!cancelled) setFairsError(true) })
+      .finally(() => { if (!cancelled) setFairsLoading(false) })
+    return () => { cancelled = true }
+  }, [needsFairStep, fairsReloadKey])
+
+  // Steps shown in the progress bar — the fair picker only when it applies.
+  const wizardSteps = needsFairStep ? [FAIR_STEP, ...STEPS] : STEPS
+  // First step of the wizard: "Back" becomes "Cancel" here.
+  const firstStep = needsFairStep ? 0 : 1
   const [submitting, setSubmitting] = useState(false)
   const [agreed, setAgreed] = useState(false)
   const [bgConsent, setBgConsent] = useState(false)
@@ -73,19 +167,64 @@ export default function BecomeDriverPage() {
   const [personal, setPersonal] = useState<Personal>({
     firstName: '', lastName: '', email: '', phone: '', dob: '', city: '',
   })
+
+  // DOB parts drive the three selects; personal.dob is kept as the SAME 'YYYY-MM-DD'
+  // string the old <input type="date"> emitted, so submit + backend (new Date(dob))
+  // are untouched. dob stays '' until all three parts form a REAL calendar date —
+  // JS Date rolls invalid combos over (Feb 30 → Mar 2), so we reject any roll-over.
+  const [dobParts, setDobParts] = useState({ month: '', day: '', year: '' })
+  const setDobPart = (patch: Partial<typeof dobParts>) => {
+    const next = { ...dobParts, ...patch }
+    setDobParts(next)
+    const mo = Number(next.month), da = Number(next.day), yr = Number(next.year)
+    let iso = ''
+    if (next.month && next.day && next.year) {
+      const dt = new Date(yr, mo - 1, da)
+      if (dt.getFullYear() === yr && dt.getMonth() === mo - 1 && dt.getDate() === da) {
+        iso = `${yr}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`
+      }
+    }
+    setPersonal(p => ({ ...p, dob: iso }))
+    // Only nag about the DOB once all three parts are chosen — blurring "Month" with
+    // Day/Year still empty shouldn't flash "required" at someone mid-entry. Once the
+    // date is complete, an invalid one (under 18, Feb 30) reports immediately.
+    if (next.month && next.day && next.year) touch('dob')
+  }
+  // Year list: most-recent first (jump straight to a birth year, no paging). 16–100
+  // years back — a permissive convenience range, not a new age gate (backend validation
+  // is unchanged: it only requires a valid date).
+  const currentYear = new Date().getFullYear()
+  const DOB_YEARS = Array.from({ length: 85 }, (_, i) => currentYear - 16 - i)
   const [vehicle, setVehicle] = useState<Vehicle>({
     make: '', model: '', year: '', color: '', plate: '', type: '',
   })
 
-  const canProceedStep1 =
-    personal.firstName.trim() && personal.lastName.trim() &&
-    personal.email.trim() && personal.phone.trim() && personal.dob
+  // Escape hatch: a signed-in applicant with no fair to pick (none live, or the list
+  // failed to load) must not be trapped on step 0. Opting into a general application
+  // leaves fairSlug null, so no Runner is minted and they get the honest "we'll be in
+  // touch" path — the same as a signed-out applicant.
+  const [generalApplication, setGeneralApplication] = useState(false)
+  const canProceedStep0 = !!pickedFair || generalApplication
 
-  const canProceedStep2 =
-    vehicle.make.trim() && vehicle.model.trim() &&
-    vehicle.year.trim() && vehicle.type
+  // ── Validation ──────────────────────────────────────────────────────────────
+  // Same module the server runs (lib/runner-application-validation). This is FEEDBACK
+  // only — POST /api/drivers re-validates and is the actual gate.
+  //
+  // Errors are computed on every render; `touched` decides whether to SHOW one, so a
+  // field the user hasn't reached yet isn't already screaming red at them. Submitting
+  // marks everything touched, revealing anything still outstanding.
+  const errors = validateApplication({ personal, vehicle, agreed, bgConsent })
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const touch = (k: string) => setTouched(t => ({ ...t, [k]: true }))
+  const errorFor = (k: string) => (touched[k] ? errors[k] : undefined)
 
-  const canProceedStep3 = agreed && bgConsent
+  const stepValid = (s: number) => (STEP_FIELDS[s] ?? []).every(f => !errors[f])
+  const touchStep = (s: number) =>
+    setTouched(t => ({ ...t, ...Object.fromEntries((STEP_FIELDS[s] ?? []).map(f => [f, true])) }))
+
+  const canProceedStep1 = stepValid(1)
+  const canProceedStep2 = stepValid(2)
+  const canProceedStep3 = stepValid(3)
 
   const handleSubmit = async () => {
     setSubmitting(true)
@@ -93,12 +232,32 @@ export default function BecomeDriverPage() {
       const res = await fetch('/api/drivers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personal, vehicle, agreed, bgConsent, termsVersion: DRIVER_TERMS_VERSION }),
+        body: JSON.stringify({ personal, vehicle, agreed, bgConsent, termsVersion: DRIVER_TERMS_VERSION, fairSlug }),
       })
       const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message || 'Submission failed')
+      if (!json.success) {
+        // The server re-validates with the same module. If it rejects a field the client
+        // let through (clock skew, a stale tab, a hand-crafted request), surface it on the
+        // field rather than as a bare toast — and jump back to the step that owns it.
+        const serverFields = json.error?.details?.fieldErrors as Record<string, string> | undefined
+        if (serverFields && Object.keys(serverFields).length) {
+          setTouched(t => ({ ...t, ...Object.fromEntries(Object.keys(serverFields).map(f => [f, true])) }))
+          const bad = Object.keys(serverFields)[0]
+          const owning = Number(Object.keys(STEP_FIELDS).find(s => STEP_FIELDS[Number(s)].includes(bad)))
+          if (owning) setStep(owning)
+        }
+        throw new Error(json.error?.message || 'Submission failed')
+      }
+      // Both paths land on the step-4 completion screen; it branches on fairSlug for the
+      // CTA. Fair context → a PENDING Runner was minted, so a single "Go to Runner Portal"
+      // button drops them into the shell (toggle locked, awaiting approval). No fair context
+      // → the classic "we'll be in touch" screen (a generic applicant has no portal yet).
       setStep(4)
-      toast.success("Application submitted! We'll be in touch within 2–3 business days.")
+      toast.success(
+        fairSlug
+          ? 'Application submitted! Your runner account is awaiting admin approval.'
+          : "Application submitted! We'll be in touch within 2–3 business days.",
+      )
     } catch (err: any) {
       toast.error(err.message || 'Could not submit application')
     } finally {
@@ -125,11 +284,12 @@ export default function BecomeDriverPage() {
             </p>
           </div>
 
-          {/* Progress Bar */}
+          {/* Progress Bar — the fair step is prepended only when it applies, so a
+              signed-out applicant still sees the original three-step wizard. */}
           {step < 4 && (
             <div className="mb-8">
               <div className="flex items-center justify-between mb-3">
-                {STEPS.map((s, i) => (
+                {wizardSteps.map((s, i) => (
                   <div key={s.id} className="flex items-center flex-1">
                     <div className="flex flex-col items-center w-full">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 border-2 ${
@@ -139,18 +299,109 @@ export default function BecomeDriverPage() {
                           ? 'border-neon-pink text-neon-pink bg-neon-pink/10'
                           : 'border-white/20 text-text-gray bg-white/5'
                       }`}>
-                        {step > s.id ? <CheckIcon className="w-4 h-4" /> : s.id}
+                        {step > s.id ? <CheckIcon className="w-4 h-4" /> : i + 1}
                       </div>
                       <span className={`text-[0.625rem] uppercase tracking-wide mt-1 font-semibold hidden sm:block text-center ${step >= s.id ? 'text-white' : 'text-text-gray'}`}>
                         {s.label}
                       </span>
                     </div>
-                    {i < STEPS.length - 1 && (
+                    {i < wizardSteps.length - 1 && (
                       <div className={`flex-1 h-0.5 mx-2 transition-colors duration-300 ${step > s.id ? 'bg-neon-pink' : 'bg-white/10'}`} />
                     )}
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Step 0: Pick your fair (signed-in applicants with no ?fair= in the URL) */}
+          {step === 0 && (
+            <div className="bg-bg-card border border-white/10 rounded-2xl p-7">
+              <h2 className="font-bebas text-2xl tracking-wide mb-2 text-white">Which Fair Will You Drive For?</h2>
+              <p className="text-text-gray text-sm mb-6">
+                Runners are assigned to a single fair. Pick the one you want to deliver at —
+                an admin there will review and approve your account.
+              </p>
+
+              {fairsLoading && (
+                <div className="space-y-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className="h-[4.5rem] bg-white/5 border border-white/10 rounded-xl animate-pulse" />
+                  ))}
+                </div>
+              )}
+
+              {!fairsLoading && fairsError && (
+                <div className="text-center py-8">
+                  <p className="text-text-gray text-sm mb-4">We couldn&apos;t load the list of fairs.</p>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button
+                      onClick={() => setFairsReloadKey(k => k + 1)}
+                      className="px-6 py-2.5 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all cursor-pointer"
+                    >
+                      Try again
+                    </button>
+                    <button
+                      onClick={() => { setGeneralApplication(true); setStep(1) }}
+                      className="px-6 py-2.5 bg-white/5 border border-white/10 text-text-gray rounded-xl font-semibold text-sm hover:bg-white/10 transition-all cursor-pointer"
+                    >
+                      Apply without a fair
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!fairsLoading && !fairsError && fairs.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-white text-sm font-semibold mb-1.5">No fairs are hiring right now</p>
+                  <p className="text-text-gray text-sm mb-5">
+                    There are no live fairs accepting runners at the moment. You can still send us
+                    your application and we&apos;ll reach out when one opens — or browse the{' '}
+                    <Link href="/fairs" className="text-neon-pink hover:underline">upcoming fairs</Link>.
+                  </p>
+                  <button
+                    onClick={() => { setGeneralApplication(true); setStep(1) }}
+                    className="px-6 py-2.5 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+                  >
+                    Apply anyway
+                  </button>
+                </div>
+              )}
+
+              {!fairsLoading && !fairsError && fairs.length > 0 && (
+                <div className="space-y-3">
+                  {fairs.map(f => {
+                    const selected = pickedFair === f.slug
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setPickedFair(f.slug)}
+                        aria-pressed={selected}
+                        className={`w-full text-left px-5 py-4 rounded-xl border transition-all cursor-pointer ${
+                          selected
+                            ? 'bg-neon-pink/10 border-neon-pink shadow-[0_4px_12px_rgba(255,0,119,0.15)]'
+                            : 'bg-bg-dark border-white/10 hover:border-white/25'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="min-w-0">
+                            <p className={`font-semibold text-sm truncate ${selected ? 'text-white' : 'text-white'}`}>{f.name}</p>
+                            <p className="text-text-gray text-xs mt-0.5">
+                              {f.vendorCount} {f.vendorCount === 1 ? 'vendor' : 'vendors'}
+                            </p>
+                          </div>
+                          <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                            selected ? 'bg-neon-pink border-neon-pink' : 'border-white/25'
+                          }`}>
+                            {selected && <CheckIcon className="w-3 h-3 text-white" />}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -168,9 +419,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={personal.firstName}
                       onChange={(e) => setPersonal(p => ({ ...p, firstName: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('firstName')}
+                      aria-invalid={!!errorFor('firstName')}
+                      className={inputCls(errorFor('firstName'))}
                       placeholder="First name"
                     />
+                    <FieldError msg={errorFor('firstName')} />
                   </div>
                   <div>
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
@@ -180,9 +434,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={personal.lastName}
                       onChange={(e) => setPersonal(p => ({ ...p, lastName: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('lastName')}
+                      aria-invalid={!!errorFor('lastName')}
+                      className={inputCls(errorFor('lastName'))}
                       placeholder="Last name"
                     />
+                    <FieldError msg={errorFor('lastName')} />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -194,9 +451,12 @@ export default function BecomeDriverPage() {
                       type="email"
                       value={personal.email}
                       onChange={(e) => setPersonal(p => ({ ...p, email: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('email')}
+                      aria-invalid={!!errorFor('email')}
+                      className={inputCls(errorFor('email'))}
                       placeholder="you@example.com"
                     />
+                    <FieldError msg={errorFor('email')} />
                   </div>
                   <div>
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
@@ -206,9 +466,12 @@ export default function BecomeDriverPage() {
                       type="tel"
                       value={personal.phone}
                       onChange={(e) => setPersonal(p => ({ ...p, phone: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('phone')}
+                      aria-invalid={!!errorFor('phone')}
+                      className={inputCls(errorFor('phone'))}
                       placeholder="(555) 000-0000"
                     />
+                    <FieldError msg={errorFor('phone')} />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -216,12 +479,42 @@ export default function BecomeDriverPage() {
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
                       Date of Birth <span className="text-neon-pink">*</span>
                     </label>
-                    <input
-                      type="date"
-                      value={personal.dob}
-                      onChange={(e) => setPersonal(p => ({ ...p, dob: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors [color-scheme:dark]"
-                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <select
+                        aria-label="Birth month"
+                        value={dobParts.month}
+                        onChange={(e) => setDobPart({ month: e.target.value })}
+                        className="w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors [color-scheme:dark]"
+                      >
+                        <option value="">Month</option>
+                        {MONTHS.map((name, i) => (
+                          <option key={name} value={String(i + 1)}>{name}</option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Birth day"
+                        value={dobParts.day}
+                        onChange={(e) => setDobPart({ day: e.target.value })}
+                        className="w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors [color-scheme:dark]"
+                      >
+                        <option value="">Day</option>
+                        {Array.from({ length: 31 }, (_, i) => (
+                          <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Birth year"
+                        value={dobParts.year}
+                        onChange={(e) => setDobPart({ year: e.target.value })}
+                        className="w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors [color-scheme:dark]"
+                      >
+                        <option value="">Year</option>
+                        {DOB_YEARS.map(y => (
+                          <option key={y} value={String(y)}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <FieldError msg={errorFor('dob')} />
                   </div>
                   <div>
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
@@ -231,9 +524,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={personal.city}
                       onChange={(e) => setPersonal(p => ({ ...p, city: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('city')}
+                      aria-invalid={!!errorFor('city')}
+                      className={inputCls(errorFor('city'))}
                       placeholder="Springfield, IL"
                     />
+                    <FieldError msg={errorFor('city')} />
                   </div>
                 </div>
               </div>
@@ -253,7 +549,8 @@ export default function BecomeDriverPage() {
                     {['Car', 'SUV / Truck', 'Motorcycle', 'Bicycle', 'Electric Scooter'].map((t) => (
                       <button
                         key={t}
-                        onClick={() => setVehicle(v => ({ ...v, type: t }))}
+                        type="button"
+                        onClick={() => { setVehicle(v => ({ ...v, type: t })); touch('vehicleType') }}
                         className={`px-4 py-2 rounded-full text-sm font-medium border cursor-pointer transition-all duration-200 ${
                           vehicle.type === t
                             ? 'bg-neon-pink border-neon-pink text-white'
@@ -264,6 +561,7 @@ export default function BecomeDriverPage() {
                       </button>
                     ))}
                   </div>
+                  <FieldError msg={errorFor('vehicleType')} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
@@ -274,9 +572,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={vehicle.make}
                       onChange={(e) => setVehicle(v => ({ ...v, make: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('vehicleMake')}
+                      aria-invalid={!!errorFor('vehicleMake')}
+                      className={inputCls(errorFor('vehicleMake'))}
                       placeholder="Toyota"
                     />
+                    <FieldError msg={errorFor('vehicleMake')} />
                   </div>
                   <div>
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
@@ -286,9 +587,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={vehicle.model}
                       onChange={(e) => setVehicle(v => ({ ...v, model: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('vehicleModel')}
+                      aria-invalid={!!errorFor('vehicleModel')}
+                      className={inputCls(errorFor('vehicleModel'))}
                       placeholder="Camry"
                     />
+                    <FieldError msg={errorFor('vehicleModel')} />
                   </div>
                   <div>
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
@@ -298,9 +602,13 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={vehicle.year}
                       onChange={(e) => setVehicle(v => ({ ...v, year: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('vehicleYear')}
+                      aria-invalid={!!errorFor('vehicleYear')}
+                      inputMode="numeric"
+                      className={inputCls(errorFor('vehicleYear'))}
                       placeholder="2020"
                     />
+                    <FieldError msg={errorFor('vehicleYear')} />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -312,9 +620,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={vehicle.color}
                       onChange={(e) => setVehicle(v => ({ ...v, color: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('vehicleColor')}
+                      aria-invalid={!!errorFor('vehicleColor')}
+                      className={inputCls(errorFor('vehicleColor'))}
                       placeholder="Silver"
                     />
+                    <FieldError msg={errorFor('vehicleColor')} />
                   </div>
                   <div>
                     <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
@@ -324,9 +635,12 @@ export default function BecomeDriverPage() {
                       type="text"
                       value={vehicle.plate}
                       onChange={(e) => setVehicle(v => ({ ...v, plate: e.target.value }))}
-                      className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40"
+                      onBlur={() => touch('vehiclePlate')}
+                      aria-invalid={!!errorFor('vehiclePlate')}
+                      className={inputCls(errorFor('vehiclePlate'))}
                       placeholder="ABC 1234"
                     />
+                    <FieldError msg={errorFor('vehiclePlate')} />
                   </div>
                 </div>
               </div>
@@ -342,36 +656,56 @@ export default function BecomeDriverPage() {
                 {DRIVER_TERMS}
               </div>
               <div className="space-y-4">
-                <label className="flex items-start gap-3 cursor-pointer group">
-                  <button
-                    onClick={() => setAgreed(a => !a)}
-                    className={`mt-0.5 w-5 h-5 rounded flex-shrink-0 border-2 flex items-center justify-center transition-all duration-200 cursor-pointer bg-transparent ${
-                      agreed ? 'bg-neon-pink border-neon-pink' : 'border-white/20 group-hover:border-white/40'
-                    }`}
-                  >
-                    {agreed && <CheckIcon className="w-3 h-3 text-white" />}
-                  </button>
-                  <span className="text-sm text-text-gray leading-relaxed">
-                    I have read and agree to the{' '}
-                    <span className="text-neon-pink font-semibold">Driver Terms & Conditions</span>{' '}
-                    and understand my status as an independent contractor.
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer group">
-                  <button
-                    onClick={() => setBgConsent(c => !c)}
-                    className={`mt-0.5 w-5 h-5 rounded flex-shrink-0 border-2 flex items-center justify-center transition-all duration-200 cursor-pointer bg-transparent ${
-                      bgConsent ? 'bg-neon-pink border-neon-pink' : 'border-white/20 group-hover:border-white/40'
-                    }`}
-                  >
-                    {bgConsent && <CheckIcon className="w-3 h-3 text-white" />}
-                  </button>
-                  <span className="text-sm text-text-gray leading-relaxed">
-                    I consent to a{' '}
-                    <span className="text-neon-pink font-semibold">background check and motor vehicle record review</span>{' '}
-                    as a condition of my driver application.
-                  </span>
-                </label>
+                <div>
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={agreed}
+                      onClick={() => { setAgreed(a => !a); touch('agreed') }}
+                      className={`mt-0.5 w-5 h-5 rounded flex-shrink-0 border-2 flex items-center justify-center transition-all duration-200 cursor-pointer bg-transparent ${
+                        agreed
+                          ? 'bg-neon-pink border-neon-pink'
+                          : errorFor('agreed')
+                          ? 'border-red-500/70'
+                          : 'border-white/20 group-hover:border-white/40'
+                      }`}
+                    >
+                      {agreed && <CheckIcon className="w-3 h-3 text-white" />}
+                    </button>
+                    <span className="text-sm text-text-gray leading-relaxed">
+                      I have read and agree to the{' '}
+                      <span className="text-neon-pink font-semibold">Driver Terms & Conditions</span>{' '}
+                      and understand my status as an independent contractor.
+                    </span>
+                  </label>
+                  <FieldError msg={errorFor('agreed')} />
+                </div>
+                <div>
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={bgConsent}
+                      onClick={() => { setBgConsent(c => !c); touch('bgConsent') }}
+                      className={`mt-0.5 w-5 h-5 rounded flex-shrink-0 border-2 flex items-center justify-center transition-all duration-200 cursor-pointer bg-transparent ${
+                        bgConsent
+                          ? 'bg-neon-pink border-neon-pink'
+                          : errorFor('bgConsent')
+                          ? 'border-red-500/70'
+                          : 'border-white/20 group-hover:border-white/40'
+                      }`}
+                    >
+                      {bgConsent && <CheckIcon className="w-3 h-3 text-white" />}
+                    </button>
+                    <span className="text-sm text-text-gray leading-relaxed">
+                      I consent to a{' '}
+                      <span className="text-neon-pink font-semibold">background check and motor vehicle record review</span>{' '}
+                      as a condition of my driver application.
+                    </span>
+                  </label>
+                  <FieldError msg={errorFor('bgConsent')} />
+                </div>
               </div>
             </div>
           )}
@@ -387,24 +721,43 @@ export default function BecomeDriverPage() {
                 Thanks for applying to drive for FairSynq,{' '}
                 <strong className="text-white">{personal.firstName || 'Driver'}</strong>.
               </p>
-              <p className="text-text-gray text-sm mb-8">
-                We'll review your application and reach out to{' '}
-                <span className="text-neon-pink">{personal.email}</span>{' '}
-                within 2–3 business days. A background check will be initiated shortly.
-              </p>
+              {fairSlug ? (
+                <p className="text-text-gray text-sm mb-8">
+                  Your runner account is created and{' '}
+                  <span className="text-neon-pink">awaiting admin approval</span>. Head to your
+                  portal to set up your profile — you'll be able to go online once you're approved.
+                </p>
+              ) : (
+                <p className="text-text-gray text-sm mb-8">
+                  We'll review your application and reach out to{' '}
+                  <span className="text-neon-pink">{personal.email}</span>{' '}
+                  within 2–3 business days. A background check will be initiated shortly.
+                </p>
+              )}
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Link
-                  href="/fairs"
-                  className="px-8 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
-                >
-                  Browse Fairs
-                </Link>
-                <Link
-                  href="/"
-                  className="px-8 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all"
-                >
-                  Go Home
-                </Link>
+                {fairSlug ? (
+                  <Link
+                    href={`/runner/${encodeURIComponent(fairSlug)}/dashboard`}
+                    className="px-8 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+                  >
+                    Go to Runner Portal
+                  </Link>
+                ) : (
+                  <>
+                    <Link
+                      href="/fairs"
+                      className="px-8 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+                    >
+                      Browse Fairs
+                    </Link>
+                    <Link
+                      href="/"
+                      className="px-8 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all"
+                    >
+                      Go Home
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -412,7 +765,7 @@ export default function BecomeDriverPage() {
           {/* Navigation */}
           {step < 4 && (
             <div className="flex justify-between mt-6">
-              {step > 1 ? (
+              {step > firstStep ? (
                 <button
                   onClick={() => setStep(s => s - 1)}
                   className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all cursor-pointer"
@@ -431,18 +784,37 @@ export default function BecomeDriverPage() {
 
               {step < 3 ? (
                 <button
-                  onClick={() => setStep(s => s + 1)}
-                  disabled={step === 1 ? !canProceedStep1 : !canProceedStep2}
-                  className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink"
+                  type="button"
+                  // Deliberately NOT disabled when the step is invalid. A greyed-out Next
+                  // blocks the user without telling them why; clicking instead reveals every
+                  // outstanding error on this step at once. Progression is still blocked.
+                  onClick={() => {
+                    const ok = step === 0 ? canProceedStep0 : step === 1 ? canProceedStep1 : canProceedStep2
+                    if (!ok) { touchStep(step); return }
+                    setStep(s => s + 1)
+                  }}
+                  aria-disabled={step === 0 ? !canProceedStep0 : step === 1 ? !canProceedStep1 : !canProceedStep2}
+                  className={`flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] ${
+                    (step === 0 ? !canProceedStep0 : step === 1 ? !canProceedStep1 : !canProceedStep2)
+                      ? 'opacity-40 hover:bg-neon-pink'
+                      : 'hover:bg-[#e0006b]'
+                  }`}
                 >
                   Next
                   <ChevronRightIcon className="w-4 h-4" />
                 </button>
               ) : (
                 <button
-                  onClick={handleSubmit}
-                  disabled={!canProceedStep3 || submitting}
-                  className="flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink"
+                  type="button"
+                  onClick={() => {
+                    if (!canProceedStep3) { touchStep(3); return }
+                    handleSubmit()
+                  }}
+                  disabled={submitting}
+                  aria-disabled={!canProceedStep3 || submitting}
+                  className={`flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:cursor-not-allowed ${
+                    !canProceedStep3 || submitting ? 'opacity-40 hover:bg-neon-pink' : 'hover:bg-[#e0006b]'
+                  }`}
                 >
                   {submitting ? 'Submitting…' : 'Submit Application'}
                   {!submitting && <CheckIcon className="w-4 h-4" />}

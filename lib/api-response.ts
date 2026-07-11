@@ -13,9 +13,20 @@ export function success<T>(data: T, status = 200) {
  * Return an error JSON response.
  * @example return error('Order not found', 404, 'ORDER_NOT_FOUND')
  */
-export function apiError(message: string, status = 400, code?: string) {
+// `details` is optional and additive — existing callers are unaffected. It carries
+// structured context alongside the human message (e.g. a VALIDATION_ERROR's per-field
+// map), so a direct API caller sees every bad field, not just the first.
+export function apiError(
+  message: string,
+  status = 400,
+  code?: string,
+  details?: unknown
+) {
   return NextResponse.json(
-    { success: false, error: { message, ...(code && { code }) } },
+    {
+      success: false,
+      error: { message, ...(code && { code }), ...(details !== undefined && { details }) },
+    },
     { status }
   )
 }

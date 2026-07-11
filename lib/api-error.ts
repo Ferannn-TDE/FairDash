@@ -10,7 +10,10 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public statusCode: number = 500,
-    public code: string = 'INTERNAL_ERROR'
+    public code: string = 'INTERNAL_ERROR',
+    // Optional structured context surfaced to the caller (e.g. per-field validation
+    // errors). Additive — existing throw sites are unaffected.
+    public details?: unknown
   ) {
     super(message)
     this.name = 'ApiError'
@@ -32,7 +35,7 @@ export class ApiError extends Error {
  */
 export function handleApiError(err: unknown) {
   if (err instanceof ApiError) {
-    return apiError(err.message, err.statusCode, err.code)
+    return apiError(err.message, err.statusCode, err.code, err.details)
   }
 
   if (err instanceof Error) {

@@ -25,6 +25,8 @@ export async function GET(
       select: {
         id: true,
         status: true,
+        approvalStatus: true,
+        rejectionReason: true,
         createdAt: true,
         eventId: true,
         completionRate: true,

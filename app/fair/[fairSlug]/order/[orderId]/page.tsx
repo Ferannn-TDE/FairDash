@@ -9,6 +9,7 @@ import { getFirebaseApp } from '@/lib/firebase-client'
 import { useFairCart } from '../../../../_contexts/FairCartContext'
 import SingleOrderTracking from '@/components/order/SingleOrderTracking'
 import MultiOrderTracking from '@/components/order/MultiOrderTracking'
+import RunnerLocationBanner from '@/components/order/RunnerLocationBanner'
 import { buildVendorGroups } from '@/components/order/helpers'
 import type { Order } from '@/components/order/types'
 
@@ -218,7 +219,20 @@ export default function OrderTrackingPage() {
   }
 
   const isMultiVendor = buildVendorGroups(order.orderItems).length > 1
-  return isMultiVendor
-    ? <MultiOrderTracking {...sharedProps} />
-    : <SingleOrderTracking {...sharedProps} />
+  return (
+    <>
+      {/* Phase 1 live runner location — minimal coord + staleness, no map. Self-polls;
+          renders nothing until a runner-fulfilled order reaches READY/RUNNER_COLLECTED. */}
+      <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 pt-4">
+        <RunnerLocationBanner
+          orderId={orderId}
+          fulfillmentType={order.fulfillmentType}
+          status={liveStatus}
+        />
+      </div>
+      {isMultiVendor
+        ? <MultiOrderTracking {...sharedProps} />
+        : <SingleOrderTracking {...sharedProps} />}
+    </>
+  )
 }

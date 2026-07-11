@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
-  Truck, DollarSign, CheckCircle, MapPin, Car, Bell, Package, WifiOff,
+  Truck, DollarSign, CheckCircle, MapPin, Car, Bell, Package, WifiOff, Clock, Ban,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useRunner } from '../_context/RunnerContext'
@@ -22,10 +22,34 @@ interface DeliveryOrder {
 }
 interface EarningsData { trackedToday: number; deliveriesToday: number; completionRate: number }
 
+/* ─── Approval banner — honest "why is my toggle dead" UX ──────────────────── */
+// Backend truth is the gate (see /api/runners/me + /api/orders/[id]/status); this
+// only explains WHY an unapproved runner can't go online.
+function ApprovalBanner({ approvalStatus }: { approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED' }) {
+  if (approvalStatus === 'APPROVED') return null
+  const rejected = approvalStatus === 'REJECTED'
+  return (
+    <div className={`rounded-2xl p-4 border flex items-start gap-3 ${rejected ? 'bg-red-500/10 border-red-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
+      {rejected ? <Ban className="w-5 h-5 text-red-400 shrink-0 mt-0.5" /> : <Clock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />}
+      <div>
+        <p className={`font-semibold text-sm ${rejected ? 'text-red-300' : 'text-amber-300'}`}>
+          {rejected ? 'Your runner application was not approved' : 'Your account is awaiting admin approval'}
+        </p>
+        <p className="text-text-gray text-xs mt-0.5">
+          {rejected
+            ? 'You can’t go online or claim deliveries. Contact the event organizer if you think this is a mistake.'
+            : 'You’ll be able to go online and claim deliveries once an admin approves your account.'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Online toggle — wired to /api/runners/me status ─────────────────────── */
 function OnlineToggle() {
-  const { isOnline, setIsOnline } = useRunner()
+  const { isOnline, setIsOnline, approvalStatus } = useRunner()
   const [busy, setBusy] = useState(false)
+  const approved = approvalStatus === 'APPROVED'
 
   async function toggle() {
     setBusy(true)
@@ -35,7 +59,9 @@ function OnlineToggle() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: next ? 'ACTIVE' : 'OFFLINE' }),
       })
-      if ((await res.json()).success) setIsOnline(next)
+      const json = await res.json()
+      if (json.success) setIsOnline(next)
+      else if (json.error?.code === 'RUNNER_NOT_APPROVED') toast.error('Your runner account is awaiting admin approval')
       else toast.error('Could not update status')
     } catch { toast.error('Network error') } finally { setBusy(false) }
   }
@@ -50,12 +76,16 @@ function OnlineToggle() {
             <span className={`font-bebas text-xl tracking-wide ${isOnline ? 'text-emerald-400' : 'text-gray-500'}`}>{isOnline ? 'Online' : 'Offline'}</span>
           </div>
         </div>
-        <button type="button" role="switch" aria-checked={isOnline} disabled={busy} onClick={toggle}
-          className={`relative w-16 h-8 rounded-full transition-colors cursor-pointer shrink-0 border-0 disabled:opacity-50 ${isOnline ? 'bg-emerald-500' : 'bg-gray-600'}`}>
-          <span className={`absolute top-1 w-6 h-6 rounded-full bg-white shadow-md transition-all ${isOnline ? 'translate-x-[34px]' : 'translate-x-1'}`} />
+        <button type="button" role="switch" aria-checked={isOnline} disabled={busy || !approved} onClick={toggle}
+          title={!approved ? 'Awaiting admin approval' : undefined}
+          className={`relative w-16 h-8 rounded-full transition-colors shrink-0 border-0 disabled:opacity-50 disabled:cursor-not-allowed ${!approved ? 'cursor-not-allowed' : 'cursor-pointer'} ${isOnline ? 'bg-emerald-500' : 'bg-gray-600'}`}>
+          {/* Knob: anchored 4px inset (top-1/left-1); slides by pill − knob − 2·inset = 64 − 24 − 8 = 32px (translate-x-8). Symmetric, stays inside the pill. */}
+          <span className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow-md transition-transform ${isOnline ? 'translate-x-8' : 'translate-x-0'}`} />
         </button>
       </div>
-      {!isOnline && <p className="text-gray-500 text-xs mt-3">Go online to start receiving deliveries.</p>}
+      {!approved
+        ? <p className="text-amber-400/70 text-xs mt-3">Go-online is locked until your account is approved.</p>
+        : !isOnline && <p className="text-gray-500 text-xs mt-3">Go online to start receiving deliveries.</p>}
     </div>
   )
 }
@@ -200,21 +230,25 @@ function DeliveryFeed({ fairSlug }: { fairSlug: string }) {
 export default function RunnerDashboard() {
   const params = useParams()
   const fairSlug = params.fairSlug as string
-  const { setIsOnline } = useRunner()
+  const { setIsOnline, approvalStatus, setApprovalStatus } = useRunner()
   const [stats, setStats] = useState<EarningsData | null>(null)
 
-  // Hydrate online status + today stats from the real APIs.
+  // Hydrate online status + approval state + today stats from the real APIs.
   useEffect(() => {
     fetch('/api/runners/me').then(r => r.json()).then(j => {
-      if (j.success) setIsOnline(j.data.runner?.status === 'ACTIVE')
+      if (j.success) {
+        setIsOnline(j.data.runner?.status === 'ACTIVE')
+        if (j.data.runner?.approvalStatus) setApprovalStatus(j.data.runner.approvalStatus)
+      }
     }).catch(() => {})
     fetch('/api/runners/me/earnings').then(r => r.json()).then(j => {
       if (j.success) setStats({ trackedToday: j.data.trackedToday, deliveriesToday: j.data.deliveriesToday, completionRate: j.data.completionRate })
     }).catch(() => {})
-  }, [setIsOnline])
+  }, [setIsOnline, setApprovalStatus])
 
   return (
     <div className="px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-5xl mx-auto">
+      {approvalStatus !== 'APPROVED' && <div className="mb-4"><ApprovalBanner approvalStatus={approvalStatus} /></div>}
       {/* Mobile-first: single column; status + feed stacked. Sidebar only on lg+. */}
       <div className="lg:hidden mb-4"><OnlineToggle /></div>
       <div className="flex flex-col lg:flex-row gap-5">

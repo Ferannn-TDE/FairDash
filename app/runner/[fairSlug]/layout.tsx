@@ -24,8 +24,13 @@ export default async function RunnerLayout({
   const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
   if (!dbUser) redirect('/sign-in/runner')
 
+  // Become-a-runner door: an authenticated user with NO Runner row is sent to the
+  // driver application, carrying the fair so submit can scope the minted Runner to
+  // this event (see app/api/drivers POST). This door is READ-ONLY w.r.t. an existing
+  // Runner — findUnique by the @unique userId is a pure existence check; it never
+  // creates, resets, or downgrades a row. Unauthenticated users still hit sign-in above.
   const runner = await db.runner.findUnique({ where: { userId: dbUser.id }, select: { id: true } })
-  if (!runner) redirect('/sign-in/runner')
+  if (!runner) redirect(`/become-driver?fair=${encodeURIComponent(fairSlug)}`)
 
   return <RunnerPortalShell fairSlug={fairSlug}>{children}</RunnerPortalShell>
 }
