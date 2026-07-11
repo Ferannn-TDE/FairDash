@@ -450,6 +450,39 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
   }
 
   if (target === 'COMPLETED' || target === 'DELIVERED') {
+    // C1 — RECORD the vendors' accrued claims. Sits HERE, beside the runner/organizer
+    // accrual below, because this is the one place that owns lifecycle → money. All
+    // three payee types now accrue in the same file, at the same moment, in the same
+    // idempotent-upsert shape.
+    //
+    // WHY IT MUST BE AT COMPLETION AND NOT AT THE EXECUTOR: the payout fires
+    // REFUND_WINDOW_MS later. The row is the admin's per-order HOLD TARGET, so it has
+    // to exist DURING that window — a row that first appears at payout time appears at
+    // the exact moment it stops being useful. (The executor re-accrues defensively too,
+    // but that is a self-heal for the payout, not a substitute for the window.)
+    //
+    // FAIL-SOFT FOR MONEY, LOUD FOR VISIBILITY: a failure here must never block
+    // completion or the payout — the executor's re-accrual still pays the vendor. What
+    // it DOES cost is the in-window hold + visibility, which is a real capability loss,
+    // so the failure is logged at ERROR with the affected vendors and REPAIRED by
+    // reconciler Pattern S (which re-accrues, restoring the window, rather than merely
+    // alerting like Pattern L does for runners).
+    try {
+      const { accrueVendorEarnings } = await import('./process-payout')
+      await accrueVendorEarnings(order.id)
+    } catch (err) {
+      const { logger } = await import('./logger')
+      logger.error(
+        '[reconcileMasterStatus] VENDOR ACCRUAL FAILED — in-window admin hold/visibility LOST for this order until Pattern S repairs it. Payout is NOT at risk (executor re-accrues).',
+        {
+          orderId: order.id,
+          eventId: order.eventId,
+          vendorIds: [...new Set(order.vendorOrderStatuses.map(v => v.vendorId))],
+          error: String(err),
+        },
+      )
+    }
+
     // CRITICAL money move — DELAYED payout enqueue behind the refund window. This
     // MUST fire on completion/delivery or the order finishes without ever paying
     // out (the original leak). Idempotent: enqueueOrderPayout dedups by jobId. The

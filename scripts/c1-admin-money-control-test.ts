@@ -213,7 +213,7 @@ async function main() {
   await installStripeSpy()
 
   try {
-    const { processOrderPayout } = await import('../lib/process-payout')
+    const { processOrderPayout, accrueVendorEarnings } = await import("../lib/process-payout")
     const { processRunnerPayout, reconcileRunnerPayouts } = await import('../lib/runner-payout')
     const { processEventOrganizerPayout } = await import('../lib/organizer-payout')
     const { setOrderPayoutState, setOrganizerPayoutState, setPayoutFreeze } = await import('../lib/admin-money')
@@ -511,6 +511,118 @@ async function main() {
     const r17 = await processOrderPayout(o17)
     assert(created.length === beforeR17, 'a refunded vendor is never subsequently paid out')
     assert(r17.skippedDeclined.some(s => s.vendorId === vRef.id), 'refunded slice is skipped by the payout executor')
+
+    // ── [18] The MOVED write: the real lifecycle path accrues vendors ─────────
+    // seedDelivered drives the genuine reconcileMasterStatus transition. If the
+    // accrual is really wired into the lifecycle path (not just called by hand in
+    // this test), a DELIVERED order must come out of it with VendorEarning rows.
+    console.log('\n[18] the completion-path write lives in reconcileMasterStatus (all 3 payees accrue in one place)')
+    const vLife = await mkVendor(ev.id)
+    const rLife = await mkRunner(ev.id)
+    const o18 = await seedDelivered(ev.id, vLife.id, rLife.id) // ← real transition, no manual accrual
+    const [ve18, re18, oe18] = await Promise.all([
+      prisma.vendorEarning.findFirst({ where: { orderId: o18 } }),
+      prisma.runnerEarning.findUnique({ where: { orderId: o18 } }),
+      prisma.organizerEarning.findFirst({ where: { orderId: o18 } }),
+    ])
+    assert(!!ve18, 'VendorEarning accrued by the LIFECYCLE path itself (not by the executor)')
+    assert(!!re18, 'RunnerEarning accrued by the same path (unchanged)')
+    assert(!!oe18, 'OrganizerEarning accrued by the same path (unchanged)')
+    assert(ve18?.status === 'accrued' && ve18.stripeTransferId === null, 'vendor row is a holdable claim during the window')
+
+    // ── [19] ⛔ IDEMPOTENCY: completion-write + executor re-accrual ────────────
+    // The one new risk hardening introduces: TWO writers of the same earning. If the
+    // completion path wrote it and the executor re-accrues defensively, they must not
+    // produce two rows or two payouts. Guarded by the (orderId,vendorId) unique key +
+    // an upsert whose `update` NEVER touches status.
+    console.log('\n[19] ⛔ IDEMPOTENCY: completion-write + executor re-accrual → ONE row, ONE payout')
+    const vIdem = await mkVendor(ev.id)
+    const o19 = await seedCompleted(ev.id, [vIdem.id])       // completion-path write (1st)
+    await accrueVendorEarnings(o19)                           // simulate a duplicate completion write (2nd)
+    await accrueVendorEarnings(o19)                           // and a third, for good measure
+    const rows19a = await prisma.vendorEarning.count({ where: { orderId: o19, vendorId: vIdem.id } })
+    assert(rows19a === 1, `3 accrual calls → exactly ONE VendorEarning row (got ${rows19a})`)
+
+    const before19 = created.length
+    await processOrderPayout(o19)   // executor re-accrues internally, THEN pays
+    await processOrderPayout(o19)   // and a full double-fire of the executor
+    const rows19b = await prisma.vendorEarning.count({ where: { orderId: o19, vendorId: vIdem.id } })
+    const payouts19 = await prisma.payout.count({ where: { orderId: o19, vendorId: vIdem.id } })
+    assert(rows19b === 1, `still exactly ONE row after the executor re-accrued twice (got ${rows19b})`)
+    assert(created.length === before19 + 1, `exactly ONE transfer despite a double payout run (got ${created.length - before19})`)
+    assert(payouts19 === 1, `exactly ONE Payout receipt (got ${payouts19})`)
+    assert(byKey.has(`payout_${o19}_${vIdem.id}`), 'the Stripe idempotency key is what makes the second run inert')
+
+    // Re-accrual must never resurrect an admin decision.
+    const vIdem2 = await mkVendor(ev.id)
+    const o19b = await seedCompleted(ev.id, [vIdem2.id])
+    await setOrderPayoutState(ctx, { payeeType: 'vendor', orderId: o19b, vendorId: vIdem2.id, action: 'HOLD', reason: 'test' })
+    await accrueVendorEarnings(o19b) // a late/duplicate completion write lands on a HELD row
+    const held19 = await prisma.vendorEarning.findFirst({ where: { orderId: o19b, vendorId: vIdem2.id } })
+    assert(held19?.status === 'held', '⛔ re-accrual does NOT clobber an admin HOLD back to payable')
+    await setOrderPayoutState(ctx, { payeeType: 'vendor', orderId: o19b, vendorId: vIdem2.id, action: 'CANCEL', reason: 'test' })
+    await accrueVendorEarnings(o19b)
+    const canc19 = await prisma.vendorEarning.findFirst({ where: { orderId: o19b, vendorId: vIdem2.id } })
+    assert(canc19?.status === 'cancelled', '⛔ re-accrual does NOT resurrect an admin CANCEL')
+
+    // ── [20] FAILURE CASE: a failed completion write is loud + recovered ───────
+    // Simulate the completion-path accrual failing: an order completes with NO
+    // VendorEarning rows. Money must be safe; the loss must be REPAIRED, not silent.
+    console.log('\n[20] FAILURE CASE: completion accrual fails → payout safe, loss REPAIRED by Pattern S (not silent)')
+    const vFail = await mkVendor(ev.id)
+    const customerF = await mkUser('customer')
+    const o20 = (await prisma.order.create({
+      data: {
+        eventId: ev.id, customerId: customerF.id, vendorId: vFail.id,
+        status: 'COMPLETED', fulfillmentType: 'BOOTH_PICKUP',
+        subtotal: 10, fairSynqFee: 1, total: 11, vendorPayout: 10,
+        customerName: 'C1', customerPhone: '+10000000000',
+        stripeChargeId: `ch_${SLUG}${rand()}`,
+        // STILL IN THE REFUND WINDOW (1h ago, window is 4h). This is the scenario that
+        // matters: the accrual failed at completion, and the sweep runs while the money
+        // is still holdable. Pattern C won't pay it yet (window open), so Pattern S has
+        // a real chance to restore the hold target while it can still be used.
+        completedAt: new Date(Date.now() - 1 * 3_600_000),
+        orderItems: { create: [{ vendorId: vFail.id, menuItemId: menuOf.get(vFail.id)!, itemName: 'Item', quantity: 1, unitPrice: 10, totalPrice: 10, subtotal: 10 }] },
+        vendorOrderStatuses: { create: [{ vendorId: vFail.id, status: 'COMPLETED' }] },
+      },
+    })).id
+    // ↑ deliberately NOT accrued — this IS the failed completion write.
+    const gone = await prisma.vendorEarning.count({ where: { orderId: o20 } })
+    assert(gone === 0, 'the failed write left NO earning row — admin cannot see or hold this payout')
+
+    const sweep20 = await runReconciliationSweep({ maxPerPattern: 50, stripeWindowHours: 0, maxStripePages: 0 })
+    const healed = await prisma.vendorEarning.findFirst({ where: { orderId: o20, vendorId: vFail.id } })
+    assert(!!healed, '⛔ Pattern S RE-ACCRUED the missing row — the in-window hold is restored, not silently lost')
+    assert(healed?.status === 'accrued' && healed.subtotalCents === 1000, 'restored row carries the correct claim')
+    assert(sweep20.repaired.S >= 1, `Pattern S counted the repair (S=${sweep20.repaired.S})`)
+    assert(sweep20.alerted.some(a => a.startsWith('Pattern S:') && a.includes(o20)), 'the failure is ALERTED by order id — loud, not swallowed')
+    assert(sweep20.backstopWarnings.some(w => w.includes('Pattern S')), 'a repair raises a BACKSTOP WARNING — "a real-time path is leaking, investigate"')
+
+    // And admin can now do what the failed write had cost them.
+    const late = await setOrderPayoutState(ctx, { payeeType: 'vendor', orderId: o20, vendorId: vFail.id, action: 'HOLD', reason: 'recovered — now holdable' })
+    assert(late.newStatus === 'held', 'admin can hold the recovered payout — the capability is genuinely restored')
+
+    // FAIL-SOFT FOR MONEY: even with NO Pattern S run at all, the executor self-heals
+    // and the vendor is still paid. Money never depended on the completion write.
+    const vFail2 = await mkVendor(ev.id)
+    const customerF2 = await mkUser('customer')
+    const o20b = (await prisma.order.create({
+      data: {
+        eventId: ev.id, customerId: customerF2.id, vendorId: vFail2.id,
+        status: 'COMPLETED', fulfillmentType: 'BOOTH_PICKUP',
+        subtotal: 10, fairSynqFee: 1, total: 11, vendorPayout: 10,
+        customerName: 'C1', customerPhone: '+10000000000',
+        stripeChargeId: `ch_${SLUG}${rand()}`,
+        completedAt: new Date(Date.now() - 5 * 3_600_000),
+        orderItems: { create: [{ vendorId: vFail2.id, menuItemId: menuOf.get(vFail2.id)!, itemName: 'Item', quantity: 1, unitPrice: 10, totalPrice: 10, subtotal: 10 }] },
+        vendorOrderStatuses: { create: [{ vendorId: vFail2.id, status: 'COMPLETED' }] },
+      },
+    })).id
+    const before20b = created.length
+    const r20b = await processOrderPayout(o20b) // no accrual ever ran for this order
+    assert(r20b.transfers.length === 1 && created.length === before20b + 1,
+      'FAIL-SOFT: the vendor is STILL PAID even though the completion accrual never happened — money never depended on it')
 
     console.log(`\n${'─'.repeat(64)}`)
     console.log(`  ${pass} passed, ${fail} failed`)

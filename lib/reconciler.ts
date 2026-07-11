@@ -99,10 +99,10 @@ export interface SweepSummary {
     unresolvedHolds: number
   }
   /** Counts of orders/holds actually repaired (or, in dryRun, that WOULD be). */
-  repaired: { A: number; B: number; C: number; D: number; E: number; F: number; G: number; H: number; I: number; J: number; K: number; L: number; M: number; N: number; O: number; P: number; Q: number; R: number }
+  repaired: { A: number; B: number; C: number; D: number; E: number; F: number; G: number; H: number; I: number; J: number; K: number; L: number; M: number; N: number; O: number; P: number; Q: number; R: number; S: number }
   /** Order/PI ids touched per pattern (for the human-readable log). */
   details: {
-    A: string[]; B: string[]; C: string[]; D: string[]; E: string[]; F: string[]; G: string[]; H: string[]; I: string[]; J: string[]; K: string[]; L: string[]; M: string[]; N: string[]; O: string[]; P: string[]; Q: string[]; R: string[]
+    A: string[]; B: string[]; C: string[]; D: string[]; E: string[]; F: string[]; G: string[]; H: string[]; I: string[]; J: string[]; K: string[]; L: string[]; M: string[]; N: string[]; O: string[]; P: string[]; Q: string[]; R: string[]; S: string[]
   }
   /** Unrepairable-by-design — needs a human. Money is safe; we just can't auto-fix. */
   alerted: string[]
@@ -149,8 +149,8 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     patternEEnabled,
     backstopEnabled,
     scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
-    repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0 },
-    details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [] },
+    repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0 },
+    details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [] },
     alerted: [],
     ambiguousSkipped: 0,
     backstopWarnings: [],
@@ -159,6 +159,13 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   try {
     await patternA(sum, { stripeWindowHours, maxStripePages, dryRun })
     await patternB(sum, { windowStart, maxPerPattern, dryRun })
+    // S BEFORE C/D — ORDER IS LOAD-BEARING. Pattern S restores a missing VendorEarning
+    // (the admin's hold target). Patterns C and D PAY unpaid orders. If S ran after
+    // them, C would pay the money out — and incidentally materialise the row via the
+    // executor's re-accrual — before S could restore anything holdable. The row would
+    // reappear at the exact moment it stopped being useful, which is the failure this
+    // pattern exists to prevent. Restore the hold target FIRST, then pay.
+    await patternS(sum, { windowStart, maxPerPattern, dryRun })
     await patternC(sum, { windowStart, maxPerPattern, dryRun })
     await patternD(sum, { maxPerPattern, dryRun })
     await patternE(sum, { windowStart, maxPerPattern, dryRun, patternEEnabled })
@@ -984,4 +991,76 @@ async function patternR(
   const res = await reconcileTipRefunds({ maxPerRun: o.maxPerPattern })
   sum.repaired.R += res.refunded
   for (const a of res.alerts) sum.alerted.push(`Pattern R: ${a}`)
+}
+
+// ─── PATTERN S — Missing VendorEarning accrual (C1 hardening) ─────────────────
+// The recovery half of the completion-path vendor accrual.
+//
+// WHAT IT GUARDS. VendorEarning is accrued in reconcileMasterStatus at
+// COMPLETED/DELIVERED. That write is fail-soft ON PURPOSE — it must never block an
+// order completing or a vendor being paid. But when it fails, something real IS lost:
+// the row is the admin's per-order HOLD TARGET and the money view's source, so a
+// missed accrual silently costs the admin the ability to see or hold that payout for
+// the whole refund window. The executor's defensive re-accrual eventually pays the
+// vendor, but it materialises the row at payout time — i.e. exactly when holding it is
+// no longer possible. Relying on that alone is what turns a failed write into silent
+// capability loss.
+//
+// WHY IT REPAIRS RATHER THAN JUST ALERTS. Pattern L (the runner/organizer equivalent)
+// only alerts, because reconstructing a runner's split after the fact is ambiguous.
+// A vendor's claim is NOT ambiguous — it is Σ their OrderItem subtotals, available
+// verbatim from the order. So this pattern re-accrues, restoring the in-window hold
+// while the window is still open. Repairing beats alerting when the repair is exact.
+//
+// MONEY SAFETY. accrueVendorEarnings is an idempotent upsert on (orderId, vendorId)
+// and NEVER touches `status`, so re-accruing cannot resurrect an admin-held or
+// cancelled row, cannot double-accrue, and cannot un-pay a paid one. A repair here
+// creates missing rows and nothing else.
+//
+// Any repair increments sum.repaired.S, which the sweep turns into a BACKSTOP WARNING
+// — the loud signal that the real-time completion path is failing and needs a look.
+async function patternS(
+  sum: SweepSummary,
+  o: { windowStart: Date; maxPerPattern: number; dryRun: boolean },
+) {
+  const orders = await db.order.findMany({
+    where: {
+      status: { in: COMPLETE_STATES },
+      completedAt: { gte: o.windowStart },
+      voidedAt: null,
+    },
+    select: {
+      id: true,
+      orderItems: { select: { vendorId: true } },
+      vendorEarnings: { select: { vendorId: true } },
+    },
+    orderBy: { completedAt: 'asc' },
+    take: o.maxPerPattern,
+  })
+
+  for (const ord of orders) {
+    const payable = new Set(ord.orderItems.map(i => i.vendorId))
+    const accrued = new Set(ord.vendorEarnings.map(e => e.vendorId))
+    const missing = [...payable].filter(v => !accrued.has(v))
+    if (missing.length === 0) continue
+
+    sum.details.S.push(ord.id)
+    sum.alerted.push(
+      `Pattern S: order ${ord.id} completed with ${missing.length} vendor(s) having NO VendorEarning — ` +
+      `in-window admin hold/visibility was lost for them (completion-path accrual failed). ` +
+      `${o.dryRun ? 'WOULD re-accrue' : 'Re-accrued'}.`,
+    )
+    if (o.dryRun) continue
+
+    try {
+      const { accrueVendorEarnings } = await import('./process-payout')
+      await accrueVendorEarnings(ord.id)
+      sum.repaired.S += 1
+    } catch (err) {
+      sum.alerted.push(
+        `Pattern S: order ${ord.id} RE-ACCRUAL FAILED — ${err instanceof Error ? err.message : String(err)}. ` +
+        `Payout still safe (executor re-accrues at payout), but the in-window hold cannot be restored.`,
+      )
+    }
+  }
 }
