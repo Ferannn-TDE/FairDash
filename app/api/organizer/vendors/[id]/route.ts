@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { notifyVendorStatusChange } from '@/lib/notify'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
+import { resolveVendorWhere } from '@/lib/resolve-vendor'
 import { VendorStatus } from '@prisma/client'
 
 const ALLOWED_STATUSES: VendorStatus[] = ['ACTIVE', 'PAUSED', 'SUSPENDED', 'REJECTED']
@@ -20,9 +21,11 @@ export async function GET(
     const { organizerId } = await requireOrganizerAuth()
     const { id: vendorParam } = await params
 
-    // Accept either cuid or per-event slug
+    // Accept cuid or per-fair slug. A bare slug is scoped to the fair the page carries
+    // (?fair=<fairSlug>); the organizerId ownership check below is the second guard.
+    const fairSlug = req.nextUrl.searchParams.get('fair')
     const vendor = await db.vendor.findFirst({
-      where: { OR: [{ id: vendorParam }, { slug: vendorParam }] },
+      where: await resolveVendorWhere(vendorParam, fairSlug),
       include: {
         event: { select: { id: true, name: true, urlSlug: true, organizerId: true } },
         vendorMembers: {
@@ -183,8 +186,9 @@ export async function PATCH(
     const { organizerId, clerkId } = await requireOrganizerAuth()
     const { id: vendorParam } = await params
 
+    const fairSlug = req.nextUrl.searchParams.get('fair')
     const vendor = await db.vendor.findFirst({
-      where: { OR: [{ id: vendorParam }, { slug: vendorParam }] },
+      where: await resolveVendorWhere(vendorParam, fairSlug),
       select: {
         id: true,
         event: { select: { organizerId: true, name: true } },
