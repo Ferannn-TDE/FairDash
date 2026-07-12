@@ -347,7 +347,32 @@ export default function VendorDashboardPage() {
   const [statsLoading,      setStatsLoading]      = useState(false)
   const [lastVerifiedAt,    setLastVerifiedAt]    = useState<Date>(() => new Date())
   const [firebaseConnected, setFirebaseConnected] = useState(true)
+  // The DEBOUNCED view of the above — what the UI is allowed to react to.
+  //
+  // Firebase's `.info/connected` fires FALSE first on every subscribe: it reports
+  // disconnected until the socket actually completes its handshake, then flips true a few
+  // hundred ms later. Rendering straight off firebaseConnected therefore flashed a
+  // full-width amber "Live updates paused" bar on every load/refresh — for a connection
+  // that was never broken. A warning that fires when nothing is wrong is worse than no
+  // warning: it teaches the vendor to ignore the one that matters.
+  //
+  // So: only surface a disconnect that PERSISTS past the grace window, and clear it the
+  // instant we reconnect. A real outage still shows the banner ~2s in; the handshake
+  // blip never does.
+  const [liveUpdatesDown, setLiveUpdatesDown] = useState(false)
   const [lastUpdated,       setLastUpdated]       = useState<Date>(() => new Date())
+  // Grace window before a dropped connection is shown to the vendor (see liveUpdatesDown).
+  const LIVE_DOWN_GRACE_MS = 2500
+  useEffect(() => {
+    if (firebaseConnected) {
+      // Reconnected (or never really disconnected) — clear immediately, no grace.
+      setLiveUpdatesDown(false)
+      return
+    }
+    const t = setTimeout(() => setLiveUpdatesDown(true), LIVE_DOWN_GRACE_MS)
+    return () => clearTimeout(t) // handshake blip resolves inside the window → never shown
+  }, [firebaseConnected])
+
   // Ticker re-renders the "X ago" label without touching any order state.
   // Fires every 15s — cheap enough and keeps the label accurate.
   const [, setTick] = useState(0)
@@ -716,8 +741,9 @@ export default function VendorDashboardPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-64px)]">
 
-      {/* Firebase disconnection banner */}
-      {!firebaseConnected && (
+      {/* Firebase disconnection banner — driven by the DEBOUNCED flag, never the raw
+          connection state, so the initial-handshake false-negative can't flash it. */}
+      {liveUpdatesDown && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500/90 backdrop-blur-sm text-black text-xs text-center py-1.5 font-medium">
           ⚠️ Live updates paused — reconnecting…
         </div>
@@ -824,9 +850,9 @@ export default function VendorDashboardPage() {
             Revenue verified {formatAge(lastVerifiedAt)}
           </p>
           <p className="text-[0.6rem] text-white/30">
-            {firebaseConnected
-              ? `Live · ${formatAge(lastUpdated)}`
-              : '⚠️ Reconnecting…'}
+            {liveUpdatesDown
+              ? '⚠️ Reconnecting…'
+              : `Live · ${formatAge(lastUpdated)}`}
           </p>
         </div>
       </div>
