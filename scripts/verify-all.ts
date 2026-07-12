@@ -46,6 +46,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'vendor-order-pagination', file: 'scripts/vendor-order-pagination-test.ts' },
   { group: 'correctness', name: 'tab-responsiveness',      file: 'scripts/tab-responsiveness-guard.ts' },
   { group: 'correctness', name: 'live-banner-debounce',    file: 'scripts/live-banner-debounce-test.ts' },
+  { group: 'correctness', name: 'vendor-online-gate',      file: 'scripts/vendor-online-gate-test.ts' },
 ]
 
 const filter = process.argv[2]

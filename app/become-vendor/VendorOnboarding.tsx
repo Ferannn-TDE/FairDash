@@ -383,8 +383,13 @@ function Step8({ data, eventSlug }: { data: FormData; eventSlug: string | null }
           { n: '03', t: 'Your portal is open now — you can look around while you wait' },
           { n: '04', t: 'You are NOT live until the operator sets your go-live date' },
         ].map(({ n, t }) => (
-          <div key={n} className="flex items-start gap-3">
-            <span className="font-bebas text-lg text-neon-pink leading-none shrink-0 w-6">{n}</span>
+          // Grid, not flex: a fixed number column + a text column so wrapped lines indent
+          // under the first line, never back under the number. leading-relaxed on the
+          // number matches the paragraph's first-line box, so the two align on line one
+          // despite the size difference (the old items-start + leading-none left the big
+          // number sitting above the smaller text).
+          <div key={n} className="grid grid-cols-[1.5rem_1fr] gap-3 items-start">
+            <span className="font-bebas text-lg text-neon-pink leading-relaxed tabular-nums text-right">{n}</span>
             <p className="text-sm text-text-gray leading-relaxed">{t}</p>
           </div>
         ))}

@@ -13,6 +13,7 @@ import { getFirebaseApp } from '@/lib/firebase-client'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { EarningsBadge } from '@/app/_components/EarningsBadge'
 import { isCompleted, isFailed } from '@/lib/order-status'
+import { deriveOnlineState } from '@/lib/vendor-online-state'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -336,7 +337,12 @@ export default function VendorDashboardPage() {
   const params = useParams<{ fairSlug: string }>()
   const { vendorId, eventId, vendorName } = useVendorMeta()
 
-  const [isOnline,          setIsOnline]          = useState(true)
+  // The vendor's OWN choice to be open for orders. Defaults FALSE, not true: an
+  // unapproved vendor must never render "Online", and even an approved one shouldn't be
+  // claimed online before we know their real state. (This toggle is currently local-only —
+  // it does not yet persist to Vendor.isOffline; that wiring is a separate follow-up. Its
+  // job here is to stop LYING, which is the reported bug.)
+  const [isOnline,          setIsOnline]          = useState(false)
   const [activeTab,         setActiveTab]         = useState<Tab>('incoming')
   // THE SELECTION IS A UI FACT, NOT A DATA FACT.
   //
@@ -435,6 +441,18 @@ export default function VendorDashboardPage() {
   const completed    = useMemo(() => Object.values(ordersById).filter(o => isCompleted(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()), [ordersById])
   const failedOrders = useMemo(() => Object.values(ordersById).filter(o => isFailed(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()),   [ordersById])
   const inQueue      = incoming.length + active.length + ready.length
+
+  // ── Online status is GATED ON APPROVAL — the vendor twin of the runner approval gate ──
+  // The bug: the badge showed a hardcoded "Online" next to an "Application under review"
+  // banner — the screen contradicting itself. An unapproved vendor is not online, can't
+  // take orders, and must not present as available. So the online control is LOCKED until
+  // the organizer approves the application, driven by the SAME readiness the banner uses
+  // (so the two can never disagree again).
+  //
+  // `awaitingApproval` is derived, not defaulted — and while readiness is still loading we
+  // treat the vendor as NOT online (same "don't show the wrong thing while waiting"
+  // discipline as the rest of this screen), so the badge never flashes Online on load.
+  const { awaitingApproval, locked: onlineControlLocked, showOnline } = deriveOnlineState(readiness, isOnline)
 
   // ── In-flight guard ──────────────────────────────────────────────────────────
   const inFlightRef    = useRef<Set<string>>(new Set())
@@ -815,21 +833,28 @@ export default function VendorDashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setIsOnline(v => !v)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-semibold text-xs transition-all cursor-pointer ${
-                isOnline
-                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/15'
-                  : 'bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/15'
+              onClick={() => { if (!onlineControlLocked) setIsOnline(v => !v) }}
+              disabled={onlineControlLocked}
+              title={awaitingApproval ? 'Locked until the organizer approves your application' : undefined}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-semibold text-xs transition-all ${
+                onlineControlLocked
+                  ? 'bg-white/5 border-white/10 text-text-gray cursor-not-allowed'
+                  : showOnline
+                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/15 cursor-pointer'
+                    : 'bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/15 cursor-pointer'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-              {isOnline ? 'Online' : 'Offline'}
+              <span className={`w-2 h-2 rounded-full ${showOnline ? 'bg-emerald-400 animate-pulse' : onlineControlLocked ? 'bg-text-gray' : 'bg-red-400'}`} />
+              {awaitingApproval ? 'Offline · Awaiting approval' : showOnline ? 'Online' : 'Offline'}
             </button>
             <UserAvatar />
           </div>
         </div>
 
-        {!isOnline && (
+        {/* The manual "you chose to go offline" notice — only for an APPROVED vendor who
+            toggled off. A vendor awaiting approval already has the amber review banner; a
+            second "store is offline" line would be noise, and the reason isn't the toggle. */}
+        {!showOnline && !onlineControlLocked && (
           <div className="mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2.5">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
             <p className="text-red-300 text-xs font-medium">
