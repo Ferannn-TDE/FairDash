@@ -36,8 +36,10 @@ export async function GET(req: NextRequest) {
         isBusy: true,
         stripeVerified: true,
         stripeAccountId: true,
-        foodHandlerPermitUrl: true,
-        insuranceUrl: true,
+        // Admin list: presence is all a list needs. Viewing a document goes through the
+        // brokered, audit-logged read (GET /api/organizer/vendors/[id]/documents).
+        foodHandlerPermitPath: true,
+        insurancePath: true,
         insuranceExpiryDate: true,
         insuranceExpired: true,
         lastHeartbeatAt: true,

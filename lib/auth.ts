@@ -158,3 +158,14 @@ export async function requireStrictAdminAuth(): Promise<string> {
 
   return userId
 }
+
+/** Non-throwing variant of requireStrictAdminAuth — "is this caller a strict platform
+ *  admin?" Same FRESH currentUser() read, so it carries the same no-stale-token property.
+ *  For routes where admin is an ADDITIONAL grant on top of another gate (e.g. an organizer
+ *  route where a platform admin may also look), not the gate itself. */
+export async function hasStrictAdminAuth(): Promise<boolean> {
+  const { userId } = await auth()
+  if (!userId) return false
+  const user = await currentUser()
+  return hasStrictAdminRole(user?.publicMetadata)
+}

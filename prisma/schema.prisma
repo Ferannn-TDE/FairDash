@@ -229,12 +229,25 @@ model Vendor {
   isOffline Boolean      @default(false) // Vendor entirely offline
   lastHeartbeatAt DateTime? // Updated every 30s by vendor dashboard; stale > 5 min → auto-hide
 
-  // Onboarding documents
-  foodHandlerPermitUrl String?
-  insuranceUrl         String?
-  businessLicenseUrl   String?
-  insuranceExpiryDate  DateTime?
-  insuranceExpired     Boolean   @default(false)
+  // ── Onboarding documents (SENSITIVE — insurance certificate, business licence) ──
+  // Stores the STORAGE OBJECT PATH inside the PRIVATE `vendor-documents` bucket —
+  // deliberately NOT a URL, and deliberately no longer named *Url.
+  //
+  // These were previously `*Url` columns holding `…/object/public/…` links in a PUBLIC
+  // bucket, AND the public customer endpoint returned them verbatim — so a stranger was
+  // handed direct links to a vendor's liability insurance and business licence. Renaming
+  // the columns to *Path is the STRUCTURAL half of the fix: a public URL can no longer be
+  // persisted here without someone noticing they are putting a URL in a Path column.
+  // (Same design as Runner.licensePath — see its note below.)
+  //
+  // Reads are brokered: GET /api/vendors/[id]/documents (vendor-self) and
+  // /api/organizer/vendors/[id]/documents (owning organizer / platform admin) mint
+  // SHORT-LIVED SIGNED URLs. Nothing renders these paths directly.
+  foodHandlerPermitPath String?
+  insurancePath         String?
+  businessLicensePath   String?
+  insuranceExpiryDate   DateTime?
+  insuranceExpired      Boolean   @default(false)
 
   // Operating hours — JSON: Record<Day, { open: string; close: string; enabled: boolean }>
   operatingHours Json?

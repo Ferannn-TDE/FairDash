@@ -33,6 +33,9 @@ const FORBIDDEN = [
   'foodHandlerPermitUrl',
   'insuranceUrl',
   'businessLicenseUrl',
+  'foodHandlerPermitPath',
+  'insurancePath',
+  'businessLicensePath',
   'stripeAccountId',
   'stripeVerified',
   'notificationPrefs',
@@ -46,9 +49,9 @@ async function main() {
     const withDocs = await prisma.vendor.findMany({
       where: {
         OR: [
-          { foodHandlerPermitUrl: { not: null } },
-          { insuranceUrl: { not: null } },
-          { businessLicenseUrl: { not: null } },
+          { foodHandlerPermitPath: { not: null } },
+          { insurancePath: { not: null } },
+          { businessLicensePath: { not: null } },
         ],
       },
       select: { id: true, name: true, slug: true, isOffline: true, event: { select: { urlSlug: true } } },

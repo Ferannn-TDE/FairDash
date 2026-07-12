@@ -4,37 +4,36 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorMembershipById } from '@/lib/auth'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
-import { logger } from '@/lib/logger'
+import {
+  DOC_PATH_FIELD,
+  DOC_TYPES,
+  StorageNotConfiguredError,
+  StorageOpError,
+  VENDOR_DOC_ALLOWED_MIME,
+  VENDOR_DOC_MAX_BYTES,
+  signVendorDocumentUrl,
+  uploadVendorDocument,
+  type VendorDocType,
+} from '@/lib/vendor-document-storage'
 
-const STORAGE_BUCKET = 'vendor-documents'
+const isDocType = (v: unknown): v is VendorDocType =>
+  typeof v === 'string' && (DOC_TYPES as readonly string[]).includes(v)
 
-const ALLOWED_MIME = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-])
-
-const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
-
-const DOC_FIELD: Record<string, string> = {
-  foodHandler:     'foodHandlerPermitUrl',
-  insurance:       'insuranceUrl',
-  businessLicense: 'businessLicenseUrl',
-}
-
-// POST /api/vendors/:id/documents
-// Accepts: multipart/form-data with fields:
-//   docType: 'foodHandler' | 'insurance' | 'businessLicense'
-//   file: the document file (PDF or image, ≤10 MB)
+// POST /api/vendors/:id/documents   — upload one document (multipart: docType, file)
+// GET  /api/vendors/:id/documents   — the vendor's own documents, as SIGNED view URLs
 //
-// Storage: configure NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
-// and replace the placeholder below with your Supabase Storage upload call.
-// The route validates MIME + size and updates the Vendor record with the URL.
+// PRIVATE BY CONSTRUCTION. Documents go to the PRIVATE `vendor-documents` bucket and only
+// the object PATH is persisted (Vendor.*Path) — never a URL. Reads are brokered here:
+// every response mints a short-lived signed URL. Both verbs are gated by
+// requireVendorMembershipById, so a vendor only ever reaches their OWN documents; the
+// vendor id comes from the path but membership is proved against the SESSION, so a
+// tampered id fails the gate rather than exposing someone else's insurance certificate.
+//
+// (Organizer/admin access to a vendor's documents is a SEPARATE, separately-authorised
+// route: /api/organizer/vendors/[id]/documents.)
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const vendorId = (await params).id
@@ -44,53 +43,32 @@ export async function POST(
     const docType = form.get('docType')
     const file    = form.get('file')
 
-    if (typeof docType !== 'string' || !DOC_FIELD[docType]) {
+    if (!isDocType(docType)) {
       return apiError('docType must be one of: foodHandler, insurance, businessLicense', 400, 'VALIDATION_ERROR')
     }
     if (!(file instanceof Blob)) {
       return apiError('file is required', 400, 'VALIDATION_ERROR')
     }
-    if (!ALLOWED_MIME.has(file.type)) {
+    if (!VENDOR_DOC_ALLOWED_MIME.has(file.type)) {
       return apiError('File must be a PDF or image (JPEG, PNG, WebP)', 400, 'INVALID_MIME')
     }
-    if (file.size > MAX_BYTES) {
+    if (file.size > VENDOR_DOC_MAX_BYTES) {
       return apiError('File must be 10 MB or smaller', 400, 'FILE_TOO_LARGE')
     }
 
-    // ── Storage upload (real — Supabase Storage REST, server-side, service key) ──
-    // Uploads the file to the vendor-documents bucket and stores its URL. Never
-    // "succeeds" without actually storing the file (the old placeholder wrote an
-    // empty URL and silently discarded uploads).
-    const supabaseUrl = process.env.SUPABASE_URL
-    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY
-    if (!supabaseUrl || !serviceKey) {
-      return apiError('Document storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.', 503, 'STORAGE_NOT_CONFIGURED')
-    }
+    // Uploads to the PRIVATE bucket. assertPrivateBucket() inside will REFUSE the upload
+    // (loudly) if the bucket has been made public — a misconfiguration can no longer
+    // silently become a breach, which is exactly how the original exposure happened.
+    const filename = (file as File).name ?? docType
+    const path = await uploadVendorDocument(vendorId, docType, file, filename)
 
-    const safeName = ((file as File).name ?? docType).replace(/[^a-zA-Z0-9._-]/g, '_')
-    const path     = `${vendorId}/${docType}/${Date.now()}_${safeName}`
-
-    const upload = await fetch(`${supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${path}`, {
-      method:  'POST',
-      headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey, 'Content-Type': file.type, 'x-upsert': 'true' },
-      body:    Buffer.from(await file.arrayBuffer()),
-    })
-    if (!upload.ok) {
-      const body = await upload.text()
-      logger.error('[Documents] Supabase upload failed', { vendorId, docType, status: upload.status, body: body.slice(0, 200) })
-      return apiError('Upload failed — please try again', 502, 'STORAGE_UPLOAD_FAILED')
-    }
-
-    const fileUrl = `${supabaseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`
-
-    const dbField = DOC_FIELD[docType]
     const vendor = await db.vendor.update({
       where: { id: vendorId },
-      data: { [dbField]: fileUrl },
+      data: { [DOC_PATH_FIELD[docType]]: path },
       select: {
-        foodHandlerPermitUrl: true,
-        insuranceUrl:         true,
-        businessLicenseUrl:   true,
+        foodHandlerPermitPath: true,
+        insurancePath:         true,
+        businessLicensePath:   true,
       },
     })
 
@@ -98,22 +76,18 @@ export async function POST(
 
     return success({
       docType,
-      url: fileUrl,
-      documents: {
-        foodHandler:     { uploaded: !!vendor.foodHandlerPermitUrl, url: vendor.foodHandlerPermitUrl },
-        insurance:       { uploaded: !!vendor.insuranceUrl,         url: vendor.insuranceUrl         },
-        businessLicense: { uploaded: !!vendor.businessLicenseUrl,   url: vendor.businessLicenseUrl   },
-      },
+      documents: await signAll(vendor),
     })
   } catch (err) {
+    if (err instanceof StorageNotConfiguredError) return apiError(err.message, 503, 'STORAGE_NOT_CONFIGURED')
+    if (err instanceof StorageOpError)            return apiError(err.message, 502, 'STORAGE_UPLOAD_FAILED')
     return handleApiError(err)
   }
 }
 
-// GET /api/vendors/:id/documents — returns current document upload status
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const vendorId = (await params).id
@@ -122,19 +96,39 @@ export async function GET(
     const vendor = await db.vendor.findUnique({
       where: { id: vendorId },
       select: {
-        foodHandlerPermitUrl: true,
-        insuranceUrl:         true,
-        businessLicenseUrl:   true,
+        foodHandlerPermitPath: true,
+        insurancePath:         true,
+        businessLicensePath:   true,
       },
     })
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
 
-    return success({
-      foodHandler:     { uploaded: !!vendor.foodHandlerPermitUrl, url: vendor.foodHandlerPermitUrl },
-      insurance:       { uploaded: !!vendor.insuranceUrl,         url: vendor.insuranceUrl         },
-      businessLicense: { uploaded: !!vendor.businessLicenseUrl,   url: vendor.businessLicenseUrl   },
-    })
+    return success(await signAll(vendor))
   } catch (err) {
+    if (err instanceof StorageNotConfiguredError) return apiError(err.message, 503, 'STORAGE_NOT_CONFIGURED')
     return handleApiError(err)
+  }
+}
+
+/**
+ * Turn the stored PATHS into short-lived signed view URLs. Response shape is unchanged
+ * ({ uploaded, url }) so the settings UI needs no rework — but `url` is now a signed link
+ * that expires, not a permanent public one.
+ */
+async function signAll(v: {
+  foodHandlerPermitPath: string | null
+  insurancePath: string | null
+  businessLicensePath: string | null
+}) {
+  const sign = async (path: string | null) => (path ? await signVendorDocumentUrl(path) : null)
+  const [foodHandler, insurance, businessLicense] = await Promise.all([
+    sign(v.foodHandlerPermitPath),
+    sign(v.insurancePath),
+    sign(v.businessLicensePath),
+  ])
+  return {
+    foodHandler:     { uploaded: !!v.foodHandlerPermitPath, url: foodHandler },
+    insurance:       { uploaded: !!v.insurancePath,         url: insurance },
+    businessLicense: { uploaded: !!v.businessLicensePath,   url: businessLicense },
   }
 }
