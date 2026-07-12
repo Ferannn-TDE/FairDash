@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, startTransition } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { UserAvatar } from '../_components/VendorPortalShell'
@@ -338,6 +338,20 @@ export default function VendorDashboardPage() {
 
   const [isOnline,          setIsOnline]          = useState(true)
   const [activeTab,         setActiveTab]         = useState<Tab>('incoming')
+  // THE SELECTION IS A UI FACT, NOT A DATA FACT.
+  //
+  // activeTab drove BOTH the tab highlight and the panel content. Switching tabs unmounts
+  // N order cards and mounts M — expensive — and React rendered that in the SAME pass as
+  // the highlight, so the paint was blocked until the whole card list was reconciled. The
+  // symptom was a ~500ms freeze and then everything snapping at once (a slow CSS
+  // transition would have animated smoothly instead; the state setter is synchronous, so
+  // it was never a late state update either).
+  //
+  // Split the two: `activeTab` is URGENT and paints the highlight immediately on click.
+  // `deferredTab` lags by one render and drives the heavy panel, so the expensive work
+  // happens in a background pass that cannot block the click feedback.
+  const deferredTab = useDeferredValue(activeTab)
+  const tabSwitchPending = deferredTab !== activeTab
   const [loading,           setLoading]           = useState(true)
   const [declineTarget,     setDeclineTarget]     = useState<VendorOrder | null>(null)
   const [todayOrders,       setTodayOrders]       = useState<number>(0)
@@ -1019,11 +1033,17 @@ export default function VendorDashboardPage() {
           </div>
         </div>
 
-        {/* Mobile: single-lane based on active tab */}
-        {/* Tabbed full-width single lane — everything below xl. Driven by activeTab from
-            the tab bar above; the selected lane gets the entire width. */}
-        <div className="xl:hidden h-full overflow-y-auto p-3 space-y-3">
-          {activeTab === 'incoming' && (
+        {/* Tabbed full-width single lane — everything below xl. Driven by DEFERRED tab, not
+            activeTab: this panel is the expensive part (swapping the whole card list), and
+            rendering it in the same pass as the highlight is what blocked the click paint.
+            The one-frame lag is invisible; the blocked paint was not. A brief dim while the
+            swap lands is honest feedback — it says "working", not "nothing happened". */}
+        <div
+          className={`xl:hidden h-full overflow-y-auto p-3 space-y-3 transition-opacity duration-150 ${
+            tabSwitchPending ? 'opacity-60' : 'opacity-100'
+          }`}
+        >
+          {deferredTab === 'incoming' && (
             incoming.length === 0
               ? <EmptyLane message="No incoming orders right now" />
               : incoming.map(order => (
@@ -1036,7 +1056,7 @@ export default function VendorDashboardPage() {
                   />
                 ))
           )}
-          {activeTab === 'active' && (
+          {deferredTab === 'active' && (
             active.length === 0
               ? <EmptyLane message="No active orders" />
               : active.map(order => (
@@ -1049,7 +1069,7 @@ export default function VendorDashboardPage() {
                   />
                 ))
           )}
-          {activeTab === 'ready' && (
+          {deferredTab === 'ready' && (
             ready.length === 0
               ? <EmptyLane message="No orders staged for pickup" />
               : ready.map(order => (
@@ -1061,7 +1081,7 @@ export default function VendorDashboardPage() {
                   />
                 ))
           )}
-          {activeTab === 'done' && (
+          {deferredTab === 'done' && (
             completed.length === 0 && failedOrders.length === 0
               ? <EmptyLane message="No completed orders yet" />
               : <>
