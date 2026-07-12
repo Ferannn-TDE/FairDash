@@ -857,8 +857,12 @@ export default function VendorDashboardPage() {
         </div>
       </div>
 
-      {/* Mobile tab bar */}
-      <div className="sm:hidden flex border-b border-white/[0.04] shrink-0">
+      {/* Tab bar — shown at every width BELOW the four-lane board (see the board's note).
+          A cramped four-lane board is worse than one full-width lane: at a fair the vendor
+          is watching one lane at a time anyway (what's incoming, or what's ready), so
+          letting them pick the lane and giving it the whole screen beats showing all four
+          badly. */}
+      <div className="xl:hidden flex border-b border-white/[0.04] shrink-0">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -882,17 +886,28 @@ export default function VendorDashboardPage() {
       {/* Kanban body */}
       <div className="flex-1 overflow-hidden">
 
-        {/* Desktop / tablet kanban.
-            Breakpoints (tailwind.config: sm=640, lg=968):
-              < 640   → stacked + tab bar (the sm:hidden block below)
-              640–968 → 2×2. Four lanes at 640px meant ~160px each, which crushes an
-                        order card; two lanes at ~320px each is legible.
-              ≥ 968   → the full four-lane board.
-            Dividers are gap-px over the grid's background rather than `divide-x`:
-            divide-* borders by DOM order, so once the grid wraps to two rows it draws a
-            stray line down the middle of a row. A 1px gap showing the layer beneath is
-            layout-agnostic — it renders correct hairlines in both configurations. */}
-        <div className="hidden sm:grid sm:grid-cols-2 sm:grid-rows-2 lg:grid-cols-4 lg:grid-rows-1 h-full gap-px bg-white/[0.04]">
+        {/* The four-lane board — TWO layouts only, no cramped middle ground.
+              ≥ xl (1400px) → this board, four lanes side by side
+              < xl          → the tabbed full-width single lane (below)
+
+            WHY 1400 AND NOT ~1000. The lane width is NOT viewport ÷ 4: VendorPortalShell
+            renders a FIXED sidebar from lg up (`lg:w-64 xl:w-72` — 256px, then 288px),
+            which comes straight off the board. Actual per-lane widths:
+              968px  →  (968 − 256) / 4 = 178px   ← unusable, crushes an order card
+              1250px →  (1250 − 256) / 4 = 248px  ← still tight
+              1400px →  (1400 − 288) / 4 = 278px  ← comfortable
+              1509px →  (1509 − 288) / 4 = 305px  ← the width that looks right today
+            Switching at ~968px would have produced a WORSE board than the one being
+            replaced. 1400 is the first breakpoint where four lanes are genuinely readable.
+
+            TO TUNE: this is one token. `xl:` → `desktop:` gives 248px lanes (board appears
+            sooner, lanes tighter); anything below that is not worth having.
+
+            Dividers are a 1px grid gap over the grid's own background rather than
+            `divide-x`, which borders by DOM order and would misplace a line if the grid
+            ever wrapped. Lanes carry min-h-0 so their overflow-y-auto scrolls instead of
+            blowing out the row. */}
+        <div className="hidden xl:grid xl:grid-cols-4 h-full gap-px bg-white/[0.04]">
 
           {/* Incoming lane */}
           <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-bg-dark">
@@ -1005,7 +1020,9 @@ export default function VendorDashboardPage() {
         </div>
 
         {/* Mobile: single-lane based on active tab */}
-        <div className="sm:hidden h-full overflow-y-auto p-3 space-y-3">
+        {/* Tabbed full-width single lane — everything below xl. Driven by activeTab from
+            the tab bar above; the selected lane gets the entire width. */}
+        <div className="xl:hidden h-full overflow-y-auto p-3 space-y-3">
           {activeTab === 'incoming' && (
             incoming.length === 0
               ? <EmptyLane message="No incoming orders right now" />
