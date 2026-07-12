@@ -349,7 +349,12 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
   )
 }
 
-function Step8({ data }: { data: FormData }) {
+// eventSlug is REQUIRED for the CTA. The vendor portal is fair-scoped
+// (/vendor/[fairSlug]/dashboard), so a bare /vendor link would land nowhere. Submission
+// cannot succeed without an eventSlug (it is validated before the POST and the API 400s
+// without it), so by the time this screen renders we always have one — but it is typed
+// nullable and the CTA falls back to home rather than routing to /vendor/null.
+function Step8({ data, eventSlug }: { data: FormData; eventSlug: string | null }) {
   return (
     <div className="py-4 text-center space-y-6 animate-fadeIn">
       <div className="relative inline-flex">
@@ -370,9 +375,12 @@ function Step8({ data }: { data: FormData }) {
       <div className="max-w-sm mx-auto p-5 bg-bg-card border border-white/10 rounded-2xl text-left space-y-3.5">
         <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold">What Happens Next</p>
         {[
+          // 03 used to read "If approved, you gain immediate access to your vendor
+          // dashboard" — which now contradicts the button below it, since the portal is
+          // reachable right away in its awaiting-approval state.
           { n: '01', t: 'The event operator reviews your application (24–48 hrs)' },
           { n: '02', t: 'You receive approval or decline with reason via email' },
-          { n: '03', t: 'If approved, you gain immediate access to your vendor dashboard' },
+          { n: '03', t: 'Your portal is open now — you can look around while you wait' },
           { n: '04', t: 'You are NOT live until the operator sets your go-live date' },
         ].map(({ n, t }) => (
           <div key={n} className="flex items-start gap-3">
@@ -386,10 +394,25 @@ function Step8({ data }: { data: FormData }) {
         Confirmation sent to <span className="text-white">{data.email}</span>
       </p>
 
-      <Link href="/"
-        className="inline-flex items-center px-8 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all no-underline">
-        Back to Home
-      </Link>
+      {/* ONE button, and it points at the thing they can actually use. POST /api/vendors
+          creates a PENDING Vendor AND a VendorMember (owner) and syncs the role metadata,
+          so this applicant is already authorised for the portal — /api/vendors/me resolves
+          by MEMBERSHIP, not by approval status, and the dashboard renders the "Application
+          under review" state. So the portal is a real destination right now, not a wall.
+          Mirrors the runner flow's "Go to Runner Portal". */}
+      {eventSlug ? (
+        <Link href={`/vendor/${eventSlug}/dashboard`}
+          className="inline-flex items-center px-8 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-all no-underline">
+          Go to Vendor Portal
+        </Link>
+      ) : (
+        // Unreachable in practice (submission requires a fair), but never route to
+        // /vendor/null — a broken destination is worse than a boring one.
+        <Link href="/"
+          className="inline-flex items-center px-8 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all no-underline">
+          Back to Home
+        </Link>
+      )}
     </div>
   )
 }
@@ -497,7 +520,7 @@ export default function VendorOnboarding() {
           {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} />}
           {step === 2 && <Step2 data={data} update={update} />}
           {step === 3 && <Step6 data={data} update={update} />}
-          {step === 4 && <Step8 data={data} />}
+          {step === 4 && <Step8 data={data} eventSlug={eventSlug} />}
         </div>
 
         {/* Navigation */}
