@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
@@ -157,6 +158,17 @@ export async function PATCH(
         ...(notificationPrefs !== undefined && { notificationPrefs }),
       },
     })
+
+    // CACHE INVALIDATION — the stale-read trap. isOffline and isBusy are shown to CUSTOMERS
+    // via the server-rendered discovery list (lib/fairs.ts getVendorsBySlugCached, cached
+    // 120s under the 'vendors' tag). Without this, a vendor flips offline and customers keep
+    // seeing them as available for up to two minutes. Bust the tag so the next render is
+    // fresh. (name/cuisineType/description/booth also appear there — revalidate on any field
+    // the discovery card reads.)
+    if (isOffline !== undefined || isBusy !== undefined ||
+        name !== undefined || cuisineType !== undefined || description !== undefined || boothNumber !== undefined) {
+      revalidateTag('vendors', 'default')
+    }
 
     // Determine which settings section was updated for audit granularity
     const isProfileUpdate = name !== undefined || cuisineType !== undefined || description !== undefined
