@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -37,6 +38,10 @@ export async function PATCH(
       },
       select: { id: true, name: true, status: true, boothNumber: true },
     })
+
+    // Now ACTIVE → orderable. Bust the cached customer discovery list ('vendors', 120s in
+    // lib/fairs.ts) so the approved vendor appears promptly, not after the TTL.
+    revalidateTag('vendors', 'default')
 
     return success({ vendor: updated })
   } catch (err) {

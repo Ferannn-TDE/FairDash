@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -38,6 +39,9 @@ export async function PATCH(
       data: { status: VendorStatus.REJECTED },
       select: { id: true, name: true, status: true },
     })
+
+    // No longer ACTIVE → must drop from the cached customer discovery list ('vendors').
+    revalidateTag('vendors', 'default')
 
     // TODO: send rejection email/notification to vendor with reason
     // await sendVendorRejectionEmail(vendor, reason)
