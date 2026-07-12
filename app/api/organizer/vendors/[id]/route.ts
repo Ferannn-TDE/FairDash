@@ -124,10 +124,15 @@ export async function GET(
       lastHeartbeatAt: vendor.lastHeartbeatAt,
       operatingHours: vendor.operatingHours,
       boothPhotoUrls: vendor.boothPhotoUrls,
-      // Documents
-      foodHandlerPermitUrl: vendor.foodHandlerPermitUrl,
-      insuranceUrl: vendor.insuranceUrl,
-      businessLicenseUrl: vendor.businessLicenseUrl,
+      // Documents — PRESENCE ONLY. The paths are never emitted, and there is no public
+      // URL to emit. To actually VIEW a document, the organizer calls
+      // GET /api/organizer/vendors/[id]/documents, which authorises them and mints a
+      // short-lived signed URL (and audit-logs the view).
+      docs: {
+        foodHandlerPermit: !!vendor.foodHandlerPermitPath,
+        insurance:         !!vendor.insurancePath,
+        businessLicense:   !!vendor.businessLicensePath,
+      },
       insuranceExpiryDate: vendor.insuranceExpiryDate,
       insuranceExpired: vendor.insuranceExpired,
       // Fair

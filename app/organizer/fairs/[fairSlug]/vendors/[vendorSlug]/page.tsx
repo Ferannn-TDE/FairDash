@@ -48,8 +48,10 @@ interface VendorDetail {
   status: string; isOffline: boolean; isBusy: boolean
   stripeVerified: boolean; stripeConnectedAt: string | null
   createdAt: string; lastHeartbeatAt: string | null
-  foodHandlerPermitUrl: string | null; insuranceUrl: string | null
-  businessLicenseUrl: string | null; insuranceExpiryDate: string | null
+  // Presence only — the documents live in a PRIVATE bucket and are fetched as
+  // short-lived signed URLs on demand (see viewDoc), never embedded in this payload.
+  docs: { foodHandlerPermit: boolean; insurance: boolean; businessLicense: boolean }
+  insuranceExpiryDate: string | null
   insuranceExpired: boolean; operatingHours: unknown; boothPhotoUrls: unknown
   fairId: string; fairName: string; fairSlug: string
   members: VendorMember[]; menuItems: MenuItem[]; pendingMenuRequests: PendingRequest[]
@@ -149,6 +151,7 @@ export default function VendorDetailPage({
   const [loadingMore, setLoadingMore] = useState(false)
   const [confirmStatus, setConfirmStatus] = useState<'PAUSED' | 'SUSPENDED' | null>(null)
   const [menuFilter, setMenuFilter] = useState<string>('ALL')
+  const [viewingDoc, setViewingDoc] = useState<string | null>(null)
 
   const fetchVendor = useCallback(async (cursor?: string) => {
     // Pass the fair so the slug resolves within THIS fair (slug is unique per fair).
@@ -186,6 +189,27 @@ export default function VendorDetailPage({
       toast.error('Failed to load more orders')
     } finally {
       setLoadingMore(false)
+    }
+  }
+
+  // Documents live in a PRIVATE bucket. Mint the signed URL ON CLICK, not on page load:
+  // the link is short-lived (60s), so minting it at render would often hand the organizer
+  // an already-expired URL — and it means the audit log records an actual VIEW rather than
+  // every page render.
+  async function viewDoc(docType: 'foodHandler' | 'insurance' | 'businessLicense') {
+    setViewingDoc(docType)
+    try {
+      const res = await fetch(
+        `/api/organizer/vendors/${vendorSlug}/documents?fair=${encodeURIComponent(fairSlug)}`,
+      )
+      const json = await res.json()
+      const url = json?.data?.[docType]?.url
+      if (url) window.open(url, '_blank', 'noopener,noreferrer')
+      else toast.error('Could not open that document')
+    } catch {
+      toast.error('Could not open that document')
+    } finally {
+      setViewingDoc(null)
     }
   }
 
@@ -316,12 +340,12 @@ export default function VendorDetailPage({
               Documents
             </h2>
             <div className="divide-y divide-white/[0.04]">
-              {[
-                { label: 'Food Handler Permit', url: vendor.foodHandlerPermitUrl },
-                { label: 'Insurance Certificate', url: vendor.insuranceUrl, expired: vendor.insuranceExpired,
-                  expiry: vendor.insuranceExpiryDate },
-                { label: 'Business License', url: vendor.businessLicenseUrl },
-              ].map(doc => (
+              {([
+                { key: 'foodHandler' as const,     label: 'Food Handler Permit',   uploaded: vendor.docs?.foodHandlerPermit },
+                { key: 'insurance' as const,       label: 'Insurance Certificate', uploaded: vendor.docs?.insurance,
+                  expired: vendor.insuranceExpired, expiry: vendor.insuranceExpiryDate },
+                { key: 'businessLicense' as const, label: 'Business License',      uploaded: vendor.docs?.businessLicense },
+              ]).map(doc => (
                 <div key={doc.label} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <DocumentTextIcon className="w-3.5 h-3.5 text-[#444] shrink-0" />
@@ -330,9 +354,15 @@ export default function VendorDetailPage({
                       <span className="px-1.5 py-0.5 bg-red-500/15 text-red-400 text-[9px] font-bold rounded uppercase shrink-0">Expired</span>
                     )}
                   </div>
-                  {doc.url ? (
-                    <a href={doc.url} target="_blank" rel="noopener noreferrer"
-                      className="text-xs text-[#FF0077] hover:underline font-inter shrink-0">View →</a>
+                  {doc.uploaded ? (
+                    <button
+                      type="button"
+                      onClick={() => viewDoc(doc.key)}
+                      disabled={viewingDoc === doc.key}
+                      className="text-xs text-[#FF0077] hover:underline font-inter shrink-0 disabled:opacity-50"
+                    >
+                      {viewingDoc === doc.key ? 'Opening…' : 'View →'}
+                    </button>
                   ) : (
                     <span className="text-xs text-[#333] font-inter shrink-0">Not uploaded</span>
                   )}

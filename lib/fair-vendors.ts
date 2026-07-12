@@ -41,9 +41,9 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
       createdAt: true,
       stripeVerified: true,
       stripeConnectedAt: true,
-      foodHandlerPermitUrl: true,
-      insuranceUrl: true,
-      businessLicenseUrl: true,
+      foodHandlerPermitPath: true,
+      insurancePath: true,
+      businessLicensePath: true,
       insuranceExpired: true,
       insuranceExpiryDate: true,
       isOffline: true,
@@ -99,12 +99,14 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
     joinedAt: v.createdAt,
     stripeVerified: v.stripeVerified,
     stripeConnectedAt: v.stripeConnectedAt,
-    // Document presence flags — no URLs exposed in list view.
+    // Document presence flags — never the paths, and there are no URLs to expose.
+    // (This surface was already correct before the private-bucket rework; it only needed
+    // the renamed columns.)
     docs: {
-      foodHandlerPermit: !!v.foodHandlerPermitUrl,
-      insurance: !!v.insuranceUrl,
+      foodHandlerPermit: !!v.foodHandlerPermitPath,
+      insurance: !!v.insurancePath,
       insuranceExpired: v.insuranceExpired,
-      businessLicense: !!v.businessLicenseUrl,
+      businessLicense: !!v.businessLicensePath,
     },
     isOffline: v.isOffline,
     isBusy: v.isBusy,
