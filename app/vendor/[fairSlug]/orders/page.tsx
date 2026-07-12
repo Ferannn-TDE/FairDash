@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   ChevronDown, ChevronUp, Clock, User, Phone,
   ShoppingBag, Car, MapPin, CheckCircle, XCircle,
@@ -205,44 +205,78 @@ function OrderCard({ order }: { order: Order }) {
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
+const PAGE_SIZE = 50
+
 export default function VendorOrdersPage() {
   const { vendorId } = useVendorMeta()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [filter, setFilter] = useState<string>('all')
   const [sortNewest, setSortNewest] = useState(true)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [counts, setCounts] = useState<Record<string, number>>({})
 
+  // FILTERING AND SORTING ARE SERVER-SIDE. They used to be done in the browser over
+  // whatever the first (capped) fetch returned — which meant the tab counts lied ("3
+  // cancelled" meant "3 among your last 50 orders") and everything past the 50th order was
+  // unreachable. Paginating a client-side filter would have given "page 2 of everything"
+  // wearing the Cancelled tab's label.
+  //
+  // The fetch key is (filter, sort). Any change to it is a NEW query from page 1 — the
+  // cursor is dropped and the list is REPLACED, never appended. Otherwise you land on page
+  // 5 of a 2-page filter, or mix Cancelled rows into Completed.
   useEffect(() => {
     if (!vendorId) return
-    fetch(`/api/vendors/${vendorId}/orders/history`)
+    let cancelled = false
+    setLoading(true)
+    setNextCursor(null)
+
+    const qs = new URLSearchParams({
+      tab: filter,
+      sort: sortNewest ? 'newest' : 'oldest',
+      take: String(PAGE_SIZE),
+      withCounts: '1',
+    })
+    fetch(`/api/vendors/${vendorId}/orders/history?${qs}`)
       .then(r => r.json())
       .then(json => {
-        if (json.success) setOrders(json.data?.orders ?? [])
+        if (cancelled || !json.success) return
+        setOrders(json.data?.orders ?? [])          // REPLACE — this is page 1
+        setNextCursor(json.data?.nextCursor ?? null)
+        if (json.data?.counts) setCounts(json.data.counts)
       })
       .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [vendorId])
+      .finally(() => { if (!cancelled) setLoading(false) })
 
-  const tabCounts = useMemo(() => ({
-    all:       orders.length,
-    PLACED:    orders.filter(o => TAB_STATUS_MAP['PLACED'].includes(o.status)).length,
-    PREPARING: orders.filter(o => TAB_STATUS_MAP['PREPARING'].includes(o.status)).length,
-    READY:     orders.filter(o => TAB_STATUS_MAP['READY'].includes(o.status)).length,
-    COMPLETED: orders.filter(o => TAB_STATUS_MAP['COMPLETED'].includes(o.status)).length,
-    CANCELLED: orders.filter(o => TAB_STATUS_MAP['CANCELLED'].includes(o.status)).length,
-  }), [orders])
+    return () => { cancelled = true } // a stale response must never overwrite a newer filter
+  }, [vendorId, filter, sortNewest])
 
-  const filtered = useMemo(() => {
-    let list = orders
-    if (filter !== 'all') {
-      const allowed = TAB_STATUS_MAP[filter] ?? [filter]
-      list = list.filter(o => allowed.includes(o.status))
-    }
-    return [...list].sort((a, b) => {
-      const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
-      return sortNewest ? diff : -diff
-    })
-  }, [orders, filter, sortNewest])
+  // Next page of the CURRENT (filter, sort). Appends. The cursor is the last row's id, and
+  // the server's stable sort (placedAt + id) makes "the row after this one" deterministic.
+  const loadMore = useCallback(async () => {
+    if (!vendorId || !nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const qs = new URLSearchParams({
+        tab: filter,
+        sort: sortNewest ? 'newest' : 'oldest',
+        take: String(PAGE_SIZE),
+        cursor: nextCursor,
+      })
+      const json = await (await fetch(`/api/vendors/${vendorId}/orders/history?${qs}`)).json()
+      if (json.success) {
+        setOrders(prev => [...prev, ...(json.data?.orders ?? [])])
+        setNextCursor(json.data?.nextCursor ?? null)
+      }
+    } catch { /* leave the cursor intact so the user can retry */ }
+    finally { setLoadingMore(false) }
+  }, [vendorId, nextCursor, filter, sortNewest, loadingMore])
+
+  // Rows are already filtered AND sorted by the server. Re-filtering here would silently
+  // re-introduce the client-side bug; re-sorting would only sort the pages fetched so far.
+  const filtered = orders
+  const tabCounts = counts
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[56rem] mx-auto">
@@ -252,7 +286,17 @@ export default function VendorOrdersPage() {
             Order <span className="text-neon-pink">History</span>
           </h1>
           <p className="text-text-gray text-sm mt-0.5">
-            {loading ? 'Loading…' : `${orders.length} order${orders.length !== 1 ? 's' : ''} total`}
+            {/* The TRUE total for the active filter (counted server-side across all
+                history), not the number of rows fetched so far. */}
+            {loading
+              ? 'Loading…'
+              : (() => {
+                  const total = tabCounts[filter] ?? orders.length
+                  const shown = orders.length
+                  return total > shown
+                    ? `Showing ${shown} of ${total} order${total !== 1 ? 's' : ''}`
+                    : `${total} order${total !== 1 ? 's' : ''} total`
+                })()}
           </p>
         </div>
         <button
@@ -304,6 +348,18 @@ export default function VendorOrdersPage() {
           {filtered.map(order => (
             <OrderCard key={order.id} order={order} />
           ))}
+
+          {/* Cursor pagination. `nextCursor` is null once the server has no further rows
+              for THIS filter, so the button disappears exactly when the list is complete. */}
+          {nextCursor && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-text-gray text-xs font-semibold hover:text-white hover:border-white/20 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
+            </button>
+          )}
         </div>
       )}
     </div>
