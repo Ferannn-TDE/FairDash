@@ -71,43 +71,89 @@ function OrderCard({ order }: { order: Order }) {
   const [expanded, setExpanded] = useState(false)
   const placedTime = new Date(order.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const shortId = '#' + order.id.slice(-8).toUpperCase()
+  // One summary string, truncated by CSS (ellipsis) rather than sheared mid-word by a
+  // too-narrow flex cell — which is what turned "1× Item" into the broken-looking "1× I".
+  // The full text stays available via the title attribute and the expanded panel.
+  const itemSummary = order.orderItems.map(i => `${i.quantity}× ${i.itemName}`).join(', ')
 
   return (
     <div className={`border border-white/10 rounded-2xl overflow-hidden transition-all duration-200 ${
       order.status === 'PLACED' ? 'border-neon-pink/30 bg-neon-pink/[0.03]' : 'bg-bg-card'
     }`}>
+      {/* THE ROW IS A GRID, NOT A FLEX BOX.
+          It used to be a flex row with TWO `flex-1` cells, so content length decided
+          x-positions: a long item name shoved the amount left, a wide status badge ("Order
+          Placed" vs "Declined") shoved the customer info right, and nothing lined up from
+          row to row. Fixed column tracks are what make a list scannable — a vendor can run
+          their eye down the amount column and compare, or down the status column and see a
+          pattern, only if those columns actually ARE columns.
+
+          Tracks (lg+):  [id + time] [status] [customer] [items] [amount] [chevron]
+                           7rem       8.5rem   9rem      1fr      6.5rem   1rem
+          The status track is FIXED WIDTH so a wide badge can never push its siblings.
+          Flexible cells carry min-w-0 + truncate, or a long value would blow the track out
+          instead of ellipsing. Narrower screens collapse to [content][amount][chevron]. */}
       <button
         onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-4 p-4 sm:p-5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer"
+        className="w-full grid items-center gap-x-4 gap-y-1 p-4 sm:p-5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer
+                   grid-cols-[minmax(0,1fr)_auto_1rem]
+                   lg:grid-cols-[7rem_8.5rem_9rem_minmax(0,1fr)_6.5rem_1rem]"
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-white text-sm">{shortId}</span>
+        {/* 1 — order id + time. On small screens this cell carries everything. */}
+        <div className="min-w-0">
+          <span className="block font-bold text-white text-sm tabular-nums truncate">{shortId}</span>
+          <span className="flex items-center gap-1 text-xs text-text-gray mt-0.5">
+            <Clock className="w-3 h-3 shrink-0" />
+            <span className="tabular-nums">{placedTime}</span>
+          </span>
+
+          {/* Below lg the dedicated tracks are hidden, so fold their content in here —
+              same information, still truncating rather than wrapping into ragged rows. */}
+          <div className="lg:hidden mt-1.5 flex flex-col gap-1">
             <StatusPill status={order.status} />
-          </div>
-          <div className="flex items-center gap-3 mt-1 flex-wrap">
-            <span className="flex items-center gap-1 text-xs text-text-gray">
-              <User className="w-3 h-3" />
-              {order.customerName}
+            <span className="flex items-center gap-1 text-xs text-text-gray min-w-0">
+              <User className="w-3 h-3 shrink-0" />
+              <span className="truncate">{order.customerName}</span>
             </span>
-            <span className="flex items-center gap-1 text-xs text-text-gray">
-              <Clock className="w-3 h-3" />
-              {placedTime}
-            </span>
-            <span className="flex items-center gap-1 text-xs text-text-gray">
+            <span className="flex items-center gap-1 text-xs text-text-gray/70 min-w-0">
               <FulfillmentIcon type={order.fulfillmentType} />
-              {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
+              <span className="truncate">{itemSummary}</span>
             </span>
           </div>
         </div>
-        <div className="hidden sm:block flex-1 min-w-0">
-          <p className="text-white/60 text-xs truncate">
-            {order.orderItems.map(i => `${i.quantity}× ${i.itemName}`).join(', ')}
-          </p>
+
+        {/* 2 — status. FIXED track: badges vary in width, so anchor them here rather than
+               letting "Order Placed" push everything after it. */}
+        <div className="hidden lg:flex min-w-0">
+          <StatusPill status={order.status} />
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <EarningsBadge amount={order.earnings} status={order.earningsStatus} />
-          {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
+
+        {/* 3 — customer + fulfillment */}
+        <div className="hidden lg:block min-w-0">
+          <span className="flex items-center gap-1 text-xs text-white/80 min-w-0">
+            <User className="w-3 h-3 shrink-0" />
+            <span className="truncate">{order.customerName}</span>
+          </span>
+          <span className="flex items-center gap-1 text-xs text-text-gray mt-0.5 min-w-0">
+            <FulfillmentIcon type={order.fulfillmentType} />
+            <span className="truncate">{FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}</span>
+          </span>
+        </div>
+
+        {/* 4 — items. Truncates with an ellipsis instead of shearing a name to one letter. */}
+        <div className="hidden lg:block min-w-0">
+          <p className="text-white/60 text-xs truncate" title={itemSummary}>{itemSummary}</p>
+        </div>
+
+        {/* 5 — amount. One shape for every state, right-aligned, tabular figures so the
+               decimal points line up down the column. */}
+        <div className="justify-self-end">
+          <EarningsBadge amount={order.earnings} status={order.earningsStatus} variant="stacked" />
+        </div>
+
+        {/* 6 — chevron */}
+        <div className="justify-self-end text-text-gray">
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </div>
       </button>
 
