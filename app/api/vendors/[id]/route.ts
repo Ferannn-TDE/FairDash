@@ -27,6 +27,14 @@ export async function GET(
     // Per-fair slug resolution: a bare slug no longer identifies one vendor, so scope
     // it to the fair the page already carries (?fair=<fairSlug>). id stays unambiguous.
     const fairSlug = new URL(req.url).searchParams.get('fair')
+    // PUBLIC, UNAUTHENTICATED ENDPOINT — the select IS the access-control boundary.
+    // Everything selected here is returned verbatim to any anonymous caller (see the
+    // `return success(vendor)` below), so this list must contain ONLY customer-facing
+    // fields. It previously leaked the vendor's compliance documents
+    // (foodHandlerPermitUrl / insuranceUrl / businessLicenseUrl — a business license and
+    // an insurance certificate, i.e. legal PII) and their Stripe Connect account id, to
+    // anyone who hit the endpoint. None of it was ever read by the customer page. Do not
+    // re-add a field here without asking: "am I happy for a stranger to have this?"
     const vendor = await db.vendor.findFirst({
       where: await resolveVendorWhere(id, fairSlug),
       select: {
@@ -42,11 +50,8 @@ export async function GET(
         status: true,
         eventId: true,
         operatingHours: true,
-        notificationPrefs: true,
-        foodHandlerPermitUrl: true,
-        insuranceUrl: true,
-        businessLicenseUrl: true,
-        stripeAccountId: true,
+        // stripeVerified: NOT customer data, but the readiness gate below needs it.
+        // It is stripped from the response — see the destructure at the return.
         stripeVerified: true,
         menuItems: {
           where: { isAvailable: true },
@@ -79,7 +84,9 @@ export async function GET(
       return apiError('Vendor not found', 404, 'NOT_FOUND')
     }
 
-    return success(vendor)
+    // Strip the gate-only field so it never reaches the wire.
+    const { stripeVerified: _gateOnly, ...publicVendor } = vendor
+    return success(publicVendor)
   } catch (err) {
     return handleApiError(err)
   }
