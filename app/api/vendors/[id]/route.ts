@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireVendorAuth } from '@/lib/auth'
+import { requireVendorAuth, getOptionalUserId, hasStrictAdminAuth } from '@/lib/auth'
 import { ApiError } from '@/lib/api-error'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
+import { callerMayViewInactiveVendor } from '@/lib/vendor-visibility'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -73,6 +75,30 @@ export async function GET(
     })
 
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
+
+    // ── STATUS GATE ────────────────────────────────────────────────────────────
+    // A non-ACTIVE vendor (PENDING / PAUSED / SUSPENDED / REJECTED) is NOT public. This
+    // closes a real gap: the marketplace LIST and order placement both require ACTIVE, but
+    // this detail endpoint only gated on status when ENFORCE_VENDOR_READINESS was on (off by
+    // default) — so a pending vendor's page + menu was reachable by DIRECT URL. Not a money
+    // leak (placement rejects non-ACTIVE with VENDOR_INACTIVE), but a real visibility gap.
+    //
+    // OWNER / ADMIN BYPASS — mirrors the sibling menu route: the gate hides a vendor from
+    // CUSTOMERS, not from themselves. An owner previewing their own storefront, or an admin,
+    // still resolves it; everyone else gets a plain 404. (Organizers review via their own
+    // route, /api/organizer/vendors/[id], so they don't need a bypass here.) Auth is
+    // resolved ONLY on the non-ACTIVE branch, so the common ACTIVE path stays a cheap
+    // anonymous read.
+    if (vendor.status !== VendorStatus.ACTIVE) {
+      const clerkId = await getOptionalUserId()
+      const callerUserId = clerkId
+        ? (await db.user.findUnique({ where: { clerkId }, select: { id: true } }))?.id ?? null
+        : null
+      const isAdmin = clerkId ? await hasStrictAdminAuth() : false
+      const privileged = await callerMayViewInactiveVendor(vendor.id, callerUserId, isAdmin, req)
+      if (!privileged) return apiError('Vendor not found', 404, 'NOT_FOUND')
+    }
+
     if (vendor.isOffline) return apiError('Vendor is currently offline', 503, 'VENDOR_OFFLINE')
 
     // Phase 5 gate: when enforcement is on, a not-ready vendor (no Stripe / no

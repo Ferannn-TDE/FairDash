@@ -40,6 +40,7 @@ const SUITES: Suite[] = [
   // Security — the vendor-document exposure and its guards.
   { group: 'security', name: 'vendor-doc-privacy',     file: 'scripts/vendor-doc-privacy-test.ts' },
   { group: 'security', name: 'vendor-public-leak',     file: 'scripts/vendor-public-leak-test.ts' },
+  { group: 'security', name: 'vendor-detail-status-gate', file: 'scripts/vendor-detail-status-gate-test.ts' },
 
   // Correctness — data-shape and UI-wiring invariants.
   { group: 'correctness', name: 'vendor-slug-per-fair',    file: 'scripts/vendor-slug-per-fair-test.ts' },
