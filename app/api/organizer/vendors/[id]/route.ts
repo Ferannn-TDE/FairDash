@@ -252,6 +252,11 @@ export async function PATCH(
     if (body.status && body.status !== vendor.status) {
       revalidateTag(`organizer-stats-${organizerId}`, 'default')
       revalidateTag(`organizer-fairs-${organizerId}`, 'default')
+      // …and the CUSTOMER discovery list. status decides whether a vendor is ACTIVE and so
+      // orderable; getVendorsBySlugCached (lib/fairs.ts) caches that list 120s under
+      // 'vendors'. Without this, a SUSPENDED vendor lingers as orderable — and a newly
+      // ACTIVE one stays invisible — for up to two minutes. Same bust the toggle uses.
+      revalidateTag('vendors', 'default')
     }
 
     // Audit log + Slack notification on status change
