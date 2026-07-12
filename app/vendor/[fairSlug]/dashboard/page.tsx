@@ -881,10 +881,23 @@ export default function VendorDashboardPage() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-2.5 text-xs font-semibold transition-all cursor-pointer ${
+            // THE WHITE BAR. The inactive state used to carry NO border class at all, so
+            // its border-bottom fell back to Tailwind's PREFLIGHT DEFAULT — #e5e7eb, a
+            // light grey that reads as white on #0F0F0F. `transition-all` then animated the
+            // departing tab's border from neon-pink toward that default while its width
+            // shrank 2px → 0, so the bar you just left visibly faded THROUGH WHITE. Both
+            // bars did. Nothing was ever "white" on purpose; it was the un-overridden
+            // default leaking in through the transition.
+            //
+            // Fix: give the inactive state an EXPLICIT `border-b-2 border-transparent`.
+            // The width is now always 2px (so no width animation and no layout shift), and
+            // the colour interpolates pink ↔ transparent — never through the default.
+            // `transition-colors` (150ms) also stops `transition-all` from animating
+            // anything else that happens to differ between the two states.
+            className={`flex-1 py-2.5 text-xs font-semibold border-b-2 transition-colors duration-150 cursor-pointer ${
               activeTab === tab.id
-                ? 'text-neon-pink border-b-2 border-neon-pink'
-                : 'text-text-gray hover:text-white'
+                ? 'text-neon-pink border-neon-pink'
+                : 'text-text-gray border-transparent hover:text-white'
             }`}
           >
             {tab.label}
