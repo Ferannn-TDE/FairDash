@@ -60,7 +60,7 @@ async function main() {
     console.log('\n[1] the same slug at two different fairs can now coexist (was impossible under global-unique)')
     const vA = await prisma.vendor.create({ data: { eventId: fairA.id, name: "Randy's BBQ (A)", slug: SHARED, cuisineType: 'BBQ', status: 'ACTIVE' } })
     let secondCreateSucceeded = false
-    let vB: { id: string } | null = null
+    let vB: { id: string; slug: string; eventId: string } | null = null
     try {
       vB = await prisma.vendor.create({ data: { eventId: fairB.id, name: "Randy's BBQ (B)", slug: SHARED, cuisineType: 'BBQ', status: 'ACTIVE' } })
       secondCreateSucceeded = true
