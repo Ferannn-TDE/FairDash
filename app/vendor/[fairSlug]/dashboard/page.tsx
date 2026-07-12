@@ -8,6 +8,7 @@ import {
   CheckCircle, Bell, ChevronRight, AlertCircle, RefreshCw, Clock,
 } from 'lucide-react'
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import toast from 'react-hot-toast'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { getFirebaseApp } from '@/lib/firebase-client'
 import { StatusPill } from '@/components/ui/StatusPill'
@@ -335,14 +336,15 @@ type Tab = 'incoming' | 'active' | 'ready' | 'done'
 
 export default function VendorDashboardPage() {
   const params = useParams<{ fairSlug: string }>()
-  const { vendorId, eventId, vendorName } = useVendorMeta()
+  const { vendorId, eventId, vendorName, isOffline: initialIsOffline } = useVendorMeta()
 
-  // The vendor's OWN choice to be open for orders. Defaults FALSE, not true: an
-  // unapproved vendor must never render "Online", and even an approved one shouldn't be
-  // claimed online before we know their real state. (This toggle is currently local-only —
-  // it does not yet persist to Vendor.isOffline; that wiring is a separate follow-up. Its
-  // job here is to stop LYING, which is the reported bug.)
-  const [isOnline,          setIsOnline]          = useState(false)
+  // The vendor's OWN choice to be open for orders. Initialised from the REAL saved value
+  // (vendorMeta.isOffline), never a default — the layout gates rendering until vendorMeta
+  // loads, so this is the true server state at first paint, not a guess that would flash
+  // and then correct. Local state so a flip is optimistic (instant UI); it persists to
+  // Vendor.isOffline via PATCH in toggleOnline() below.
+  const [isOnline,          setIsOnline]          = useState(() => !initialIsOffline)
+  const [savingOnline,      setSavingOnline]      = useState(false)
   const [activeTab,         setActiveTab]         = useState<Tab>('incoming')
   // THE SELECTION IS A UI FACT, NOT A DATA FACT.
   //
@@ -453,6 +455,29 @@ export default function VendorDashboardPage() {
   // treat the vendor as NOT online (same "don't show the wrong thing while waiting"
   // discipline as the rest of this screen), so the badge never flashes Online on load.
   const { awaitingApproval, locked: onlineControlLocked, showOnline } = deriveOnlineState(readiness, isOnline)
+
+  // Flip the vendor's online/offline state and PERSIST it to Vendor.isOffline. Optimistic:
+  // the UI flips immediately, then the write goes out; on failure we revert so the badge
+  // never claims a state the server didn't accept.
+  const toggleOnline = useCallback(async () => {
+    if (onlineControlLocked || savingOnline) return
+    const next = !isOnline
+    setIsOnline(next)          // optimistic
+    setSavingOnline(true)
+    try {
+      const res = await fetch(`/api/vendors/${vendorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOffline: !next }), // online ⇒ isOffline false
+      })
+      if (!res.ok) throw new Error('save failed')
+    } catch {
+      setIsOnline(!next)       // revert — don't leave the badge lying
+      toast.error('Could not update your status — try again')
+    } finally {
+      setSavingOnline(false)
+    }
+  }, [onlineControlLocked, savingOnline, isOnline, vendorId])
 
   // ── In-flight guard ──────────────────────────────────────────────────────────
   const inFlightRef    = useRef<Set<string>>(new Set())
@@ -833,10 +858,10 @@ export default function VendorDashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => { if (!onlineControlLocked) setIsOnline(v => !v) }}
-              disabled={onlineControlLocked}
+              onClick={toggleOnline}
+              disabled={onlineControlLocked || savingOnline}
               title={awaitingApproval ? 'Locked until the organizer approves your application' : undefined}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-semibold text-xs transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-semibold text-xs transition-all disabled:cursor-not-allowed ${
                 onlineControlLocked
                   ? 'bg-white/5 border-white/10 text-text-gray cursor-not-allowed'
                   : showOnline
