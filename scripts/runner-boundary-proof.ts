@@ -42,6 +42,29 @@ function assert(cond: boolean, label: string) {
   else { fail++; console.log(`  ❌ ${label}`) }
 }
 
+/**
+ * Assert a rejection happened FOR THE RIGHT REASON.
+ *
+ * THE BUG THIS PREVENTS. Asserting only `status === 403` cannot tell a boundary violation
+ * apart from any other refusal. When the runner-approval gate shipped, every runner in this
+ * proof was left PENDING — so "runner B cannot claim an order in fair A" passed with a 403
+ * that said RUNNER_NOT_APPROVED. B never reached the cross-fair check at all. The assertion
+ * was green and the property was untested.
+ *
+ * Checking the CODE makes that class of false-green structurally impossible: a 403 for the
+ * wrong reason now FAILS the assertion instead of quietly satisfying it.
+ */
+function assertRejected(
+  res: { status: number; json: any },
+  expectStatus: number,
+  expectCode: string,
+  label: string,
+) {
+  const code = res.json?.error?.code ?? '(none)'
+  const ok = res.status === expectStatus && code === expectCode
+  assert(ok, `${label} → ${expectStatus} ${expectCode} (got ${res.status} ${code})`)
+}
+
 function login(clerkId: string | null) { (globalThis as any).__MOCK_CLERK = clerkId ? { userId: clerkId } : undefined }
 
 // ── Handlers (dynamic import AFTER the loader is registered) ───────────────────
@@ -92,9 +115,18 @@ async function mkEvent() {
 async function mkVendor(eventId: string) {
   return prisma.vendor.create({ data: { eventId, name: `V ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Test', status: 'ACTIVE' } })
 }
-async function mkRunner(eventId: string) {
+/**
+ * Runners default to approvalStatus PENDING. This proof is about the BOUNDARY (can runner A
+ * reach runner B's data, or another fair's order), so its runners must be APPROVED —
+ * otherwise every request 403s on the approval gate and the boundary is never exercised.
+ * That is exactly what had happened: the gate shipped, this seed didn't follow, and the
+ * cross-fair assertions were "passing" on the WRONG 403. See the assertCode() note below.
+ */
+async function mkRunner(eventId: string, approvalStatus: 'APPROVED' | 'PENDING' = 'APPROVED') {
   const u = await mkUser('runner')
-  const r = await prisma.runner.create({ data: { userId: u.id, eventId, status: 'ACTIVE' } })
+  const r = await prisma.runner.create({
+    data: { userId: u.id, eventId, status: 'ACTIVE', approvalStatus },
+  })
   return { runner: r, user: u }
 }
 async function mkOrder(eventId: string, vendorId: string, status: 'READY' = 'READY') {
@@ -142,12 +174,25 @@ async function main() {
     // ── Seed: two fairs, three runners, one non-runner ─────────────────────────
     const evA = await mkEvent(), evB = await mkEvent()
     const venA = await mkVendor(evA.id), venB = await mkVendor(evB.id)
+    // APPROVED — otherwise every request below 403s on the approval gate and the boundary
+    // is never reached. (That is precisely what had happened; see assertRejected().)
     const A1 = await mkRunner(evA.id)   // fair A, will be the legit owner
     const A2 = await mkRunner(evA.id)   // fair A, a DIFFERENT runner
     const B  = await mkRunner(evB.id)   // fair B
+    const pendingA = await mkRunner(evA.id, 'PENDING') // fair A, NOT yet approved
     const plain = await mkUser('customer') // authenticated, but NO Runner row
     const orderA = await mkOrder(evA.id, venA.id) // READY, unclaimed, fair A
     const orderB = await mkOrder(evB.id, venB.id) // READY, unclaimed, fair B (B's own)
+
+    // ── G. APPROVAL GATE: an unapproved runner cannot act at all ────────────────
+    // This property used to be tested only BY ACCIDENT — every runner in this proof was
+    // PENDING, so the gate fired on requests that were meant to probe the fair boundary.
+    // Now it is asserted deliberately, on its own runner, so the boundary tests can be
+    // approved AND the gate keeps its coverage. The accident becomes real coverage.
+    console.log('\n[G] a PENDING (unapproved) runner cannot claim — the approval gate')
+    const g1 = await patchStatus(pendingA.user.clerkId!, orderA.id, { status: 'RUNNER_COLLECTED' })
+    assertRejected(g1, 403, 'RUNNER_NOT_APPROVED', 'unapproved runner claim')
+    assert(await runnerIdOf(orderA.id) === null, 'orderA still unclaimed after the unapproved runner tried')
 
     // ── C. non-runner cannot claim ─────────────────────────────────────────────
     console.log('\n[C] a signed-in user with NO Runner row cannot claim')
@@ -158,9 +203,14 @@ async function main() {
     assert(c2.status === 404, `non-runner GET /me/orders → 404 RUNNER_NOT_FOUND (got ${c2.status})`)
 
     // ── B (crux) 1: cross-fair claim blocked ───────────────────────────────────
+    // B is APPROVED, and we assert the CODE — so this can only pass if B was stopped by the
+    // FAIR BOUNDARY, not by the approval gate. That distinction is the whole point of the
+    // test, and it is what the old status-only assertion could not make.
     console.log('\n[B1] runner B (fair B) CANNOT claim an order in fair A')
     const b1 = await patchStatus(B.user.clerkId!, orderA.id, { status: 'RUNNER_COLLECTED' })
     assert(b1.status === 403, `cross-fair claim → 403 (got ${b1.status})`)
+    assert(b1.json?.error?.code !== 'RUNNER_NOT_APPROVED',
+      `…and NOT because B was unapproved — the 403 is the FAIR BOUNDARY (code ${b1.json?.error?.code})`)
     assert(await runnerIdOf(orderA.id) === null, 'orderA STILL unclaimed after B tried')
 
     // ── positive control: the legit fair-A runner CAN claim ────────────────────
@@ -179,13 +229,16 @@ async function main() {
     // ── B3: same-fair OTHER runner cannot DELIVER A1's order ───────────────────
     console.log('\n[B3] runner A2 CANNOT mark A1’s order delivered')
     const b3 = await patchStatus(A2.user.clerkId!, orderA.id, { status: 'DELIVERED', photoUrl: 'https://rbseed.local/p.jpg' })
-    assert(b3.status === 403, `A2 deliver A1’s order → 403 NOT_YOUR_DELIVERY (got ${b3.status})`)
+    // The CODE matters: A2 must be refused for OWNERSHIP, not for approval.
+    assertRejected(b3, 403, 'NOT_YOUR_DELIVERY', 'A2 deliver A1’s order')
     assert(await statusOf(orderA.id) === 'RUNNER_COLLECTED', 'orderA NOT delivered by A2')
 
     // ── B4: cross-fair runner cannot DELIVER either ────────────────────────────
     console.log('\n[B4] runner B (fair B) CANNOT deliver a fair-A order')
     const b4 = await patchStatus(B.user.clerkId!, orderA.id, { status: 'DELIVERED', photoUrl: 'https://rbseed.local/p.jpg' })
     assert(b4.status === 403, `cross-fair deliver → 403 (got ${b4.status})`)
+    assert(b4.json?.error?.code !== 'RUNNER_NOT_APPROVED',
+      `…and NOT because B was unapproved — the 403 is the FAIR BOUNDARY (code ${b4.json?.error?.code})`)
     assert(await statusOf(orderA.id) === 'RUNNER_COLLECTED', 'orderA STILL not delivered')
 
     // ── positive control: A1 delivers its own order ────────────────────────────
@@ -215,7 +268,19 @@ async function main() {
     const d2 = await getOrders(A1.user.clerkId!, orderA.id)
     assert(d2.status === 200 && !!d2.json?.data?.order, 'A1 CAN read its own order detail (flow intact)')
 
-    console.log(`\n── RESULT: ${pass} passed, ${fail} failed ──`)
+    // A FAILING RUN MUST NOT BE READABLE AS A PASSING ONE.
+    //
+    // The old summary was `RESULT: 10 passed, 11 failed` — honest, but it CONTAINS the
+    // substring "10 passed", and a grep looking for "N passed" happily reported this suite
+    // green while 11 assertions were on the floor. That is how a broken security proof went
+    // unnoticed. So on failure we do not emit a "passed" count at all: the summary says
+    // SUITE FAILED and nothing else can be mistaken for success.
+    if (fail === 0) {
+      console.log(`\n── RESULT: ${pass} passed, 0 failed ──`)
+    } else {
+      console.log(`\n── ❌ SUITE FAILED — ${fail} assertion(s) failed (of ${pass + fail}) ──`)
+      console.log('── DO NOT read this run as green. Exit code 1. ──')
+    }
   } finally {
     await cleanup()
     console.log('cleanup done (all rbseed- rows removed)')
