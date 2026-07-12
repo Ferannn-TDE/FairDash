@@ -882,11 +882,20 @@ export default function VendorDashboardPage() {
       {/* Kanban body */}
       <div className="flex-1 overflow-hidden">
 
-        {/* Desktop: 4-column kanban */}
-        <div className="hidden sm:grid sm:grid-cols-4 h-full divide-x divide-white/[0.04]">
+        {/* Desktop / tablet kanban.
+            Breakpoints (tailwind.config: sm=640, lg=968):
+              < 640   → stacked + tab bar (the sm:hidden block below)
+              640–968 → 2×2. Four lanes at 640px meant ~160px each, which crushes an
+                        order card; two lanes at ~320px each is legible.
+              ≥ 968   → the full four-lane board.
+            Dividers are gap-px over the grid's background rather than `divide-x`:
+            divide-* borders by DOM order, so once the grid wraps to two rows it draws a
+            stray line down the middle of a row. A 1px gap showing the layer beneath is
+            layout-agnostic — it renders correct hairlines in both configurations. */}
+        <div className="hidden sm:grid sm:grid-cols-2 sm:grid-rows-2 lg:grid-cols-4 lg:grid-rows-1 h-full gap-px bg-white/[0.04]">
 
           {/* Incoming lane */}
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-bg-dark">
             <LaneHeader label="Incoming" count={incoming.length} pulse />
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {loading ? (
@@ -908,7 +917,7 @@ export default function VendorDashboardPage() {
           </div>
 
           {/* Preparing lane */}
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-bg-dark">
             <LaneHeader label="Preparing" count={active.length} />
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {loading ? (
@@ -930,7 +939,7 @@ export default function VendorDashboardPage() {
           </div>
 
           {/* Ready lane */}
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-bg-dark">
             <LaneHeader label="Ready for Pickup" count={ready.length} />
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {loading ? (
@@ -951,7 +960,7 @@ export default function VendorDashboardPage() {
           </div>
 
           {/* Completed / Failed lane */}
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-bg-dark">
             <LaneHeader label="Completed Today" count={completed.length + failedOrders.length} />
             <div className="flex-1 overflow-y-auto">
               {loading ? (
