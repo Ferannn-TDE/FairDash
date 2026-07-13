@@ -51,6 +51,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'vendor-online-persist',   file: 'scripts/vendor-online-persist-guard.ts' },
   { group: 'correctness', name: 'vendor-status-revalidation', file: 'scripts/vendor-status-revalidation-guard.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
+  { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
 ]
 
 const filter = process.argv[2]
