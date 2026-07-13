@@ -14,6 +14,12 @@ export interface VendorMeta {
    *  load. Present because the layout gates rendering until vendorMeta loads, so it is
    *  always available at the dashboard's first paint. */
   isOffline: boolean
+  /** Vendor.status (PENDING / ACTIVE / PAUSED / SUSPENDED / REJECTED). Drives the online
+   *  toggle's approval + organizer-pause lock: only an ACTIVE vendor may go online. A
+   *  PAUSED/SUSPENDED vendor was taken offline by the organizer and — since a vendor can't
+   *  change their own status — cannot bring themselves back. That is "admin-set sticky
+   *  offline" for free, via the status axis; the toggle just reflects it. */
+  status: string
 }
 
 export const VendorContext = createContext<VendorMeta | null>(null)

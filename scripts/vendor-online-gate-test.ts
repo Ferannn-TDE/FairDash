@@ -48,6 +48,29 @@ assert(off.locked === false, 'unlocked')
 assert(off.showOnline === false, 'shows Offline')
 assert(off.label === 'Offline', 'label reads "Offline" (not the awaiting-approval variant)')
 
+console.log('\n[6] ⛔ STICKY: an organizer-PAUSED vendor cannot flip themselves back Online')
+for (const isOnline of [true, false]) {
+  const s = deriveOnlineState(approved, isOnline, 'PAUSED')
+  assert(s.locked === true, `paused → locked (isOnline=${isOnline})`)
+  assert(s.showOnline === false, `⛔ paused → NOT online even with isOnline=${isOnline} — the vendor can't self-release`)
+  assert(s.organizerLocked === true, 'organizerLocked flag set')
+  assert(s.lockReason === 'paused' && s.label === 'Taken offline by organizer', `label "${s.label}"`)
+}
+
+console.log('\n[7] SUSPENDED / REJECTED also lock (organizer action)')
+assert(deriveOnlineState(approved, true, 'SUSPENDED').showOnline === false, 'suspended → not online')
+assert(deriveOnlineState(approved, true, 'SUSPENDED').label === 'Suspended by organizer', 'suspended label')
+assert(deriveOnlineState(approved, true, 'REJECTED').locked === true, 'rejected → locked')
+
+console.log('\n[8] an ACTIVE (approved, not paused) vendor toggles normally — status did not break it')
+assert(deriveOnlineState(approved, true, 'ACTIVE').showOnline === true, 'ACTIVE + on → Online')
+assert(deriveOnlineState(approved, false, 'ACTIVE').showOnline === false, 'ACTIVE + off → Offline')
+assert(deriveOnlineState(approved, true, undefined).showOnline === true, 'no status passed → behaves as before (back-compat)')
+
+console.log('\n[9] precedence: an organizer PAUSE outranks the approval/loading reasons')
+assert(deriveOnlineState(underReview, true, 'PAUSED').lockReason === 'paused',
+  'paused + under-review → reports the PAUSE (the more specific, actionable reason)')
+
 console.log('\n[5] the gate is DECISIVE: no readiness state lets an unapproved vendor be Online')
 // Exhaustive over the small input space — approval is the ONLY thing that unlocks Online.
 const cases: Array<[ReadinessLike | null, boolean]> = [

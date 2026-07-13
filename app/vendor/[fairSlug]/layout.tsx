@@ -58,6 +58,7 @@ export default function VendorFairLayout({ params: paramsPromise, children }: Pr
           logoUrl:     v.logoUrl ?? null,
           cuisineType: v.cuisineType,
           isOffline:   Boolean(v.isOffline),
+          status:      String(v.status ?? 'PENDING'),
         })
       })
       .catch(() => setError(true))
