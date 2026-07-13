@@ -336,7 +336,7 @@ type Tab = 'incoming' | 'active' | 'ready' | 'done'
 
 export default function VendorDashboardPage() {
   const params = useParams<{ fairSlug: string }>()
-  const { vendorId, eventId, vendorName, isOffline: initialIsOffline } = useVendorMeta()
+  const { vendorId, eventId, vendorName, isOffline: initialIsOffline, status: vendorStatus } = useVendorMeta()
 
   // The vendor's OWN choice to be open for orders. Initialised from the REAL saved value
   // (vendorMeta.isOffline), never a default — the layout gates rendering until vendorMeta
@@ -454,7 +454,7 @@ export default function VendorDashboardPage() {
   // `awaitingApproval` is derived, not defaulted — and while readiness is still loading we
   // treat the vendor as NOT online (same "don't show the wrong thing while waiting"
   // discipline as the rest of this screen), so the badge never flashes Online on load.
-  const { awaitingApproval, locked: onlineControlLocked, showOnline } = deriveOnlineState(readiness, isOnline)
+  const { locked: onlineControlLocked, showOnline, label: onlineLabel, lockReason } = deriveOnlineState(readiness, isOnline, vendorStatus)
 
   // Flip the vendor's online/offline state and PERSIST it to Vendor.isOffline. Optimistic:
   // the UI flips immediately, then the write goes out; on failure we revert so the badge
@@ -860,7 +860,13 @@ export default function VendorDashboardPage() {
             <button
               onClick={toggleOnline}
               disabled={onlineControlLocked || savingOnline}
-              title={awaitingApproval ? 'Locked until the organizer approves your application' : undefined}
+              title={
+                lockReason === 'paused' || lockReason === 'suspended'
+                  ? 'Taken offline by the organizer — contact them to go back online'
+                  : lockReason === 'awaiting_approval'
+                    ? 'Locked until the organizer approves your application'
+                    : undefined
+              }
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-semibold text-xs transition-all disabled:cursor-not-allowed ${
                 onlineControlLocked
                   ? 'bg-white/5 border-white/10 text-text-gray cursor-not-allowed'
@@ -870,7 +876,7 @@ export default function VendorDashboardPage() {
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${showOnline ? 'bg-emerald-400 animate-pulse' : onlineControlLocked ? 'bg-text-gray' : 'bg-red-400'}`} />
-              {awaitingApproval ? 'Offline · Awaiting approval' : showOnline ? 'Online' : 'Offline'}
+              {onlineLabel}
             </button>
             <UserAvatar />
           </div>
