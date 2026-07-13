@@ -307,7 +307,10 @@ function CloseModal({
 export default function AdminDashboardPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
   const params = use(paramsPromise)
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
-  const [eventStatus, setEventStatus] = useState<EventStatus>('UPCOMING')
+  // null until the real status loads — never a default that looks real. 'UPCOMING' as a
+  // seed would flash the wrong badge AND the wrong action button (Go Live) for an already-
+  // ACTIVE fair before the fetch resolves. Same class as the slug-as-name flash.
+  const [eventStatus, setEventStatus] = useState<EventStatus | null>(null)
   const [isPaused, setIsPaused] = useState(false)
   const [showGoLive, setShowGoLive] = useState(false)
   const [showPause, setShowPause] = useState(false)
@@ -315,7 +318,8 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  // Fetch real dashboard data; fall back to mock if unavailable (dev without DB)
+  // Fetch real dashboard data. No mock fallback — an unresolved fetch shows skeletons/zero
+  // state, never a fake or a URL fragment dressed up as real data.
   useEffect(() => {
     fetch(`/api/admin/events/${params.eventSlug}/dashboard`)
       .then((r) => r.json())
@@ -331,7 +335,10 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
   // Real data only — zero/empty state until the fetch resolves (no mock).
   const stats = dashboardData?.stats ?? ZERO_STATS
   const vendorGrid = dashboardData?.vendorGrid ?? []
-  const eventName = dashboardData?.event.name ?? params.eventSlug
+  // NEVER fall back to the slug — a URL fragment ("springfield-state-fair-2026") rendered as
+  // the fair's name is a plausible-but-WRONG value that flashes before the real name loads.
+  // null until we know the truth; the render shows a skeleton, not a lie.
+  const eventName = dashboardData?.event.name ?? null
   const eventDates = dashboardData
     ? `${new Date(dashboardData.event.startDate).toLocaleDateString()} – ${new Date(dashboardData.event.endDate).toLocaleDateString()}`
     : ''
@@ -435,13 +442,19 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h1 className="font-bebas text-3xl text-white tracking-wide">{eventName}</h1>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase
-                ${eventStatus === 'ACTIVE' ? 'bg-green-500/15 text-green-400' :
-                  eventStatus === 'UPCOMING' ? 'bg-sky-500/15 text-sky-400' :
-                  'bg-white/5 text-[#888]'}`}>
-                {eventStatus}
-              </span>
+              {eventName
+                ? <h1 className="font-bebas text-3xl text-white tracking-wide">{eventName}</h1>
+                : <span className="inline-block h-8 w-56 rounded bg-white/5 animate-pulse" aria-label="Loading fair name" />}
+              {eventStatus ? (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase
+                  ${eventStatus === 'ACTIVE' ? 'bg-green-500/15 text-green-400' :
+                    eventStatus === 'UPCOMING' ? 'bg-sky-500/15 text-sky-400' :
+                    'bg-white/5 text-[#888]'}`}>
+                  {eventStatus}
+                </span>
+              ) : (
+                <span className="inline-block h-4 w-16 rounded-full bg-white/5 animate-pulse" aria-label="Loading status" />
+              )}
               {isPaused && eventStatus === 'ACTIVE' && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-yellow-500/15 text-yellow-400">
                   PAUSED
