@@ -65,6 +65,23 @@ assert(/isOffline\s*!==\s*undefined\s*\|\|\s*isBusy\s*!==\s*undefined/.test(R),
 assert(/getVendorsBySlugCached[\s\S]*tags:\s*\['vendors'\]/.test(fairs),
   "…and getVendorsBySlugCached is genuinely cached under 'vendors' (the bust is not a no-op)")
 
+console.log('\n[5] the readiness BANNER and the online BADGE share one source (can\'t contradict)')
+// The bug this locks: the badge said "Taken offline by organizer" while the banner said
+// "you're not live yet — get approved", because the banner computed its own message and
+// lumped paused/pending/setup into one. Both must key off the SAME derived lockReason.
+assert(/lockReason === 'paused' \|\| lockReason === 'suspended'/.test(D),
+  'the banner derives its paused/suspended state from lockReason (the badge\'s source), not a private copy')
+assert(/Paused by the organizer/.test(D) && /Suspended by the organizer/.test(D),
+  'a paused/suspended vendor gets an organizer-pause message, not "finish setup / awaiting approval"')
+// Ordering: the paused branch must come BEFORE the finish-setup fallback, or a paused vendor
+// falls through to "you're not live yet — finish setup" (the exact reported contradiction).
+const pausedIdx = D.indexOf("lockReason === 'paused'")
+const finishIdx = D.indexOf('Finish setup')
+assert(pausedIdx !== -1 && finishIdx !== -1 && pausedIdx < finishIdx,
+  'the paused branch is evaluated BEFORE the finish-setup fallback (a paused vendor never sees "finish setup")')
+assert(/onlineLabel/.test(D),
+  'the badge renders the derived label (onlineLabel) — same derivation, so badge & banner agree by construction')
+
 console.log(`\n${'─'.repeat(62)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)
