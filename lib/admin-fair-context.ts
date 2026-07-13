@@ -20,6 +20,8 @@ const ADMIN_FAIR_SELECT = {
   endDate: true,
   eventLat: true,
   eventLng: true,
+  serviceChargeEnabled: true,
+  serviceChargeAmount: true,
   featuredVendorIds: true,
   featuredLabel: true,
   featuredEnabled: true,
