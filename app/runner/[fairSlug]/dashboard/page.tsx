@@ -248,7 +248,9 @@ export default function RunnerDashboard() {
 
   return (
     <div className="px-4 sm:px-6 py-6 pb-24 lg:pb-8 max-w-5xl mx-auto">
-      {approvalStatus !== 'APPROVED' && <div className="mb-4"><ApprovalBanner approvalStatus={approvalStatus} /></div>}
+      {/* Only once the real status has loaded — null means "not known yet", which must show
+          neither the approved UI nor the pending banner (no flash of either). */}
+      {approvalStatus && approvalStatus !== 'APPROVED' && <div className="mb-4"><ApprovalBanner approvalStatus={approvalStatus} /></div>}
       {/* Mobile-first: single column; status + feed stacked. Sidebar only on lg+. */}
       <div className="lg:hidden mb-4"><OnlineToggle /></div>
       <div className="flex flex-col lg:flex-row gap-5">
