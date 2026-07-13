@@ -806,16 +806,34 @@ export default function VendorDashboardPage() {
         </div>
       )}
 
-      {/* Readiness gate — only when NOT ready (a ready vendor sees no nag). Copy is
-          about being LIVE/visible, not "completeness", so the not-yet-connected
-          cohort understands they're invisible to customers until they finish. */}
+      {/* Readiness gate — only when NOT ready (a ready vendor sees no nag).
+          SINGLE SOURCE OF TRUTH: this banner branches on the SAME lockReason the online
+          badge derives (deriveOnlineState), so the two can never contradict again. Before,
+          the banner computed its own message and lumped THREE states into "you're not live
+          yet — finish setup": a PAUSED vendor (already approved!) was told to finish setup /
+          get approved, contradicting the badge that correctly said "Taken offline by
+          organizer". Now each state gets its own truthful message. */}
       {readiness && !readiness.ready && (() => {
-        const appStep = readiness.steps.find(s => s.key === 'application')
-        const pending = Boolean(appStep?.waiting)
         const remaining = readiness.steps.filter(s => s.required && !s.done && !s.waiting)
+        const orgPaused = lockReason === 'paused' || lockReason === 'suspended'
         return (
           <div className="shrink-0 px-4 sm:px-5 pt-3">
-            {pending ? (
+            {orgPaused ? (
+              // Approved, then taken offline by the organizer. NOT a setup task — no "finish
+              // setup" button; the action is "contact the organizer".
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25">
+                <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-300">
+                    {lockReason === 'suspended' ? 'Suspended by the organizer' : 'Paused by the organizer'}
+                  </p>
+                  <p className="text-xs text-text-gray">
+                    Customers can&apos;t see or order from you. You can&apos;t bring yourself back
+                    online — contact the organizer to be reactivated.
+                  </p>
+                </div>
+              </div>
+            ) : lockReason === 'awaiting_approval' ? (
               <div className="flex items-center gap-3 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25">
                 <Clock className="w-5 h-5 text-amber-400 shrink-0" />
                 <div className="flex-1 min-w-0">
@@ -824,6 +842,8 @@ export default function VendorDashboardPage() {
                 </div>
               </div>
             ) : (
+              // Approved, not paused, but genuinely has setup steps left (no Stripe / no menu).
+              // This is the ONLY state where "finish setup" is the truthful call to action.
               <div className="flex items-center gap-3 p-3.5 rounded-xl bg-neon-pink/10 border border-neon-pink/30">
                 <AlertCircle className="w-5 h-5 text-neon-pink shrink-0" />
                 <div className="flex-1 min-w-0">
