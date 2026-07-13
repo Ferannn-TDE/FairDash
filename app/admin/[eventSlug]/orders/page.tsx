@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, use } from 'react'
 import { Search, ChevronDown, ChevronUp, Package, User, Store, Clock, ArrowUpDown } from 'lucide-react'
 
-// ─── Types (was lib/mock/admin — now the real /api/admin/events/[id]/orders shape) ─
+// ─── Types (the real /api/admin/events/[id]/orders shape) ─
 
 type AdminOrderStatus =
   | 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'RUNNER_COLLECTED'
