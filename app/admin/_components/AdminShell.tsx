@@ -17,6 +17,7 @@ import {
   ChevronRightIcon,
   ClipboardDocumentListIcon,
   ChartBarIcon,
+  BanknotesIcon,
   ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
 interface Props {
@@ -90,6 +91,7 @@ function EventNav({ slug, fairs, onClose }: { slug: string; fairs: ShellFair[]; 
           <SidebarLink href={`/admin/${slug}/fulfillment`} icon={BoltIcon} label="Fulfillment" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/runners`} icon={TruckIcon} label="Runners" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/orders`} icon={ClipboardDocumentListIcon} label="Orders" indent onClick={onClose} />
+          <SidebarLink href={`/admin/${slug}/money`} icon={BanknotesIcon} label="Money" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/reports`} icon={ChartBarIcon} label="Reports" indent onClick={onClose} />
           <SidebarLink href={`/admin/${slug}/settings`} icon={Cog6ToothIcon} label="Settings" indent onClick={onClose} />
         </div>
