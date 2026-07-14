@@ -36,6 +36,7 @@ const SUITES: Suite[] = [
   { group: 'boundary', name: 'p6-admin-chokepoint',    file: 'scripts/p6-admin-fair-chokepoint-proof.ts' },
   { group: 'boundary', name: 'a6-org-killswitch',      file: 'scripts/a6-organizer-killswitch-proof.ts' },
   { group: 'boundary', name: 'organizer-approval-gate', file: 'scripts/organizer-approval-gate-test.ts' },
+  { group: 'boundary', name: 'organizer-approval-admin', file: 'scripts/organizer-approval-admin-test.ts' },
   { group: 'boundary', name: 'runner-boundary',        file: 'scripts/runner-boundary-proof.ts' },
 
   // Security — the vendor-document exposure and its guards.
