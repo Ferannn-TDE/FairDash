@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, use } from 'react'
+import { useState, useEffect, useCallback, use } from 'react'
 import OrganizerControl, { type OrganizerState } from '../../_components/OrganizerControl'
 import {
   CheckCircleIcon,
@@ -317,20 +317,30 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
   const [showClose, setShowClose] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Fetch real dashboard data. No mock fallback — an unresolved fetch shows skeletons/zero
-  // state, never a fake or a URL fragment dressed up as real data.
-  useEffect(() => {
+  // Fetch real dashboard data. A FAILURE MUST BE VISIBLE — the old handler swallowed every
+  // error (`if (!success) return` + empty `.catch`), so a 504/timeout left an eternal
+  // skeleton + fake zeros, indistinguishable from an empty fair. That is exactly how a prod
+  // timeout hid as "the dashboard shows nothing". Now a non-ok response, a non-JSON body
+  // (Vercel's 504 page is HTML — .json() throws), or !success all surface as loadError.
+  const load = useCallback(() => {
+    setLoadError(null)
     fetch(`/api/admin/events/${params.eventSlug}/dashboard`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (!json.success) return
+      .then(async (r) => {
+        if (!r.ok) throw new Error(
+          r.status === 504 || r.status === 502
+            ? 'The dashboard timed out loading (server took too long). Retry, or check the deployment.'
+            : `Dashboard request failed (${r.status})`)
+        const json = await r.json()
+        if (!json.success) throw new Error(json.error?.message ?? 'Dashboard failed to load')
         setDashboardData(json.data)
         setEventStatus(json.data.event.status)
         setIsPaused(json.data.event.isPaused)
       })
-      .catch(() => {})
+      .catch((e) => setLoadError(e instanceof Error ? e.message : 'Dashboard failed to load'))
   }, [params.eventSlug])
+  useEffect(() => { load() }, [load])
 
   // Real data only — zero/empty state until the fetch resolves (no mock).
   const stats = dashboardData?.stats ?? ZERO_STATS
@@ -438,13 +448,33 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
       )}
 
       <div>
+        {/* Load failure — surfaced, not swallowed. Without this, a 504/timeout looks like an
+            empty fair (eternal skeleton + zeros). Now it says what actually went wrong, with
+            a retry, and suppresses the misleading skeleton/zero cards below. */}
+        {loadError && !dashboardData && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/25 rounded-2xl flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-red-300 text-sm font-semibold">Couldn&apos;t load the dashboard</p>
+              <p className="text-red-300/80 text-xs mt-0.5">{loadError}</p>
+            </div>
+            <button
+              onClick={() => load()}
+              className="shrink-0 px-3.5 py-2 bg-red-500/15 border border-red-500/25 text-red-300 text-xs font-semibold rounded-xl hover:bg-red-500/25 cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-2 mb-1">
               {eventName
                 ? <h1 className="font-bebas text-3xl text-white tracking-wide">{eventName}</h1>
-                : <span className="inline-block h-8 w-56 rounded bg-white/5 animate-pulse" aria-label="Loading fair name" />}
+                : loadError
+                  ? <h1 className="font-bebas text-3xl text-white/40 tracking-wide">Unavailable</h1>
+                  : <span className="inline-block h-8 w-56 rounded bg-white/5 animate-pulse" aria-label="Loading fair name" />}
               {eventStatus ? (
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase
                   ${eventStatus === 'ACTIVE' ? 'bg-green-500/15 text-green-400' :
