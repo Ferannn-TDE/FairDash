@@ -38,6 +38,7 @@ const SUITES: Suite[] = [
   { group: 'boundary', name: 'organizer-approval-gate', file: 'scripts/organizer-approval-gate-test.ts' },
   { group: 'boundary', name: 'organizer-approval-admin', file: 'scripts/organizer-approval-admin-test.ts' },
   { group: 'boundary', name: 'organizer-admin-panel',  file: 'scripts/organizer-admin-panel-test.ts' },
+  { group: 'boundary', name: 'organizer-portal-gate',  file: 'scripts/organizer-portal-gate-test.ts' },
   { group: 'boundary', name: 'runner-boundary',        file: 'scripts/runner-boundary-proof.ts' },
 
   // Security — the vendor-document exposure and its guards.
