@@ -54,6 +54,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
+  { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
 ]
 
 const filter = process.argv[2]
