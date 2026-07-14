@@ -958,11 +958,37 @@ model FairOrganizer {
   stripeVerified    Boolean   @default(false)
   stripeConnectedAt DateTime?
 
+  // ── Organizer approval gate (#7) ─────────────────────────────────────────────
+  // The organizer is the HIGHEST-authority role (runs whole fairs, approves vendors,
+  // sits in the money-control flow) and was the only ungated one — self-active on
+  // signup. Now: PENDING until a platform admin approves. Reuses the SAME
+  // ApprovalStatus enum + audit-field shape as Runner (the runner migration named the
+  // enum generically for exactly this).
+  //
+  // ENFORCEMENT is one check in requireOrganizerAuth (lib/auth.ts) — every one of the
+  // 26 organizer routes funnels through it, so a PENDING organizer is blocked from
+  // fair creation, vendor approval, refunds, disputes and chargebacks server-side, not
+  // by hiding buttons. /api/organizer/profile deliberately uses plain requireAuth, so a
+  // pending organizer can still load an "awaiting approval" shell.
+  //
+  // Because fair CREATION is gated, a pending organizer can never accumulate a fair —
+  // so there is no orphaned-fair problem on rejection (nothing downstream to clean up).
+  //
+  // PLATFORM-LEVEL, not per-fair: an organizer owns many fairs, so approval means "you
+  // may be an organizer at all". Approve/reject ride requireStrictAdminAuth, matching
+  // the existing organizer-suspend route — NOT the fair-scoped chokepoint.
+  approvalStatus  ApprovalStatus @default(PENDING)
+  approvedAt      DateTime?
+  approvedBy      String?        // admin Clerk id (or 'system-grandfather')
+  rejectionReason String?
+
   // A6 kill-switch — org-wide suspension (D4). When suspendedAt is set, EVERY
   // request through requireOrganizerAuth for a member of this organizer is denied
   // (403 ORGANIZER_SUSPENDED). Deliberately DB state, not Clerk metadata: because
   // requireOrganizerAuth reads fresh per request, suspension takes effect on the
   // NEXT request — no token lag. Set/cleared only via the admin-gated write.
+  // DISTINCT from approvalStatus: approval is "may you operate at all"; suspension is
+  // "you were approved, but we've stopped you". Both gate, for different reasons.
   suspendedAt     DateTime?
   suspendedReason String?
 
@@ -984,6 +1010,7 @@ model FairOrganizer {
   @@index([stripeVerified])
   @@index([stripeAccountId])
   @@index([suspendedAt])
+  @@index([approvalStatus])
   @@index([payoutsFrozenAt])
 }
 

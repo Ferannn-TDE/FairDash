@@ -4,6 +4,7 @@ import { ApiError } from './api-error'
 import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
 import { hasRole, hasStrictAdminRole } from './roles'
 import { organizerSuspensionError } from './organizer-suspension'
+import { organizerApprovalError } from './organizer-approval'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -58,15 +59,31 @@ export async function requireOrganizerAuth(): Promise<{ clerkId: string; organiz
   const dbUser = await db.user.findUnique({ where: { clerkId } })
   if (!dbUser) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
 
-  // Resolve membership + the org's suspension state in one read (fresh per request).
+  // Resolve membership + the org's approval AND suspension state in one read (fresh per
+  // request — so both gates take effect on the NEXT request, with no token lag).
   const orgMember = await db.orgMember.findFirst({
     where: { userId: dbUser.id },
     select: {
       organizerId: true,
-      organizer: { select: { suspendedAt: true, suspendedReason: true } },
+      organizer: {
+        select: {
+          suspendedAt: true, suspendedReason: true,
+          approvalStatus: true, rejectionReason: true,
+        },
+      },
     },
   })
   if (!orgMember) throw new ApiError('Forbidden — organizer access required', 403, 'FORBIDDEN')
+
+  // #7: the APPROVAL gate. Checked BEFORE suspension: an organizer who was never approved
+  // isn't "suspended", they simply may not operate yet, and the message must say so.
+  // This ONE check blocks a pending organizer from every organizer power — fair creation,
+  // VENDOR APPROVAL, refunds, disputes, chargebacks — because all 26 organizer routes funnel
+  // through here. Server-side, not hidden buttons.
+  // (/api/organizer/profile deliberately uses plain requireAuth, so a pending organizer can
+  //  still load an "awaiting approval" shell rather than hitting a wall.)
+  const notApproved = organizerApprovalError(orgMember.organizer)
+  if (notApproved) throw notApproved
 
   // A6: immediate-effect suspension gate — distinct code from the not-authorized 403.
   const suspended = organizerSuspensionError(orgMember.organizer)
