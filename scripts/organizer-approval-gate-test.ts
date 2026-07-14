@@ -86,7 +86,12 @@ async function main() {
 
     // ── [6] ✅ THE PRODUCTION-CRITICAL POSITIVE: grandfathered orgs still work ──
     console.log('\n[6] ✅ GRANDFATHER: every pre-existing organizer is APPROVED (nobody locked out)')
+    // Excludes clearly-labelled DEMO rows (scripts/seed-demo-organizers.ts, @fairsynq.demo),
+    // which intentionally sit in the four gate states for eyeballing and are NOT the
+    // "pre-existing real organizer" this grandfather invariant is about. The whole point of
+    // the demo seed is a PENDING/REJECTED row, so counting it here would be a false lockout.
     const orgs = await prisma.fairOrganizer.findMany({
+      where: { NOT: { contactEmail: { endsWith: '@fairsynq.demo' } } },
       select: { name: true, approvalStatus: true, approvedBy: true, fairs: { select: { status: true } } },
     })
     assert(orgs.length > 0, `${orgs.length} organizer(s) exist to check`)
