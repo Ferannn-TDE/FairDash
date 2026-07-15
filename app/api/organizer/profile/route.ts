@@ -17,12 +17,21 @@ export async function GET(_req: NextRequest) {
       include: { organizer: true },
     })
 
+    // This route is deliberately UNGATED (plain requireAuth, not requireOrganizerAuth) so a
+    // pending organizer can still load their own status rather than 403-ing. It therefore
+    // surfaces the approval/suspension state — the enabling piece the layout's gate screen and
+    // any "your account status" UI read. Same fields, same meaning, as the gate helpers.
+    const org = orgMember?.organizer
     return success({
       name: dbUser.name,
       email: dbUser.email,
       phone: dbUser.phone,
-      organizationName: orgMember?.organizer?.name ?? null,
-      contactEmail: orgMember?.organizer?.contactEmail ?? null,
+      organizationName: org?.name ?? null,
+      contactEmail: org?.contactEmail ?? null,
+      approvalStatus: org?.approvalStatus ?? null,
+      rejectionReason: org?.rejectionReason ?? null,
+      suspended: !!org?.suspendedAt,
+      suspendedReason: org?.suspendedReason ?? null,
     })
   } catch (err) {
     return handleApiError(err)

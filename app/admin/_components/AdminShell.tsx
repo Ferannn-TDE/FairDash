@@ -19,6 +19,7 @@ import {
   ChartBarIcon,
   BanknotesIcon,
   ArrowRightOnRectangleIcon,
+  UserGroupIcon,
 } from '@heroicons/react/24/outline'
 interface Props {
   children: React.ReactNode
@@ -122,6 +123,10 @@ function SidebarContent({ currentSlug, fairs, onClose }: { currentSlug: string |
       {/* Nav */}
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
         <SidebarLink href="/admin" icon={HomeIcon} label="All Events" exact onClick={onClose} />
+        {/* PLATFORM-level, not per-fair: an organizer owns many fairs, so approving or
+            suspending one is not a fair-scoped decision. Sits alongside "All Events",
+            never inside the per-event nav. */}
+        <SidebarLink href="/admin/organizers" icon={UserGroupIcon} label="Organizers" exact onClick={onClose} />
 
         {/* Per-event nav */}
         {currentSlug && <EventNav slug={currentSlug} fairs={fairs} onClose={onClose} />}
