@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Calendar, Store, ChevronRight, AlertTriangle } from 'lucide-react'
+import { Calendar, Store, ChevronRight, AlertTriangle, Users } from 'lucide-react'
 
 interface Fair {
   id: string
@@ -50,13 +50,24 @@ export default function FairPicker() {
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto pt-20">
-      <div className="mb-8">
-        <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
-          All <span className="text-neon-pink">Fairs</span>
-        </h1>
-        <p className="text-text-gray text-sm mt-0.5">
-          {loading ? 'Loading…' : `${fairs.length} fair${fairs.length === 1 ? '' : 's'} across all organizers — pick one to manage`}
-        </p>
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
+            All <span className="text-neon-pink">Fairs</span>
+          </h1>
+          <p className="text-text-gray text-sm mt-0.5">
+            {loading ? 'Loading…' : `${fairs.length} fair${fairs.length === 1 ? '' : 's'} across all organizers — pick one to manage`}
+          </p>
+        </div>
+        {/* Organizers are PLATFORM-level (one organizer, many fairs), so their panel is a
+            sibling of the fair list — not something you reach by picking a fair. */}
+        <Link
+          href="/admin/organizers"
+          className="inline-flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 transition-colors"
+        >
+          <Users className="w-3.5 h-3.5" /> Organizers
+          <ChevronRight className="w-3.5 h-3.5 text-text-gray" />
+        </Link>
       </div>
 
       {error ? (
