@@ -4,10 +4,12 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorMembershipById } from '@/lib/auth'
 import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
+import { statusWhere, vendorOrderScope } from '@/lib/vendor-order-history'
 import { logger } from '@/lib/logger'
 
-// Active VendorOrderStatus values (string field, not enum)
-const ACTIVE_VENDOR_STATUSES = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY']
+// Active VendorOrderStatus values (string field, not enum).
+// Exported so the divergence guard binds to the REAL set, never a drifting copy.
+export const ACTIVE_VENDOR_STATUSES = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY']
 
 // GET /api/vendors/:id/orders/active
 // Returns the live kitchen queue for this vendor: orders where this vendor's
@@ -27,10 +29,17 @@ export async function GET(
 
     const orders = await db.order.findMany({
       where: {
-        orderItems: { some: { vendorId } },
-        vendorOrderStatuses: {
-          some: { vendorId, status: { in: ACTIVE_VENDOR_STATUSES } },
-        },
+        // ONE definition of "orders active for this vendor", shared verbatim with the
+        // orders-page history query (lib/vendor-order-history). Two parts, both shared:
+        //   • vendorOrderScope — this vendor's items, and NOT voided.
+        //   • statusWhere — mirrors the displayed status `vendorOrderStatus ?? order.status`:
+        //     this vendor's VOS row is active, OR (no VOS row AND master Order.status active).
+        // A JOIN-only `some` here silently DROPPED orders with no VendorOrderStatus row — so a
+        // PLACED order the vendor must accept was "Incoming 1" on the orders page yet invisible
+        // on this live dashboard. Deriving both readers from the same two helpers means a future
+        // reader can't re-introduce the split by forgetting either the fallback or the void filter.
+        ...vendorOrderScope(vendorId),
+        ...statusWhere(vendorId, ACTIVE_VENDOR_STATUSES),
       },
       orderBy: [{ placedAt: 'asc' }],
       take: 50,

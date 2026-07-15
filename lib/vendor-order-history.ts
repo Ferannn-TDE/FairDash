@@ -50,6 +50,22 @@ export function statusWhere(vendorId: string, allowed: string[]): Prisma.OrderWh
   return { OR: arms }
 }
 
+/**
+ * The base SCOPE of "orders operationally visible to this vendor" — the part every vendor
+ * order reader shares, kept in ONE place so the readers cannot drift on it:
+ *   • orderItems.some(vendorId) — this vendor is actually on the order.
+ *   • voidedAt: null — voided orders are the OUT-OF-MODEL exclusion marker (pre-fee-model
+ *     test data etc.); the reconciler and every money/audit path skip them, so a vendor's
+ *     live queue and order history must skip them too. A JOIN-only reader hid voided orders
+ *     only by accident (they have no VendorOrderStatus row); once a reader adds the
+ *     none→master fallback, voided orders would leak back in UNLESS this scope excludes them.
+ *
+ * Compose with statusWhere: `{ ...vendorOrderScope(vendorId), ...statusWhere(vendorId, xs) }`.
+ */
+export function vendorOrderScope(vendorId: string): Prisma.OrderWhereInput {
+  return { orderItems: { some: { vendorId } }, voidedAt: null }
+}
+
 export interface HistoryQuery {
   vendorId: string
   /** Canonical tab (TAB_STATUS_MAP). Takes precedence over `statuses`. */
@@ -85,7 +101,7 @@ export async function fetchVendorOrderHistory(q: HistoryQuery) {
   startOfToday.setHours(0, 0, 0, 0)
 
   const baseWhere: Prisma.OrderWhereInput = {
-    orderItems: { some: { vendorId } },
+    ...vendorOrderScope(vendorId),
     ...(q.range === 'today' ? { placedAt: { gte: startOfToday } } : {}),
   }
   const where: Prisma.OrderWhereInput = { ...baseWhere, ...statusWhere(vendorId, allowed) }
