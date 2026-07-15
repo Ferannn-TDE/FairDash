@@ -125,8 +125,9 @@ async function main() {
 
     const A = await mk(OrderStatus.PLACED, 'PLACED')          // normal incoming — has a VOS row
     const B = await mk(OrderStatus.PLACED, null)              // ⛔ the corpse — PLACED, NO VOS row
-    const C = await mk(OrderStatus.COMPLETED, 'COMPLETED')    // terminal — must NOT be "incoming"
-    const D = await mk(OrderStatus.PLACED, null, true)        // ⛔ voided PLACED, NO VOS row — must be HIDDEN everywhere
+    const C = await mk(OrderStatus.COMPLETED, 'COMPLETED')          // terminal — must NOT be "incoming"
+    const D = await mk(OrderStatus.PLACED, null, true)              // ⛔ voided PLACED, NO VOS row — must be HIDDEN everywhere
+    const E = await mk(OrderStatus.RUNNER_COLLECTED, 'RUNNER_COLLECTED') // handed off — must LEAVE the vendor's board
 
     // ── [0] BASELINE — the seed really contains the bug's precondition ──────────
     console.log('\n[0] the seed contains the condition the bug needs (a VOS-less PLACED order)')
@@ -165,6 +166,12 @@ async function main() {
     assert(withoutVoidFilter.has(D), 'positive control: statusWhere WITHOUT the scope would match the voided order D (so its exclusion is meaningful)')
     assert(!active.has(D),  '⛔ dashboard reader HIDES the voided order D')
     assert(!history.has(D), '⛔ orders-page reader HIDES the voided order D')
+
+    // ── [4] HANDOFF BOUNDARY — a RUNNER_COLLECTED order leaves the vendor's live board ──
+    console.log('\n[4] a collected (RUNNER_COLLECTED) order is OFF the vendor active board — the runner has it now')
+    const eVos = await prisma.vendorOrderStatus.count({ where: { orderId: E, vendorId: vendor.id, status: 'RUNNER_COLLECTED' } })
+    assert(eVos === 1, `order E is RUNNER_COLLECTED with a VOS row (found ${eVos}) — the handoff case exists`)
+    assert(!active.has(E), '⛔ the vendor active board (all lanes) EXCLUDES the collected order E — it can never sit in the ready lane')
 
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)
