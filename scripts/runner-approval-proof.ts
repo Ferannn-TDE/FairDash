@@ -198,7 +198,7 @@ async function main() {
     console.log('\n[6] DELIVERED carve-out: runner claimed then went OFFLINE can STILL mark DELIVERED (ACTIVE gate is claim-only)')
     // simulate "went offline mid-delivery" — flip the runner OFFLINE directly
     await prisma.runner.update({ where: { id: pend.runner.id }, data: { status: 'OFFLINE' } })
-    const t6 = await patchStatus(pend.user.clerkId!, order1.id, { status: 'DELIVERED', photoUrl: 'https://raseed.local/proof.jpg' })
+    const t6 = await patchStatus(pend.user.clerkId!, order1.id, { status: 'DELIVERED', proofPath: 'https://raseed.local/proof.jpg' })
     assert(t6.status === 200, `OFFLINE-but-assigned runner CAN mark DELIVERED (status ${t6.status}) — ACTIVE gate did NOT block completion`)
     assert(await statusOf(order1.id) === 'DELIVERED', 'order now DELIVERED (not stranded)')
 

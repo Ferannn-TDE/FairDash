@@ -33,7 +33,7 @@ import { logger } from '@/lib/logger'
 //
 // Runner-initiated transitions (caller must be the assigned runner):
 //   READY            → RUNNER_COLLECTED  (runner picks up from vendor)
-//   RUNNER_COLLECTED → DELIVERED         (runner delivers; requires photoUrl + GPS for HOME_DELIVERY)
+//   RUNNER_COLLECTED → DELIVERED         (runner delivers; requires proofPath + GPS for HOME_DELIVERY)
 //
 // Side-effects per transition:
 //   → READY:     schedule BullMQ delayed job (UNCOLLECTED / UNDELIVERABLE)
