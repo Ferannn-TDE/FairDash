@@ -41,7 +41,8 @@ export default function DeliveryPage() {
   // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
   const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
   const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  // The Supabase object PATH of the uploaded proof (private bucket) — never a URL.
+  const [proofPath, setProofPath] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -119,16 +120,23 @@ export default function DeliveryPage() {
       })
       const sign = await signRes.json()
       if (!sign.success) { toast.error('Could not start photo upload'); return }
-      const put = await fetch(sign.data.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file })
+      // PUT to the signed upload url — token is in the url (no Authorization header);
+      // x-upsert lets a retake overwrite the same object.
+      const put = await fetch(sign.data.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type, 'x-upsert': 'true' },
+        body: file,
+      })
       if (!put.ok) { toast.error('Photo upload failed'); return }
-      setPhotoUrl(sign.data.publicUrl)
+      // Store the PATH, not a URL — the bucket is private; reads resolve a signed url later.
+      setProofPath(sign.data.path)
       toast.success('Photo attached')
     } catch { toast.error('Photo upload failed') } finally { setUploading(false) }
   }
 
   async function confirmDelivery() {
     if (!order) return
-    if (!photoUrl) { toast.error('Take a proof-of-delivery photo first'); return }
+    if (!proofPath) { toast.error('Take a proof-of-delivery photo first'); return }
     setSubmitting(true)
     // Best-effort GPS for HOME_DELIVERY (the route GPS-verifies within range).
     const getPos = () => new Promise<GeolocationPosition | null>(resolve => {
@@ -140,7 +148,7 @@ export default function DeliveryPage() {
       const res = await fetch(`/api/orders/${orderId}/status`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: 'DELIVERED', photoUrl,
+          status: 'DELIVERED', proofPath,
           ...(pos ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : {}),
         }),
       })
@@ -241,15 +249,15 @@ export default function DeliveryPage() {
         <div>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPhoto} className="hidden" />
           <button onClick={() => fileRef.current?.click()} disabled={!pickedUp || uploading}
-            className={`w-full h-11 rounded-xl font-semibold text-sm border flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 ${photoUrl ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-white'}`}>
-            <Camera className="w-4 h-4" />{uploading ? 'Uploading…' : photoUrl ? 'Photo attached ✓ — retake' : 'Take proof-of-delivery photo'}
+            className={`w-full h-11 rounded-xl font-semibold text-sm border flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 ${proofPath ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-white'}`}>
+            <Camera className="w-4 h-4" />{uploading ? 'Uploading…' : proofPath ? 'Photo attached ✓ — retake' : 'Take proof-of-delivery photo'}
           </button>
         </div>
       </div>
 
-      <button onClick={confirmDelivery} disabled={!pickedUp || !photoUrl || submitting}
+      <button onClick={confirmDelivery} disabled={!pickedUp || !proofPath || submitting}
         className="w-full py-4 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-0">
-        {submitting ? 'Confirming…' : !pickedUp ? 'Collect the order first' : !photoUrl ? 'Add a delivery photo' : 'Confirm Delivery Complete'}
+        {submitting ? 'Confirming…' : !pickedUp ? 'Collect the order first' : !proofPath ? 'Add a delivery photo' : 'Confirm Delivery Complete'}
       </button>
     </div>
   )

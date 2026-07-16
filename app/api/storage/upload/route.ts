@@ -4,24 +4,28 @@ import { requireAuth } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 
 // POST /api/storage/upload
-// Returns a Supabase Storage presigned upload URL.
-// Used by vendors (menu item photos) and runners (delivery confirmation photos).
-// Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.
+// Returns a Supabase Storage presigned UPLOAD url for a runner's proof-of-delivery photo.
 //
-// TODO: Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to .env.local to enable.
-//       SUPABASE_URL = https://<project-ref>.supabase.co
-//       SUPABASE_SERVICE_ROLE_KEY = from Supabase Dashboard → Settings → API
+// The bucket is PRIVATE (`delivery-proofs`) and dedicated: proof photos are chargeback
+// evidence with their own retention lifetime (must outlive the runner record), so they do
+// NOT share a bucket with runner-documents. The caller receives an upload url + the object
+// PATH; it stores the PATH (never a URL — a private object has no public URL, and a stored
+// signed url would lie once it expires). Reads resolve a fresh signed url at read time.
+//
+// NOTE: vendor menu images do NOT use this route — that flow currently keeps a local
+// blob: URL and never uploads (separate, tracked bug). This route's only caller is the
+// runner delivery page.
+const DELIVERY_PROOFS_BUCKET = 'delivery-proofs'
+
 export async function POST(req: Request) {
   try {
     await requireAuth()
 
     const supabaseUrl = process.env.SUPABASE_URL
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? 'menu-images'
-
     if (!supabaseUrl || !serviceKey) {
       return apiError(
-        'Photo upload is not configured — add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to enable',
+        'Photo upload is not configured — SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing',
         503,
         'STORAGE_NOT_CONFIGURED'
       )
@@ -32,13 +36,16 @@ export async function POST(req: Request) {
       return apiError('filename and contentType are required', 400, 'VALIDATION_ERROR')
     }
 
-    // Sanitise filename and scope to vendor uploads path
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const path = `uploads/${Date.now()}_${safeName}`
+    const path = `proofs/${Date.now()}_${safeName}`
 
-    // Create a signed upload URL via Supabase Storage REST API
+    // Create a signed UPLOAD url. NOTE the endpoint: /object/UPLOAD/sign — the plain
+    // /object/sign endpoint signs a DOWNLOAD of an EXISTING object and 404s for an upload.
+    // The response field is `url` (not `signedURL`), a path like
+    //   /object/upload/sign/<bucket>/<path>?token=<jwt>
+    // to which the client PUTs the file (token in the url = auth; no Authorization header).
     const res = await fetch(
-      `${supabaseUrl}/storage/v1/object/sign/${bucket}/${path}`,
+      `${supabaseUrl}/storage/v1/object/upload/sign/${DELIVERY_PROOFS_BUCKET}/${path}`,
       {
         method: 'POST',
         headers: {
@@ -46,24 +53,28 @@ export async function POST(req: Request) {
           'Content-Type': 'application/json',
           apikey: serviceKey,
         },
-        body: JSON.stringify({ expiresIn: 300 }), // 5 minutes
+        body: JSON.stringify({}),
       }
     )
 
     if (!res.ok) {
       const body = await res.text()
-      logger.error('[Storage] Supabase sign error', { body })
+      logger.error('[Storage] Supabase upload-sign error', { body })
       return apiError('Could not generate upload URL', 500, 'STORAGE_ERROR')
     }
 
-    const data = await res.json()
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`
+    const data = await res.json() as { url?: string }
+    if (!data.url) {
+      logger.error('[Storage] upload-sign returned no url', { data })
+      return apiError('Could not generate upload URL', 500, 'STORAGE_ERROR')
+    }
 
     return Response.json({
       success: true,
       data: {
-        uploadUrl: `${supabaseUrl}${data.signedURL}`,
-        publicUrl,
+        uploadUrl: `${supabaseUrl}/storage/v1${data.url}`,
+        // The stored value: an object PATH, resolved to a signed read url at read time.
+        // Never a public/signed URL — the bucket is private and a stored url would expire.
         path,
       },
     })

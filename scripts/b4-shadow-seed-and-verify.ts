@@ -80,7 +80,7 @@ async function seedDeliveredTipped(eventId: string, vendorId: string, runnerId: 
     data: {
       eventId, customerId: customer.id, vendorId, status: 'READY', fulfillmentType: 'HOME_DELIVERY',
       subtotal: 15, fairSynqFee: 1.5, deliveryFee: 10, tip: tipCents / 100, total: 15 + 1.5 + 10 + tipCents / 100, vendorPayout: 15,
-      customerName: 'B4', customerPhone: '+10000000000', runnerId, curbsidePhotoUrl: 'https://b2seed.local/p.jpg', stripeChargeId: `ch_${SLUG}${rand()}`,
+      customerName: 'B4', customerPhone: '+10000000000', runnerId, deliveryProofPath: 'https://b2seed.local/p.jpg', stripeChargeId: `ch_${SLUG}${rand()}`,
     },
   })
   await prisma.vendorOrderStatus.create({ data: { orderId: order.id, vendorId, status: 'READY' } })

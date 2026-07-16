@@ -93,7 +93,7 @@ export interface DeriveInput {
   // Runner overlay (delivery arm only): set by the runner's claim / deliver
   // transitions. The derivation reads them but never writes them.
   runnerId?: string | null
-  curbsidePhotoUrl?: string | null // present once the runner confirms delivery
+  deliveryProofPath?: string | null // present once the runner confirms delivery
   voided?: boolean                 // voidedAt set → excluded from the model
 }
 
@@ -166,7 +166,7 @@ export function deriveMasterStatus(input: DeriveInput): DeriveResult {
   }
 
   // All active portions are READY (or COMPLETED→clamped). Runner overlay decides.
-  if (input.curbsidePhotoUrl) {
+  if (input.deliveryProofPath) {
     return { derived: 'DELIVERED', arm, reason: 'delivery: runner confirmed (photo present)' }
   }
   if (input.runnerId) {
@@ -234,7 +234,7 @@ export async function shadowReconcile(orderId: string): Promise<ShadowResult> {
     where: { id: orderId },
     select: {
       id: true, status: true, fulfillmentType: true,
-      runnerId: true, curbsidePhotoUrl: true, voidedAt: true,
+      runnerId: true, deliveryProofPath: true, voidedAt: true,
       vendorOrderStatuses: { select: { status: true } },
     },
   })
@@ -244,7 +244,7 @@ export async function shadowReconcile(orderId: string): Promise<ShadowResult> {
     fulfillmentType: order.fulfillmentType as FulfillmentType,
     vendorStatuses: order.vendorOrderStatuses,
     runnerId: order.runnerId,
-    curbsidePhotoUrl: order.curbsidePhotoUrl,
+    deliveryProofPath: order.deliveryProofPath,
     voided: order.voidedAt != null,
   })
 
@@ -354,7 +354,7 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     select: {
       id: true, status: true, fulfillmentType: true, eventId: true,
       vendorId: true, customerId: true, runnerId: true,
-      curbsidePhotoUrl: true, voidedAt: true, deliveryFee: true, tip: true,
+      deliveryProofPath: true, voidedAt: true, deliveryFee: true, tip: true,
       vendorOrderStatuses: { select: { status: true, vendorId: true } },
     },
   })
@@ -366,14 +366,14 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     fulfillmentType: order.fulfillmentType as FulfillmentType,
     vendorStatuses: order.vendorOrderStatuses,
     runnerId: order.runnerId,
-    curbsidePhotoUrl: order.curbsidePhotoUrl,
+    deliveryProofPath: order.deliveryProofPath,
     voided: order.voidedAt != null,
   })
 
   // Two ways to reach a target master status:
   //   • DERIVED — pure function of persistent columns: per-vendor truth (READY /
   //     COMPLETED / CANCELLED-from-all-DECLINED) AND the runner overlay
-  //     (RUNNER_COLLECTED from runnerId, DELIVERED from curbsidePhotoUrl). The
+  //     (RUNNER_COLLECTED from runnerId, DELIVERED from deliveryProofPath). The
   //     runner transitions are DERIVED, not asserted — the aggregator reads the
   //     columns W3 writes (claim → runnerId, deliver → photo), same shape as W4.
   //   • ASSERTED — the caller supplies intent no column can hold:

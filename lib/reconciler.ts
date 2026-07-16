@@ -837,7 +837,7 @@ async function patternN(
     where: { status: { in: ACTIVE_STATES }, voidedAt: null },
     select: {
       id: true, status: true, fulfillmentType: true, runnerId: true,
-      curbsidePhotoUrl: true, vendorOrderStatuses: { select: { status: true } },
+      deliveryProofPath: true, vendorOrderStatuses: { select: { status: true } },
     },
     take: o.maxPerPattern,
   })
@@ -849,7 +849,7 @@ async function patternN(
       fulfillmentType: ord.fulfillmentType as FulfillmentType,
       vendorStatuses: ord.vendorOrderStatuses,
       runnerId: ord.runnerId,
-      curbsidePhotoUrl: ord.curbsidePhotoUrl,
+      deliveryProofPath: ord.deliveryProofPath,
     })
     if (derived === 'SKIP' || !DERIVED_OK.has(derived)) continue // abstain / not derivable
     if (!canAdvance(stored, derived)) continue                   // already at/ahead of derived — no drift

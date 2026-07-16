@@ -115,10 +115,10 @@ export async function PATCH(
     if (!dbUser) return apiError('User not found', 404, 'USER_NOT_FOUND')
 
     const body = await req.json()
-    const { status: newStatus, reason, photoUrl, lat, lng } = body as {
+    const { status: newStatus, reason, proofPath, lat, lng } = body as {
       status: OrderStatus
       reason?: string
-      photoUrl?: string   // runner delivery confirmation photo
+      proofPath?: string  // runner proof-of-delivery photo — a Supabase object PATH, not a URL
       lat?: number        // runner GPS lat
       lng?: number        // runner GPS lng
     }
@@ -195,9 +195,9 @@ export async function PATCH(
         throw new ApiError('BOOTH_PICKUP orders do not use runner transitions', 409, 'INVALID_TRANSITION')
       }
 
-      // DELIVERED requires a photo
-      if (newStatus === OrderStatus.DELIVERED && !photoUrl) {
-        throw new ApiError('photoUrl is required to mark an order as delivered', 400, 'VALIDATION_ERROR')
+      // DELIVERED requires the proof-of-delivery photo path
+      if (newStatus === OrderStatus.DELIVERED && !proofPath) {
+        throw new ApiError('proofPath is required to mark an order as delivered', 400, 'VALIDATION_ERROR')
       }
 
       // ── RACE-SAFE CLAIM ──────────────────────────────────────────────────
@@ -232,7 +232,7 @@ export async function PATCH(
       // The atomic claim above won the assignment (runnerId, race-safe). Now write
       // the runner DATA (delivery proof) and let the aggregator DERIVE the master
       // status from the persistent columns — RUNNER_COLLECTED from runnerId,
-      // DELIVERED from curbsidePhotoUrl — behind canAdvance. The aggregator owns the
+      // DELIVERED from deliveryProofPath — behind canAdvance. The aggregator owns the
       // status write (gaining the monotonic guard) AND the DELIVERED side-effects
       // (RunnerEarning + OrganizerEarning accrual + delayed payout). Returns here so
       // runner transitions never reach the legacy monolithic update below.
@@ -240,7 +240,7 @@ export async function PATCH(
         await db.order.update({
           where: { id: order.id },
           data: {
-            curbsidePhotoUrl: photoUrl ?? null,
+            deliveryProofPath: proofPath ?? null,
             ...(lat != null ? { runnerConfirmedLat: lat } : {}),
             ...(lng != null ? { runnerConfirmedLng: lng } : {}),
           },
