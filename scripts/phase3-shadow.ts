@@ -40,7 +40,7 @@ async function main() {
   const orders = await db.order.findMany({
     where: { voidedAt: null },
     select: {
-      id: true, status: true, fulfillmentType: true, runnerId: true, curbsidePhotoUrl: true,
+      id: true, status: true, fulfillmentType: true, runnerId: true, deliveryProofPath: true,
       vendorOrderStatuses: { select: { status: true } },
     },
   })
@@ -58,7 +58,7 @@ async function main() {
     const { derived } = deriveMasterStatus({
       fulfillmentType: o.fulfillmentType as FulfillmentType,
       vendorStatuses: o.vendorOrderStatuses,
-      runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl,
+      runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath,
     })
     const line = `${o.id} stored=${o.status} w5=CANCELLED agg=${derived} vendors=[${rows.join(',')}]` +
       ` guardAllows=${canAdvance(o.status as MasterStatus, 'CANCELLED')}`

@@ -6,7 +6,7 @@
  *
  * Two kinds of write to converge:
  *   • W3 runner (RUNNER_COLLECTED / DELIVERED) — DERIVABLE from the persistent
- *     runner-state columns (runnerId, curbsidePhotoUrl) the aggregator already
+ *     runner-state columns (runnerId, deliveryProofPath) the aggregator already
  *     reads. So these are DERIVED, not asserted — same pattern as W4. We confirm
  *     the derivation matches live runner-state orders.
  *   • W7 timeouts (UNCOLLECTED / UNDELIVERABLE / accept-CANCELLED) — time/operator
@@ -33,7 +33,7 @@ async function main() {
     where: { voidedAt: null, status: { in: [...RUNNER_STATES, ...TIMEOUT_STATES] as never } },
     select: {
       id: true, status: true, fulfillmentType: true, runnerId: true,
-      curbsidePhotoUrl: true, deliveryFee: true, tip: true,
+      deliveryProofPath: true, deliveryFee: true, tip: true,
       runnerEarning: { select: { id: true } },
       organizerEarning: { select: { id: true } },
       vendorOrderStatuses: { select: { status: true } },
@@ -50,9 +50,9 @@ async function main() {
     const derived = deriveMasterStatus({
       fulfillmentType: o.fulfillmentType as FulfillmentType,
       vendorStatuses: o.vendorOrderStatuses,
-      runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl,
+      runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath,
     }).derived
-    const line = `${o.id} stored=${o.status} derived=${derived} runner=${o.runnerId ? 'Y' : '-'} photo=${o.curbsidePhotoUrl ? 'Y' : '-'} vendors=[${rows.join(',')}]`
+    const line = `${o.id} stored=${o.status} derived=${derived} runner=${o.runnerId ? 'Y' : '-'} photo=${o.deliveryProofPath ? 'Y' : '-'} vendors=[${rows.join(',')}]`
 
     if (RUNNER_STATES.includes(o.status as MasterStatus)) {
       // W3 transitions should be DERIVED from runner-state columns — EXCEPT legacy

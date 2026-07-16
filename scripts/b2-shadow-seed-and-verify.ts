@@ -114,7 +114,7 @@ async function seedDelivered(s: Scenario): Promise<string> {
       total: totalCents / 100, vendorPayout: subtotalCents / 100,
       customerName: 'B2 Seed', customerPhone: '+10000000000',
       runnerId: s.runnerId,                       // runner overlay
-      curbsidePhotoUrl: 'https://b2seed.local/proof.jpg', // → derives DELIVERED
+      deliveryProofPath: 'https://b2seed.local/proof.jpg', // → derives DELIVERED
       stripeChargeId: `ch_${SLUG}${rand()}`,      // source_transaction (synthetic for shadow)
     },
   })

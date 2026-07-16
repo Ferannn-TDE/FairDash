@@ -34,7 +34,7 @@ interface Row {
   status: MasterStatus
   fulfillmentType: FulfillmentType
   runnerId: string | null
-  curbsidePhotoUrl: string | null
+  deliveryProofPath: string | null
   voidedAt: Date | null
   placedAt: Date | null
   vendorOrderStatuses: { status: string }[]
@@ -46,7 +46,7 @@ async function main() {
   const orders = (await db.order.findMany({
     select: {
       id: true, status: true, fulfillmentType: true,
-      runnerId: true, curbsidePhotoUrl: true, voidedAt: true, placedAt: true,
+      runnerId: true, deliveryProofPath: true, voidedAt: true, placedAt: true,
       vendorOrderStatuses: { select: { status: true } },
     },
     orderBy: { placedAt: 'desc' },
@@ -78,7 +78,7 @@ async function main() {
       // Voided test orders MUST derive SKIP and never be touched.
       const d = deriveMasterStatus({
         fulfillmentType: o.fulfillmentType, vendorStatuses: rows,
-        runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl, voided: true,
+        runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath, voided: true,
       })
       if (d.derived !== 'SKIP') { keep('VOIDED_NOT_SKIPPED', o); tally.UNEXPECTED++; continue }
       tally.SKIP_VOIDED++
@@ -88,7 +88,7 @@ async function main() {
     // ── Normal derivation + classification ───────────────────────────────────
     const d = deriveMasterStatus({
       fulfillmentType: o.fulfillmentType, vendorStatuses: rows,
-      runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl, voided: false,
+      runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath, voided: false,
     })
 
     // The derivation now ABSTAINS (SKIP) where it has no jurisdiction: no
@@ -142,8 +142,8 @@ async function main() {
   // ── Report ───────────────────────────────────────────────────────────────
   const fmt = (o: Row) =>
     `    ${o.id}  type=${o.fulfillmentType.padEnd(13)} stored=${o.status.padEnd(15)} ` +
-    `derived=${deriveMasterStatus({ fulfillmentType: o.fulfillmentType, vendorStatuses: o.vendorOrderStatuses, runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl, voided: o.voidedAt != null }).derived.padEnd(15)} ` +
-    `runner=${o.runnerId ? 'Y' : '-'} photo=${o.curbsidePhotoUrl ? 'Y' : '-'} ` +
+    `derived=${deriveMasterStatus({ fulfillmentType: o.fulfillmentType, vendorStatuses: o.vendorOrderStatuses, runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath, voided: o.voidedAt != null }).derived.padEnd(15)} ` +
+    `runner=${o.runnerId ? 'Y' : '-'} photo=${o.deliveryProofPath ? 'Y' : '-'} ` +
     `vendors=[${o.vendorOrderStatuses.map(v => v.status).join(',')}]`
 
   console.log(`Total orders swept: ${orders.length}\n`)
@@ -186,7 +186,7 @@ async function main() {
   // REGRESSION_RISK from the classifier is only a TRUE danger if the guard would
   // actually advance it. Report whether the guard protects every such row.
   const regrGuarded = (examples['REGRESSION_RISK'] ?? []).every(o => {
-    const d = deriveMasterStatus({ fulfillmentType: o.fulfillmentType, vendorStatuses: o.vendorOrderStatuses, runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl, voided: o.voidedAt != null })
+    const d = deriveMasterStatus({ fulfillmentType: o.fulfillmentType, vendorStatuses: o.vendorOrderStatuses, runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath, voided: o.voidedAt != null })
     return d.derived === 'SKIP' || !canAdvance(o.status, d.derived as MasterStatus)
   })
 
