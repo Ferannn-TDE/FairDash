@@ -88,7 +88,7 @@ async function main() {
   const claim1 = await atomicClaim(o1, runner.id)
   const rcoll = await reconcileMasterStatus(o1)
   check('claim won + master derives RUNNER_COLLECTED', claim1 === 1 && rcoll.to === 'RUNNER_COLLECTED' && (await ostatus(o1)).status === 'RUNNER_COLLECTED', JSON.stringify(rcoll))
-  await db.order.update({ where: { id: o1 }, data: { curbsidePhotoUrl: 'proof.jpg', runnerConfirmedLat: 1, runnerConfirmedLng: 2 } })
+  await db.order.update({ where: { id: o1 }, data: { deliveryProofPath: 'proof.jpg', runnerConfirmedLat: 1, runnerConfirmedLng: 2 } })
   const rdel = await reconcileMasterStatus(o1)
   check('deliver: master derives DELIVERED from photo', rdel.to === 'DELIVERED' && (await ostatus(o1)).status === 'DELIVERED', JSON.stringify(rdel))
 

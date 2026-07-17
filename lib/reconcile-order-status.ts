@@ -93,7 +93,7 @@ export interface DeriveInput {
   // Runner overlay (delivery arm only): set by the runner's claim / deliver
   // transitions. The derivation reads them but never writes them.
   runnerId?: string | null
-  curbsidePhotoUrl?: string | null // present once the runner confirms delivery
+  deliveryProofPath?: string | null // present once the runner confirms delivery
   voided?: boolean                 // voidedAt set → excluded from the model
 }
 
@@ -145,7 +145,18 @@ export function deriveMasterStatus(input: DeriveInput): DeriveResult {
 
   // Vendor-derived base = the MINIMUM progress across active portions. "All ready
   // → READY"; "one still preparing → PREPARING" falls out of the min.
-  const minProgress = Math.min(...active.map(s => VENDOR_PROGRESS[s] ?? 0))
+  // An unrecognized ACTIVE status must fail LOUD, never silently rank 0 → PLACED. `?? 0`
+  // here was the exact silent-default trap the codebase sweeps for: an unknown input
+  // producing an answer instead of admitting it doesn't have one — and in this money-adjacent
+  // aggregator it's worse than a flicker (it would derive PLACED on, e.g., a delivered order
+  // if someone wrote VOS='DELIVERED', which is NOT a VendorStatus). Throw so it can't hide.
+  const minProgress = Math.min(...active.map(s => {
+    const p = VENDOR_PROGRESS[s]
+    if (p === undefined) {
+      throw new Error(`[deriveMasterStatus] unrecognized active VendorOrderStatus "${s}" — not in VENDOR_PROGRESS. A money-adjacent derivation must fail loud, not silently rank it 0 (PLACED).`)
+    }
+    return p
+  }))
   const base = PROGRESS_TO_STATUS[minProgress]
 
   if (!isDelivery) {
@@ -166,7 +177,7 @@ export function deriveMasterStatus(input: DeriveInput): DeriveResult {
   }
 
   // All active portions are READY (or COMPLETED→clamped). Runner overlay decides.
-  if (input.curbsidePhotoUrl) {
+  if (input.deliveryProofPath) {
     return { derived: 'DELIVERED', arm, reason: 'delivery: runner confirmed (photo present)' }
   }
   if (input.runnerId) {
@@ -234,7 +245,7 @@ export async function shadowReconcile(orderId: string): Promise<ShadowResult> {
     where: { id: orderId },
     select: {
       id: true, status: true, fulfillmentType: true,
-      runnerId: true, curbsidePhotoUrl: true, voidedAt: true,
+      runnerId: true, deliveryProofPath: true, voidedAt: true,
       vendorOrderStatuses: { select: { status: true } },
     },
   })
@@ -244,7 +255,7 @@ export async function shadowReconcile(orderId: string): Promise<ShadowResult> {
     fulfillmentType: order.fulfillmentType as FulfillmentType,
     vendorStatuses: order.vendorOrderStatuses,
     runnerId: order.runnerId,
-    curbsidePhotoUrl: order.curbsidePhotoUrl,
+    deliveryProofPath: order.deliveryProofPath,
     voided: order.voidedAt != null,
   })
 
@@ -354,7 +365,7 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     select: {
       id: true, status: true, fulfillmentType: true, eventId: true,
       vendorId: true, customerId: true, runnerId: true,
-      curbsidePhotoUrl: true, voidedAt: true, deliveryFee: true, tip: true,
+      deliveryProofPath: true, voidedAt: true, deliveryFee: true, tip: true,
       vendorOrderStatuses: { select: { status: true, vendorId: true } },
     },
   })
@@ -366,14 +377,14 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     fulfillmentType: order.fulfillmentType as FulfillmentType,
     vendorStatuses: order.vendorOrderStatuses,
     runnerId: order.runnerId,
-    curbsidePhotoUrl: order.curbsidePhotoUrl,
+    deliveryProofPath: order.deliveryProofPath,
     voided: order.voidedAt != null,
   })
 
   // Two ways to reach a target master status:
   //   • DERIVED — pure function of persistent columns: per-vendor truth (READY /
   //     COMPLETED / CANCELLED-from-all-DECLINED) AND the runner overlay
-  //     (RUNNER_COLLECTED from runnerId, DELIVERED from curbsidePhotoUrl). The
+  //     (RUNNER_COLLECTED from runnerId, DELIVERED from deliveryProofPath). The
   //     runner transitions are DERIVED, not asserted — the aggregator reads the
   //     columns W3 writes (claim → runnerId, deliver → photo), same shape as W4.
   //   • ASSERTED — the caller supplies intent no column can hold:
@@ -506,6 +517,40 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
       await safeRevalidateTag(`analytics-${vid}`)
       await safeRevalidateTag(`stats-${vid}`)
       await safeRevalidateTag(`revenue-${vid}`)
+    }
+  }
+
+  // ── Vendor VOS advance on DELIVERED — closes the delivery-order under-report ──
+  // A delivery order's vendor portions stay at READY forever (the vendor marks READY, the
+  // runner delivers, the vendor never marks COMPLETED). Every VOS-join reader — vendor
+  // analytics, dashboard "today revenue", the Firebase stats push — filters VOS IN
+  // (COMPLETED, DELIVERED), so a delivered order is DROPPED from the vendor's own revenue
+  // view even though they were PAID (accrual is VOS-independent). Advancing the vendor's
+  // READY portions to COMPLETED on DELIVERED makes those readers count it.
+  //
+  // COMPLETED, not DELIVERED: 'DELIVERED' is not a VendorStatus and would derive PLACED via
+  // VENDOR_PROGRESS. Safe by construction — the delivery arm CLAMPS a vendor COMPLETED to
+  // READY, then the runner overlay (proof → DELIVERED) wins, so the next derive returns
+  // DELIVERED and canAdvance(DELIVERED,DELIVERED) is a no-op: a converging fixed point, never
+  // a flip to COMPLETED, never oscillation. Idempotent (only READY portions move).
+  //
+  // ⚠️ STRICT ORDERING — this MUST ship BEFORE gating the vendor "Mark Picked Up" action.
+  // Today a vendor clicking that (mis-framed) button is the ONLY thing advancing VOS for
+  // delivery orders; gating it first, or shipping the gate alone, converts a partial
+  // under-report into a UNIVERSAL silent one (every delivery order, forever).
+  //
+  // TODO(collectedAt): DELIVERED is a PROXY. The honest trigger is COLLECTION (runner takes
+  // the food ⇒ vendor's work is done), but "collect" is not a server event yet (claim ==
+  // collect today). When Commit 2 adds collectedAt, MOVE this advance to that transition.
+  if (target === 'DELIVERED') {
+    try {
+      await db.vendorOrderStatus.updateMany({
+        where: { orderId: order.id, status: 'READY' },
+        data: { status: 'COMPLETED' },
+      })
+    } catch (err) {
+      const { logger } = await import('./logger')
+      logger.error('[reconcileMasterStatus] vendor VOS advance on DELIVERED failed (non-fatal; analytics under-reports this order until a re-derive repairs it)', { orderId: order.id, error: String(err) })
     }
   }
 

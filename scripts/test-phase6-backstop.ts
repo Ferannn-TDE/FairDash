@@ -60,10 +60,10 @@ async function main() {
   const strand = await track(db.order.create({ data: base({ status: 'READY', readyAt: new Date(Date.now() - 20 * 60000), vendorOrderStatuses: { create: [{ vendorId, status: 'READY' }] } }), select: { id: true } }))
 
   // DELIVERED with MISSING earnings (recent updatedAt, fee/tip) → Pattern L alert.
-  const delBad = await track(db.order.create({ data: base({ status: 'DELIVERED', runnerId: runner.id, deliveryFee: 5, tip: 3, curbsidePhotoUrl: 'p.jpg', vendorOrderStatuses: { create: [{ vendorId, status: 'READY' }] } }), select: { id: true } }))
+  const delBad = await track(db.order.create({ data: base({ status: 'DELIVERED', runnerId: runner.id, deliveryFee: 5, tip: 3, deliveryProofPath: 'p.jpg', vendorOrderStatuses: { create: [{ vendorId, status: 'READY' }] } }), select: { id: true } }))
 
   // DELIVERED with CORRECT earnings → Pattern L should NOT alert.
-  const delGood = await track(db.order.create({ data: base({ status: 'DELIVERED', runnerId: runner.id, deliveryFee: 5, tip: 3, curbsidePhotoUrl: 'p.jpg', vendorOrderStatuses: { create: [{ vendorId, status: 'READY' }] } }), select: { id: true } }))
+  const delGood = await track(db.order.create({ data: base({ status: 'DELIVERED', runnerId: runner.id, deliveryFee: 5, tip: 3, deliveryProofPath: 'p.jpg', vendorOrderStatuses: { create: [{ vendorId, status: 'READY' }] } }), select: { id: true } }))
   const { splitRunnerFee } = await import('../lib/payout-split')
   const { runnerShareCents, organizerShareCents } = splitRunnerFee(500, pct)
   await db.runnerEarning.create({ data: { eventId, orderId: delGood, runnerId: runner.id, amountCents: runnerShareCents + 300, status: 'tracked' } })

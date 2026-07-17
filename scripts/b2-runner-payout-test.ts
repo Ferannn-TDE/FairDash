@@ -85,7 +85,7 @@ async function seedDelivered(opts: {
       subtotal: 15, fairSynqFee: 1.5, deliveryFee: opts.feeCents / 100, tip: opts.tipCents / 100,
       total: 15 + 1.5 + opts.feeCents / 100 + opts.tipCents / 100, vendorPayout: 15,
       customerName: 'B2', customerPhone: '+10000000000',
-      runnerId: opts.runnerId, curbsidePhotoUrl: 'https://b2seed.local/p.jpg',
+      runnerId: opts.runnerId, deliveryProofPath: 'https://b2seed.local/p.jpg',
       stripeChargeId: `ch_${SLUG}${rand()}`,
     },
   })

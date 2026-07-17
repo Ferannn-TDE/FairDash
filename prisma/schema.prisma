@@ -486,8 +486,18 @@ model Order {
   runnerId     String?
   dispatchedAt DateTime?
 
-  // Curbside — mandatory Runner photo before Delivered
-  curbsidePhotoUrl String?
+  // Proof-of-delivery photo — mandatory before DELIVERED for runner-fulfilled orders
+  // (HOME_DELIVERY *and* CURBSIDE). Holds the Supabase Storage object PATH (in the private
+  // `delivery-proofs` bucket), NOT a URL and NEVER a signed URL — a stored signed URL is
+  // true when written and lies later. Resolve to a signed READ url at read time.
+  //
+  // ⚠️ CHARGEBACK EVIDENCE. This photo is the proof that answers a card dispute, which per
+  // the fee-model can arrive ~120 days after the fair. Any future read path for it is on the
+  // MONEY/AUDIT path and MUST resolve the order with includeArchived (INCLUDE archived fairs,
+  // not EXCLUDE) — the 13-INCLUDE soft-delete floor. If a read scopes through a fair lookup
+  // with archivedAt: null, the proof becomes unreadable EXACTLY when it's needed: fair
+  // archived, chargeback open, money at stake. INCLUDE, not EXCLUDE.
+  deliveryProofPath String?
 
   // Home delivery — GPS confirmation (must be within 100m of address)
   runnerConfirmedLat Float?

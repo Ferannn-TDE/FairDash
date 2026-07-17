@@ -189,7 +189,7 @@ async function seedDelivered(eventId: string, vendorId: string, runnerId: string
       subtotal: 15, fairSynqFee: 1.5, deliveryFee: 10, tip: 3, total: 29.5, vendorPayout: 15,
       customerName: 'C1', customerPhone: '+10000000000',
       runnerId, stripeChargeId: `ch_${SLUG}${rand()}`,
-      curbsidePhotoUrl: 'https://c1seed.local/p.jpg', // = runner confirmed delivery → DELIVERED
+      deliveryProofPath: 'https://c1seed.local/p.jpg', // = runner confirmed delivery → DELIVERED
       orderItems: { create: [{ vendorId, menuItemId: menuOf.get(vendorId)!, itemName: 'Item', quantity: 1, unitPrice: 15, totalPrice: 15, subtotal: 15 }] },
       vendorOrderStatuses: { create: [{ vendorId, status: 'READY' }] },
     },
