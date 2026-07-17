@@ -10,7 +10,6 @@ export const ORDER_STATUS_CONFIG: Record<string, {
   ACCEPTED:         { label: 'Accepted',         color: 'bg-blue-500/10',   textColor: 'text-blue-400',   borderColor: 'border-blue-400/20',   dotColor: 'bg-blue-400'   },
   PREPARING:        { label: 'Preparing',        color: 'bg-blue-500/10',   textColor: 'text-blue-400',   borderColor: 'border-blue-400/20',   dotColor: 'bg-blue-400'   },
   READY:            { label: 'Ready',            color: 'bg-green-500/10',  textColor: 'text-green-400',  borderColor: 'border-green-400/20',  dotColor: 'bg-green-400'  },
-  READY_FOR_PICKUP: { label: 'Ready for Pickup', color: 'bg-green-500/10',  textColor: 'text-green-400',  borderColor: 'border-green-400/20',  dotColor: 'bg-green-400'  },
   RUNNER_COLLECTED: { label: 'On the Way',       color: 'bg-green-500/10',  textColor: 'text-green-400',  borderColor: 'border-green-400/20',  dotColor: 'bg-green-400'  },
   DELIVERED:        { label: 'Delivered',        color: 'bg-green-500/10',  textColor: 'text-green-400',  borderColor: 'border-green-400/20',  dotColor: 'bg-green-400'  },
   COMPLETED:        { label: 'Completed',        color: 'bg-green-500/10',  textColor: 'text-green-400',  borderColor: 'border-green-400/20',  dotColor: 'bg-green-400'  },

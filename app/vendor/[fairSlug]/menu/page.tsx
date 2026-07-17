@@ -275,8 +275,8 @@ function DeleteConfirmModal({ item, onConfirm, onClose }: {
           A removal request will be sent to the organizer for approval. The item stays live until they approve.
         </p>
         <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-colors cursor-pointer">Cancel</button>
-          <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors cursor-pointer">Yes, Request Removal</button>
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-colors cursor-pointer">Cancel</button>
+          <button onClick={onConfirm} className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold whitespace-nowrap transition-colors cursor-pointer">Yes, Request Removal</button>
         </div>
       </div>
     </div>

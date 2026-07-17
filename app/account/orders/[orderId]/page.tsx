@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import MarketplaceNavbar from '../../../_components/MarketplaceNavbar'
 import Link from 'next/link'
 import { MapPinIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
+import { getStatusConfig } from '@/lib/order-status-config'
 
 export const metadata = { title: 'Order Detail — FairSynq' }
 
@@ -18,11 +19,13 @@ const STATUS_STYLES: Record<string, string> = {
   UNCOLLECTED: 'bg-red-500/10 text-red-400 border-red-500/20',
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  PLACED: 'New', ACCEPTED: 'Accepted', PREPARING: 'Preparing',
-  READY: 'Ready for pickup', COMPLETED: 'Completed', DELIVERED: 'Delivered',
-  CANCELLED: 'Cancelled', UNCOLLECTED: 'Uncollected',
-}
+// Labels come from the SHARED getStatusConfig — the single source every customer
+// surface reads. This page used to keep its own STATUS_LABELS map, which hardcoded
+// READY: 'Ready for pickup' with no fulfillment-awareness — so a HOME_DELIVERY
+// customer saw "Ready for pickup" right above their own delivery address. Consolidating
+// onto the shared config kills the lie AND the duplicate, so it can't drift again;
+// the shared "Ready" / "On the Way" is honest here (this is the history-detail view,
+// not the live tracker — the richer "out for delivery" copy lives on the tracking page).
 
 const TIMELINE = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COMPLETED']
 
@@ -84,7 +87,7 @@ export default async function OrderDetailPage({ params }: Props) {
               </p>
             </div>
             <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold border ${STATUS_STYLES[order.status] ?? 'bg-white/5 text-text-gray border-white/10'}`}>
-              {STATUS_LABELS[order.status] ?? order.status}
+              {getStatusConfig(order.status).label}
             </span>
           </div>
 
@@ -111,7 +114,7 @@ export default async function OrderDetailPage({ params }: Props) {
               <div className="flex justify-between mt-2">
                 {TIMELINE.map((step) => (
                   <span key={step} className="text-[0.5625rem] text-text-gray text-center flex-1 first:text-left last:text-right px-0.5">
-                    {STATUS_LABELS[step] ?? step}
+                    {getStatusConfig(step).label}
                   </span>
                 ))}
               </div>

@@ -18,10 +18,17 @@ import { Banknote, Lock, Snowflake, AlertTriangle, RotateCcw } from 'lucide-reac
 // never the organizer refund route, which hardcodes actorRole 'organizer' and skips the
 // admin audit table.
 //
-// DISPLAY RULE: every figure below is the API's ledger number rendered verbatim. This page
-// NEVER re-derives money — a second source of truth is the mistake the whole payout design
-// avoids. Settled (paid) and owed (payable/held) are shown as DISTINCT figures, never
+// DISPLAY RULE: every LEDGER figure below is the API's number rendered verbatim. This page
+// NEVER re-derives ledger money — a second source of truth is the mistake the whole payout
+// design avoids. Settled (paid) and owed (payable/held) are shown as DISTINCT figures, never
 // blended, so an estimate can never read as cash in hand.
+//
+// THE ONE EXCEPTION, and why it obeys the rule rather than breaks it: the vendors' "Estimated
+// (pre-accrual)" line. It is NOT recomputed here — it is the API's figure from the SAME shared
+// helper the vendor's own screens use (lib/vendor-earnings), surfaced so pre-payout money is
+// not invisible to the admin. It is kept in its OWN field, given a distinct (dashed, sky, "~")
+// treatment unlike any ledger tone, and NEVER blended into the four ledger figures — the very
+// "distinct, never reads as cash" discipline this rule exists to enforce.
 
 interface Totals {
   payableCents: number
@@ -49,7 +56,13 @@ interface MoneyView {
   fair: { id: string; name: string; urlSlug: string }
   platformBalance: { availableCents: number; pendingCents: number } | null
   platformBalanceNote: string
-  vendors: { totals: Totals; frozen: { vendorId: string; name: string; reason: string | null }[]; earnings: VendorEarning[] }
+  vendors: {
+    totals: Totals
+    estimatedPreAccrual: { cents: number; orderCount: number }
+    estimatedPreAccrualNote: string
+    frozen: { vendorId: string; name: string; reason: string | null }[]
+    earnings: VendorEarning[]
+  }
   runners: { totals: Totals; earnings: RunnerEarning[] }
   organizer: { totals: Totals; payee: { id: string; name: string; payoutsFrozenAt: string | null } | null }
   passiveHolds: { orderId: string; vendorId: string; amountCents: number; reason: string }[]
@@ -224,6 +237,25 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
             <Stat label="Admin-held" value={money(t.adminHeldCents)} tone="held" sub="Held by an admin — not paid" />
             <Stat label="Cancelled" value={money(t.cancelledCents)} tone="cancelled" sub="Never to be paid" />
           </div>
+
+          {/* PRE-ACCRUAL ESTIMATE (vendors only) — deliberately NOT a ledger figure, and styled
+              to say so: dashed border, sky tone (unlike settled/held/cancelled), a leading "~".
+              It exists because the ledger is written only at accrual, so pre-payout money the
+              vendor already sees as "~pending" was invisible here. Same helper as the vendor →
+              cannot drift. Never blended into the four ledger figures above. */}
+          {key === 'vendors' && vendors.estimatedPreAccrual.cents > 0 && (
+            <div className="bg-bg-card/40 border border-dashed border-sky-400/30 rounded-xl px-4 py-3">
+              <p className="text-[0.6rem] uppercase tracking-wider text-sky-300/70 font-semibold mb-1">
+                Estimated · pre-accrual (not settled, not in the ledger)
+              </p>
+              <p className="font-bebas text-2xl tracking-wide leading-none tabular-nums text-sky-300/80">
+                ~{money(vendors.estimatedPreAccrual.cents)}
+              </p>
+              <p className="text-[0.6rem] text-text-gray mt-1">
+                {vendors.estimatedPreAccrual.orderCount} order{vendors.estimatedPreAccrual.orderCount !== 1 ? 's' : ''} not yet accrued — the same estimate the vendor sees. Becomes “Payable” once the payout accrues.
+              </p>
+            </div>
+          )}
         </div>
       ))}
 

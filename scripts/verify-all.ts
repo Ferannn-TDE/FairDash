@@ -57,6 +57,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
+  { group: 'correctness', name: 'incoming-divergence',    file: 'scripts/incoming-divergence-guard.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
 ]
