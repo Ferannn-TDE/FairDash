@@ -1033,13 +1033,18 @@ async function patternS(
       id: true,
       orderItems: { select: { vendorId: true } },
       vendorEarnings: { select: { vendorId: true } },
+      vendorOrderStatuses: { select: { vendorId: true, status: true } },
     },
     orderBy: { completedAt: 'asc' },
     take: o.maxPerPattern,
   })
 
+  const { payableVendorIds } = await import('./process-payout')
   for (const ord of orders) {
-    const payable = new Set(ord.orderItems.map(i => i.vendorId))
+    // ONE payable definition, shared with accrueVendorEarnings: a REFUNDED/DECLINED/
+    // CANCELLED portion is owed NOTHING — counting it here made S write phantom
+    // 'accrued' rows for refunded money (and would alert forever once accrual refused).
+    const payable = payableVendorIds(ord.orderItems, ord.vendorOrderStatuses)
     const accrued = new Set(ord.vendorEarnings.map(e => e.vendorId))
     const missing = [...payable].filter(v => !accrued.has(v))
     if (missing.length === 0) continue
@@ -1050,7 +1055,7 @@ async function patternS(
       `in-window admin hold/visibility was lost for them (completion-path accrual failed). ` +
       `${o.dryRun ? 'WOULD re-accrue' : 'Re-accrued'}.`,
     )
-    if (o.dryRun) continue
+    if (o.dryRun) { sum.repaired.S += 1; continue } // count consistently with A–C in dryRun
 
     try {
       const { accrueVendorEarnings } = await import('./process-payout')

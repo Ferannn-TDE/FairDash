@@ -84,15 +84,42 @@ export interface PayoutResult {
  * still computes the authoritative net from the real settled fee and stamps it back.
  * Never overwrites a paid/held/cancelled row's status.
  */
+/**
+ * The ONE definition of "which vendors on this order are owed an earning row".
+ * A DECLINED / REFUNDED / CANCELLED portion is NOT payable — the executor already
+ * skips them at pay time (see the declined/refunded gate below); accruing them
+ * anyway wrote PHANTOM 'accrued' rows that inflated the admin panel's payableCents
+ * with money nobody is owed (8 such rows, $200.00, written 2026-07-17 by the
+ * executor's self-heal and Pattern S before this fix). Used by BOTH this accrual
+ * and reconciler Pattern S's detection, so the two can't drift.
+ */
+export const NON_PAYABLE_VENDOR_STATUSES = new Set(['DECLINED', 'REFUNDED', 'CANCELLED'])
+
+export function payableVendorIds(
+  orderItems: { vendorId: string }[],
+  vendorStatuses: { vendorId: string; status: string }[],
+): Set<string> {
+  const excluded = new Set(
+    vendorStatuses.filter(v => NON_PAYABLE_VENDOR_STATUSES.has(v.status)).map(v => v.vendorId),
+  )
+  return new Set(orderItems.map(i => i.vendorId).filter(v => !excluded.has(v)))
+}
+
 export async function accrueVendorEarnings(orderId: string): Promise<number> {
   const order = await db.order.findUnique({
     where: { id: orderId },
-    select: { id: true, eventId: true, orderItems: { select: { vendorId: true, subtotal: true } } },
+    select: {
+      id: true, eventId: true,
+      orderItems: { select: { vendorId: true, subtotal: true } },
+      vendorOrderStatuses: { select: { vendorId: true, status: true } },
+    },
   })
   if (!order) return 0
 
+  const payable = payableVendorIds(order.orderItems, order.vendorOrderStatuses)
   const subtotals: Record<string, number> = {}
   for (const item of order.orderItems) {
+    if (!payable.has(item.vendorId)) continue // refunded/declined/cancelled portion — no earning owed
     subtotals[item.vendorId] = (subtotals[item.vendorId] ?? 0) + Math.round(item.subtotal * 100)
   }
 
