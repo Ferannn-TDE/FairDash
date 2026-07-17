@@ -94,6 +94,31 @@ export async function PATCH(
       )
     }
 
+    // A RUNNER-FULFILLED order is completed by the RUNNER (RUNNER_COLLECTED → DELIVERED),
+    // NOT by the vendor. Blocking READY → COMPLETED here stops a vendor marking a delivery
+    // "done" while the food is still on their counter (claim == collect today) or in a
+    // runner's car — the premature-completion bug. The system advances the vendor's VOS to
+    // COMPLETED on the DELIVERED transition instead (see reconcile-order-status). CURBSIDE is
+    // gated ONLY when the method is RUNNER_DELIVERS; CUSTOMER_WALKS curbside (and BOOTH_PICKUP)
+    // are genuinely vendor-completed — no runner — so they stay allowed.
+    //
+    // ⚠️ ORDERING: this gate is SAFE only because the system-advance (VOS→COMPLETED on
+    // DELIVERED) already exists. Without it, gating here would leave every delivery order
+    // permanently at VOS=READY → a universal silent analytics under-report.
+    if (newStatus === 'COMPLETED') {
+      const ord = await db.order.findUnique({
+        where: { id: orderId },
+        select: { fulfillmentType: true, event: { select: { fulfillmentConfig: { select: { curbsideMethod: true } } } } },
+      })
+      const runnerFulfilled = !!ord && (
+        ord.fulfillmentType === 'HOME_DELIVERY' ||
+        (ord.fulfillmentType === 'CURBSIDE' && ord.event?.fulfillmentConfig?.curbsideMethod === 'RUNNER_DELIVERS')
+      )
+      if (runnerFulfilled) {
+        return apiError('This delivery is completed by the runner, not the vendor', 409, 'RUNNER_COMPLETES_DELIVERY')
+      }
+    }
+
     const TIMESTAMP_FIELD: Record<string, string> = {
       ACCEPTED:  'acceptedAt',
       PREPARING: 'preparingAt',
