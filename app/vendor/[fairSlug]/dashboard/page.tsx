@@ -272,16 +272,26 @@ function ReadyCard({ order, onComplete, submitting }: {
       </div>
       <p className="text-white/70 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
       {detail && <p className="text-text-gray text-[0.65rem] mb-2">{detail}</p>}
-      <div className="flex items-center justify-between mt-2.5">
-        <span className="text-text-gray text-xs">Waiting for pickup</span>
-        <button
-          onClick={() => onComplete(order)}
-          disabled={submitting}
-          className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[0.65rem] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {submitting ? 'Updating…' : 'Mark Picked Up'}
-        </button>
-      </div>
+      {/* HOME_DELIVERY is completed by the RUNNER, never the vendor — so no "Mark Picked Up"
+          here (the server rejects it too). The vendor's VOS advances to COMPLETED
+          automatically on delivery. Curbside/booth stay vendor-completed. */}
+      {order.fulfillmentType === 'HOME_DELIVERY' ? (
+        <div className="flex items-center justify-between mt-2.5">
+          <span className="text-text-gray text-xs">Ready — a runner will collect &amp; deliver</span>
+          <span className="text-[0.65rem] font-semibold text-emerald-400/80">With runner</span>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between mt-2.5">
+          <span className="text-text-gray text-xs">Waiting for pickup</span>
+          <button
+            onClick={() => onComplete(order)}
+            disabled={submitting}
+            className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[0.65rem] font-semibold hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? 'Updating…' : 'Mark Picked Up'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
