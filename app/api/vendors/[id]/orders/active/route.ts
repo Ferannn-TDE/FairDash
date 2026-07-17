@@ -39,6 +39,10 @@ export async function GET(
         status: true,
         placedAt: true,
         total: true,
+        // The ready-lane gate ("runner completes this, not you") keys on fulfillmentType.
+        // Without it here, REST-loaded orders had fulfillmentType undefined and the UI
+        // gate was silently vacuous after a reload.
+        fulfillmentType: true,
         vendorOrderStatuses: {
           where: { vendorId },
           select: { vendorId: true, status: true },
@@ -61,6 +65,7 @@ export async function GET(
       return {
         id: o.id,
         status: o.vendorOrderStatuses[0]?.status ?? o.status,
+        fulfillmentType: o.fulfillmentType,
         vendorSubtotal: parseFloat(myItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0).toFixed(2)),
         earnings: parseFloat((earn.cents / 100).toFixed(2)),
         earningsStatus: earn.status, // 'estimated' for active orders
@@ -79,7 +84,15 @@ export async function GET(
       rowCount: result.length,
     })
 
-    return success({ orders: result })
+    // The event's curbside method, once at top level (same for every order at this fair) —
+    // the dashboard needs it to apply the SAME isRunnerFulfilled predicate the vendor-status
+    // route enforces, so the ready-lane button and the server gate cannot disagree.
+    const vendorEvent = await db.vendor.findUnique({
+      where: { id: vendorId },
+      select: { event: { select: { fulfillmentConfig: { select: { curbsideMethod: true } } } } },
+    })
+
+    return success({ orders: result, curbsideMethod: vendorEvent?.event?.fulfillmentConfig?.curbsideMethod ?? null })
   } catch (err) {
     return handleApiError(err)
   }

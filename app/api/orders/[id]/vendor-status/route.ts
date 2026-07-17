@@ -3,6 +3,7 @@ import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { reconcileMasterStatus } from '@/lib/reconcile-order-status'
+import { isRunnerFulfilled } from '@/lib/order-status'
 import { refundVendorPortion } from '@/lib/process-refund'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { success, apiError } from '@/lib/api-response'
@@ -110,11 +111,9 @@ export async function PATCH(
         where: { id: orderId },
         select: { fulfillmentType: true, event: { select: { fulfillmentConfig: { select: { curbsideMethod: true } } } } },
       })
-      const runnerFulfilled = !!ord && (
-        ord.fulfillmentType === 'HOME_DELIVERY' ||
-        (ord.fulfillmentType === 'CURBSIDE' && ord.event?.fulfillmentConfig?.curbsideMethod === 'RUNNER_DELIVERS')
-      )
-      if (runnerFulfilled) {
+      // ONE shared predicate (lib/order-status.isRunnerFulfilled) — the dashboard's
+      // ready-lane hides the button by the same rule, so UI and route can't drift.
+      if (ord && isRunnerFulfilled(ord.fulfillmentType, ord.event?.fulfillmentConfig?.curbsideMethod)) {
         return apiError('This delivery is completed by the runner, not the vendor', 409, 'RUNNER_COMPLETES_DELIVERY')
       }
     }

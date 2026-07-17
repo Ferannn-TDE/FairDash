@@ -120,6 +120,19 @@ async function main() {
     try { deriveMasterStatus({ fulfillmentType: 'HOME_DELIVERY', vendorStatuses: [{ status: 'READY' }] }) } catch { ok = false }
     assert(ok, 'a recognized status still derives fine (the throw is specific to the unknown)')
 
+    // ── [5] ONE runner-fulfilled predicate — UI and route cannot drift ──────────
+    console.log('\n[5] isRunnerFulfilled: truth table + both the route AND the dashboard use the SHARED predicate')
+    const { isRunnerFulfilled } = await import('../lib/order-status')
+    assert(isRunnerFulfilled('HOME_DELIVERY') === true, 'HOME_DELIVERY → runner-fulfilled (always)')
+    assert(isRunnerFulfilled('CURBSIDE', 'RUNNER_DELIVERS') === true, '⛔ CURBSIDE + RUNNER_DELIVERS → runner-fulfilled (no vendor button, route rejects)')
+    assert(isRunnerFulfilled('CURBSIDE', 'CUSTOMER_WALKS') === false, 'CURBSIDE + CUSTOMER_WALKS → vendor-completed (button stays)')
+    assert(isRunnerFulfilled('BOOTH_PICKUP') === false, 'BOOTH_PICKUP → vendor-completed (button stays)')
+    const { readFileSync } = await import('node:fs')
+    const routeSrc = readFileSync('app/api/orders/[id]/vendor-status/route.ts', 'utf8')
+    const dashSrc  = readFileSync('app/vendor/[fairSlug]/dashboard/page.tsx', 'utf8')
+    assert(routeSrc.includes('isRunnerFulfilled('), 'the vendor-status ROUTE gates via the shared predicate (not a hand-rolled copy)')
+    assert(dashSrc.includes('isRunnerFulfilled('), 'the DASHBOARD ready-lane gates via the shared predicate (not a hand-rolled copy)')
+
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)
   } finally {

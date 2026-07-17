@@ -72,6 +72,22 @@ export function getStatusMeta(status: string): StatusMeta {
 
 // ─── Predicate helpers ────────────────────────────────────────────────────────
 
+/**
+ * Is this order completed by a RUNNER (claim → collect → deliver), not by the vendor?
+ * ONE definition, used by BOTH the vendor-status route (which rejects a vendor
+ * "COMPLETED" on such orders) and the vendor dashboard's ready-lane (which hides the
+ * "Mark Picked Up" button for them). Two hand-rolled copies of this predicate drifted
+ * within one commit (UI checked only HOME_DELIVERY; the route also gated
+ * RUNNER_DELIVERS curbside) — the same two-copies-one-lies class as everything else.
+ * CUSTOMER_WALKS curbside and BOOTH_PICKUP are genuinely vendor-completed.
+ */
+export const isRunnerFulfilled = (
+  fulfillmentType: string | null | undefined,
+  curbsideMethod?: string | null,
+): boolean =>
+  fulfillmentType === 'HOME_DELIVERY' ||
+  (fulfillmentType === 'CURBSIDE' && curbsideMethod === 'RUNNER_DELIVERS')
+
 export const isCompleted = (status: string): boolean =>
   (COMPLETED_STATUSES as readonly string[]).includes(status)
 
