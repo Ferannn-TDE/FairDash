@@ -13,7 +13,7 @@ import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { getFirebaseApp } from '@/lib/firebase-client'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { EarningsBadge } from '@/app/_components/EarningsBadge'
-import { isCompleted, isFailed } from '@/lib/order-status'
+import { isCompleted, isFailed, isRunnerFulfilled } from '@/lib/order-status'
 import { deriveOnlineState } from '@/lib/vendor-online-state'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -254,8 +254,10 @@ function ActiveCard({ order, onStartPreparing, onMarkReady, submitting }: {
 
 // ─── Ready Card ────────────────────────────────────────────────────────────────
 
-function ReadyCard({ order, onComplete, submitting }: {
+function ReadyCard({ order, runnerFulfilled, onComplete, submitting }: {
   order: VendorOrder
+  /** Same isRunnerFulfilled predicate the vendor-status route enforces — one definition. */
+  runnerFulfilled: boolean
   onComplete: (o: VendorOrder) => void
   submitting?: boolean
 }) {
@@ -272,10 +274,11 @@ function ReadyCard({ order, onComplete, submitting }: {
       </div>
       <p className="text-white/70 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
       {detail && <p className="text-text-gray text-[0.65rem] mb-2">{detail}</p>}
-      {/* HOME_DELIVERY is completed by the RUNNER, never the vendor — so no "Mark Picked Up"
-          here (the server rejects it too). The vendor's VOS advances to COMPLETED
-          automatically on delivery. Curbside/booth stay vendor-completed. */}
-      {order.fulfillmentType === 'HOME_DELIVERY' ? (
+      {/* A runner-fulfilled order (home delivery, or runner-delivers curbside) is completed by
+          the RUNNER, never the vendor — so no "Mark Picked Up" (the server rejects it too, via
+          the SAME shared predicate). The vendor's VOS advances automatically on delivery.
+          Customer-walks curbside and booth pickup stay vendor-completed. */}
+      {runnerFulfilled ? (
         <div className="flex items-center justify-between mt-2.5">
           <span className="text-text-gray text-xs">Ready — a runner will collect &amp; deliver</span>
           <span className="text-[0.65rem] font-semibold text-emerald-400/80">With runner</span>
@@ -372,6 +375,9 @@ export default function VendorDashboardPage() {
   const tabSwitchPending = deferredTab !== activeTab
   const [loading,           setLoading]           = useState(true)
   const [declineTarget,     setDeclineTarget]     = useState<VendorOrder | null>(null)
+  // The fair's curbside method — feeds the SAME isRunnerFulfilled predicate the
+  // vendor-status route enforces, so the ready-lane button matches the server gate.
+  const [curbsideMethod,    setCurbsideMethod]    = useState<string | null>(null)
   const [todayOrders,       setTodayOrders]       = useState<number>(0)
   const [todayRevenue,      setTodayRevenue]      = useState<number>(0)
   const [todayEarned,       setTodayEarned]       = useState<number>(0)
@@ -526,6 +532,7 @@ export default function VendorDashboardPage() {
       .then(([ordersJson, historyJson]) => {
         const activeOrders:    VendorOrder[] = ordersJson.data?.orders  ?? []
         const completedOrders: VendorOrder[] = historyJson.data?.orders ?? []
+        if (ordersJson.data?.curbsideMethod !== undefined) setCurbsideMethod(ordersJson.data.curbsideMethod)
         const all = [...activeOrders, ...completedOrders]
         all.forEach(o => seenOrderIds.current.add(o.id))
         // Merge into map — preserves any orders that arrived via Firebase
@@ -551,6 +558,7 @@ export default function VendorDashboardPage() {
       .then(([ordersJson, analyticsJson, historyJson]) => {
         const activeOrders:    VendorOrder[] = ordersJson.data?.orders   ?? []
         const completedOrders: VendorOrder[] = historyJson.data?.orders  ?? []
+        if (ordersJson.data?.curbsideMethod !== undefined) setCurbsideMethod(ordersJson.data.curbsideMethod)
         const all = [...activeOrders, ...completedOrders]
         all.forEach(o => seenOrderIds.current.add(o.id))
         setOrdersById(Object.fromEntries(all.map(o => [o.id, o])))
@@ -1079,6 +1087,7 @@ export default function VendorDashboardPage() {
                   <ReadyCard
                     key={order.id}
                     order={order}
+                    runnerFulfilled={isRunnerFulfilled(order.fulfillmentType, curbsideMethod)}
                     onComplete={handleComplete}
                     submitting={processingIds.has(order.id)}
                   />
@@ -1175,6 +1184,7 @@ export default function VendorDashboardPage() {
                   <ReadyCard
                     key={order.id}
                     order={order}
+                    runnerFulfilled={isRunnerFulfilled(order.fulfillmentType, curbsideMethod)}
                     onComplete={handleComplete}
                     submitting={processingIds.has(order.id)}
                   />
