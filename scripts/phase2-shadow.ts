@@ -44,7 +44,7 @@ async function main() {
   const orders = await db.order.findMany({
     where: { status: { in: NON_TERMINAL as never }, voidedAt: null },
     select: {
-      id: true, status: true, fulfillmentType: true, runnerId: true, curbsidePhotoUrl: true,
+      id: true, status: true, fulfillmentType: true, runnerId: true, deliveryProofPath: true,
       vendorOrderStatuses: { select: { status: true } },
     },
   })
@@ -64,7 +64,7 @@ async function main() {
     const { derived } = deriveMasterStatus({
       fulfillmentType: o.fulfillmentType as FulfillmentType,
       vendorStatuses: o.vendorOrderStatuses,
-      runnerId: o.runnerId, curbsidePhotoUrl: o.curbsidePhotoUrl,
+      runnerId: o.runnerId, deliveryProofPath: o.deliveryProofPath,
     })
     const isDelivery = o.fulfillmentType === 'HOME_DELIVERY' || o.fulfillmentType === 'CURBSIDE'
     const line = `${o.id} type=${o.fulfillmentType} stored=${o.status} w4=${w4} agg=${derived} vendors=[${rows.join(',')}]`

@@ -1,0 +1,14 @@
+-- Rename Order.curbsidePhotoUrl → Order.deliveryProofPath.
+--
+-- The column now holds a Supabase Storage object PATH (private `delivery-proofs` bucket),
+-- NOT a URL, and covers BOTH home-delivery and curbside proof-of-delivery (the old name was
+-- a misnomer). A RENAME (not drop+add) preserves existing rows — verified all-NULL at
+-- migration time, so nothing is stranded either way.
+--
+-- ⚠️ This value is CHARGEBACK EVIDENCE. Any read path is on the money/audit path and MUST
+-- resolve the order with includeArchived (see the field comment in schema.prisma).
+--
+-- DEPLOY NOTE: local DB == prod Supabase DB. Apply this migration and deploy the code that
+-- references `deliveryProofPath` BACK TO BACK — deployed code selecting the old column name
+-- errors the moment the column is renamed.
+ALTER TABLE "Order" RENAME COLUMN "curbsidePhotoUrl" TO "deliveryProofPath";

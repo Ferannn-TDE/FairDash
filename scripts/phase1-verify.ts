@@ -33,7 +33,7 @@ interface Case {
 // Mirror of the function's decision (derive → READY? → canAdvance? → write).
 function decide(c: Case) {
   const { derived } = deriveMasterStatus({
-    fulfillmentType: c.type, vendorStatuses: c.vendors, runnerId: c.runnerId, curbsidePhotoUrl: c.photo,
+    fulfillmentType: c.type, vendorStatuses: c.vendors, runnerId: c.runnerId, deliveryProofPath: c.photo,
   })
   const willPromote = derived === 'READY' && canAdvance(c.stored, 'READY')
   return { derived, willPromote }

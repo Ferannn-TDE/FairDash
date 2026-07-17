@@ -115,7 +115,7 @@ console.log('─'.repeat(120))
 
 for (const c of cases) {
   const r = deriveMasterStatus({
-    fulfillmentType: c.type, vendorStatuses: c.vendors, runnerId: c.runnerId, curbsidePhotoUrl: c.photo,
+    fulfillmentType: c.type, vendorStatuses: c.vendors, runnerId: c.runnerId, deliveryProofPath: c.photo,
   })
   const div = classifyDivergence(c.stored, r.derived)
   tally[div]++
@@ -148,7 +148,7 @@ if (tally.UNEXPECTED > 0) failures.push('UNEXPECTED divergence present — deriv
 // Every UNDER_ADVANCED case must be a genuine forward repair the monotonic guard
 // would allow — never a no-op or a regression dressed up as a bug.
 for (const c of cases) {
-  const r = deriveMasterStatus({ fulfillmentType: c.type, vendorStatuses: c.vendors, runnerId: c.runnerId, curbsidePhotoUrl: c.photo })
+  const r = deriveMasterStatus({ fulfillmentType: c.type, vendorStatuses: c.vendors, runnerId: c.runnerId, deliveryProofPath: c.photo })
   const div = classifyDivergence(c.stored, r.derived)
   if (div === 'UNDER_ADVANCED' && r.derived !== 'SKIP' && !canAdvance(c.stored, r.derived as MasterStatus)) {
     failures.push(`"${c.label}": flagged UNDER_ADVANCED but monotonic guard would NOT advance it`)

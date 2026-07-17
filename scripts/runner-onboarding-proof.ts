@@ -233,7 +233,7 @@ async function main() {
     // ── 7. DELIVERED carve-out — claimed runner who went OFFLINE can still DELIVER
     console.log('\n[7] DELIVERED carve-out: runner claimed then went OFFLINE can STILL mark DELIVERED (ACTIVE gate is claim-only)')
     await prisma.runner.update({ where: { id: selfRunnerId }, data: { status: 'OFFLINE' } })
-    const t7 = await patchStatus(newbie.clerkId!, order1.id, { status: 'DELIVERED', photoUrl: 'https://ronb.local/proof.jpg' })
+    const t7 = await patchStatus(newbie.clerkId!, order1.id, { status: 'DELIVERED', proofPath: 'https://ronb.local/proof.jpg' })
     assert(t7.status === 200, `OFFLINE-but-assigned runner CAN mark DELIVERED (status ${t7.status}) — ACTIVE gate did NOT block completion`)
     assert(await statusOf(order1.id) === 'DELIVERED', 'order now DELIVERED (not stranded)')
 

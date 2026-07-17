@@ -228,14 +228,14 @@ async function main() {
 
     // ── B3: same-fair OTHER runner cannot DELIVER A1's order ───────────────────
     console.log('\n[B3] runner A2 CANNOT mark A1’s order delivered')
-    const b3 = await patchStatus(A2.user.clerkId!, orderA.id, { status: 'DELIVERED', photoUrl: 'https://rbseed.local/p.jpg' })
+    const b3 = await patchStatus(A2.user.clerkId!, orderA.id, { status: 'DELIVERED', proofPath: 'https://rbseed.local/p.jpg' })
     // The CODE matters: A2 must be refused for OWNERSHIP, not for approval.
     assertRejected(b3, 403, 'NOT_YOUR_DELIVERY', 'A2 deliver A1’s order')
     assert(await statusOf(orderA.id) === 'RUNNER_COLLECTED', 'orderA NOT delivered by A2')
 
     // ── B4: cross-fair runner cannot DELIVER either ────────────────────────────
     console.log('\n[B4] runner B (fair B) CANNOT deliver a fair-A order')
-    const b4 = await patchStatus(B.user.clerkId!, orderA.id, { status: 'DELIVERED', photoUrl: 'https://rbseed.local/p.jpg' })
+    const b4 = await patchStatus(B.user.clerkId!, orderA.id, { status: 'DELIVERED', proofPath: 'https://rbseed.local/p.jpg' })
     assert(b4.status === 403, `cross-fair deliver → 403 (got ${b4.status})`)
     assert(b4.json?.error?.code !== 'RUNNER_NOT_APPROVED',
       `…and NOT because B was unapproved — the 403 is the FAIR BOUNDARY (code ${b4.json?.error?.code})`)
@@ -243,7 +243,7 @@ async function main() {
 
     // ── positive control: A1 delivers its own order ────────────────────────────
     console.log('\n[+] runner A1 CAN deliver its own order (positive control)')
-    const p2 = await patchStatus(A1.user.clerkId!, orderA.id, { status: 'DELIVERED', photoUrl: 'https://rbseed.local/p.jpg' })
+    const p2 = await patchStatus(A1.user.clerkId!, orderA.id, { status: 'DELIVERED', proofPath: 'https://rbseed.local/p.jpg' })
     assert(p2.status === 200, `A1 deliver → 200 (got ${p2.status}) ${JSON.stringify(p2.json).slice(0,120)}`)
     assert(await statusOf(orderA.id) === 'DELIVERED', 'orderA now DELIVERED')
 
