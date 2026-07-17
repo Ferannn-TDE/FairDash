@@ -3,6 +3,8 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { stripe } from '@/lib/stripe'
 import { db } from '@/lib/db'
+import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
+import { ACTIVE_STATUSES, COMPLETED_STATUSES } from '@/lib/order-status'
 import { logger } from '@/lib/logger'
 
 // GET /api/admin/events/[id]/money
@@ -117,6 +119,39 @@ export async function GET(
       logger.warn('[AdminMoney] platform balance unavailable', { error: String(err) })
     }
 
+    // ── ESTIMATED (pre-accrual) — the ONE non-ledger figure, and the reason it earns an
+    //    exception. A VendorEarning row is written only when a payout ACCRUES (order complete
+    //    + refund window). Between placement and accrual the vendor's OWN screens already show
+    //    this money as "~$X pending". Showing only the ledger here made that money INVISIBLE to
+    //    the admin — $0 payable while the vendor saw $6.92 — a blind spot in a panel built for
+    //    full money authority. So we surface the SAME estimate the vendor sees, via the SAME
+    //    shared helper (lib/vendor-earnings) — NOT a second formula — kept in its OWN field,
+    //    labelled "estimated / not in the ledger", never blended into a ledger total. Only
+    //    (order,vendor) pairs with NO VendorEarning row count, so it can't double-count payable.
+    const accruedPairs = new Set(vendorEarnings.map(e => `${e.orderId}|${e.vendorId}`))
+    const estOrders = await db.order.findMany({
+      where: { eventId: event.id, voidedAt: null, status: { in: [...ACTIVE_STATUSES, ...COMPLETED_STATUSES] } },
+      select: {
+        id: true, total: true,
+        orderItems: { select: { vendorId: true, subtotal: true } },
+        payouts: { select: { vendorId: true, netAmount: true, reversedAt: true } },
+        refunds: { select: { vendorId: true, status: true, amountCents: true } },
+        vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      },
+    })
+    let estCents = 0, estOrderCount = 0
+    for (const o of estOrders) {
+      const vids = [...new Set(o.orderItems.map(i => i.vendorId))]
+      let counted = false
+      for (const vid of vids) {
+        if (accruedPairs.has(`${o.id}|${vid}`)) continue // already represented in a ledger total
+        const e = computeVendorOrderEarnings(o, vid)
+        if (e.status === 'estimated') { estCents += e.cents; counted = true }
+      }
+      if (counted) estOrderCount++
+    }
+    const vendorEstimatedPreAccrual = { cents: estCents, orderCount: estOrderCount }
+
     // Recent admin actions on this fair's money — the audit trail, surfaced.
     const recentActions = await db.adminMoneyAction.findMany({
       where: { eventId: event.id },
@@ -134,6 +169,11 @@ export async function GET(
 
       vendors: {
         totals: vendorTotals,
+        // NOT a ledger total — the vendor's own estimate, surfaced (see block above). Rendered
+        // as a visually distinct, explicitly-"not settled" figure so it can never read as cash.
+        estimatedPreAccrual: vendorEstimatedPreAccrual,
+        estimatedPreAccrualNote:
+          'Estimated take-home for orders not yet accrued into the ledger — the same "~pending" figure the vendor sees, via the same helper. NOT settled money and NOT owed-in-ledger; shown so pre-payout money is not invisible to the admin.',
         frozen: vendorEarnings
           .filter(e => e.vendor.payoutsFrozenAt)
           .map(e => ({ vendorId: e.vendorId, name: e.vendor.name, reason: e.vendor.payoutsFrozenReason })),

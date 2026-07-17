@@ -439,7 +439,13 @@ export default function VendorDashboardPage() {
 
   const incoming     = useMemo(() => Object.values(ordersById).filter(o => o.status === 'PLACED'),                                   [ordersById])
   const active       = useMemo(() => Object.values(ordersById).filter(o => ['ACCEPTED', 'PREPARING'].includes(o.status)),            [ordersById])
-  const ready        = useMemo(() => Object.values(ordersById).filter(o => ['READY', 'RUNNER_COLLECTED'].includes(o.status)),        [ordersById])
+  // READY only — NOT RUNNER_COLLECTED. The handoff boundary: while an order is READY the food
+  // is on the vendor's counter awaiting the runner, so it stays on the vendor's board (they
+  // must hand it over). The moment a runner collects it (RUNNER_COLLECTED) the ball is in the
+  // runner's court and it leaves this board. This matches /active, which excludes
+  // RUNNER_COLLECTED from ACTIVE_VENDOR_STATUSES — so including it here was dead code that only
+  // claimed to show orders the endpoint never delivers.
+  const ready        = useMemo(() => Object.values(ordersById).filter(o => o.status === 'READY'),                                    [ordersById])
   const completed    = useMemo(() => Object.values(ordersById).filter(o => isCompleted(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()), [ordersById])
   const failedOrders = useMemo(() => Object.values(ordersById).filter(o => isFailed(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()),   [ordersById])
   const inQueue      = incoming.length + active.length + ready.length
