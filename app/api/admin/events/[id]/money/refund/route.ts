@@ -4,6 +4,7 @@ import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { refundVendorPortion } from '@/lib/process-refund'
+import { writeMoneyAudit } from '@/lib/admin-money'
 import { logger } from '@/lib/logger'
 
 // POST /api/admin/events/[id]/money/refund
@@ -80,20 +81,18 @@ export async function POST(
         orderId: order.id, vendorId, reason, actor: adminUser.id,
       })
 
-      // Audit EVERY refund, per vendor slice — same durable trail as hold/freeze.
-      // Written per-slice (not per-request) so the record names whose money moved.
-      await db.adminMoneyAction.create({
-        data: {
-          adminClerkId, eventId: event.id, action: 'REFUND',
-          payeeType: 'vendor', payeeId: vendorId, orderId: order.id,
-          amountCents: res.sliceCents, reason,
-          metadata: {
-            case: res.case,
-            status: res.status,
-            stripeRefundId: res.stripeRefundId,
-            stripeReversalId: res.stripeReversalId,
-            negativeBalanceCents: res.negativeBalanceCents,
-          },
+      // Audit EVERY refund, per vendor slice — same durable trail as hold/freeze, through the
+      // ONE shared writer. This is the admin refund route, so the actor is 'admin'.
+      await writeMoneyAudit({ id: adminClerkId, type: 'admin' }, event.id, {
+        action: 'REFUND',
+        payeeType: 'vendor', payeeId: vendorId, orderId: order.id,
+        amountCents: res.sliceCents, reason,
+        metadata: {
+          case: res.case,
+          status: res.status,
+          stripeRefundId: res.stripeRefundId,
+          stripeReversalId: res.stripeReversalId,
+          negativeBalanceCents: res.negativeBalanceCents,
         },
       })
 

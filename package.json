@@ -10,6 +10,7 @@
     "lint": "eslint . --ext js,jsx,ts,tsx --report-unused-disable-directives --max-warnings 0",
     "server": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' server.ts",
     "worker": "tsx workers/index.ts",
+    "migrate": "tsx scripts/safe-migrate.ts",
     "test:c1": "tsx scripts/test-c1.ts"
   },
   "dependencies": {

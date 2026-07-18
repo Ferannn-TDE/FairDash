@@ -358,7 +358,7 @@ async function main() {
     console.log('\n[11] AUDIT: every admin money action is recorded (who / what / whose money / why)')
     const audits = await prisma.adminMoneyAction.findMany({ where: { eventId: ev.id }, orderBy: { createdAt: 'asc' } })
     assert(audits.length >= 10, `${audits.length} AdminMoneyAction rows written`)
-    assert(audits.every(a => a.adminClerkId === ADMIN), 'every row attributes the acting admin')
+    assert(audits.every(a => a.actorId === ADMIN && a.actorType === 'admin'), 'every row attributes the acting admin (actorId + actorType=admin)')
     assert(audits.every(a => !!a.reason?.trim()), 'every row carries a stated reason')
     assert(audits.every(a => a.eventId === ev.id), 'every row is fair-scoped')
     assert(audits.some(a => a.action === 'HOLD') && audits.some(a => a.action === 'RELEASE')

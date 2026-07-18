@@ -48,7 +48,7 @@ interface RunnerEarning {
   runner: { payoutsFrozenAt: string | null; payoutsFrozenReason: string | null; user: { name: string | null } | null }
 }
 interface AdminAction {
-  id: string; adminClerkId: string; action: string
+  id: string; actorId: string; actorType: string; action: string
   payeeType: string; payeeId: string; amountCents: number | null
   reason: string; createdAt: string
 }
@@ -419,11 +419,12 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
         </div>
       )}
 
-      {/* The audit trail, surfaced. Every action here is attributed to the acting admin
-          (AdminMoneyAction.adminClerkId) — this is the record if a payee contests it. */}
+      {/* The audit trail, surfaced. Every action is attributed to WHO actually acted
+          (AdminMoneyAction.actorId + actorType — admin / organizer / reconciler / system) —
+          this is the record if a payee contests it. */}
       <div className="space-y-2">
         <h2 className="font-bebas text-lg tracking-wide text-white flex items-center gap-2">
-          <RotateCcw className="w-4 h-4 text-text-gray" /> Recent admin money actions
+          <RotateCcw className="w-4 h-4 text-text-gray" /> Recent money actions
         </h2>
         {recentAdminActions.length === 0 ? (
           <p className="text-text-gray text-xs">No admin money actions on this fair yet.</p>
@@ -441,7 +442,9 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-[0.6rem] text-text-gray">{new Date(a.createdAt).toLocaleString()}</p>
-                  <p className="text-[0.6rem] text-text-gray/60 truncate max-w-[12rem]">by {a.adminClerkId}</p>
+                  <p className="text-[0.6rem] text-text-gray/60 truncate max-w-[12rem]">
+                    by {a.actorId}{a.actorType !== 'admin' && <span className="text-neon-pink/70"> ({a.actorType})</span>}
+                  </p>
                 </div>
               </div>
             ))}
