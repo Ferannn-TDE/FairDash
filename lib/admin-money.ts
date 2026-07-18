@@ -38,7 +38,7 @@ import { ApiError } from './api-error'
 import { logger } from './logger'
 
 export type PayeeType = 'vendor' | 'runner' | 'organizer'
-export type MoneyActionType = 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE'
+export type MoneyActionType = 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND'
 
 export interface AdminMoneyContext {
   /** From requireAdminFairContext — proves platform admin + resolves the fair. */
@@ -57,24 +57,34 @@ export interface MoneyActionResult {
   auditId: string
 }
 
-/** Payee-agnostic audit write. Always called inside the state-change transaction. */
-function auditRow(
-  ctx: AdminMoneyContext,
-  fields: {
-    action: MoneyActionType
-    payeeType: PayeeType
-    payeeId: string
-    orderId?: string | null
-    earningId?: string | null
-    amountCents?: number | null
-    reason: string
-    metadata?: Record<string, unknown>
-  },
-) {
+/** WHO acted on money — recorded honestly. Not admin-only: an organizer refund, a reconciler
+ *  sweep, or a system/webhook path each writes its own actor here. Never lie about the actor
+ *  by routing a non-admin action through an admin field. */
+export type MoneyActor = { id: string; type: 'admin' | 'organizer' | 'system' | 'reconciler' }
+
+interface AuditFields {
+  action: MoneyActionType
+  payeeType: PayeeType
+  payeeId: string
+  orderId?: string | null
+  earningId?: string | null
+  amountCents?: number | null
+  reason: string
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * The ONE money-audit writer. Exported so every actor — admin routes here, the accrual
+ * reverser, the reconciler backstop — records through the same place with an HONEST actor,
+ * rather than each inventing its own AdminMoneyAction.create (the two-writers-one-truth trap).
+ * Always called inside the state-change transaction.
+ */
+export function writeMoneyAudit(actor: MoneyActor, eventId: string, fields: AuditFields) {
   return db.adminMoneyAction.create({
     data: {
-      adminClerkId: ctx.adminClerkId,
-      eventId: ctx.eventId,
+      actorId: actor.id,
+      actorType: actor.type,
+      eventId,
       action: fields.action,
       payeeType: fields.payeeType,
       payeeId: fields.payeeId,
@@ -86,6 +96,11 @@ function auditRow(
     },
     select: { id: true },
   })
+}
+
+/** Admin wrapper — the admin routes always act as an 'admin' actor (ctx.adminClerkId). */
+function auditRow(ctx: AdminMoneyContext, fields: AuditFields) {
+  return writeMoneyAudit({ id: ctx.adminClerkId, type: 'admin' }, ctx.eventId, fields)
 }
 
 // ─── Per-order holds (vendor + runner) ────────────────────────────────────────
