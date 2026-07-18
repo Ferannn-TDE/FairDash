@@ -1376,8 +1376,15 @@ model VendorEarning {
 model AdminMoneyAction {
   id String @id @default(cuid())
 
-  /// The acting platform admin (Clerk id, from requireAdminFairContext).
-  adminClerkId String
+  /// WHO actually acted. Not admin-only: a money action can be taken by an admin (Clerk id),
+  /// an organizer (their user id, e.g. an organizer refund), the reconciler, or the system
+  /// (webhook-driven). The audit must record who truly acted — routing a non-admin action
+  /// through an "adminClerkId" field would be attribution that lies. Paired with actorType.
+  actorId String
+
+  /// admin | organizer | system | reconciler — the actor's role. Grandfathered: every row that
+  /// existed before this field was added was an admin action, so the default is 'admin'.
+  actorType String @default("admin")
 
   /// HOLD | RELEASE | CANCEL | FREEZE | UNFREEZE
   action String
@@ -1408,7 +1415,8 @@ model AdminMoneyAction {
 
   @@index([eventId, createdAt])
   @@index([payeeType, payeeId])
-  @@index([adminClerkId])
+  @@index([actorId])
+  @@index([actorType])
   @@index([action])
 }
 
