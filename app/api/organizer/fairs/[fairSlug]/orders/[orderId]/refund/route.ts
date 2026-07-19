@@ -56,7 +56,7 @@ export async function POST(
     const results: Array<{ vendorId: string; case: 1 | 2 | null; status: string; refundId: string | null; reversalId: string | null; negativeBalanceCents: number }> = []
     for (const vendorId of targets) {
       try {
-        const res = await refundVendorPortion({ orderId, vendorId, reason, actor: dbUser.id })
+        const res = await refundVendorPortion({ orderId, vendorId, reason, actor: dbUser.id, moneyActor: { id: dbUser.id, type: 'organizer' } })
         results.push({
           vendorId, case: res.case, status: res.status,
           refundId: res.stripeRefundId, reversalId: res.stripeReversalId,

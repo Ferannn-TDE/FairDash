@@ -1,5 +1,6 @@
 import { config } from 'dotenv'; config({ path: '.env.local' })
-import { db } from '../lib/db'
+import { guardedPrisma } from '../lib/prod-write-guard'
+const db = guardedPrisma()
 import { getFairOrders } from '../lib/fair-orders'
 import { getFairVendors } from '../lib/fair-vendors'
 

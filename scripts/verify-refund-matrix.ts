@@ -20,7 +20,7 @@ const C = (n: number) => Math.round(n * 100)
 const rows: string[] = []
 
 async function main() {
-  const { db } = await import('../lib/db.js')
+  const { guardedPrisma } = await import('../lib/prod-write-guard.js'); const db = guardedPrisma()
   const { stripe } = await import('../lib/stripe.js')
   const { refundVendorPortion } = await import('../lib/process-refund.js')
 

@@ -29,7 +29,11 @@ const SUITES: Suite[] = [
   { group: 'money',    name: 'b2-runner-payout',       file: 'scripts/b2-runner-payout-test.ts' },
   { group: 'money',    name: 'b3-organizer-batch',     file: 'scripts/b3-organizer-payout-test.ts' },
   { group: 'money',    name: 'b4-tip-refund',          file: 'scripts/b4-tip-refund-test.ts' },
-  { group: 'money',    name: 'refund-engine',          file: 'scripts/test-refunds.ts' },
+  // refund-engine (test-refunds) is DISABLED: it writes to the REAL Italian Fest event for the
+  // connected Stripe test vendors, and prod-write-guard now BLOCKS that. Re-enable once it is
+  // repointed at a disposable event with test-mode-connected vendors (open item). Its coverage
+  // gap is tracked; running it against prod was the third pollution incident.
+  // { group: 'money',    name: 'refund-engine',          file: 'scripts/test-refunds.ts' },
   { group: 'money',    name: 'payout-split',           file: 'scripts/test-payout-split.ts' },
 
   // Boundaries — who may reach whose data. A false green here is the dangerous kind.
@@ -59,8 +63,11 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
   { group: 'correctness', name: 'incoming-divergence',    file: 'scripts/incoming-divergence-guard.ts' },
   { group: 'correctness', name: 'migration-safety',       file: 'scripts/migration-safety-guard.ts' },
+  { group: 'correctness', name: 'prod-write-guard',       file: 'scripts/prod-write-guard-test.ts' },
+  { group: 'correctness', name: 'sweep-summary',         file: 'scripts/sweep-summary-guard.ts' },
   { group: 'correctness', name: 'vendor-vos-advance',     file: 'scripts/vendor-vos-advance-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
+  { group: 'money',       name: 'reverser-pattern-t',     file: 'scripts/reverser-pattern-t-guard.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
 ]
