@@ -123,6 +123,15 @@ export async function accrueVendorEarnings(orderId: string): Promise<number> {
     subtotals[item.vendorId] = (subtotals[item.vendorId] ?? 0) + Math.round(item.subtotal * 100)
   }
 
+  // Which portions already have a row — so we log only GENUINELY-NEW accruals, not idempotent
+  // re-accruals. A new accrual raises the admin's payable, and this path (executor / Pattern S)
+  // was SILENT — it moved $80 during a watch window with no log line (Q5). Now it emits a
+  // prod-visible ledger-delta so money moving outside the sweep is never invisible.
+  const existing = new Set(
+    (await db.vendorEarning.findMany({ where: { orderId }, select: { vendorId: true } })).map(e => e.vendorId),
+  )
+  const newlyAccrued: { vendorId: string; cents: number }[] = []
+
   let accrued = 0
   for (const [vendorId, subtotalCents] of Object.entries(subtotals)) {
     await db.vendorEarning.upsert({
@@ -132,7 +141,16 @@ export async function accrueVendorEarnings(orderId: string): Promise<number> {
       // cancel, or a completed payout must survive re-accrual.
       update: { subtotalCents },
     })
+    if (!existing.has(vendorId)) newlyAccrued.push({ vendorId, cents: subtotalCents })
     accrued++
+  }
+
+  if (newlyAccrued.length) {
+    const total = newlyAccrued.reduce((s, n) => s + n.cents, 0)
+    logger.warn(
+      `[Ledger] accrued ${newlyAccrued.length} vendor portion(s) on order ${orderId} (event ${order.eventId}): ` +
+      `+$${(total / 100).toFixed(2)} [${newlyAccrued.map(n => `${n.vendorId.slice(-6)}+${n.cents}¢`).join(' ')}]`,
+    )
   }
   return accrued
 }

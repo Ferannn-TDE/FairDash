@@ -1,5 +1,6 @@
 import { config } from 'dotenv'; config({ path: '.env.local' })
-import { db } from '../lib/db'
+import { guardedPrisma } from '../lib/prod-write-guard'
+const db = guardedPrisma()
 import { VendorStatus } from '@prisma/client'
 import { isVendorReadinessEnforced, readinessWhereIfEnforced, readyVendorWhere } from '../lib/vendor-readiness'
 

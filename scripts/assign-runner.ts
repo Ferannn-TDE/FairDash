@@ -1,7 +1,8 @@
 import 'dotenv/config'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
-import { db } from '../lib/db'
+import { guardedPrisma } from '../lib/prod-write-guard'
+const db = guardedPrisma()
 import { syncUserRoleMetadata } from '../lib/role-sync'
 
 // Assign a user as a Runner for an event. There is no production runner-creation

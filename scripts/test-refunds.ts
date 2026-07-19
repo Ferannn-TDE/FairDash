@@ -27,7 +27,11 @@ const no = (m: string) => { console.log(`  ❌ ${m}`); fail++ }
 const C = (n: number) => Math.round(n * 100)
 
 async function main() {
-  const { db } = await import('../lib/db.js')
+  // Guarded client — this suite writes to a REAL event (Italian Fest) for the connected
+  // Stripe test vendors, so guardedPrisma BLOCKS it against the prod DB until it is repointed
+  // at a disposable event (open item). It cannot silently pollute prod again.
+  const { guardedPrisma } = await import('../lib/prod-write-guard.js')
+  const db = guardedPrisma()
   const { stripe } = await import('../lib/stripe.js')
   const { refundVendorPortion } = await import('../lib/process-refund.js')
 
@@ -86,6 +90,9 @@ async function main() {
   // ── T1: CASE 1 — within-window per-vendor refund (no payout fired) ────────
   console.log('\nT1 — CASE 1 per-vendor refund within window (A=$40, B=$30)')
   const o1 = await createOrder({ [VENDOR_A]: 40, [VENDOR_B]: 30 })
+  // Seed an ACCRUAL for A before refunding — the refund-time hook must reverse this phantom
+  // (refund-AFTER-accrual), instantly, without waiting for Pattern T.
+  await db.vendorEarning.create({ data: { eventId: EVENT_ID, orderId: o1.orderId, vendorId: VENDOR_A, subtotalCents: C(40), status: 'accrued' } })
   const r1 = await refundVendorPortion({ orderId: o1.orderId, vendorId: VENDOR_A, reason: 'test case1', actor: 'test' })
   r1.case === 1 ? ok('classified CASE 1 (payout not fired)') : no(`expected CASE 1, got ${r1.case}`)
   r1.sliceCents === C(40) ? ok(`customer refunded the SLICE $40.00 (${r1.sliceCents}¢), NOT the fee`) : no(`slice ${r1.sliceCents}¢ != 4000`)
@@ -98,6 +105,18 @@ async function main() {
   vosA?.status === 'REFUNDED' ? ok('vendor A portion marked REFUNDED') : no(`A status ${vosA?.status}`)
   const vosB = await db.vendorOrderStatus.findFirst({ where: { orderId: o1.orderId, vendorId: VENDOR_B }, select: { status: true } })
   vosB?.status === 'COMPLETED' ? ok('vendor B untouched (still COMPLETED)') : no(`B status ${vosB?.status}`)
+  // ── Refund-time hook: the A accrual seeded above must now be REVERSED (refund-after-accrual) ─
+  const accrualA = await db.vendorEarning.findFirst({ where: { orderId: o1.orderId, vendorId: VENDOR_A }, select: { status: true } })
+  accrualA?.status === 'cancelled' ? ok('refund-time hook REVERSED the A accrual (accrued→cancelled)') : no(`A accrual status ${accrualA?.status} — hook did not reverse`)
+  const revAudit = await db.adminMoneyAction.findFirst({ where: { orderId: o1.orderId, payeeId: VENDOR_A, action: 'CANCEL' }, orderBy: { createdAt: 'desc' }, select: { actorType: true, actorId: true } })
+  revAudit?.actorType === 'system' && revAudit?.actorId === 'test'
+    ? ok(`reversal audited with the refund's actor (actorId=test, actorType=system) — not admin-by-default`)
+    : no(`reversal audit actor ${revAudit?.actorId}/${revAudit?.actorType}`)
+  const vosBstill = await db.vendorOrderStatus.findFirst({ where: { orderId: o1.orderId, vendorId: VENDOR_B }, select: { status: true } })
+  const accrualBcheck = await db.vendorEarning.findFirst({ where: { orderId: o1.orderId, vendorId: VENDOR_B }, select: { status: true } })
+  !accrualBcheck || accrualBcheck.status !== 'cancelled' || vosBstill?.status !== 'REFUNDED'
+    ? ok('B (untouched, still COMPLETED) had no accrual reversed — the hook is portion-scoped')
+    : no('the hook wrongly touched B')
 
   // ── T3: idempotency — re-run T1 refund ────────────────────────────────────
   console.log('\nT3 — idempotency (re-run A refund)')

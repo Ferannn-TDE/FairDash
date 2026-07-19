@@ -24,7 +24,7 @@ const no = (m: string) => { console.log(`  ❌ ${m}`); fail++ }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 async function main() {
-  const { db } = await import('../lib/db.js')
+  const { guardedPrisma } = await import('../lib/prod-write-guard.js'); const db = guardedPrisma()
   const { stripe } = await import('../lib/stripe.js')
   const { handleChargebackCreated, handleChargebackClosed } = await import('../lib/process-chargeback.js')
 

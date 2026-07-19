@@ -18,7 +18,8 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
-import { db } from '../lib/db.js'
+import { guardedPrisma } from '../lib/prod-write-guard.js'
+const db = guardedPrisma()
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

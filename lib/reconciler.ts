@@ -43,6 +43,7 @@ import { enqueueJobSafely } from './queue-safe'
 import { VENDOR_ACCEPT_TIMEOUT_MS, REFUND_WINDOW_MS, CURBSIDE_WAIT_TIMEOUT_MS } from './constants'
 import { logger } from './logger'
 import { deriveMasterStatus, canAdvance, reconcileMasterStatus, type MasterStatus, type FulfillmentType } from './reconcile-order-status'
+import { reverseAccrualForRefundedPortion } from './reverse-accrual'
 
 // ─── Tunables (all overridable per-run) ─────────────────────────────────────
 
@@ -74,6 +75,15 @@ export interface SweepOptions {
    * started writing status outside the aggregator.
    */
   backstopEnabled?: boolean
+  /**
+   * Pattern T (phantom-accrual backstop) CANCELS an 'accrued' VendorEarning whose own portion
+   * is REFUNDED/DECLINED/CANCELLED (owed nothing) only when true. Default false: the sweep
+   * DETECTS + ALERTS which rows it WOULD cancel (via the reverser in dryRun), so its debut can
+   * never move the ledger unreviewed. Flip via RECONCILER_PATTERN_T_ENABLED after diffing the
+   * reported set. Its first enabled run cleans the existing residual (the 148) as the
+   * reconciler — honest actor — replacing any one-off script.
+   */
+  patternTEnabled?: boolean
 }
 
 const DEFAULTS = {
@@ -99,10 +109,10 @@ export interface SweepSummary {
     unresolvedHolds: number
   }
   /** Counts of orders/holds actually repaired (or, in dryRun, that WOULD be). */
-  repaired: { A: number; B: number; C: number; D: number; E: number; F: number; G: number; H: number; I: number; J: number; K: number; L: number; M: number; N: number; O: number; P: number; Q: number; R: number; S: number }
+  repaired: { A: number; B: number; C: number; D: number; E: number; F: number; G: number; H: number; I: number; J: number; K: number; L: number; M: number; N: number; O: number; P: number; Q: number; R: number; S: number; T: number }
   /** Order/PI ids touched per pattern (for the human-readable log). */
   details: {
-    A: string[]; B: string[]; C: string[]; D: string[]; E: string[]; F: string[]; G: string[]; H: string[]; I: string[]; J: string[]; K: string[]; L: string[]; M: string[]; N: string[]; O: string[]; P: string[]; Q: string[]; R: string[]; S: string[]
+    A: string[]; B: string[]; C: string[]; D: string[]; E: string[]; F: string[]; G: string[]; H: string[]; I: string[]; J: string[]; K: string[]; L: string[]; M: string[]; N: string[]; O: string[]; P: string[]; Q: string[]; R: string[]; S: string[]; T: string[]
   }
   /** Unrepairable-by-design — needs a human. Money is safe; we just can't auto-fix. */
   alerted: string[]
@@ -137,6 +147,8 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     opts.patternEEnabled ?? (process.env.RECONCILER_PATTERN_E_ENABLED === 'true')
   const backstopEnabled =
     opts.backstopEnabled ?? (process.env.RECONCILER_BACKSTOP_ENABLED === 'true')
+  const patternTEnabled =
+    opts.patternTEnabled ?? (process.env.RECONCILER_PATTERN_T_ENABLED === 'true')
 
   const startedAt = new Date()
   const windowStart = new Date(startedAt.getTime() - windowHours * 3600_000)
@@ -149,8 +161,8 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     patternEEnabled,
     backstopEnabled,
     scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
-    repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0 },
-    details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [] },
+    repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0, T: 0 },
+    details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [], T: [] },
     alerted: [],
     ambiguousSkipped: 0,
     backstopWarnings: [],
@@ -182,6 +194,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternP(sum, { maxPerPattern, dryRun })
     await patternQ(sum, { maxPerPattern, dryRun })
     await patternR(sum, { maxPerPattern, dryRun })
+    await patternT(sum, { maxPerPattern, dryRun, patternTEnabled })
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -201,19 +214,40 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   sum.finishedAt = finishedAt.toISOString()
   sum.durationMs = finishedAt.getTime() - startedAt.getTime()
 
+  // ── THE SUMMARY MUST BE UNCONDITIONAL AND PROD-VISIBLE (Q5) ──────────────────
+  // logger.info is a HARD NO-OP in production (logger.ts: `if (!isDev) return`), so the old
+  // info summary NEVER reached Railway — a sweep that changed the ledger logged "clean" while
+  // repaired counts were invisible. The fix: one flat, greppable line at WARN (captured in
+  // prod), emitted EVERY sweep, carrying repaired-per-pattern AND the resulting payable total.
+  // Now silence provably means zero — it can't be info-suppressed. (info line kept for dev.)
+  let payableCents = 0
+  try {
+    payableCents = (await db.vendorEarning.aggregate({ _sum: { subtotalCents: true }, where: { status: 'accrued' } }))._sum.subtotalCents ?? 0
+  } catch { payableCents = -1 } // -1 = couldn't read; still emit the line, never swallow
+  logger.warn(formatSweepSummary(sum, payableCents))
+
   logger.info('[Reconciler] sweep complete', {
-    dryRun,
-    patternEEnabled,
-    scanned: sum.scanned,
-    repaired: sum.repaired,
-    alerted: sum.alerted.length,
-    ambiguousSkipped: sum.ambiguousSkipped,
-    durationMs: sum.durationMs,
+    dryRun, patternEEnabled, scanned: sum.scanned, repaired: sum.repaired,
+    alerted: sum.alerted.length, ambiguousSkipped: sum.ambiguousSkipped, durationMs: sum.durationMs,
   })
   if (sum.alerted.length) logger.warn('[Reconciler] ALERTS (human review)', { alerted: sum.alerted })
   if (sum.backstopWarnings.length) logger.warn('[Reconciler] BACKSTOP WARNINGS', { backstopWarnings: sum.backstopWarnings })
 
   return sum
+}
+
+/**
+ * The one flat, greppable sweep-summary line — pure, so it can be proven without running a
+ * sweep. Always names the repaired TOTAL (so "repaired=0" is an explicit, unmissable zero),
+ * lists only the non-zero patterns, and carries the resulting payable total. `[Reconciler]
+ * SUMMARY` is the grep anchor; any non-zero repaired is the signal money moved.
+ */
+export function formatSweepSummary(sum: SweepSummary, payableCents: number): string {
+  const total = Object.values(sum.repaired).reduce((a, b) => a + b, 0)
+  const nonZero = Object.entries(sum.repaired).filter(([, n]) => n > 0).map(([p, n]) => `${p}${n}`).join(' ')
+  const payable = payableCents < 0 ? '(unreadable)' : `$${(payableCents / 100).toFixed(2)}`
+  return `[Reconciler] SUMMARY repaired=${total}${nonZero ? ` [${nonZero}]` : ''} payable=${payable} ` +
+    `alerts=${sum.alerted.length} ambiguousSkipped=${sum.ambiguousSkipped} dryRun=${sum.dryRun} ${sum.durationMs}ms`
 }
 
 // ─── PATTERN A — Paid in Stripe, not fully placed (boundary 1) ───────────────
@@ -1068,4 +1102,61 @@ async function patternS(
       )
     }
   }
+}
+
+// ─── PATTERN T — phantom accrual on a refunded/declined portion → CANCEL ─────
+// The EXCESS counterpart to Pattern S's MISSING: an 'accrued' VendorEarning whose OWN portion
+// is REFUNDED/DECLINED/CANCELLED is owed nothing — it inflates the admin's payableCents with
+// money no one should receive (the executor already skips it at pay time, so no wrong transfer;
+// this is a ledger-VIEW correction). It is BOTH the race net between accrual and refund AND the
+// mechanism that cleans the existing residual as the reconciler (honest actor), not a one-off.
+//
+// SAFETY: routes every cancel through the ONE shared reverser (reverseAccrualForRefundedPortion),
+// which re-checks the non-payable predicate and REFUSES a payable row — so this can never cancel
+// a legit COMPLETED accrual. DETECT-ONLY unless patternTEnabled (the reverser runs in dryRun),
+// so its debut reports the set + WOULD-cancel total without touching the ledger until reviewed.
+// NOT time-windowed: phantom accruals are permanent until reversed (the residual is months old),
+// so it scans all non-payable-portion accruals, bounded by maxPerPattern.
+async function patternT(
+  sum: SweepSummary,
+  o: { maxPerPattern: number; dryRun: boolean; patternTEnabled: boolean },
+) {
+  // Accrued rows whose OWN vendor portion is non-payable. Query mirrors the reverser's predicate.
+  const NON_PAYABLE = ['REFUNDED', 'DECLINED', 'CANCELLED']
+  const candidates = await db.vendorEarning.findMany({
+    where: {
+      status: 'accrued',
+      order: { voidedAt: null, vendorOrderStatuses: { some: { status: { in: NON_PAYABLE } } } },
+    },
+    select: {
+      orderId: true, vendorId: true, subtotalCents: true,
+      order: { select: { vendorOrderStatuses: { select: { vendorId: true, status: true } } } },
+    },
+    take: o.maxPerPattern,
+  })
+
+  // Filter to the vendor's OWN portion being non-payable (the `some` above is order-level).
+  const phantoms = candidates.filter(e =>
+    NON_PAYABLE.includes(e.order.vendorOrderStatuses.find(v => v.vendorId === e.vendorId)?.status ?? ''))
+
+  if (phantoms.length === 0) return
+
+  // DETECT-ONLY unless enabled — the reverser runs in dryRun so nothing is written.
+  const effectiveDryRun = o.dryRun || !o.patternTEnabled
+  let wouldCents = 0
+  for (const e of phantoms) {
+    const r = await reverseAccrualForRefundedPortion({
+      orderId: e.orderId, vendorId: e.vendorId,
+      actor: { id: 'reconciler', type: 'reconciler' },
+      reason: 'reconciler Pattern-T backstop: accrued on a refunded/declined portion — no earning owed',
+      dryRun: effectiveDryRun,
+    })
+    if (r.reversed) { wouldCents += r.cents; sum.repaired.T += 1; sum.details.T.push(e.orderId) }
+  }
+
+  const verb = effectiveDryRun ? 'WOULD cancel' : 'cancelled'
+  sum.alerted.push(
+    `Pattern T: ${sum.repaired.T} phantom accrual(s) ${verb} — $${(wouldCents / 100).toFixed(2)} of payableCents on refunded/declined portions` +
+    `${effectiveDryRun ? ' (detect-only; set RECONCILER_PATTERN_T_ENABLED=true to act after diffing the set)' : ''}.`,
+  )
 }
