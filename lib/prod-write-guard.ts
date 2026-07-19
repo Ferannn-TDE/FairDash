@@ -25,6 +25,16 @@ export const PROTECTED_EVENT_IDS = new Set<string>([
   'cmni6x63n000011znjwlln5k2', // Italian Fest 2026 — the live event
 ])
 
+// The same events by slug — a script that resolves the event dynamically often does so by
+// urlSlug (event.findFirst({ where: { urlSlug } })) and never mentions the id, so the CI
+// detector greps BOTH. (A fully-dynamic resolver — iterate all events, no literal at all —
+// still evades a static grep; that residual is closed only by the durable fix, a separate
+// test DB. The RUNTIME guard remains sound there: it value-checks the resolved eventId at
+// write time, so any guarded script is caught however it obtained the id.)
+export const PROTECTED_EVENT_SLUGS = new Set<string>([
+  'springfield-state-fair-2026', // Italian Fest 2026's urlSlug
+])
+
 export class ProdWriteBlockedError extends Error {
   constructor(model: string, eventId: string) {
     super(
@@ -36,10 +46,10 @@ export class ProdWriteBlockedError extends Error {
   }
 }
 
-/** The pure check — exported so the guard's positive control can prove it without any real write. */
-export function assertWriteAllowed(model: string, data: unknown): void {
+/** Check one data/where/create object (or array) for a protected eventId. */
+export function assertWriteAllowed(model: string, obj: unknown): void {
   if (process.env.ALLOW_PROD_WRITES === 'true') return
-  const rows = Array.isArray(data) ? data : [data]
+  const rows = Array.isArray(obj) ? obj : [obj]
   for (const d of rows) {
     const eventId = (d as { eventId?: unknown })?.eventId
     if (typeof eventId === 'string' && PROTECTED_EVENT_IDS.has(eventId)) {
@@ -51,6 +61,20 @@ export function assertWriteAllowed(model: string, data: unknown): void {
 /**
  * A PrismaClient that blocks protected-event writes. Drop-in for scripts:
  *   const prisma = guardedPrisma()
+ *
+ * COVERED (write ops, checking BOTH data and where for a protected eventId):
+ *   create · createMany · upsert · update · updateMany · delete · deleteMany
+ * Raw WRITES ($executeRaw / $executeRawUnsafe) are BLOCKED WHOLESALE — the SQL is opaque, so
+ * the guard refuses rather than parse it (use guardedPrisma's typed ops, or ALLOW_PROD_WRITES).
+ * Raw READS ($queryRaw*) pass.
+ *
+ * NOT COVERED (documented, not hidden): a write whose eventId is neither in `data` nor `where`
+ * (e.g. update/delete BY ID where the id was resolved from a protected event elsewhere). The
+ * PROTECTED_EVENT_IDS value-check is SEMANTIC (it inspects the actual eventId at call time, so a
+ * dynamically-resolved event IS caught when it appears in data/where) — but an id-only operation
+ * carries no eventId to inspect. Those are the deliberate-prod receipts (ALLOW_PROD_WRITES). The
+ * CI guard (prod-write-guard-test) is the class net: it forbids ANY script from using an
+ * unguarded client, so a dynamic-resolution script can't sidestep this by not mentioning the id.
  */
 export function guardedPrisma() {
   const base = new PrismaClient({
@@ -61,9 +85,31 @@ export function guardedPrisma() {
       $allModels: {
         create({ model, args, query }) { assertWriteAllowed(model, (args as { data?: unknown }).data); return query(args) },
         createMany({ model, args, query }) { assertWriteAllowed(model, (args as { data?: unknown }).data); return query(args) },
-        upsert({ model, args, query }) { assertWriteAllowed(model, (args as { create?: unknown }).create); return query(args) },
-        update({ model, args, query }) { assertWriteAllowed(model, (args as { data?: unknown }).data); return query(args) },
-        updateMany({ model, args, query }) { assertWriteAllowed(model, (args as { data?: unknown }).data); return query(args) },
+        upsert({ model, args, query }) {
+          assertWriteAllowed(model, (args as { create?: unknown }).create)
+          assertWriteAllowed(model, (args as { update?: unknown }).update)
+          assertWriteAllowed(model, (args as { where?: unknown }).where)
+          return query(args)
+        },
+        update({ model, args, query }) {
+          assertWriteAllowed(model, (args as { data?: unknown }).data)
+          assertWriteAllowed(model, (args as { where?: unknown }).where)
+          return query(args)
+        },
+        updateMany({ model, args, query }) {
+          assertWriteAllowed(model, (args as { data?: unknown }).data)
+          assertWriteAllowed(model, (args as { where?: unknown }).where)
+          return query(args)
+        },
+        delete({ model, args, query }) { assertWriteAllowed(model, (args as { where?: unknown }).where); return query(args) },
+        deleteMany({ model, args, query }) { assertWriteAllowed(model, (args as { where?: unknown }).where); return query(args) },
+      },
+      // Raw WRITES are opaque → refuse wholesale unless ALLOW_PROD_WRITES. Raw reads pass.
+      async $allOperations({ operation, args, query }) {
+        if ((operation === '$executeRaw' || operation === '$executeRawUnsafe') && process.env.ALLOW_PROD_WRITES !== 'true') {
+          throw new ProdWriteBlockedError(`rawWrite(${operation})`, '(opaque SQL — raw writes blocked in scripts)')
+        }
+        return query(args)
       },
     },
   })

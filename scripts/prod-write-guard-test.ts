@@ -14,7 +14,7 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { guardedPrisma, assertWriteAllowed, ProdWriteBlockedError, PROTECTED_EVENT_IDS } from '../lib/prod-write-guard'
+import { guardedPrisma, assertWriteAllowed, ProdWriteBlockedError, PROTECTED_EVENT_IDS, PROTECTED_EVENT_SLUGS } from '../lib/prod-write-guard'
 
 const ITALIAN_FEST = 'cmni6x63n000011znjwlln5k2'
 const prisma = guardedPrisma()
@@ -52,6 +52,17 @@ async function main() {
     const after = await prisma.vendor.count({ where: { eventId: ITALIAN_FEST } })
     assert(before === after, `NO vendor was created in Italian Fest (${before}→${after}) — the block is real, not cosmetic`)
 
+    // ── [1b] the OTHER write ops are blocked too (delete / where-update / raw write) ─
+    // Probed with a filter matching 0 rows, so even an un-blocked op would change nothing.
+    console.log('\n[1b] delete / where-based update / raw WRITE to Italian Fest are ALSO blocked')
+    const blk = async (fn: () => Promise<unknown>) => { try { await fn(); return false } catch (e) { return e instanceof ProdWriteBlockedError } }
+    assert(await blk(() => prisma.vendor.deleteMany({ where: { eventId: ITALIAN_FEST, name: '__never__' } })), 'deleteMany where.eventId=Italian Fest BLOCKED')
+    assert(await blk(() => prisma.vendor.updateMany({ where: { eventId: ITALIAN_FEST, name: '__never__' }, data: { cuisineType: 'x' } })), 'updateMany where.eventId=Italian Fest BLOCKED (where-based)')
+    assert(await blk(() => prisma.$executeRawUnsafe(`UPDATE "Vendor" SET "cuisineType"='x' WHERE id='__never__'`)), 'raw WRITE ($executeRawUnsafe) BLOCKED wholesale')
+    let rawReadOk = true
+    try { await prisma.$queryRawUnsafe(`SELECT 1`) } catch { rawReadOk = false }
+    assert(rawReadOk, 'raw READ ($queryRawUnsafe) passes (reads are fine)')
+
     // ── [2] RUNTIME PASS — writes to a throwaway TEST event are allowed ─────────────
     console.log('\n[2] the guarded client ALLOWS writes to a throwaway test event')
     const ev = await prisma.event.create({ data: { name: `PWG ${rand()}`, urlSlug: `${SLUG}${rand()}`, startDate: new Date(), endDate: new Date(Date.now() + 864e5), status: 'ACTIVE' } })
@@ -60,8 +71,12 @@ async function main() {
     await prisma.vendor.deleteMany({ where: { eventId: ev.id } })
     await prisma.event.delete({ where: { id: ev.id } })
 
-    // ── [3] CLASS CHECK — every script touching a protected event is guarded/allowlisted ─
-    console.log('\n[3] structural: no script writes to a protected event via an unguarded client')
+    // ── [3] CLASS CHECK — every script naming a protected event (by id OR slug) is guarded ─
+    // PREDICATE, stated precisely: this greps each script for a protected event id OR urlSlug.
+    // It catches literal references and the common slug-lookup dynamic resolution. It does NOT
+    // catch a FULLY-dynamic resolver (iterate all events, no literal) — that residual is closed
+    // only by the durable fix (a separate test DB). The runtime guard stays sound there.
+    console.log('\n[3] structural: every script naming a protected event (id OR slug) is guarded/allowlisted')
     // Deliberate-prod-op receipts + read-only diagnostics + the guard's own test.
     const ALLOWLIST = new Set([
       'reverse-phantom-accruals.ts', // remediation receipt (ALLOW_PROD_WRITES intent)
@@ -74,7 +89,9 @@ async function main() {
     const offenders: string[] = []
     for (const f of readdirSync(dir).filter(f => f.endsWith('.ts'))) {
       const src = readFileSync(join(dir, f), 'utf8')
-      const referencesProtected = [...PROTECTED_EVENT_IDS].some(id => src.includes(id))
+      const referencesProtected =
+        [...PROTECTED_EVENT_IDS].some(id => src.includes(id)) ||
+        [...PROTECTED_EVENT_SLUGS].some(slug => src.includes(slug))
       if (!referencesProtected) continue
       if (ALLOWLIST.has(f)) continue
       if (src.includes('guardedPrisma')) continue // uses the guard → fine
