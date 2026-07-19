@@ -79,6 +79,7 @@ export async function POST(
     for (const vendorId of targets) {
       const res = await refundVendorPortion({
         orderId: order.id, vendorId, reason, actor: adminUser.id,
+        moneyActor: { id: adminClerkId, type: 'admin' },
       })
 
       // Audit EVERY refund, per vendor slice — same durable trail as hold/freeze, through the
