@@ -46,6 +46,28 @@ export class ProdWriteBlockedError extends Error {
   }
 }
 
+/** Best-effort SQL text from a raw call's args: string form (`$queryRawUnsafe`) or a
+ *  tagged-template Sql object (`$queryRaw`). Returns null when it can't be read (→ block). */
+export function extractRawSql(args: unknown): string | null {
+  if (typeof args === 'string') return args
+  if (Array.isArray(args) && typeof args[0] === 'string') return args[0]            // $queryRawUnsafe(sql, ...params)
+  const sqlObj = (Array.isArray(args) ? args[0] : args) as { strings?: unknown; sql?: unknown } | undefined
+  if (sqlObj && Array.isArray(sqlObj.strings)) return sqlObj.strings.join(' ')       // Prisma.Sql tagged template
+  if (sqlObj && typeof sqlObj.sql === 'string') return sqlObj.sql
+  return null
+}
+
+/** True only if the statement leads with SELECT or WITH (a read) after stripping leading
+ *  whitespace and comments. A DELETE/UPDATE/INSERT (incl. `… RETURNING *`) is NOT a read. */
+export function leadsWithRead(sql: string): boolean {
+  const cleaned = sql
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')  // block comments
+    .replace(/--[^\n]*/g, ' ')          // line comments
+    .replace(/^\s+/, '')
+  const first = cleaned.slice(0, 6).toUpperCase()
+  return first.startsWith('SELECT') || first.startsWith('WITH')
+}
+
 /** Check one data/where/create object (or array) for a protected eventId. */
 export function assertWriteAllowed(model: string, obj: unknown): void {
   if (process.env.ALLOW_PROD_WRITES === 'true') return
@@ -104,10 +126,21 @@ export function guardedPrisma() {
         delete({ model, args, query }) { assertWriteAllowed(model, (args as { where?: unknown }).where); return query(args) },
         deleteMany({ model, args, query }) { assertWriteAllowed(model, (args as { where?: unknown }).where); return query(args) },
       },
-      // Raw WRITES are opaque → refuse wholesale unless ALLOW_PROD_WRITES. Raw reads pass.
+      // RAW is opaque, and query≠read: `DELETE … RETURNING *` / `UPDATE … RETURNING *` mutate
+      // yet run through $queryRaw. So $executeRaw* is blocked wholesale, and $queryRaw* is
+      // allowed ONLY when the statement leads with SELECT/WITH (a read). Anything else — a
+      // mutation, or SQL we can't parse — is blocked. Imperfect (leading-keyword only), but not
+      // an open door. ALLOW_PROD_WRITES bypasses for deliberate ops.
       async $allOperations({ operation, args, query }) {
-        if ((operation === '$executeRaw' || operation === '$executeRawUnsafe') && process.env.ALLOW_PROD_WRITES !== 'true') {
-          throw new ProdWriteBlockedError(`rawWrite(${operation})`, '(opaque SQL — raw writes blocked in scripts)')
+        if (process.env.ALLOW_PROD_WRITES === 'true') return query(args)
+        if (operation === '$executeRaw' || operation === '$executeRawUnsafe') {
+          throw new ProdWriteBlockedError(`rawWrite(${operation})`, '(raw execute — always a write)')
+        }
+        if (operation === '$queryRaw' || operation === '$queryRawUnsafe') {
+          const sql = extractRawSql(args)
+          if (sql === null || !leadsWithRead(sql)) {
+            throw new ProdWriteBlockedError(`rawQuery(${operation})`, '(non-SELECT raw query may mutate — RETURNING)')
+          }
         }
         return query(args)
       },
