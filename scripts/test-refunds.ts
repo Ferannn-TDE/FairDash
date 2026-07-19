@@ -27,7 +27,11 @@ const no = (m: string) => { console.log(`  ❌ ${m}`); fail++ }
 const C = (n: number) => Math.round(n * 100)
 
 async function main() {
-  const { db } = await import('../lib/db.js')
+  // Guarded client — this suite writes to a REAL event (Italian Fest) for the connected
+  // Stripe test vendors, so guardedPrisma BLOCKS it against the prod DB until it is repointed
+  // at a disposable event (open item). It cannot silently pollute prod again.
+  const { guardedPrisma } = await import('../lib/prod-write-guard.js')
+  const db = guardedPrisma()
   const { stripe } = await import('../lib/stripe.js')
   const { refundVendorPortion } = await import('../lib/process-refund.js')
 
