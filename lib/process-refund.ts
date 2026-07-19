@@ -36,6 +36,16 @@ import { stripe } from './stripe'
 import { splitStripeFee } from './payout-split'
 import { reverseVendorPayout } from './clawback'
 import { logger } from './logger'
+import type { MoneyActor } from './admin-money'
+
+/** Best-effort map of the free-form `actor` string to a MoneyActor, for the accrual-reversal
+ *  audit. Callers with a clear actor pass `moneyActor` explicitly (organizer/admin refunds);
+ *  this only covers the fallbacks — all of which are no-accrual or unambiguously typed. */
+export function deriveMoneyActor(actor?: string): MoneyActor {
+  if (actor === 'reconciler') return { id: 'reconciler', type: 'reconciler' }
+  if (!actor || actor === 'system' || actor.startsWith('vendor:')) return { id: 'system', type: 'system' }
+  return { id: actor, type: 'system' } // a bare id from a path that didn't set moneyActor — record as system
+}
 
 /** Thrown when the order's money identity doesn't hold — refund halted, no money moves. */
 export class RefundReconciliationError extends Error {
@@ -50,6 +60,14 @@ export interface RefundVendorInput {
   vendorId: string
   reason?: string
   actor?: string // id of who initiated (admin/organizer/customer/system)
+  /**
+   * WHO acted, for the accrual-reversal audit (refund-AFTER-accrual). If a refund lands on a
+   * portion that was already accrued, the accrual is a phantom and gets reversed here — the
+   * audit must name the real actor. Callers with a clear actor pass it (organizer refund →
+   * that organizer; admin → admin); otherwise the string `actor` is mapped best-effort. The
+   * reverser is idempotent + refuses payable rows, so this is always safe to run.
+   */
+  moneyActor?: import('./admin-money').MoneyActor
   /**
    * Whether to set this vendor's VendorOrderStatus to REFUNDED (default true).
    * The vendor-decline path passes false: a declined portion stays DECLINED (its
@@ -279,6 +297,25 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
       },
     }),
   ])
+
+  // ── REFUND-AFTER-ACCRUAL: reverse any phantom accrual for this portion ─────────
+  // The one chokepoint every refund funnels through, so hooking here covers all in-app doors
+  // (organizer/admin/customer/dispute/reconciler). If this portion was already accrued (a
+  // refund landing AFTER completion accrued it), that accrual is now owed nothing → reverse it,
+  // attributed to the real actor. Idempotent + refuses payable rows (safe if there's nothing to
+  // reverse — the pre-completion refund/decline case). Fail-soft: reconciler Pattern T is the
+  // 60s race net, so a failure here is a latency hit, never a correctness hole. Dynamic import
+  // keeps the module graph acyclic.
+  try {
+    const { reverseAccrualForRefundedPortion } = await import('./reverse-accrual')
+    const moneyActor = input.moneyActor ?? deriveMoneyActor(actor)
+    await reverseAccrualForRefundedPortion({
+      orderId, vendorId, actor: moneyActor,
+      reason: `accrual reversed at refund time — portion refunded${reason ? ` (${reason})` : ''}`,
+    })
+  } catch (err) {
+    logger.error('[Refund] accrual reversal failed — Pattern T backstops within 60s', { orderId, vendorId, error: String(err) })
+  }
 
   // Reconciliation log (to the cent). FairSynq keeps its 10% UNLESS waiveFee, in
   // which case the waived fee is an explicit, accounted waived-revenue line (not

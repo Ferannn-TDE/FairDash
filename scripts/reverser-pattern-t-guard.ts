@@ -19,6 +19,8 @@ config({ path: '.env.local' })
 import { PrismaClient, OrderStatus } from '@prisma/client'
 import { reverseAccrualForRefundedPortion } from '../lib/reverse-accrual'
 import { runReconciliationSweep } from '../lib/reconciler'
+import { deriveMoneyActor } from '../lib/process-refund'
+import { readFileSync } from 'node:fs'
 
 const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 const SLUG = 'revt-', MAIL = '@revt.local', rand = () => Math.random().toString(36).slice(2, 10)
@@ -114,6 +116,17 @@ async function main() {
     assert(await payable() === payableBeforeT, 'detect-only wrote NOTHING (payable unchanged)')
     const stillAccrued = await prisma.vendorEarning.findFirst({ where: { orderId: o.id, vendorId: vPh.id }, select: { status: true } })
     assert(stillAccrued?.status === 'accrued', 'the phantom is still accrued after detect-only')
+
+    // ── [6] REFUND-TIME HOOK — wiring + actor mapping (end-to-end proven in test-refunds) ──
+    console.log('\n[6] the refund-time hook is wired at the chokepoint + threads the honest actor')
+    assert(deriveMoneyActor('reconciler').type === 'reconciler', 'deriveMoneyActor: reconciler → reconciler')
+    assert(deriveMoneyActor('system').type === 'system' && deriveMoneyActor(undefined).type === 'system', 'deriveMoneyActor: system/undefined → system')
+    assert(deriveMoneyActor('vendor:abc').type === 'system', 'deriveMoneyActor: vendor:X → system (decline path, no accrual)')
+    assert(deriveMoneyActor('user_x').id === 'user_x' && deriveMoneyActor('user_x').type === 'system', 'deriveMoneyActor: bare id → system (callers pass moneyActor explicitly)')
+    const refundSrc = readFileSync('lib/process-refund.ts', 'utf8')
+    assert(refundSrc.includes('reverseAccrualForRefundedPortion'), 'refundVendorPortion hooks the reverser at the chokepoint (covers every refund door)')
+    assert(readFileSync('app/api/organizer/fairs/[fairSlug]/orders/[orderId]/refund/route.ts', 'utf8').includes("type: 'organizer'"), "organizer refund threads moneyActor {type:'organizer'}")
+    assert(readFileSync('app/api/admin/events/[id]/money/refund/route.ts', 'utf8').includes("type: 'admin'"), "admin refund threads moneyActor {type:'admin'}")
 
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)
