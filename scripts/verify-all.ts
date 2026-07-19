@@ -61,6 +61,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'migration-safety',       file: 'scripts/migration-safety-guard.ts' },
   { group: 'correctness', name: 'vendor-vos-advance',     file: 'scripts/vendor-vos-advance-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
+  { group: 'money',       name: 'reverser-pattern-t',     file: 'scripts/reverser-pattern-t-guard.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
 ]
