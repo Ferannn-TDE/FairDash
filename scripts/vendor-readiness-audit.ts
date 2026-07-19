@@ -1,5 +1,6 @@
 import { config } from 'dotenv'; config({ path: '.env.local' })
-import { db } from '../lib/db'
+import { guardedPrisma } from '../lib/prod-write-guard'
+const db = guardedPrisma()
 import { vendorReady, readyVendorWhere } from '../lib/vendor-readiness'
 
 // READ-ONLY vendor-readiness audit for the live fair. Uses the REAL vendorReady
