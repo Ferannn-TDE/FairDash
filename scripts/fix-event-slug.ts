@@ -7,9 +7,9 @@
  * Run with:  npx tsx scripts/fix-event-slug.ts
  */
 
-import { PrismaClient } from '@prisma/client'
+import { guardedPrisma } from '../lib/prod-write-guard'
 
-const prisma = new PrismaClient()
+const prisma = guardedPrisma()
 
 const OLD_SLUG = 'springfield-fair-2026'
 const NEW_SLUG = 'springfield-state-fair-2026'

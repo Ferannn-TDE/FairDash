@@ -35,7 +35,8 @@ const FIXTURE_VENDOR_ID = 'cmni6x68q000211znxtpw0076'
 const FIXTURE_MENU_ID   = 'cmni6x6dg000411zn0dkahkma'
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
-import { db } from '../lib/db.js'
+import { guardedPrisma } from '../lib/prod-write-guard.js'
+const db = guardedPrisma()
 
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
