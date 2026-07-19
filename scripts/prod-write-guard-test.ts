@@ -52,16 +52,22 @@ async function main() {
     const after = await prisma.vendor.count({ where: { eventId: ITALIAN_FEST } })
     assert(before === after, `NO vendor was created in Italian Fest (${before}→${after}) — the block is real, not cosmetic`)
 
-    // ── [1b] the OTHER write ops are blocked too (delete / where-update / raw write) ─
-    // Probed with a filter matching 0 rows, so even an un-blocked op would change nothing.
-    console.log('\n[1b] delete / where-based update / raw WRITE to Italian Fest are ALSO blocked')
+    // ── [1b] the OTHER write ops are blocked too (delete / where-update / raw) ───────
+    // EACH assertion is on the THROW (blk returns true ONLY for a ProdWriteBlockedError) —
+    // NOT on a row count. The 0-row filters are a safety belt (a leak couldn't damage), not
+    // the proof: "0 rows changed" is satisfied by both a working guard and a no-match leak,
+    // so the throw is what distinguishes them.
+    console.log('\n[1b] delete / where-based update / raw (incl. RETURNING) are blocked — asserting the THROW')
     const blk = async (fn: () => Promise<unknown>) => { try { await fn(); return false } catch (e) { return e instanceof ProdWriteBlockedError } }
-    assert(await blk(() => prisma.vendor.deleteMany({ where: { eventId: ITALIAN_FEST, name: '__never__' } })), 'deleteMany where.eventId=Italian Fest BLOCKED')
-    assert(await blk(() => prisma.vendor.updateMany({ where: { eventId: ITALIAN_FEST, name: '__never__' }, data: { cuisineType: 'x' } })), 'updateMany where.eventId=Italian Fest BLOCKED (where-based)')
-    assert(await blk(() => prisma.$executeRawUnsafe(`UPDATE "Vendor" SET "cuisineType"='x' WHERE id='__never__'`)), 'raw WRITE ($executeRawUnsafe) BLOCKED wholesale')
+    assert(await blk(() => prisma.vendor.deleteMany({ where: { eventId: ITALIAN_FEST, name: '__never__' } })), 'deleteMany where.eventId=Italian Fest THREW')
+    assert(await blk(() => prisma.vendor.updateMany({ where: { eventId: ITALIAN_FEST, name: '__never__' }, data: { cuisineType: 'x' } })), 'updateMany where.eventId=Italian Fest THREW (where-based)')
+    assert(await blk(() => prisma.$executeRawUnsafe(`UPDATE "Vendor" SET "cuisineType"='x' WHERE id='__never__'`)), 'raw $executeRawUnsafe THREW (write)')
+    // query≠read: a DELETE/UPDATE via $queryRaw mutates. Must THROW.
+    assert(await blk(() => prisma.$queryRawUnsafe(`DELETE FROM "Vendor" WHERE id='__never__' RETURNING id`)), '⛔ $queryRawUnsafe(DELETE … RETURNING) THREW (query is NOT read-only)')
+    // a genuine SELECT read still passes
     let rawReadOk = true
     try { await prisma.$queryRawUnsafe(`SELECT 1`) } catch { rawReadOk = false }
-    assert(rawReadOk, 'raw READ ($queryRawUnsafe) passes (reads are fine)')
+    assert(rawReadOk, 'a leading-SELECT raw read passes (reads are fine)')
 
     // ── [2] RUNTIME PASS — writes to a throwaway TEST event are allowed ─────────────
     console.log('\n[2] the guarded client ALLOWS writes to a throwaway test event')
