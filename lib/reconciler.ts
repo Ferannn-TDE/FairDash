@@ -214,19 +214,40 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   sum.finishedAt = finishedAt.toISOString()
   sum.durationMs = finishedAt.getTime() - startedAt.getTime()
 
+  // ── THE SUMMARY MUST BE UNCONDITIONAL AND PROD-VISIBLE (Q5) ──────────────────
+  // logger.info is a HARD NO-OP in production (logger.ts: `if (!isDev) return`), so the old
+  // info summary NEVER reached Railway — a sweep that changed the ledger logged "clean" while
+  // repaired counts were invisible. The fix: one flat, greppable line at WARN (captured in
+  // prod), emitted EVERY sweep, carrying repaired-per-pattern AND the resulting payable total.
+  // Now silence provably means zero — it can't be info-suppressed. (info line kept for dev.)
+  let payableCents = 0
+  try {
+    payableCents = (await db.vendorEarning.aggregate({ _sum: { subtotalCents: true }, where: { status: 'accrued' } }))._sum.subtotalCents ?? 0
+  } catch { payableCents = -1 } // -1 = couldn't read; still emit the line, never swallow
+  logger.warn(formatSweepSummary(sum, payableCents))
+
   logger.info('[Reconciler] sweep complete', {
-    dryRun,
-    patternEEnabled,
-    scanned: sum.scanned,
-    repaired: sum.repaired,
-    alerted: sum.alerted.length,
-    ambiguousSkipped: sum.ambiguousSkipped,
-    durationMs: sum.durationMs,
+    dryRun, patternEEnabled, scanned: sum.scanned, repaired: sum.repaired,
+    alerted: sum.alerted.length, ambiguousSkipped: sum.ambiguousSkipped, durationMs: sum.durationMs,
   })
   if (sum.alerted.length) logger.warn('[Reconciler] ALERTS (human review)', { alerted: sum.alerted })
   if (sum.backstopWarnings.length) logger.warn('[Reconciler] BACKSTOP WARNINGS', { backstopWarnings: sum.backstopWarnings })
 
   return sum
+}
+
+/**
+ * The one flat, greppable sweep-summary line — pure, so it can be proven without running a
+ * sweep. Always names the repaired TOTAL (so "repaired=0" is an explicit, unmissable zero),
+ * lists only the non-zero patterns, and carries the resulting payable total. `[Reconciler]
+ * SUMMARY` is the grep anchor; any non-zero repaired is the signal money moved.
+ */
+export function formatSweepSummary(sum: SweepSummary, payableCents: number): string {
+  const total = Object.values(sum.repaired).reduce((a, b) => a + b, 0)
+  const nonZero = Object.entries(sum.repaired).filter(([, n]) => n > 0).map(([p, n]) => `${p}${n}`).join(' ')
+  const payable = payableCents < 0 ? '(unreadable)' : `$${(payableCents / 100).toFixed(2)}`
+  return `[Reconciler] SUMMARY repaired=${total}${nonZero ? ` [${nonZero}]` : ''} payable=${payable} ` +
+    `alerts=${sum.alerted.length} ambiguousSkipped=${sum.ambiguousSkipped} dryRun=${sum.dryRun} ${sum.durationMs}ms`
 }
 
 // ─── PATTERN A — Paid in Stripe, not fully placed (boundary 1) ───────────────
