@@ -38,7 +38,12 @@ import { ApiError } from './api-error'
 import { logger } from './logger'
 
 export type PayeeType = 'vendor' | 'runner' | 'organizer'
-export type MoneyActionType = 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND'
+// HOLD|RELEASE|CANCEL|FREEZE|UNFREEZE|REFUND are admin/organizer/reconciler money moves.
+// PAYOUT_FAILED is a SYSTEM record: a payout job exhausted its retries. It is written by the
+// worker's failed handler and doubles as the durable failed-since timestamp Pattern U reads
+// (the earning rows carry no updatedAt), giving the honest-actor audit that system money-ops
+// otherwise lacked. Column is a free String — extending this union needs no migration.
+export type MoneyActionType = 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND' | 'PAYOUT_FAILED'
 
 export interface AdminMoneyContext {
   /** From requireAdminFairContext — proves platform admin + resolves the fair. */
