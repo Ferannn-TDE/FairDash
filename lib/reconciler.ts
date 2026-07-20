@@ -195,6 +195,10 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternQ(sum, { maxPerPattern, dryRun })
     await patternR(sum, { maxPerPattern, dryRun })
     await patternT(sum, { maxPerPattern, dryRun, patternTEnabled })
+    // U is a read-only alerter (never moves money) — always runs live, no env gate. It reads
+    // the durable payout-failure markers so a permanently-failed payout can't stay a flag with
+    // no reader. Runs regardless of dryRun (it writes nothing).
+    await patternU(sum, { maxPerPattern })
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -1159,4 +1163,101 @@ async function patternT(
     `Pattern T: ${sum.repaired.T} phantom accrual(s) ${verb} — $${(wouldCents / 100).toFixed(2)} of payableCents on refunded/declined portions` +
     `${effectiveDryRun ? ' (detect-only; set RECONCILER_PATTERN_T_ENABLED=true to act after diffing the set)' : ''}.`,
   )
+}
+
+// ─── PATTERN U — STUCK MONEY (read-only alerter; never moves money) ──────────
+// The single reader for "money that should have moved and didn't." Durable failure
+// states are otherwise flags with no reader: a vendor/runner/organizer payout can fail
+// permanently, be marked, and stay operationally invisible until someone queries a
+// column. This funnels all of them to the ONE alert surface (sum.alerted → the
+// prod-visible '[Reconciler] ALERTS' line), with the condition NAMED so the alert says
+// which fired and on what. Each condition has its OWN threshold because urgency differs:
+//   • orphaned intent   (2m)  — a recordMoneyMove intent with no matching confirmed: a
+//        Stripe transfer may have gone out with nothing recorded. MOST urgent. WIRED but
+//        dormant until the chokepoint writes intent records (no source yet → no-op).
+//   • vendor payout FAILED    (15m) — Order.payoutStatus='FAILED'
+//   • runner payout failed    (15m) — RunnerEarning.status='failed'
+//   • organizer payout failed (15m) — OrganizerPayout.status='failed'
+// The 15m gate lets the reconciler's own 60s retries (C/P/Q) heal a transient failure
+// before a human is paged; older-than-15m means those retries have had ~15 chances and
+// still can't. Age comes from the PAYOUT_FAILED audit createdAt (the marker rows carry no
+// updatedAt). New (<30m) vs standing (>=30m) so a fresh failure never hides inside a
+// standing count. Wallpaper-resistant: every alert carries count, $total, and ids.
+const STUCK_FAILED_MIN = 15
+const STUCK_INTENT_MIN = 2   // orphaned-intent threshold (used when the chokepoint lands)
+const STUCK_NEW_MIN = 30     // failed newer than this = "new"; else "standing"
+
+type StuckRow = { id: string; cents: number | null; sinceMs: number | null }
+
+export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) {
+  const now = Date.now()
+
+  // Failed-since ages: latest PAYOUT_FAILED audit per (payeeType, orderId|eventId). The
+  // MARKER rows are the source of truth for "currently stuck" (a healed payout is no longer
+  // 'failed'); the audit only dates the failure. desc order ⇒ first seen per key = latest.
+  const audits = await db.adminMoneyAction.findMany({
+    where: { action: 'PAYOUT_FAILED' },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true, payeeType: true, orderId: true, eventId: true },
+    take: 2000,
+  })
+  const failedSince = new Map<string, Date>()
+  for (const a of audits) {
+    const k = `${a.payeeType}:${a.orderId ?? a.eventId}`
+    if (!failedSince.has(k)) failedSince.set(k, a.createdAt)
+  }
+  const sinceMs = (payeeType: string, id: string): number | null => {
+    const d = failedSince.get(`${payeeType}:${id}`)
+    return d ? now - d.getTime() : null
+  }
+  const fmt = (cents: number | null) => (cents == null ? '$?' : `$${(cents / 100).toFixed(2)}`)
+
+  // One emitter, parameterised by threshold — this is where per-condition urgency lives.
+  // Unknown age (no audit row, e.g. a legacy FAILED) counts as stuck: conservative, alert.
+  const emit = (condition: string, rows: StuckRow[], thresholdMin: number) => {
+    const stuck = rows.filter(r => r.sinceMs == null || r.sinceMs >= thresholdMin * 60_000)
+    if (!stuck.length) return
+    const totalCents = stuck.reduce((s, r) => s + (r.cents ?? 0), 0)
+    const newN = stuck.filter(r => r.sinceMs != null && r.sinceMs < STUCK_NEW_MIN * 60_000).length
+    const idList = stuck.slice(0, 20).map(r => {
+      const age = r.sinceMs == null ? 'age?' : `${Math.floor(r.sinceMs / 60_000)}m`
+      return `${r.id}(${fmt(r.cents)},${age})`
+    }).join(' ')
+    sum.alerted.push(
+      `[STUCK-MONEY ${condition}] ${stuck.length} failed >${thresholdMin}m, ${fmt(totalCents)} total ` +
+      `(${newN} new, ${stuck.length - newN} standing) — auto-retry exhausted, manual intervention. ` +
+      `ids: ${idList}${stuck.length > 20 ? ` +${stuck.length - 20} more` : ''}`,
+    )
+  }
+
+  // ── vendor: Order.payoutStatus='FAILED' ──
+  const vFailed = await db.order.findMany({
+    where: { payoutStatus: 'FAILED' }, select: { id: true, vendorPayout: true }, take: o.maxPerPattern,
+  })
+  emit('vendor', vFailed.map(r => ({
+    id: r.id, cents: Math.round((r.vendorPayout ?? 0) * 100), sinceMs: sinceMs('vendor', r.id),
+  })), STUCK_FAILED_MIN)
+
+  // ── runner: RunnerEarning.status='failed' ──
+  const rFailed = await db.runnerEarning.findMany({
+    where: { status: 'failed' }, select: { orderId: true, amountCents: true }, take: o.maxPerPattern,
+  })
+  emit('runner', rFailed.map(r => ({
+    id: r.orderId, cents: r.amountCents, sinceMs: sinceMs('runner', r.orderId),
+  })), STUCK_FAILED_MIN)
+
+  // ── organizer: OrganizerPayout.status='failed' ── (aged by eventId — batch-level failure)
+  const oFailed = await db.organizerPayout.findMany({
+    where: { status: 'failed' }, select: { id: true, eventId: true, totalCents: true }, take: o.maxPerPattern,
+  })
+  emit('organizer', oFailed.map(r => ({
+    id: r.id, cents: r.totalCents, sinceMs: sinceMs('organizer', r.eventId),
+  })), STUCK_FAILED_MIN)
+
+  // ── orphaned intent (2m) — dormant until recordMoneyMove writes intent records. ──
+  // When the chokepoint lands, an INTENT money-audit with no CONFIRMED sibling older than
+  // STUCK_INTENT_MIN calls emit('orphaned-intent', rows, STUCK_INTENT_MIN). Left explicit
+  // (not silently omitted) so the reader is complete-by-construction the moment the source
+  // exists. No source today ⇒ intentionally a no-op, never a false alert.
+  void STUCK_INTENT_MIN
 }

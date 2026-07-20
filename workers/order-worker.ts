@@ -45,6 +45,7 @@ import { processRunnerPayout } from '../lib/runner-payout'
 import { processEventOrganizerPayout } from '../lib/organizer-payout'
 import { refundVendorPortion } from '../lib/process-refund'
 import { reconcileMasterStatus } from '../lib/reconcile-order-status'
+import { writeMoneyAudit } from '../lib/admin-money'
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -652,6 +653,71 @@ async function handleRefund(job: Job<JobData>) {
 }
 
 /**
+ * On a PERMANENTLY failed payout (BullMQ attempts exhausted), record the failure durably AND
+ * with an honest actor — because a marker with no reader is operationally invisible and a log
+ * line with no marker is gone the moment it scrolls off Railway. Two writes:
+ *   • durable marker — vendor: order.payoutStatus='FAILED' (set by the caller); runner:
+ *     RunnerEarning.status='failed'; organizer: OrganizerPayout.status='failed'. This is what
+ *     distinguishes "tried and failed" from "not yet processed" — for runner/organizer those
+ *     two states were previously identical in the DB.
+ *   • honest-actor PAYOUT_FAILED audit — a SYSTEM money-op attributed to THIS job run (the
+ *     attribution system payouts never carried), which also supplies the failed-since
+ *     timestamp Pattern U reads for its 15-min threshold (the earning rows have no updatedAt).
+ * Best-effort: bookkeeping never throws out of the failed handler or masks the real failure.
+ */
+async function recordPayoutFailure(job: Job<JobData>) {
+  const actor = { id: `worker:${job.name}:${job.id}`, type: 'system' as const }
+  const attempts = `${job.attemptsMade} attempt(s)`
+  try {
+    if (job.name === JOB_RUNNER_PAYOUT && job.data.orderId) {
+      const earning = await prisma.runnerEarning.findUnique({ where: { orderId: job.data.orderId } })
+      if (earning && earning.status !== 'paid') {
+        if (earning.status !== 'failed') {
+          await prisma.runnerEarning.update({ where: { orderId: job.data.orderId }, data: { status: 'failed' } })
+        }
+        await writeMoneyAudit(actor, earning.eventId, {
+          action: 'PAYOUT_FAILED', payeeType: 'runner', payeeId: earning.runnerId,
+          orderId: earning.orderId, earningId: earning.id, amountCents: earning.amountCents,
+          reason: `runner payout job exhausted after ${attempts}`,
+        })
+      }
+      console.error(`[Worker] Runner payout permanently FAILED for order ${job.data.orderId} — marked + audited, manual intervention required`)
+    } else if (job.name === JOB_ORGANIZER_PAYOUT && job.data.eventId) {
+      // Mark the batch that was mid-flight (latest non-paid for the event), if one formed.
+      const batch = await prisma.organizerPayout.findFirst({
+        where: { eventId: job.data.eventId, status: { not: 'paid' } },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (batch && batch.status !== 'failed') {
+        await prisma.organizerPayout.update({ where: { id: batch.id }, data: { status: 'failed' } })
+      }
+      await writeMoneyAudit(actor, job.data.eventId, {
+        action: 'PAYOUT_FAILED', payeeType: 'organizer', payeeId: batch?.organizerId ?? job.data.eventId,
+        orderId: null, earningId: batch?.id ?? null, amountCents: batch?.totalCents ?? null,
+        reason: `organizer payout job exhausted after ${attempts}`,
+      })
+      console.error(`[Worker] Organizer payout permanently FAILED for event ${job.data.eventId} — marked + audited, manual intervention required`)
+    } else if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
+      // The caller already set order.payoutStatus='FAILED'; add the honest-actor audit +
+      // failed-since timestamp (the enum column carries neither).
+      const order = await prisma.order.findUnique({ where: { id: job.data.orderId }, select: { eventId: true, vendorId: true } })
+      const unpaidCents = (await prisma.vendorEarning.aggregate({
+        _sum: { subtotalCents: true }, where: { orderId: job.data.orderId, status: { notIn: ['paid', 'cancelled'] } },
+      }))._sum.subtotalCents ?? null
+      if (order) {
+        await writeMoneyAudit(actor, order.eventId, {
+          action: 'PAYOUT_FAILED', payeeType: 'vendor', payeeId: order.vendorId ?? job.data.orderId,
+          orderId: job.data.orderId, earningId: null, amountCents: unpaidCents,
+          reason: `vendor payout job exhausted after ${attempts}`,
+        })
+      }
+    }
+  } catch (err) {
+    console.error(`[Worker] recordPayoutFailure bookkeeping failed for job ${job.id} (original failure still stands):`, err)
+  }
+}
+
+/**
  * reconcile-sweep (recurring, ~60s)
  * Periodic backstop: compares Stripe (money-truth) against the DB (state-truth)
  * and self-heals pipeline leaks the real-time paths missed — all via existing
@@ -757,18 +823,24 @@ export function startOrderWorker() {
 
   worker.on('failed', async (job, err) => {
     console.error(`[Worker] ✗ ${job?.name} (${job?.id}) failed after ${job?.attemptsMade} attempt(s):`, err.message)
+    if (!job) return
 
-    if (
-      job?.name === JOB_VENDOR_PAYOUT &&
-      job?.data?.orderId &&
-      job.attemptsMade >= (job.opts.attempts ?? 3)
-    ) {
+    const exhausted = job.attemptsMade >= (job.opts.attempts ?? 3)
+    const isPayout =
+      job.name === JOB_VENDOR_PAYOUT || job.name === JOB_RUNNER_PAYOUT || job.name === JOB_ORGANIZER_PAYOUT
+    if (!exhausted || !isPayout) return
+
+    // Vendor's order-level durable marker (unchanged). Runner/organizer markers + the
+    // honest-actor PAYOUT_FAILED audit for ALL THREE live in recordPayoutFailure, so every
+    // permanently-failed payout is both durably distinguishable AND read by Pattern U.
+    if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
       await prisma.order.update({
         where: { id: job.data.orderId },
         data: { payoutStatus: 'FAILED' },
       }).catch(e => console.error('[Worker] Failed to set payoutStatus=FAILED:', e))
       console.error(`[Worker] Payout permanently FAILED for order ${job.data.orderId} — manual intervention required`)
     }
+    await recordPayoutFailure(job)
   })
 
   worker.on('error', err => {
