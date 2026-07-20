@@ -224,11 +224,13 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   // repaired counts were invisible. The fix: one flat, greppable line at WARN (captured in
   // prod), emitted EVERY sweep, carrying repaired-per-pattern AND the resulting payable total.
   // Now silence provably means zero — it can't be info-suppressed. (info line kept for dev.)
-  let payableCents = 0
+  let ledger: LedgerBreakdown
   try {
-    payableCents = (await db.vendorEarning.aggregate({ _sum: { subtotalCents: true }, where: { status: 'accrued' } }))._sum.subtotalCents ?? 0
-  } catch { payableCents = -1 } // -1 = couldn't read; still emit the line, never swallow
-  logger.warn(formatSweepSummary(sum, payableCents))
+    ledger = await computeLedgerBreakdown()
+  } catch {
+    ledger = { all: { payableCents: 0, paidCents: 0, cancelledCents: 0 }, byEvent: [], readable: false }
+  }
+  logger.warn(formatSweepSummary(sum, ledger))
 
   logger.info('[Reconciler] sweep complete', {
     dryRun, patternEEnabled, scanned: sum.scanned, repaired: sum.repaired,
@@ -240,17 +242,65 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   return sum
 }
 
+export interface LedgerTotals { payableCents: number; paidCents: number; cancelledCents: number }
+export interface EventLedger extends LedgerTotals { eventId: string; name: string }
+/** readable=false ⇒ the ledger read failed; the line still emits, never swallowed. */
+export interface LedgerBreakdown { all: LedgerTotals; byEvent: EventLedger[]; readable: boolean }
+
+/**
+ * The vendor ledger, split by event AND rolled up. WHY per-event: the sweep is global, but the
+ * admin panel any human watches is PER-EVENT. A single global `payable` matched a panel only
+ * while ONE event had accruals; the moment a second fair accrues, a global figure equals NO
+ * panel and every watch procedure keyed to it silently goes wrong. So the summary carries both.
+ * Fields mirror the panel: payable=Σsubtotal(accrued), paid=Σnet(paid), cancelled=Σsubtotal(cancelled).
+ */
+async function computeLedgerBreakdown(): Promise<LedgerBreakdown> {
+  const grouped = await db.vendorEarning.groupBy({
+    by: ['eventId', 'status'],
+    where: { status: { in: ['accrued', 'paid', 'cancelled'] } },
+    _sum: { subtotalCents: true, netCents: true },
+  })
+  const byId = new Map<string, LedgerTotals>()
+  const all: LedgerTotals = { payableCents: 0, paidCents: 0, cancelledCents: 0 }
+  for (const g of grouped) {
+    let t = byId.get(g.eventId)
+    if (!t) { t = { payableCents: 0, paidCents: 0, cancelledCents: 0 }; byId.set(g.eventId, t) }
+    const sub = g._sum.subtotalCents ?? 0
+    const net = g._sum.netCents ?? 0
+    if (g.status === 'accrued')   { t.payableCents += sub;   all.payableCents += sub }
+    if (g.status === 'paid')      { t.paidCents += net;      all.paidCents += net }
+    if (g.status === 'cancelled') { t.cancelledCents += sub; all.cancelledCents += sub }
+  }
+  const ids = [...byId.keys()]
+  const events = ids.length ? await db.event.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : []
+  const nameOf = new Map(events.map(e => [e.id, e.name]))
+  const byEvent: EventLedger[] = ids
+    .map(id => ({ eventId: id, name: nameOf.get(id) ?? id, ...byId.get(id)! }))
+    .filter(e => e.payableCents || e.paidCents || e.cancelledCents)
+    .sort((a, b) => b.payableCents - a.payableCents)
+  return { all, byEvent, readable: true }
+}
+
 /**
  * The one flat, greppable sweep-summary line — pure, so it can be proven without running a
  * sweep. Always names the repaired TOTAL (so "repaired=0" is an explicit, unmissable zero),
- * lists only the non-zero patterns, and carries the resulting payable total. `[Reconciler]
- * SUMMARY` is the grep anchor; any non-zero repaired is the signal money moved.
+ * lists only the non-zero patterns, and carries the vendor ledger BOTH globally (labeled
+ * [all-events]) and PER-EVENT, so a watch on one fair stays correct once a second fair
+ * accrues. `[Reconciler] SUMMARY` is the grep anchor; any non-zero repaired signals money moved.
  */
-export function formatSweepSummary(sum: SweepSummary, payableCents: number): string {
+export function formatSweepSummary(sum: SweepSummary, ledger: LedgerBreakdown): string {
   const total = Object.values(sum.repaired).reduce((a, b) => a + b, 0)
   const nonZero = Object.entries(sum.repaired).filter(([, n]) => n > 0).map(([p, n]) => `${p}${n}`).join(' ')
-  const payable = payableCents < 0 ? '(unreadable)' : `$${(payableCents / 100).toFixed(2)}`
-  return `[Reconciler] SUMMARY repaired=${total}${nonZero ? ` [${nonZero}]` : ''} payable=${payable} ` +
+  const m = (c: number) => `$${(c / 100).toFixed(2)}`
+  const ledgerStr = !ledger.readable
+    ? 'payable=(unreadable)'
+    : `payable=${m(ledger.all.payableCents)} paid=${m(ledger.all.paidCents)} cancelled=${m(ledger.all.cancelledCents)} [all-events]`
+  const perEvent = ledger.readable && ledger.byEvent.length
+    ? ' | by-event: ' + ledger.byEvent.slice(0, 10).map(e =>
+        `${e.name}(pay=${m(e.payableCents)} paid=${m(e.paidCents)} canc=${m(e.cancelledCents)})`).join(' ')
+      + (ledger.byEvent.length > 10 ? ` +${ledger.byEvent.length - 10} more` : '')
+    : ''
+  return `[Reconciler] SUMMARY repaired=${total}${nonZero ? ` [${nonZero}]` : ''} ${ledgerStr}${perEvent} ` +
     `alerts=${sum.alerted.length} ambiguousSkipped=${sum.ambiguousSkipped} dryRun=${sum.dryRun} ${sum.durationMs}ms`
 }
 
