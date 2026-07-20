@@ -18,6 +18,7 @@ interface DeliveryOrder {
   customerPhone: string
   deliveryFee: number | null
   total: number
+  collectedAt?: string | null
   deliveryStreet?: string | null
   deliveryCity?: string | null
   deliveryZip?: string | null
@@ -38,6 +39,7 @@ export default function DeliveryPage() {
   const [order, setOrder] = useState<DeliveryOrder | null>(null)
   const [loading, setLoading] = useState(true)
   const [pickedUp, setPickedUp] = useState(false)
+  const [collecting, setCollecting] = useState(false)
   // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
   const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
   const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
@@ -54,7 +56,9 @@ export default function DeliveryPage() {
       if (json.success) {
         const o = json.data.order ?? json.data
         setOrder(o)
-        if (o?.status === 'DELIVERED') setPickedUp(true)
+        // pickedUp reflects the SERVER truth (collectedAt persisted), not local taps — so a
+        // reload/reconnect mid-delivery restores the real collected state. DELIVERED implies it.
+        setPickedUp(o?.collectedAt != null || o?.status === 'DELIVERED')
       }
     } catch { /* reconnect handler below refetches */ } finally { setLoading(false) }
   }
@@ -108,6 +112,31 @@ export default function DeliveryPage() {
 
     return () => { cancelled = true; navigator.geolocation.clearWatch(watchId) }
   }, [order?.status])
+
+  // The REAL collect action (U1). Optimism is DELIBERATELY withheld: pickedUp flips only on a
+  // confirmed server success, so a failure leaves the checkbox HONEST (unchecked) and the
+  // runner can retry — never optimistically stuck "collected" while the bag is still on the
+  // counter. The endpoint is idempotent, so a retry after a lost-but-succeeded response is a
+  // benign no-op (alreadyCollected), not a double-collect.
+  async function collect() {
+    if (!order || pickedUp || collecting) return
+    setCollecting(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/collect`, { method: 'POST' })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setPickedUp(true)
+        setOrder(o => (o ? { ...o, collectedAt: json.data.collectedAt ?? new Date().toISOString() } : o))
+        if (!json.data.alreadyCollected) toast.success('Collected from vendor')
+      } else {
+        toast.error(json.error || json.message || 'Could not mark collected — try again')
+      }
+    } catch {
+      toast.error('Could not mark collected — check your connection and retry')
+    } finally {
+      setCollecting(false)
+    }
+  }
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -206,7 +235,7 @@ export default function DeliveryPage() {
 
       {/* Step 1: pick up from the vendor */}
       <div className={`bg-bg-card border rounded-2xl p-4 ${pickedUp ? 'border-emerald-500/30' : 'border-white/10'}`}>
-        <button onClick={() => setPickedUp(v => !v)} className="flex items-start gap-3 w-full text-left bg-transparent border-0 cursor-pointer">
+        <button onClick={collect} disabled={pickedUp || collecting} className="flex items-start gap-3 w-full text-left bg-transparent border-0 cursor-pointer disabled:cursor-default">
           {pickedUp ? <CheckSquare className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" /> : <Square className="w-5 h-5 text-text-gray mt-0.5 shrink-0" />}
           <div className="flex-1">
             <p className={`font-semibold text-sm ${pickedUp ? 'text-text-gray line-through' : 'text-white'}`}>
@@ -215,6 +244,7 @@ export default function DeliveryPage() {
             <div className="mt-1 space-y-0.5">
               {(order.orderItems ?? []).map(i => <p key={i.id} className="text-text-gray text-xs">{i.quantity}× {i.menuItem?.name ?? 'Item'}</p>)}
             </div>
+            {collecting && <p className="text-text-gray text-xs mt-1">Marking collected…</p>}
           </div>
         </button>
       </div>
