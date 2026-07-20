@@ -486,6 +486,28 @@ model Order {
   runnerId     String?
   dispatchedAt DateTime?
 
+  // ── Delivery custody (Commit 2 — possession-split escape path) ───────────────
+  // The custody lifecycle is keyed on these COLUMNS, not on master status: claim ==
+  // RUNNER_COLLECTED today, and a real "collect from vendor" action sets collectedAt.
+  // The split:
+  //   collectedAt NULL → runner claimed, but the food is still on the vendor's counter
+  //   collectedAt SET  → the runner physically has the bag
+  // A collected order is REVERSIBLE (runner returns it, vendor confirms) — which is
+  // precisely why the vendor-VOS advance stays on DELIVERED (the earliest IRREVERSIBLE
+  // vendor-done signal) and is NOT moved onto collectedAt. INVARIANT: VOS advances ride
+  // irreversible events only; moving one onto a human-tappable/reversible event forces a
+  // non-monotonic revert, the oscillation the clamp model exists to forbid.
+  collectedAt       DateTime? // the "collect from vendor" server action fired (U1)
+  releasedAt        DateTime? // returned to the pool (U2); the runner feed re-arms off THIS, never readyAt
+  returnRequestedAt DateTime? // post-collection (U3): runner asked to hand the bag back, awaiting vendor confirm
+
+  // Strand clocks RAISE A FLAG — a human decides; nothing here ever auto-acts. strandedReason
+  // names the action a human must take (see enum StrandedReason). A strand is CLEARED (both
+  // fields → null + a `strand_cleared` custody event) when resolved by a legitimate action,
+  // so the ALERTS line never accretes wallpaper (the Pattern-K lesson).
+  strandedAt     DateTime?
+  strandedReason StrandedReason?
+
   // Proof-of-delivery photo — mandatory before DELIVERED for runner-fulfilled orders
   // (HOME_DELIVERY *and* CURBSIDE). Holds the Supabase Storage object PATH (in the private
   // `delivery-proofs` bucket), NOT a URL and NEVER a signed URL — a stored signed URL is
@@ -551,6 +573,7 @@ model Order {
   vendorOrderStatuses VendorOrderStatus[]
   cancellation        Cancellation?
   orderEvents         OrderEvent[]
+  custodyEvents       DeliveryCustodyEvent[]
   incidentReports     IncidentReport[]
   disputes            Dispute[]
   payouts             Payout[]
@@ -1519,6 +1542,38 @@ model OrderEvent {
 
   @@index([orderId])
   @@index([timestamp])
+}
+
+// Why an order is stranded — named for the ACTION a human must take, because the
+// escalation surface's whole job is telling someone what to do. A closed set (each maps to
+// one distinct human response), so it's an enum: an unrecognized value FAILS LOUD, matching
+// this neighborhood's derivation stance (VENDOR_PROGRESS throws rather than rank 0).
+enum StrandedReason {
+  CLAIMED_NOT_COLLECTED        // pre-collection stall: food is safe on the counter — find or release the runner
+  RUNNER_UNREACHABLE_WITH_FOOD // post-collection: the runner has the bag and is unreachable — go find the runner
+  AWAITING_VENDOR_CONFIRMATION // return requested, vendor hasn't confirmed — go tap the vendor
+}
+
+// The custody audit spine for the possession-split escape path (Commit 2). One row per
+// custody transition (collect / release / return_requested / return_confirmed / stranded /
+// strand_cleared). Denormalizes runnerId so the trail SURVIVES a release nulling Order.runnerId
+// — the record of who held the bag must outlive the live assignment. Mirrors OrderEvent.
+model DeliveryCustodyEvent {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  eventType String  // collected | released | return_requested | return_confirmed | stranded | strand_cleared
+  actorId   String? // who acted (runner/vendor/organizer/admin userId, or null for system/reconciler)
+  actorRole String? // runner | vendor | organizer | admin | system
+  runnerId  String? // the runner in custody at the time (denormalized; survives Order.runnerId being nulled on release)
+  metadata  Json?   // e.g. { strandedReason, fromStatus, releasedTo: "pool", clearedBy }
+
+  timestamp DateTime @default(now())
+
+  @@index([orderId])
+  @@index([timestamp])
+  @@index([eventType])
 }
 
 // ============================================================================
