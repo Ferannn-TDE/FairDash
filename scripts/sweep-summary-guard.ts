@@ -12,7 +12,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { formatSweepSummary, type SweepSummary } from '../lib/reconciler'
+import { formatSweepSummary, type SweepSummary, type LedgerBreakdown } from '../lib/reconciler'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -27,23 +27,49 @@ function mkSum(repaired: Partial<SweepSummary['repaired']>, extra: Partial<Sweep
   }
 }
 
+// Build a ledger breakdown from per-event rows; `all` is the roll-up (what the OLD global line showed).
+function mkLedger(rows: { name: string; pay: number; paid?: number; canc?: number }[], readable = true): LedgerBreakdown {
+  const all = { payableCents: 0, paidCents: 0, cancelledCents: 0 }
+  const byEvent = rows.map((e, i) => {
+    const t = { payableCents: e.pay, paidCents: e.paid ?? 0, cancelledCents: e.canc ?? 0 }
+    all.payableCents += t.payableCents; all.paidCents += t.paidCents; all.cancelledCents += t.cancelledCents
+    return { eventId: `ev${i}`, name: e.name, ...t }
+  })
+  return { all, byEvent, readable }
+}
+
 function main() {
   // ── [1] the summary is UNCONDITIONAL — a clean sweep says repaired=0 explicitly ──
   console.log('[1] formatSweepSummary — silence is an explicit zero, never absent')
-  const clean = formatSweepSummary(mkSum({}), 34000)
+  const clean = formatSweepSummary(mkSum({}), mkLedger([{ name: 'Italian Fest', pay: 34000 }]))
   assert(clean.includes('[Reconciler] SUMMARY'), 'has the greppable [Reconciler] SUMMARY anchor')
   assert(clean.includes('repaired=0'), 'a clean sweep states repaired=0 (unmissable, not silence)')
-  assert(clean.includes('payable=$340.00'), 'carries the resulting payable total ($340.00)')
+  assert(clean.includes('payable=$340.00') && clean.includes('[all-events]'), 'carries the rolled-up payable, labeled [all-events]')
+
+  // ── [1b] PER-EVENT — a watch on ONE fair stays correct once a SECOND fair accrues ──
+  // This is the whole point: the global figure stops equalling any single panel the moment
+  // >1 event has a ledger, so the per-event line must carry each fair's own numbers.
+  console.log('\n[1b] per-event: the global figure diverges from any one fair, but the per-fair line stays greppable')
+  const twoFairs = formatSweepSummary(mkSum({}), mkLedger([{ name: 'Italian Fest', pay: 34000 }, { name: 'Second Fair', pay: 5000 }]))
+  assert(twoFairs.includes('payable=$390.00') && twoFairs.includes('[all-events]'), 'the global roll-up is $390.00 (both fairs) — no longer equal to Italian Fest alone')
+  assert(twoFairs.includes('Italian Fest(pay=$340.00'), 'the Italian Fest per-event line still reads $340.00 — the watch survives a second fair')
+  assert(twoFairs.includes('Second Fair(pay=$50.00'), 'the second fair is broken out separately, not folded into a global blur')
+
+  // ── [1c] the summary carries the WHOLE ledger — paid and cancelled, not only payable ──
+  console.log('\n[1c] payable AND paid AND cancelled — both sides of every move are visible')
+  const whole = formatSweepSummary(mkSum({}), mkLedger([{ name: 'F', pay: 10000, paid: 20000, canc: 3000 }]))
+  assert(whole.includes('payable=$100.00') && whole.includes('paid=$200.00') && whole.includes('cancelled=$30.00'),
+    'the roll-up carries payable/paid/cancelled; a payout draining payable into paid is now visible in one line')
 
   // ── [2] a repair is loud and per-pattern ───────────────────────────────────────
   console.log('\n[2] a repair shows the total AND the pattern')
-  const moved = formatSweepSummary(mkSum({ S: 2 }, { alerted: ['x'] }), 42000)
+  const moved = formatSweepSummary(mkSum({ S: 2 }, { alerted: ['x'] }), mkLedger([{ name: 'F', pay: 42000 }]))
   assert(moved.includes('repaired=2') && moved.includes('[S2]'), `names repaired=2 [S2] (got: ${moved})`)
   assert(moved.includes('alerts=1'), 'carries the alert count')
 
-  // ── [3] an unreadable payable still emits the line — never swallowed ────────────
-  console.log('\n[3] an unreadable payable still emits (payable read failure never suppresses the line)')
-  assert(formatSweepSummary(mkSum({}), -1).includes('payable=(unreadable)'), 'payable=(unreadable) when the read failed')
+  // ── [3] an unreadable ledger still emits the line — never swallowed ──────────────
+  console.log('\n[3] an unreadable ledger still emits (a read failure never suppresses the line)')
+  assert(formatSweepSummary(mkSum({}), mkLedger([], false)).includes('payable=(unreadable)'), 'payable=(unreadable) when the read failed')
 
   // ── [4] Q5 ROOT + WIRING (static) — the summary is at WARN, not the no-op INFO ──
   console.log('\n[4] static: the summary routes through logger.warn (prod-visible), not the prod-no-op logger.info')
