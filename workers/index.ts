@@ -35,7 +35,12 @@ if (process.env.WORKER_ENABLED !== 'true') {
 // module-level side effects of) the worker module before the gate executes.
 const { startOrderWorker } = await import('./order-worker')
 
-console.log('[Workers] Starting... (WORKER_ENABLED=true)')
+// Deploy fingerprint in the boot line: the health endpoint fingerprints Vercel,
+// but the worker is a separate deploy on a separate host — this is the ONLY place
+// its served commit surfaces. Railway injects RAILWAY_GIT_COMMIT_SHA.
+const commit =
+  process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA ?? 'unknown'
+console.log(`[Workers] Starting... (WORKER_ENABLED=true, commit=${commit})`)
 
 const workers = [
   startOrderWorker(),
