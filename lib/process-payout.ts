@@ -41,6 +41,39 @@ import { logger } from './logger'
 /** Why the admin gate refused to pay a slice. Never gets a PayoutHold row. */
 export type PayoutBlockReason = 'admin_hold' | 'admin_cancelled' | 'payouts_frozen'
 
+export type VendorPayoutOutcome = 'pay' | 'hold' | 'skip' | 'blocked' | 'already_paid'
+
+/**
+ * The per-slice payout decision — pure, so it can be unit-tested without Stripe or a DB.
+ * processOrderPayout builds the maps from the order and calls this for each vendor line;
+ * extracting it mirrors runner-payout's planRunnerPayout and lets the double-pay guard
+ * (`paid → already_paid`) be proven with a positive control. Check ORDER is load-bearing:
+ *   declined  → skip        (customer's refund, owned by the decline/refund flow)
+ *   PAID      → already_paid (durable double-pay guard — refuse re-transfer BEFORE Stripe)
+ *   cancelled → blocked      (C1 admin gate)
+ *   held      → blocked      (C1 admin gate)
+ *   frozen    → blocked      (vendor payouts frozen)
+ *   !connected/non-positive → hold
+ *   else      → pay
+ */
+export function classifyVendorSlice(input: {
+  declined: boolean
+  earningStatus: string | null | undefined
+  connected: boolean
+  payoutsFrozen: boolean
+  transferCents: number
+}): { outcome: VendorPayoutOutcome; heldReason: 'unconnected' | 'non_positive' | null; blockedReason: PayoutBlockReason | null } {
+  const { declined, earningStatus, connected, payoutsFrozen, transferCents } = input
+  if (declined)                      return { outcome: 'skip',         heldReason: null,          blockedReason: null }
+  if (earningStatus === 'paid')      return { outcome: 'already_paid', heldReason: null,          blockedReason: null }
+  if (earningStatus === 'cancelled') return { outcome: 'blocked',      heldReason: null,          blockedReason: 'admin_cancelled' }
+  if (earningStatus === 'held')      return { outcome: 'blocked',      heldReason: null,          blockedReason: 'admin_hold' }
+  if (payoutsFrozen)                 return { outcome: 'blocked',      heldReason: null,          blockedReason: 'payouts_frozen' }
+  if (!connected)                    return { outcome: 'hold',         heldReason: 'unconnected',  blockedReason: null }
+  if (transferCents <= 0)            return { outcome: 'hold',         heldReason: 'non_positive', blockedReason: null }
+  return { outcome: 'pay', heldReason: null, blockedReason: null }
+}
+
 /** Thrown when the money identity doesn't hold — payout is halted, no transfers. */
 export class PayoutReconciliationError extends Error {
   constructor(message: string) {
@@ -272,21 +305,19 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     const declined = status === 'DECLINED' || status === 'REFUNDED'
     const earning = earningMap.get(line.vendorId)
 
-    let outcome: 'pay' | 'hold' | 'skip' | 'blocked'
-    let heldReason: 'unconnected' | 'non_positive' | null = null
-    let blockedReason: PayoutBlockReason | null = null
-
-    // Customer's money first — a refunded/declined slice is never the vendor's to
-    // hold or block; it already belongs back to the customer.
-    if (declined) outcome = 'skip'
-    // ── C1 ADMIN GATE ────────────────────────────────────────────────────────
-    else if (earning?.status === 'cancelled') { outcome = 'blocked'; blockedReason = 'admin_cancelled' }
-    else if (earning?.status === 'held')      { outcome = 'blocked'; blockedReason = 'admin_hold' }
-    else if (v?.payoutsFrozenAt)              { outcome = 'blocked'; blockedReason = 'payouts_frozen' }
-    // ── end gate ─────────────────────────────────────────────────────────────
-    else if (!connected) { outcome = 'hold'; heldReason = 'unconnected' }
-    else if (line.transferCents <= 0) { outcome = 'hold'; heldReason = 'non_positive' }
-    else outcome = 'pay'
+    // The decision is a pure function (classifyVendorSlice) so it can be proven with a
+    // positive control without Stripe or a DB. The DURABLE DOUBLE-PAY GUARD lives there:
+    // a row already 'paid' → 'already_paid', refused BEFORE Stripe. The idempotency key
+    // (`payout_<order>_<vendor>`) only protects the FAST retry — it expires at Stripe
+    // after 24h, so a failed-set job re-run by hand a day later would double-pay on an
+    // expired key. Reading the durable ledger is the slow-path guard the key can't be.
+    const { outcome, heldReason, blockedReason } = classifyVendorSlice({
+      declined,
+      earningStatus: earning?.status,
+      connected,
+      payoutsFrozen: !!v?.payoutsFrozenAt,
+      transferCents: line.transferCents,
+    })
 
     return {
       ...line,
@@ -298,10 +329,15 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     }
   })
 
-  const sentCents    = plan.filter(p => p.outcome === 'pay').reduce((s, p) => s + p.transferCents, 0)
-  const heldCents    = plan.filter(p => p.outcome === 'hold').reduce((s, p) => s + p.transferCents, 0)
-  const skippedCents = plan.filter(p => p.outcome === 'skip').reduce((s, p) => s + p.transferCents, 0)
-  const blockedCents = plan.filter(p => p.outcome === 'blocked').reduce((s, p) => s + p.transferCents, 0)
+  const sentCents        = plan.filter(p => p.outcome === 'pay').reduce((s, p) => s + p.transferCents, 0)
+  const heldCents        = plan.filter(p => p.outcome === 'hold').reduce((s, p) => s + p.transferCents, 0)
+  const skippedCents     = plan.filter(p => p.outcome === 'skip').reduce((s, p) => s + p.transferCents, 0)
+  const blockedCents     = plan.filter(p => p.outcome === 'blocked').reduce((s, p) => s + p.transferCents, 0)
+  // Already-paid slices were sent on a PRIOR run — they sit on the sent side of the
+  // payout-side identity (money already left the platform to the vendor), never the
+  // refundable-skip side. On a re-run their cents move from `sent` to `alreadyPaid`;
+  // both count identically toward Σ === charge, so the invariant holds across re-runs.
+  const alreadyPaidCents = plan.filter(p => p.outcome === 'already_paid').reduce((s, p) => s + p.transferCents, 0)
 
   // ── Reconciliation 2: payout side ─────────────────────────────────────────
   //   Σ(sent) + Σ(held) + Σ(blocked) + Σ(skipped/declined→refundable) + serviceFee
@@ -310,10 +346,10 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   //   not transferred in this phase). Runner/organizer payouts are Part B.
   //   blocked is retained in the platform balance under admin control — it MUST be
   //   in the identity, or an admin hold would look like money that vanished.
-  const payoutSide = sentCents + heldCents + blockedCents + skippedCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + stripeFeeCents
+  const payoutSide = sentCents + alreadyPaidCents + heldCents + blockedCents + skippedCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + stripeFeeCents
   if (payoutSide !== totalCents) {
     throw new PayoutReconciliationError(
-      `order ${orderId}: payout-side mismatch — ${payoutSide}¢ ≠ charge ${totalCents}¢ (sent ${sentCents}, held ${heldCents}, blocked ${blockedCents}, skipped ${skippedCents}, serviceFee ${serviceFeeCents}, delivery ${deliveryCents}, serviceCharge ${serviceChargeCents}, tip ${tipCents}, stripeFee ${stripeFeeCents})`,
+      `order ${orderId}: payout-side mismatch — ${payoutSide}¢ ≠ charge ${totalCents}¢ (sent ${sentCents}, alreadyPaid ${alreadyPaidCents}, held ${heldCents}, blocked ${blockedCents}, skipped ${skippedCents}, serviceFee ${serviceFeeCents}, delivery ${deliveryCents}, serviceCharge ${serviceChargeCents}, tip ${tipCents}, stripeFee ${stripeFeeCents})`,
     )
   }
 
@@ -354,6 +390,16 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
         orderId, vendorId: p.vendorId, sliceCents: p.transferCents, reason: p.heldReason,
       })
       result.held.push({ vendorId: p.vendorId, sliceCents: p.transferCents, reason: p.heldReason! })
+      continue
+    }
+
+    if (p.outcome === 'already_paid') {
+      // Durable double-pay guard fired: this slice already has a confirmed transfer.
+      // Skip Stripe entirely. WARN (not info) so a prevented double-pay is visible —
+      // the interesting event on a manual re-run is precisely the transfer we DIDN'T send.
+      logger.warn('[Payout] vendor slice ALREADY PAID — skipping transfer (durable double-pay guard)', {
+        orderId, vendorId: p.vendorId, sliceCents: p.transferCents,
+      })
       continue
     }
 
