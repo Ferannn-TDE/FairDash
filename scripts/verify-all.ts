@@ -67,6 +67,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'sweep-summary',         file: 'scripts/sweep-summary-guard.ts' },
   { group: 'correctness', name: 'vendor-vos-advance',     file: 'scripts/vendor-vos-advance-guard.ts' },
   { group: 'correctness', name: 'collect-guard',          file: 'scripts/test-collect-guard.ts' },
+  { group: 'correctness', name: 'release-guard',          file: 'scripts/test-release-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
   { group: 'money',       name: 'reverser-pattern-t',     file: 'scripts/reverser-pattern-t-guard.ts' },
   { group: 'money',       name: 'double-pay-guard',       file: 'scripts/test-double-pay-guard.ts' },
