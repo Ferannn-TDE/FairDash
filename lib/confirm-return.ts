@@ -19,6 +19,7 @@ import { OrderStatus } from '@prisma/client'
 export type ConfirmReturnOutcome =
   | { outcome: 'returned' }
   | { outcome: 'not_found' }
+  | { outcome: 'order_voided' } // voided = dead to all custody ops (ghost fix, 2026-07-21)
   | { outcome: 'not_on_order' } // the confirming vendor is not part of this order
   | { outcome: 'no_return_requested' } // nothing to confirm — the runner hasn't requested a return
   | { outcome: 'not_confirmable'; status: string }
@@ -32,9 +33,10 @@ export async function confirmReturn(input: {
 
   const order = await db.order.findUnique({
     where: { id: orderId },
-    select: { id: true, status: true, runnerId: true, returnRequestedAt: true },
+    select: { id: true, status: true, runnerId: true, returnRequestedAt: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }
+  if (order.voidedAt) return { outcome: 'order_voided' }
 
   // The confirming vendor must actually be on this order.
   const onOrder = await db.vendorOrderStatus.findUnique({

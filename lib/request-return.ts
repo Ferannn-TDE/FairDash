@@ -21,6 +21,7 @@ export type RequestReturnOutcome =
   | { outcome: 'return_requested'; returnRequestedAt: Date }
   | { outcome: 'already_requested'; returnRequestedAt: Date | null }
   | { outcome: 'not_found' }
+  | { outcome: 'order_voided' } // voided = dead to all custody ops (ghost fix, 2026-07-21)
   | { outcome: 'wrong_event' }
   | { outcome: 'not_your_delivery' }
   | { outcome: 'not_collected' } // no bag yet → that's a release (U2), not a return
@@ -36,9 +37,10 @@ export async function requestReturn(input: {
 
   const order = await db.order.findUnique({
     where: { id: orderId },
-    select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, returnRequestedAt: true },
+    select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, returnRequestedAt: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }
+  if (order.voidedAt) return { outcome: 'order_voided' }
   if (order.eventId !== eventId) return { outcome: 'wrong_event' }
   if (order.runnerId !== runnerId) return { outcome: 'not_your_delivery' }
   if (!order.collectedAt) return { outcome: 'not_collected' }

@@ -160,6 +160,12 @@ export async function PATCH(
       newStatus === OrderStatus.DELIVERED
 
     if (isRunnerTransition) {
+      // Voided orders are dead to every operational surface (the void floor: money/audit
+      // include, operations exclude). Named refusal — a ghost claim/deliver must fail
+      // loudly, not fall through to a generic "no longer claimable".
+      if (order.voidedAt) {
+        return apiError('This order was voided by an admin', 409, 'ORDER_VOIDED')
+      }
       // Runner must have a record and be assigned to this event's order
       const runner = await db.runner.findUnique({ where: { userId: dbUser.id } })
       if (!runner || runner.eventId !== order.eventId) {
@@ -213,7 +219,7 @@ export async function PATCH(
           // status guard means a claim landing after the UNDELIVERABLE timeout fired
           // can't even set runnerId on the terminal order (no stray assignment) —
           // the resurrection is prevented at the claim, with canAdvance as backstop.
-          where: { id: order.id, runnerId: null, status: OrderStatus.READY },
+          where: { id: order.id, runnerId: null, status: OrderStatus.READY, voidedAt: null },
           data: { runnerId: runner.id, dispatchedAt: new Date() },
         })
         if (claim.count === 0) {
