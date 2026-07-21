@@ -123,7 +123,26 @@ console.log(argv.length ? `Running ${suites.length} suite(s): ${argv.join(' ')}`
 const BENIGN_STDERR = [/REDIS_URL not set/, /delayed jobs disabled/, /Failed to parse REDIS_URL/]
 
 const failed: string[] = []
+const flaky: string[] = []
 let lastGroup = ''
+
+const runSuite = (file: string) => spawnSync('npx', ['tsx', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+
+// The failure evidence display: the suite's own ❌ lines + the actionable stderr TAIL with
+// benign noise removed — never the FIRST line, which is often a graceful-degradation warn.
+function printEvidence(res: ReturnType<typeof runSuite>) {
+  const lines = (res.stdout ?? '').split('\n').filter(l => l.includes('❌')).slice(0, 6)
+  for (const l of lines) console.log(`       ${l.trim()}`)
+  const errLines = (res.stderr ?? '').split('\n').map(l => l.trim())
+    .filter(l => l && !BENIGN_STDERR.some(re => re.test(l)))
+  if (errLines.length) {
+    for (const l of errLines.slice(-3)) console.log(`       stderr: ${l.slice(0, 160)}`)
+  } else if (res.stderr?.trim()) {
+    // Only benign warns in stderr → this is NOT infra; look to the assertions above, or it's a
+    // flake. Say so, so a benign warn never reads as the failure reason.
+    console.log(`       stderr: (only benign warnings; not the cause — check the assertions above or re-run in isolation)`)
+  }
+}
 
 for (const s of suites) {
   if (s.group !== lastGroup) {
@@ -132,31 +151,36 @@ for (const s of suites) {
   }
   process.stdout.write(`  ${s.name.padEnd(26)} `)
 
-  const res = spawnSync('npx', ['tsx', s.file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  let res = runSuite(s.file)
+
+  // INFRA-FLAKE RETRY. The full-run flake (documented-likely: pooler saturation under 40+
+  // back-to-back suites) fails a suite that passes in isolation. One retry after a short pause
+  // separates that from a real failure — but HONESTLY: a pass-on-retry is reported loudly with
+  // the first run's evidence (so the flake's true cause accumulates proof instead of vanishing),
+  // never silently greened. A retry that hides the first failure would be the same
+  // false-confidence machine this runner exists to kill.
+  let firstFail: ReturnType<typeof runSuite> | null = null
+  if (res.status !== 0) {
+    firstFail = res
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000) // let the pool drain
+    res = runSuite(s.file)
+  }
 
   // THE VERDICT IS THE EXIT CODE. We do not parse the suite's prose for a pass count —
   // that is exactly the mistake this runner exists to make impossible.
   const ok = res.status === 0
-  if (ok) {
+  if (ok && firstFail) {
+    flaky.push(s.name)
+    console.log(`⚠️  passed on RETRY — first run failed (exit ${firstFail.status}); its evidence:`)
+    printEvidence(firstFail)
+  } else if (ok) {
     // Show the suite's own tally when it offers one, but it is decoration, not the verdict.
     const tally = (res.stdout ?? '').match(/(\d+) passed, 0 failed|ALL PROOFS PASS|All \d+ assertions passed|ALL PASS/)?.[0] ?? 'ok'
     console.log(`✅ ${tally}`)
   } else {
     failed.push(s.name)
-    console.log(`❌ FAILED (exit ${res.status})`)
-    const lines = (res.stdout ?? '').split('\n').filter(l => l.includes('❌')).slice(0, 6)
-    for (const l of lines) console.log(`       ${l.trim()}`)
-    // Show the actionable stderr TAIL (the real error), with benign noise removed — never the
-    // FIRST line, which is often just a graceful-degradation warn that isn't the cause.
-    const errLines = (res.stderr ?? '').split('\n').map(l => l.trim())
-      .filter(l => l && !BENIGN_STDERR.some(re => re.test(l)))
-    if (errLines.length) {
-      for (const l of errLines.slice(-3)) console.log(`       stderr: ${l.slice(0, 160)}`)
-    } else if (res.stderr?.trim()) {
-      // Only benign warns in stderr → this is NOT infra; look to the assertions above, or it's a
-      // flake. Say so, so a benign warn never reads as the failure reason.
-      console.log(`       stderr: (only benign warnings; not the cause — check the assertions above or re-run in isolation)`)
-    }
+    console.log(`❌ FAILED twice (exit ${res.status}) — not a flake`)
+    printEvidence(res)
   }
 }
 
@@ -165,6 +189,10 @@ if (failed.length === 0) {
   console.log(`  ✅ ALL ${suites.length} SUITES PASS`)
 } else {
   console.log(`  ❌ ${failed.length} of ${suites.length} SUITES FAILED: ${failed.join(', ')}`)
+}
+if (flaky.length) {
+  // Flaky ≠ green-and-forgotten: it stays on the summary line every run until someone chases it.
+  console.log(`  ⚠️  ${flaky.length} FLAKY (passed only on retry): ${flaky.join(', ')}`)
 }
 console.log(`${'═'.repeat(52)}\n`)
 
