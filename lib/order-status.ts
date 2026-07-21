@@ -11,6 +11,10 @@ export const FAILED_STATUSES = [
   'CANCELLED',
   'UNCOLLECTED',
   'UNDELIVERABLE',
+  // VendorOrderStatus-level terminal: the vendor's slice was refunded (e.g. the accept-timeout
+  // auto-cancel). Missing from a drifted copy of this list, a customer's REFUNDED order showed
+  // "Cannot cancel — vendor is preparing" — and fell out of every vendor orders tab, even 'all'.
+  'REFUNDED',
 ] as const
 
 export const ACTIVE_STATUSES = [
@@ -61,6 +65,8 @@ export function getStatusMeta(status: string): StatusMeta {
       return { label: 'Order fulfilled successfully', iconType: 'check',   color: 'text-emerald-400' }
     case 'DECLINED':
       return { label: 'Order declined by vendor',     iconType: 'x',       color: 'text-amber-400'  }
+    case 'REFUNDED':
+      return { label: 'Order refunded',               iconType: 'x',       color: 'text-red-400'    }
     case 'CANCELLED':
     case 'UNCOLLECTED':
     case 'UNDELIVERABLE':
