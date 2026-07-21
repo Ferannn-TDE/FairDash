@@ -30,6 +30,7 @@
 import { OrderStatus, StrandedReason } from '@prisma/client'
 import { db } from './db'
 import { STRAND_THRESHOLDS_MS } from './constants'
+import { recordSweepHeartbeat } from './health'
 import { stripe } from './stripe'
 import { placePaidOrder } from './place-order'
 import { enqueueOrderPayout } from './order-side-effects'
@@ -240,6 +241,10 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   })
   if (sum.alerted.length) logger.warn('[Reconciler] ALERTS (human review)', { alerted: sum.alerted })
   if (sum.backstopWarnings.length) logger.warn('[Reconciler] BACKSTOP WARNINGS', { backstopWarnings: sum.backstopWarnings })
+
+  // Worker liveness heartbeat (best-effort — never breaks the sweep). Reaching here means the
+  // sweep RAN; /api/health reads this to tell a live-but-quiet sweep from a dead worker.
+  await recordSweepHeartbeat()
 
   return sum
 }
