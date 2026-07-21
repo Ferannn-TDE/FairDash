@@ -125,3 +125,22 @@ export const POST_EVENT_REPORT_HOURS = 48
  * Playbook Quick Ref: "Max vendors per order: 5"
  */
 export const MAX_VENDORS_PER_ORDER = 5
+
+/**
+ * Delivery-custody strand clocks (Commit 2, U4). Time thresholds after which an order stuck
+ * in a runner-custody state is FLAGGED for a human (reconciler Pattern V — flag only, never
+ * auto-acts). One named home for all three, so no timing literals live scattered in the
+ * reconciler; the per-runner concurrency cap will join these later.
+ *   - claimedNotCollected  — PRE-collection, aged from dispatchedAt. Generous: the food is
+ *     safe on the vendor's counter, and collectedAt-null is ambiguous (could be "collected but
+ *     forgot to tap"), so this only ever flags — never auto-releases.
+ *   - runnerUnreachable     — POST-collection, aged from collectedAt. Tighter: the food is in
+ *     a runner's car, undelivered.
+ *   - awaitingVendorConfirm — a return was requested, aged from returnRequestedAt. The vendor
+ *     is a tap away from resolving it.
+ */
+export const STRAND_THRESHOLDS_MS = {
+  claimedNotCollected:   15 * 60 * 1000, // 15 minutes
+  runnerUnreachable:     10 * 60 * 1000, // 10 minutes
+  awaitingVendorConfirm: 10 * 60 * 1000, // 10 minutes
+} as const
