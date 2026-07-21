@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorMembershipById } from '@/lib/auth'
-import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
+import { toVendorActiveOrder } from '@/lib/vendor-active-order'
 import { statusWhere, vendorOrderScope } from '@/lib/vendor-order-history'
 import { logger } from '@/lib/logger'
 
@@ -43,18 +43,27 @@ export async function GET(
       },
       orderBy: [{ placedAt: 'asc' }],
       take: 50,
+      // This select must produce VendorActiveOrderRow (lib/vendor-active-order) — drop a
+      // field here and the toVendorActiveOrder call below is a COMPILE error, not
+      // "undefined, undefined" on a card. That's the fix for the partial-rows class
+      // (fulfillmentType's vacuous gate was instance two; the missing delivery address
+      // was instance three).
       select: {
         id: true,
         status: true,
         placedAt: true,
         total: true,
-        // The ready-lane gate ("runner completes this, not you") keys on fulfillmentType.
-        // Without it here, REST-loaded orders had fulfillmentType undefined and the UI
-        // gate was silently vacuous after a reload.
         fulfillmentType: true,
+        customerName: true,
+        customerPhone: true,
+        vehicleMake: true,
+        vehicleColor: true,
+        vehiclePlate: true,
+        deliveryStreet: true,
+        deliveryCity: true,
         vendorOrderStatuses: {
           where: { vendorId },
-          select: { vendorId: true, status: true },
+          select: { vendorId: true, status: true, version: true },
         },
         payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true } },
         refunds: { where: { vendorId }, select: { vendorId: true, status: true, amountCents: true } },
@@ -65,28 +74,9 @@ export async function GET(
       },
     })
 
-    // Active orders are pre-payout → earnings are a conservative ESTIMATE
-    // (slice − estimated Stripe-fee share), via the one shared helper. vendorSubtotal
-    // is the gross slice (kept for line items); earnings is the take-home estimate.
-    const result = orders.map(o => {
-      const myItems = o.orderItems.filter(i => i.vendorId === vendorId)
-      const earn = computeVendorOrderEarnings(o, vendorId)
-      return {
-        id: o.id,
-        status: o.vendorOrderStatuses[0]?.status ?? o.status,
-        fulfillmentType: o.fulfillmentType,
-        vendorSubtotal: parseFloat(myItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0).toFixed(2)),
-        earnings: parseFloat((earn.cents / 100).toFixed(2)),
-        earningsStatus: earn.status, // 'estimated' for active orders
-        placedAt: o.placedAt,
-        orderItems: myItems.map(i => ({
-          id: i.id,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-          itemName: i.itemName,
-        })),
-      }
-    })
+    // ONE shared mapper (lib/vendor-active-order) — the dashboard imports the same
+    // VendorActiveOrder type, so producer and consumer cannot silently diverge.
+    const result = orders.map(o => toVendorActiveOrder(o, vendorId))
 
     logger.debug('[vendor/orders/active] served', {
       durationMs: Math.round(performance.now() - start),

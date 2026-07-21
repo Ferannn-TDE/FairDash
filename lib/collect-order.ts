@@ -16,6 +16,7 @@ export type CollectOutcome =
   | { outcome: 'collected'; collectedAt: Date }
   | { outcome: 'already_collected'; collectedAt: Date | null }
   | { outcome: 'not_found' }
+  | { outcome: 'order_voided' } // voided = dead to all custody ops (ghost fix, 2026-07-21)
   | { outcome: 'wrong_event' }
   | { outcome: 'not_runner_order' } // BOOTH_PICKUP is not runner-collected
   | { outcome: 'not_your_delivery' }
@@ -31,9 +32,10 @@ export async function collectOrder(input: {
 
   const order = await db.order.findUnique({
     where: { id: orderId },
-    select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, fulfillmentType: true },
+    select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, fulfillmentType: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }
+  if (order.voidedAt) return { outcome: 'order_voided' }
   if (order.eventId !== eventId) return { outcome: 'wrong_event' }
   if (order.fulfillmentType === FulfillmentType.BOOTH_PICKUP) return { outcome: 'not_runner_order' }
   if (order.runnerId !== runnerId) return { outcome: 'not_your_delivery' }

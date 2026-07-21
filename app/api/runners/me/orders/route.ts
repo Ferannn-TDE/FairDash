@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
-import { OrderStatus, FulfillmentType } from '@prisma/client'
 import { db } from '@/lib/db'
+import { runnerFeedWhere, runnerOrderDetailWhere } from '@/lib/runner-feed'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -31,16 +31,10 @@ export async function GET(req: NextRequest) {
       // before claiming. This mirrors the list scoping below — without it, any runner in
       // the fair could read another runner's active-delivery detail (customer name,
       // phone, address) by passing its orderId. (Proven by scripts/runner-boundary-proof.ts.)
+      // The WHERE lives in lib/runner-feed (voidedAt: null included) — the ghost guard
+      // binds to that predicate, so this route and the guard cannot diverge.
       const order = await db.order.findFirst({
-        where: {
-          id: orderId,
-          eventId: runner.eventId,
-          fulfillmentType: { in: [FulfillmentType.HOME_DELIVERY, FulfillmentType.CURBSIDE] },
-          OR: [
-            { runnerId: runner.id },
-            { status: OrderStatus.READY, runnerId: null },
-          ],
-        },
+        where: runnerOrderDetailWhere(orderId, runner.eventId, runner.id),
         include: {
           vendor: { select: { name: true, boothNumber: true } },
           orderItems: {
@@ -53,22 +47,10 @@ export async function GET(req: NextRequest) {
       return success({ order })
     }
 
-    // List: READY (unassigned or this runner) + RUNNER_COLLECTED (this runner)
+    // List: READY (unassigned or this runner) + RUNNER_COLLECTED (this runner).
+    // Shared predicate from lib/runner-feed — includes voidedAt: null (ghost fix).
     const orders = await db.order.findMany({
-      where: {
-        eventId: runner.eventId,
-        fulfillmentType: { in: [FulfillmentType.HOME_DELIVERY, FulfillmentType.CURBSIDE] },
-        OR: [
-          {
-            status: OrderStatus.READY,
-            OR: [{ runnerId: null }, { runnerId: runner.id }],
-          },
-          {
-            status: OrderStatus.RUNNER_COLLECTED,
-            runnerId: runner.id,
-          },
-        ],
-      },
+      where: runnerFeedWhere(runner.eventId, runner.id),
       orderBy: { readyAt: 'asc' },
       include: {
         vendor: { select: { name: true, boothNumber: true } },

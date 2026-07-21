@@ -42,6 +42,8 @@ export async function POST(
         return success({ orderId: id, collected: true, alreadyCollected: true, collectedAt: r.collectedAt })
       case 'not_found':
         return apiError('Order not found', 404, 'ORDER_NOT_FOUND')
+      case 'order_voided':
+        return apiError('This order was voided by an admin', 409, 'ORDER_VOIDED')
       case 'wrong_event':
         return apiError('Access denied — not a runner for this event', 403, 'FORBIDDEN')
       case 'not_runner_order':
