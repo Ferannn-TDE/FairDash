@@ -70,6 +70,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'release-guard',          file: 'scripts/test-release-guard.ts' },
   { group: 'correctness', name: 'return-guard',           file: 'scripts/test-return-guard.ts' },
   { group: 'correctness', name: 'strand-guard',           file: 'scripts/test-strand-guard.ts' },
+  { group: 'correctness', name: 'ghost-guard',            file: 'scripts/test-ghost-guard.ts' },
   { group: 'correctness', name: 'health-guard',           file: 'scripts/test-health-guard.ts' },
   { group: 'correctness', name: 'escalation-guard',       file: 'scripts/test-escalation-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
@@ -91,7 +92,7 @@ const SUITES: Suite[] = [
 const AREA_SUITES: Record<string, string[]> = {
   // Delivery custody / runner escape path (Commit 2). Touched-area guards + the cross-cutting
   // runner boundary + one reconcile guard (the smoke set that catches breakage they didn't mean).
-  delivery: ['collect-guard', 'release-guard', 'return-guard', 'strand-guard', 'escalation-guard', 'runner-boundary', 'reverser-pattern-t'],
+  delivery: ['collect-guard', 'release-guard', 'return-guard', 'strand-guard', 'ghost-guard', 'escalation-guard', 'runner-boundary', 'reverser-pattern-t'],
   money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t'],
   reconcile:['reverser-pattern-t', 'sweep-summary', 'stuck-money-reader', 'health-guard', 'incoming-divergence'],
   vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence'],
