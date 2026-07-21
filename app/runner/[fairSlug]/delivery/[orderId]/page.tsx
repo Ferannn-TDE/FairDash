@@ -40,6 +40,7 @@ export default function DeliveryPage() {
   const [loading, setLoading] = useState(true)
   const [pickedUp, setPickedUp] = useState(false)
   const [collecting, setCollecting] = useState(false)
+  const [releasing, setReleasing] = useState(false)
   // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
   const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
   const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
@@ -135,6 +136,30 @@ export default function DeliveryPage() {
       toast.error('Could not mark collected — check your connection and retry')
     } finally {
       setCollecting(false)
+    }
+  }
+
+  // PRE-collection release (U2): hand a claimed-but-not-collected order back to the pool. Valid
+  // only before collection — once collected, handing it back needs the vendor-confirmed return
+  // (U3), and the server refuses a release on a collected order. On success the order is no
+  // longer yours, so leave the screen.
+  async function release() {
+    if (!order || pickedUp || releasing) return
+    if (!window.confirm('Release this delivery back to the pool? Another runner can then claim it.')) return
+    setReleasing(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/release`, { method: 'POST' })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        toast.success('Released back to the pool')
+        router.push(`/runner/${fairSlug}/dashboard`)
+      } else {
+        toast.error(json.error || json.message || 'Could not release — try again')
+      }
+    } catch {
+      toast.error('Could not release — check your connection and retry')
+    } finally {
+      setReleasing(false)
     }
   }
 
@@ -248,6 +273,17 @@ export default function DeliveryPage() {
           </div>
         </button>
       </div>
+
+      {/* Pre-collection escape: hand it back to the pool (only before you've collected). */}
+      {!pickedUp && (
+        <button
+          onClick={release}
+          disabled={releasing}
+          className="w-full text-center text-xs text-text-gray hover:text-white transition-colors bg-transparent border-0 disabled:opacity-50 cursor-pointer"
+        >
+          {releasing ? 'Releasing…' : "Can't take this? Release it back to the pool"}
+        </button>
+      )}
 
       {/* Step 2: deliver */}
       <div className={`bg-bg-card border rounded-2xl p-5 space-y-4 transition-all ${pickedUp ? 'border-neon-pink/30' : 'border-white/10 opacity-50'}`}>
