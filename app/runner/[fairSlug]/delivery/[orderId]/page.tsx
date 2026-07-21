@@ -18,6 +18,8 @@ interface DeliveryOrder {
   customerPhone: string
   deliveryFee: number | null
   total: number
+  collectedAt?: string | null
+  returnRequestedAt?: string | null
   deliveryStreet?: string | null
   deliveryCity?: string | null
   deliveryZip?: string | null
@@ -38,6 +40,9 @@ export default function DeliveryPage() {
   const [order, setOrder] = useState<DeliveryOrder | null>(null)
   const [loading, setLoading] = useState(true)
   const [pickedUp, setPickedUp] = useState(false)
+  const [collecting, setCollecting] = useState(false)
+  const [releasing, setReleasing] = useState(false)
+  const [requesting, setRequesting] = useState(false)
   // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
   const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
   const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
@@ -54,7 +59,9 @@ export default function DeliveryPage() {
       if (json.success) {
         const o = json.data.order ?? json.data
         setOrder(o)
-        if (o?.status === 'DELIVERED') setPickedUp(true)
+        // pickedUp reflects the SERVER truth (collectedAt persisted), not local taps — so a
+        // reload/reconnect mid-delivery restores the real collected state. DELIVERED implies it.
+        setPickedUp(o?.collectedAt != null || o?.status === 'DELIVERED')
       }
     } catch { /* reconnect handler below refetches */ } finally { setLoading(false) }
   }
@@ -108,6 +115,79 @@ export default function DeliveryPage() {
 
     return () => { cancelled = true; navigator.geolocation.clearWatch(watchId) }
   }, [order?.status])
+
+  // The REAL collect action (U1). Optimism is DELIBERATELY withheld: pickedUp flips only on a
+  // confirmed server success, so a failure leaves the checkbox HONEST (unchecked) and the
+  // runner can retry — never optimistically stuck "collected" while the bag is still on the
+  // counter. The endpoint is idempotent, so a retry after a lost-but-succeeded response is a
+  // benign no-op (alreadyCollected), not a double-collect.
+  async function collect() {
+    if (!order || pickedUp || collecting) return
+    setCollecting(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/collect`, { method: 'POST' })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setPickedUp(true)
+        setOrder(o => (o ? { ...o, collectedAt: json.data.collectedAt ?? new Date().toISOString() } : o))
+        if (!json.data.alreadyCollected) toast.success('Collected from vendor')
+      } else {
+        toast.error(json.error || json.message || 'Could not mark collected — try again')
+      }
+    } catch {
+      toast.error('Could not mark collected — check your connection and retry')
+    } finally {
+      setCollecting(false)
+    }
+  }
+
+  // PRE-collection release (U2): hand a claimed-but-not-collected order back to the pool. Valid
+  // only before collection — once collected, handing it back needs the vendor-confirmed return
+  // (U3), and the server refuses a release on a collected order. On success the order is no
+  // longer yours, so leave the screen.
+  async function release() {
+    if (!order || pickedUp || releasing) return
+    if (!window.confirm('Release this delivery back to the pool? Another runner can then claim it.')) return
+    setReleasing(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/release`, { method: 'POST' })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        toast.success('Released back to the pool')
+        router.push(`/runner/${fairSlug}/dashboard`)
+      } else {
+        toast.error(json.error || json.message || 'Could not release — try again')
+      }
+    } catch {
+      toast.error('Could not release — check your connection and retry')
+    } finally {
+      setReleasing(false)
+    }
+  }
+
+  // POST-collection return (U3): the runner has the bag but can't deliver. Ask the vendor to
+  // take it back — the order moves back to the pool only when the VENDOR confirms. Optimism
+  // withheld: the banner flips only on a confirmed server success (returnRequestedAt is server
+  // truth), so a failure stays retryable, never a false "return requested".
+  async function requestReturn() {
+    if (!order || !pickedUp || order.returnRequestedAt || requesting) return
+    if (!window.confirm('Ask the vendor to take this order back? You keep the food until they confirm.')) return
+    setRequesting(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/request-return`, { method: 'POST' })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setOrder(o => (o ? { ...o, returnRequestedAt: json.data.returnRequestedAt ?? new Date().toISOString() } : o))
+        toast.success('Return requested — waiting for the vendor to confirm')
+      } else {
+        toast.error(json.error || json.message || 'Could not request a return — try again')
+      }
+    } catch {
+      toast.error('Could not request a return — check your connection and retry')
+    } finally {
+      setRequesting(false)
+    }
+  }
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -206,7 +286,7 @@ export default function DeliveryPage() {
 
       {/* Step 1: pick up from the vendor */}
       <div className={`bg-bg-card border rounded-2xl p-4 ${pickedUp ? 'border-emerald-500/30' : 'border-white/10'}`}>
-        <button onClick={() => setPickedUp(v => !v)} className="flex items-start gap-3 w-full text-left bg-transparent border-0 cursor-pointer">
+        <button onClick={collect} disabled={pickedUp || collecting} className="flex items-start gap-3 w-full text-left bg-transparent border-0 cursor-pointer disabled:cursor-default">
           {pickedUp ? <CheckSquare className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" /> : <Square className="w-5 h-5 text-text-gray mt-0.5 shrink-0" />}
           <div className="flex-1">
             <p className={`font-semibold text-sm ${pickedUp ? 'text-text-gray line-through' : 'text-white'}`}>
@@ -215,9 +295,21 @@ export default function DeliveryPage() {
             <div className="mt-1 space-y-0.5">
               {(order.orderItems ?? []).map(i => <p key={i.id} className="text-text-gray text-xs">{i.quantity}× {i.menuItem?.name ?? 'Item'}</p>)}
             </div>
+            {collecting && <p className="text-text-gray text-xs mt-1">Marking collected…</p>}
           </div>
         </button>
       </div>
+
+      {/* Pre-collection escape: hand it back to the pool (only before you've collected). */}
+      {!pickedUp && (
+        <button
+          onClick={release}
+          disabled={releasing}
+          className="w-full text-center text-xs text-text-gray hover:text-white transition-colors bg-transparent border-0 disabled:opacity-50 cursor-pointer"
+        >
+          {releasing ? 'Releasing…' : "Can't take this? Release it back to the pool"}
+        </button>
+      )}
 
       {/* Step 2: deliver */}
       <div className={`bg-bg-card border rounded-2xl p-5 space-y-4 transition-all ${pickedUp ? 'border-neon-pink/30' : 'border-white/10 opacity-50'}`}>
@@ -255,10 +347,25 @@ export default function DeliveryPage() {
         </div>
       </div>
 
-      <button onClick={confirmDelivery} disabled={!pickedUp || !proofPath || submitting}
-        className="w-full py-4 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-0">
-        {submitting ? 'Confirming…' : !pickedUp ? 'Collect the order first' : !proofPath ? 'Add a delivery photo' : 'Confirm Delivery Complete'}
-      </button>
+      {order.returnRequestedAt ? (
+        <div className="w-full bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+          <p className="text-amber-400 font-semibold text-sm">Return requested — waiting for the vendor to confirm</p>
+          <p className="text-text-gray text-xs mt-0.5">Hand the food back to {order.vendor?.name ?? 'the vendor'}. Once they confirm it&apos;s returned, this order goes back to the pool.</p>
+        </div>
+      ) : (
+        <button onClick={confirmDelivery} disabled={!pickedUp || !proofPath || submitting}
+          className="w-full py-4 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-0">
+          {submitting ? 'Confirming…' : !pickedUp ? 'Collect the order first' : !proofPath ? 'Add a delivery photo' : 'Confirm Delivery Complete'}
+        </button>
+      )}
+
+      {/* Post-collection escape: can't deliver → ask the vendor to take it back (U3). */}
+      {pickedUp && !order.returnRequestedAt && (
+        <button onClick={requestReturn} disabled={requesting}
+          className="w-full text-center text-xs text-text-gray hover:text-white transition-colors bg-transparent border-0 disabled:opacity-50 cursor-pointer">
+          {requesting ? 'Requesting…' : "Can't deliver? Ask the vendor to take it back"}
+        </button>
+      )}
     </div>
   )
 }
