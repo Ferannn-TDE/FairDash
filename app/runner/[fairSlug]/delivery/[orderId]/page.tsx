@@ -19,6 +19,7 @@ interface DeliveryOrder {
   deliveryFee: number | null
   total: number
   collectedAt?: string | null
+  returnRequestedAt?: string | null
   deliveryStreet?: string | null
   deliveryCity?: string | null
   deliveryZip?: string | null
@@ -41,6 +42,7 @@ export default function DeliveryPage() {
   const [pickedUp, setPickedUp] = useState(false)
   const [collecting, setCollecting] = useState(false)
   const [releasing, setReleasing] = useState(false)
+  const [requesting, setRequesting] = useState(false)
   // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
   const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
   const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
@@ -160,6 +162,30 @@ export default function DeliveryPage() {
       toast.error('Could not release — check your connection and retry')
     } finally {
       setReleasing(false)
+    }
+  }
+
+  // POST-collection return (U3): the runner has the bag but can't deliver. Ask the vendor to
+  // take it back — the order moves back to the pool only when the VENDOR confirms. Optimism
+  // withheld: the banner flips only on a confirmed server success (returnRequestedAt is server
+  // truth), so a failure stays retryable, never a false "return requested".
+  async function requestReturn() {
+    if (!order || !pickedUp || order.returnRequestedAt || requesting) return
+    if (!window.confirm('Ask the vendor to take this order back? You keep the food until they confirm.')) return
+    setRequesting(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/request-return`, { method: 'POST' })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setOrder(o => (o ? { ...o, returnRequestedAt: json.data.returnRequestedAt ?? new Date().toISOString() } : o))
+        toast.success('Return requested — waiting for the vendor to confirm')
+      } else {
+        toast.error(json.error || json.message || 'Could not request a return — try again')
+      }
+    } catch {
+      toast.error('Could not request a return — check your connection and retry')
+    } finally {
+      setRequesting(false)
     }
   }
 
@@ -321,10 +347,25 @@ export default function DeliveryPage() {
         </div>
       </div>
 
-      <button onClick={confirmDelivery} disabled={!pickedUp || !proofPath || submitting}
-        className="w-full py-4 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-0">
-        {submitting ? 'Confirming…' : !pickedUp ? 'Collect the order first' : !proofPath ? 'Add a delivery photo' : 'Confirm Delivery Complete'}
-      </button>
+      {order.returnRequestedAt ? (
+        <div className="w-full bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+          <p className="text-amber-400 font-semibold text-sm">Return requested — waiting for the vendor to confirm</p>
+          <p className="text-text-gray text-xs mt-0.5">Hand the food back to {order.vendor?.name ?? 'the vendor'}. Once they confirm it&apos;s returned, this order goes back to the pool.</p>
+        </div>
+      ) : (
+        <button onClick={confirmDelivery} disabled={!pickedUp || !proofPath || submitting}
+          className="w-full py-4 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] transition-colors shadow-[0_4px_12px_rgba(255,0,119,0.3)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-0">
+          {submitting ? 'Confirming…' : !pickedUp ? 'Collect the order first' : !proofPath ? 'Add a delivery photo' : 'Confirm Delivery Complete'}
+        </button>
+      )}
+
+      {/* Post-collection escape: can't deliver → ask the vendor to take it back (U3). */}
+      {pickedUp && !order.returnRequestedAt && (
+        <button onClick={requestReturn} disabled={requesting}
+          className="w-full text-center text-xs text-text-gray hover:text-white transition-colors bg-transparent border-0 disabled:opacity-50 cursor-pointer">
+          {requesting ? 'Requesting…' : "Can't deliver? Ask the vendor to take it back"}
+        </button>
+      )}
     </div>
   )
 }
