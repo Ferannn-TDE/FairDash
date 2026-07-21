@@ -17,6 +17,7 @@ interface DeliveryOrder {
   status: string
   fulfillmentType: string
   runnerId: string | null
+  collectedAt?: string | null // custody sub-state: null = still on the vendor's counter
   vendor?: { name?: string | null } | null
   orderItems?: { quantity: number }[]
 }
@@ -113,7 +114,13 @@ function TodayStats({ stats }: { stats: EarningsData | null }) {
   )
 }
 
-/* ─── Claimable deliveries (real) ─────────────────────────────────────────── */
+/* ─── Delivery feed: Available vs My delivery tabs ─────────────────────────── */
+// One endpoint serves both tabs (the feed already returns claimable READY + my
+// RUNNER_COLLECTED); the UI does the split. "My delivery" doubles as the escape-path
+// surface — a runner has at most one active delivery, and its release/return actions
+// live on the delivery page this card opens.
+type FeedTab = 'available' | 'active'
+
 function DeliveryFeed({ fairSlug }: { fairSlug: string }) {
   const router = useRouter()
   const { isOnline } = useRunner()
@@ -121,6 +128,8 @@ function DeliveryFeed({ fairSlug }: { fairSlug: string }) {
   const [loading, setLoading] = useState(true)
   const [claiming, setClaiming] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
+  const [tab, setTab] = useState<FeedTab>('available')
+  const [tabInitialized, setTabInitialized] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -129,6 +138,14 @@ function DeliveryFeed({ fairSlug }: { fairSlug: string }) {
       if (json.success) { setOrders(json.data.orders ?? []); setOffline(false) }
     } catch { setOffline(true) } finally { setLoading(false) }
   }, [])
+
+  // Land on "My delivery" when there IS one — but only on first load; after that the
+  // tab is the runner's choice (a background poll must never yank it away mid-tap).
+  useEffect(() => {
+    if (loading || tabInitialized) return
+    setTabInitialized(true)
+    if (orders.some(o => o.status === 'RUNNER_COLLECTED' && o.runnerId)) setTab('active')
+  }, [loading, tabInitialized, orders])
 
   // Reconnection: refetch on mount, on regaining focus, and on the browser's
   // online event — a runner crossing the fairgrounds drops WiFi constantly, and
@@ -186,20 +203,60 @@ function DeliveryFeed({ fairSlug }: { fairSlug: string }) {
   const claimable = orders.filter(o => o.status === 'READY' && !o.runnerId)
   const mine = orders.filter(o => o.status === 'RUNNER_COLLECTED' && o.runnerId)
 
+  const tabs: { key: FeedTab; label: string; count: number }[] = [
+    { key: 'available', label: 'Available', count: claimable.length },
+    { key: 'active', label: 'My Delivery', count: mine.length },
+  ]
+
   return (
     <div className="space-y-4">
-      {mine.map(o => (
-        <button key={o.id} onClick={() => router.push(`/runner/${fairSlug}/delivery/${o.id}`)}
-          className="w-full text-left bg-blue-500/[0.07] border border-blue-500/30 rounded-2xl p-5 cursor-pointer">
-          <p className="text-[0.6875rem] uppercase tracking-wide text-blue-400 font-semibold mb-1">Your Active Delivery</p>
-          <p className="text-white font-semibold">#{o.id.slice(-8).toUpperCase()} · {FULFILLMENT_LABEL[o.fulfillmentType]}</p>
-          <p className="text-text-gray text-xs mt-1">{o.vendor?.name ?? 'Vendor'} — tap to continue →</p>
-        </button>
-      ))}
+      {/* Tab bar — counts stay visible on both tabs so a new claimable order shows up
+          even while the runner is looking at their active delivery. */}
+      <div className="flex gap-2" role="tablist">
+        {tabs.map(t => (
+          <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
+            className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${
+              tab === t.key
+                ? 'bg-neon-pink text-white border-neon-pink shadow-[0_4px_12px_rgba(255,0,119,0.3)]'
+                : 'bg-white/5 text-text-gray border-white/10 hover:bg-white/10'
+            }`}>
+            {t.label}
+            <span className={`ml-1.5 inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full text-[0.65rem] font-bold ${
+              tab === t.key ? 'bg-white/20 text-white' : t.count > 0 ? 'bg-neon-pink/20 text-neon-pink' : 'bg-white/10 text-text-gray'
+            }`}>{t.count}</span>
+          </button>
+        ))}
+      </div>
 
-      {loading && claimable.length === 0 && mine.length === 0 ? (
+      {loading && orders.length === 0 ? (
         <div className="bg-bg-card border border-white/10 rounded-2xl p-10 text-center"><p className="text-text-gray text-sm">Loading…</p></div>
-      ) : claimable.length === 0 && mine.length === 0 ? (
+      ) : tab === 'active' ? (
+        mine.length === 0 ? (
+          // Honest per-tab empty state: this one is about THIS runner's delivery, never "waiting for orders".
+          <div className="bg-bg-card border border-white/10 rounded-2xl p-10 text-center">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-white/[0.03] flex items-center justify-center mb-4"><Truck className="w-8 h-8 text-gray-600" /></div>
+            <p className="text-white font-semibold text-sm mb-1">No active delivery</p>
+            <p className="text-text-gray text-xs">Claim one from the Available tab to get started.</p>
+          </div>
+        ) : mine.map(o => {
+          const hasBag = !!o.collectedAt
+          return (
+            <button key={o.id} onClick={() => router.push(`/runner/${fairSlug}/delivery/${o.id}`)}
+              className="w-full text-left bg-blue-500/[0.07] border border-blue-500/30 rounded-2xl p-5 cursor-pointer">
+              <p className="text-[0.6875rem] uppercase tracking-wide text-blue-400 font-semibold mb-1">Your Active Delivery</p>
+              <p className="text-white font-semibold">#{o.id.slice(-8).toUpperCase()} · {FULFILLMENT_LABEL[o.fulfillmentType]}</p>
+              {/* Custody sub-state from collectedAt — the column the whole escape path keys on. */}
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className={`w-2 h-2 rounded-full ${hasBag ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                <p className={`text-xs font-semibold ${hasBag ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {hasBag ? 'Bag collected — out for delivery' : `Collect from ${o.vendor?.name ?? 'the vendor'}`}
+                </p>
+              </div>
+              <p className="text-text-gray text-xs mt-1">Tap to continue →</p>
+            </button>
+          )
+        })
+      ) : claimable.length === 0 ? (
         <div className="bg-bg-card border border-white/10 rounded-2xl p-10 text-center">
           <div className="w-16 h-16 mx-auto rounded-2xl bg-white/[0.03] flex items-center justify-center mb-4"><Package className="w-8 h-8 text-gray-600" /></div>
           <p className="text-white font-semibold text-sm mb-1">Waiting for orders</p>

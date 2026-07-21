@@ -18,42 +18,21 @@ import { isCompleted, isFailed, isRunnerFulfilled } from '@/lib/order-status'
 import { deriveOnlineState } from '@/lib/vendor-online-state'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+// THE response contract of /api/vendors/[id]/orders/active, imported — never re-declared.
+// A hand-written local interface here promised fields the route didn't return, and
+// home-delivery cards rendered "undefined, undefined" (third partial-rows instance).
+// Reading a field the route doesn't return is now a compile error.
 
-export interface OrderItem {
-  itemName: string
-  quantity: number
-  unitPrice: number
-}
+import type { VendorActiveOrder, VendorActiveOrderItem, VendorFulfillmentType } from '@/lib/vendor-active-order'
+
+export type VendorOrder = VendorActiveOrder
+export type OrderItem = VendorActiveOrderItem
+export type FulfillmentType = VendorFulfillmentType
 
 export type OrderStatus =
   | 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY'
   | 'RUNNER_COLLECTED' | 'COMPLETED' | 'DELIVERED'
-  | 'CANCELLED' | 'DECLINED' | 'UNCOLLECTED' | 'UNDELIVERABLE'
-
-export type FulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
-
-export interface VendorOrder {
-  id: string
-  status: OrderStatus
-  fulfillmentType: FulfillmentType
-  customerName: string
-  customerPhone: string
-  // This vendor's own slice (sum of their items) — gross, kept for reference.
-  vendorSubtotal: number
-  // Take-home + honesty status from the shared earnings helper (what cards show).
-  earnings?: number
-  earningsStatus?: import('@/app/_components/EarningsBadge').EarningsStatus
-  orderItems: OrderItem[]
-  placedAt: string
-  version?: number
-  // curbside
-  vehicleMake?: string | null
-  vehicleColor?: string | null
-  vehiclePlate?: string | null
-  // delivery
-  deliveryStreet?: string | null
-  deliveryCity?: string | null
-}
+  | 'CANCELLED' | 'DECLINED' | 'UNCOLLECTED' | 'UNDELIVERABLE' | 'REFUNDED'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

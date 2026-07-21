@@ -53,6 +53,8 @@ export async function POST(
         return success({ orderId: id, returned: true })
       case 'not_found':
         return apiError('Order not found', 404, 'ORDER_NOT_FOUND')
+      case 'order_voided':
+        return apiError('This order was voided by an admin', 409, 'ORDER_VOIDED')
       case 'not_on_order':
         return apiError('This order does not include your vendor', 404, 'NOT_FOUND')
       case 'no_return_requested':
