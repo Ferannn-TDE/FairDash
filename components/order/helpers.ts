@@ -4,6 +4,7 @@ import {
   BuildingStorefrontIcon,
 } from '@heroicons/react/24/outline'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
+import { FAILED_STATUSES } from '@/lib/order-status'
 import type { OrderItem, VendorGroup, Order } from './types'
 
 export const STEPS = [
@@ -35,7 +36,11 @@ export const STATUS_TO_STEP: Record<string, number> = {
   DELIVERED:        3,
 }
 
-export const TERMINAL_STATUSES = ['CANCELLED', 'UNCOLLECTED', 'UNDELIVERABLE']
+// Terminal-FAILED statuses (drives isCancelled on the tracking surfaces; COMPLETED/DELIVERED
+// are handled separately by isCompleted). DERIVED from the one canonical list — this used to be
+// a local copy missing REFUNDED and DECLINED, so a refunded order rendered
+// "Cannot cancel — vendor is preparing". Never re-inline it (cancel-label-guard pins this).
+export const TERMINAL_STATUSES: readonly string[] = FAILED_STATUSES
 
 export const STATUS_LABELS: Record<string, string> = {
   PLACED:        'Order Placed',
@@ -46,6 +51,8 @@ export const STATUS_LABELS: Record<string, string> = {
   CANCELLED:     'Cancelled',
   UNCOLLECTED:   'Uncollected',
   UNDELIVERABLE: 'Undeliverable',
+  REFUNDED:      'Refunded',
+  DECLINED:      'Declined',
 }
 
 export const STATUS_COLORS: Record<string, string> = {
@@ -57,6 +64,8 @@ export const STATUS_COLORS: Record<string, string> = {
   CANCELLED:     'text-red-400 bg-red-400/10 border-red-400/20',
   UNCOLLECTED:   'text-red-400 bg-red-400/10 border-red-400/20',
   UNDELIVERABLE: 'text-red-400 bg-red-400/10 border-red-400/20',
+  REFUNDED:      'text-red-400 bg-red-400/10 border-red-400/20',
+  DECLINED:      'text-red-400 bg-red-400/10 border-red-400/20',
 }
 
 export const VENDOR_STATUS_STYLES: Record<string, string> = {
