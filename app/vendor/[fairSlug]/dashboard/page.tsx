@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, startTransition } from 'react'
+import VendorReturnsCard from './VendorReturnsCard'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { UserAvatar } from '../_components/VendorPortalShell'
@@ -970,6 +971,10 @@ export default function VendorDashboardPage() {
           </p>
         </div>
       </div>
+
+      {/* Returns to confirm (U5): a runner handed an order back — self-contained, renders
+          nothing unless there's something to confirm. Above the lanes because it's time-sensitive. */}
+      <div className="mb-3"><VendorReturnsCard vendorId={vendorId} /></div>
 
       {/* Tab bar — shown at every width BELOW the four-lane board (see the board's note).
           A cramped four-lane board is worse than one full-width lane: at a fair the vendor

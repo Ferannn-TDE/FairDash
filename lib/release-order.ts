@@ -31,8 +31,9 @@ export async function releaseOrder(input: {
   runnerId: string
   eventId: string
   actorId?: string | null
+  actorRole?: string // 'runner' (default) — an admin releasing a stranded order passes 'admin'
 }): Promise<ReleaseOutcome> {
-  const { orderId, runnerId, eventId, actorId } = input
+  const { orderId, runnerId, eventId, actorId, actorRole } = input
 
   const order = await db.order.findUnique({
     where: { id: orderId },
@@ -58,9 +59,9 @@ export async function releaseOrder(input: {
         orderId: order.id,
         eventType: 'released',
         actorId: actorId ?? null,
-        actorRole: 'runner',
-        runnerId, // denormalized — WHO released it, since Order.runnerId is now null
-        metadata: { fromStatus: order.status, releasedTo: 'pool' },
+        actorRole: actorRole ?? 'runner',
+        runnerId, // denormalized — WHOSE claim was released, since Order.runnerId is now null
+        metadata: { fromStatus: order.status, releasedTo: 'pool', ...(actorRole && actorRole !== 'runner' ? { by: actorRole } : {}) },
       },
     })
     return true
@@ -72,4 +73,16 @@ export async function releaseOrder(input: {
   const fresh = await db.order.findUnique({ where: { id: order.id }, select: { status: true, collectedAt: true } })
   if (fresh?.collectedAt) return { outcome: 'already_collected' }
   return { outcome: 'not_releasable', status: fresh?.status ?? 'UNKNOWN' }
+}
+
+/**
+ * Admin release of a stranded PRE-collection order (the CLAIMED_NOT_COLLECTED handle, U5). The
+ * admin isn't the assigned runner, so this reads the order's current runnerId and releases on
+ * its behalf — attributed to the admin in the custody trail. Same atomic, pre-collection-gated
+ * core; a COLLECTED order still refuses (that's the deliberate-refund path, not a release).
+ */
+export async function adminReleaseStranded(input: { orderId: string; eventId: string; actorId: string }): Promise<ReleaseOutcome> {
+  const order = await db.order.findUnique({ where: { id: input.orderId }, select: { runnerId: true } })
+  if (!order?.runnerId) return { outcome: 'not_your_delivery' } // no assigned runner to release
+  return releaseOrder({ orderId: input.orderId, runnerId: order.runnerId, eventId: input.eventId, actorId: input.actorId, actorRole: 'admin' })
 }

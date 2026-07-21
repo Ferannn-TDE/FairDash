@@ -27,8 +27,10 @@
  * concern (e.g. Render health checks / external uptime monitor).
  */
 
-import { OrderStatus } from '@prisma/client'
+import { OrderStatus, StrandedReason } from '@prisma/client'
 import { db } from './db'
+import { STRAND_THRESHOLDS_MS } from './constants'
+import { recordSweepHeartbeat } from './health'
 import { stripe } from './stripe'
 import { placePaidOrder } from './place-order'
 import { enqueueOrderPayout } from './order-side-effects'
@@ -199,6 +201,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     // the durable payout-failure markers so a permanently-failed payout can't stay a flag with
     // no reader. Runs regardless of dryRun (it writes nothing).
     await patternU(sum, { maxPerPattern })
+    await patternV(sum, { maxPerPattern })
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -238,6 +241,10 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   })
   if (sum.alerted.length) logger.warn('[Reconciler] ALERTS (human review)', { alerted: sum.alerted })
   if (sum.backstopWarnings.length) logger.warn('[Reconciler] BACKSTOP WARNINGS', { backstopWarnings: sum.backstopWarnings })
+
+  // Worker liveness heartbeat (best-effort — never breaks the sweep). Reaching here means the
+  // sweep RAN; /api/health reads this to tell a live-but-quiet sweep from a dead worker.
+  await recordSweepHeartbeat()
 
   return sum
 }
@@ -1310,4 +1317,105 @@ export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) 
   // (not silently omitted) so the reader is complete-by-construction the moment the source
   // exists. No source today ⇒ intentionally a no-op, never a false alert.
   void STUCK_INTENT_MIN
+}
+
+// ─── PATTERN V — delivery-custody strand clocks (Commit 2, U4) ─────────────────
+// Time-based flags for orders stuck in a runner-custody state. FLAG ONLY — sets strandedAt +
+// strandedReason (with a `stranded` custody event) and reads them to the ALERTS line; it NEVER
+// moves money or order status. A human decides — that's the whole point of strandedReason: it
+// names the action (find/release the runner · go find the runner · go tap the vendor).
+//
+// SELF-HEALING, the single owner of strand state. Each sweep reconciles every candidate to its
+// DESIRED strand — the condition it is currently in past threshold, or none:
+//   none → reason      SET    (+ `stranded`)
+//   reason → none      CLEAR  (+ `strand_cleared`) — a legitimate action (collect / deliver /
+//                      release / return-confirm) resolved the condition
+//   reason → reason'   re-point (both events; rare — a clock reset moved the condition)
+// Clearing RESETS, never immunises: a re-claimed order that stalls again strands afresh.
+// voidedAt orders are skipped — excluded/test data never strands.
+//
+// Conditions, all within status=RUNNER_COLLECTED (the only stranding status):
+//   CLAIMED_NOT_COLLECTED        collectedAt null,      returnRequestedAt null, dispatchedAt aged
+//   RUNNER_UNREACHABLE_WITH_FOOD collectedAt set,       returnRequestedAt null, collectedAt aged
+//   AWAITING_VENDOR_CONFIRMATION returnRequestedAt set,                         returnRequestedAt aged
+type StrandRow = {
+  id: string; status: string
+  collectedAt: Date | null; returnRequestedAt: Date | null; dispatchedAt: Date | null
+  strandedAt: Date | null; strandedReason: StrandedReason | null
+}
+
+/** The strand condition this order is CURRENTLY in past its threshold, or null. Thresholds
+ *  live in one named home (STRAND_THRESHOLDS_MS) — no timing literals in the reconciler. */
+function strandConditionOf(r: StrandRow, now: number): StrandedReason | null {
+  if (r.status !== OrderStatus.RUNNER_COLLECTED) return null
+  const T = STRAND_THRESHOLDS_MS
+  if (r.returnRequestedAt) {
+    return now - r.returnRequestedAt.getTime() >= T.awaitingVendorConfirm ? StrandedReason.AWAITING_VENDOR_CONFIRMATION : null
+  }
+  if (r.collectedAt) {
+    return now - r.collectedAt.getTime() >= T.runnerUnreachable ? StrandedReason.RUNNER_UNREACHABLE_WITH_FOOD : null
+  }
+  if (r.dispatchedAt) {
+    return now - r.dispatchedAt.getTime() >= T.claimedNotCollected ? StrandedReason.CLAIMED_NOT_COLLECTED : null
+  }
+  return null
+}
+
+const STRAND_NEW_MIN = 30 // stranded newer than this = "new"; else "standing" (mirrors Pattern U)
+const STRAND_ACTION: Record<StrandedReason, string> = {
+  CLAIMED_NOT_COLLECTED:        'food on the counter — find or release the runner',
+  RUNNER_UNREACHABLE_WITH_FOOD: 'food in the wild — go find the runner',
+  AWAITING_VENDOR_CONFIRMATION: 'return requested — go tap the vendor to confirm',
+}
+
+export async function patternV(sum: SweepSummary, o: { maxPerPattern: number }) {
+  const now = Date.now()
+
+  // Candidates: anything that could NEED a strand (RUNNER_COLLECTED) OR already carries one
+  // (so a resolved strand gets cleared). Never voided.
+  const candidates: StrandRow[] = await db.order.findMany({
+    where: { voidedAt: null, OR: [{ status: OrderStatus.RUNNER_COLLECTED }, { strandedAt: { not: null } }] },
+    select: {
+      id: true, status: true, collectedAt: true, returnRequestedAt: true, dispatchedAt: true,
+      strandedAt: true, strandedReason: true,
+    },
+    take: o.maxPerPattern,
+  })
+
+  const stranded: { id: string; reason: StrandedReason; sinceMs: number | null }[] = []
+
+  for (const r of candidates) {
+    const desired = strandConditionOf(r, now)
+    const current = r.strandedAt ? r.strandedReason : null
+    if (desired === current) {
+      if (current) stranded.push({ id: r.id, reason: current, sinceMs: r.strandedAt ? now - r.strandedAt.getTime() : null })
+      continue
+    }
+    // Transition current → desired: flag-only write + the matching custody event(s), one tx.
+    await db.$transaction(async tx => {
+      await tx.order.updateMany({ where: { id: r.id }, data: { strandedAt: desired ? new Date() : null, strandedReason: desired } })
+      if (current) {
+        await tx.deliveryCustodyEvent.create({ data: { orderId: r.id, eventType: 'strand_cleared', actorRole: 'system', metadata: { clearedReason: current } } })
+      }
+      if (desired) {
+        await tx.deliveryCustodyEvent.create({ data: { orderId: r.id, eventType: 'stranded', actorRole: 'system', metadata: { strandedReason: desired } } })
+      }
+    })
+    if (desired) stranded.push({ id: r.id, reason: desired, sinceMs: 0 })
+  }
+
+  // ── Read to the ALERTS line — one entry per condition, NAMED for the human action. ──
+  const byReason = new Map<StrandedReason, typeof stranded>()
+  for (const s of stranded) {
+    const arr = byReason.get(s.reason) ?? []
+    arr.push(s); byReason.set(s.reason, arr)
+  }
+  for (const [reason, rows] of byReason) {
+    const newN = rows.filter(r => r.sinceMs != null && r.sinceMs < STRAND_NEW_MIN * 60_000).length
+    const ids = rows.slice(0, 20).map(r => `${r.id}(${r.sinceMs == null ? 'age?' : `${Math.floor(r.sinceMs / 60_000)}m`})`).join(' ')
+    sum.alerted.push(
+      `[STRAND ${reason}] ${rows.length} stranded (${newN} new, ${rows.length - newN} standing) — ${STRAND_ACTION[reason]}. ` +
+      `ids: ${ids}${rows.length > 20 ? ` +${rows.length - 20} more` : ''}`,
+    )
+  }
 }
