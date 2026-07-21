@@ -77,12 +77,47 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
 ]
 
-const filter = process.argv[2]
-const suites = filter ? SUITES.filter(s => s.group === filter || s.name === filter) : SUITES
+// ─── Tiered gate ──────────────────────────────────────────────────────────────
+// The full suite is the BATCH gate (merge boundaries). Between units, run only the touched
+// area's suites — a COMMITTED mapping, so "which suites for this change" is a decision in the
+// repo, not a per-session judgement call that erodes when someone's in a hurry.
+//   no args            → full run (batch gate)
+//   --for <area>       → the unit gate for a changed area (below)
+//   --group <group>    → one group (money | boundary | security | correctness)
+//   <group>|<name>     → that group or single suite (back-compat)
+const AREA_SUITES: Record<string, string[]> = {
+  // Delivery custody / runner escape path (Commit 2). Touched-area guards + the cross-cutting
+  // runner boundary + one reconcile guard (the smoke set that catches breakage they didn't mean).
+  delivery: ['collect-guard', 'release-guard', 'return-guard', 'runner-boundary', 'reverser-pattern-t'],
+  money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t'],
+  reconcile:['reverser-pattern-t', 'sweep-summary', 'stuck-money-reader', 'incoming-divergence'],
+  vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence'],
+}
+
+const argv = process.argv.slice(2)
+let suites = SUITES
+if (argv[0] === '--for') {
+  const area = argv[1]
+  const names = AREA_SUITES[area]
+  if (!names) { console.error(`Unknown --for area "${area}". Known: ${Object.keys(AREA_SUITES).join(', ')}`); process.exit(2) }
+  const missing = names.filter(n => !SUITES.some(s => s.name === n))
+  if (missing.length) { console.error(`--for ${area} references unregistered suites: ${missing.join(', ')}`); process.exit(2) }
+  suites = SUITES.filter(s => names.includes(s.name))
+} else if (argv[0] === '--group') {
+  suites = SUITES.filter(s => s.group === argv[1])
+} else if (argv[0]) {
+  suites = SUITES.filter(s => s.group === argv[0] || s.name === argv[0])
+}
 if (!suites.length) {
-  console.error(`No suite or group matched "${filter}".`)
+  console.error(`No suite or group matched "${argv.join(' ')}".`)
   process.exit(2)
 }
+console.log(argv.length ? `Running ${suites.length} suite(s): ${argv.join(' ')}` : `Running ALL ${suites.length} suites (batch gate)`)
+
+// stderr lines that are known-benign NOISE, not a failure cause — filtered from the failure
+// display so they can't masquerade as the reason (the "[BullMQ] REDIS_URL not set" warn is a
+// graceful-degradation log that fires in PASSING runs; it cost a real diagnosis detour once).
+const BENIGN_STDERR = [/REDIS_URL not set/, /delayed jobs disabled/, /Failed to parse REDIS_URL/]
 
 const failed: string[] = []
 let lastGroup = ''
@@ -108,7 +143,17 @@ for (const s of suites) {
     console.log(`❌ FAILED (exit ${res.status})`)
     const lines = (res.stdout ?? '').split('\n').filter(l => l.includes('❌')).slice(0, 6)
     for (const l of lines) console.log(`       ${l.trim()}`)
-    if (res.stderr?.trim()) console.log(`       stderr: ${res.stderr.trim().split('\n')[0].slice(0, 120)}`)
+    // Show the actionable stderr TAIL (the real error), with benign noise removed — never the
+    // FIRST line, which is often just a graceful-degradation warn that isn't the cause.
+    const errLines = (res.stderr ?? '').split('\n').map(l => l.trim())
+      .filter(l => l && !BENIGN_STDERR.some(re => re.test(l)))
+    if (errLines.length) {
+      for (const l of errLines.slice(-3)) console.log(`       stderr: ${l.slice(0, 160)}`)
+    } else if (res.stderr?.trim()) {
+      // Only benign warns in stderr → this is NOT infra; look to the assertions above, or it's a
+      // flake. Say so, so a benign warn never reads as the failure reason.
+      console.log(`       stderr: (only benign warnings; not the cause — check the assertions above or re-run in isolation)`)
+    }
   }
 }
 
