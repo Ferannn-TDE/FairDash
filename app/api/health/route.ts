@@ -12,7 +12,9 @@ export async function GET() {
       status: health.status,
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version ?? '1.0.0',
-      commit: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+      // COMMIT_SHA is baked at build time by next.config.mjs (fallback chain ending in
+      // 'unknown') — never read the Vercel var at runtime here; it is null on non-git deploys.
+      commit: process.env.COMMIT_SHA ?? 'unknown',
       checks: {
         database: health.database,
         redis: health.redis,

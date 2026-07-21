@@ -1,5 +1,28 @@
+import { execSync } from 'node:child_process'
+
+// Deploy fingerprint, baked at BUILD time. The health route used to read VERCEL_GIT_COMMIT_SHA
+// at runtime, which went null on a deploy that didn't come through the Git integration — the
+// field built to identify deploys was empty on the first deploy that needed identifying. Baking
+// the value here (config is evaluated during the build, where git/CI metadata lives) with a
+// fallback chain that ends in an honest 'unknown' means the fingerprint can never silently be
+// null again: 'unknown' is a visible answer, null was a lie of omission.
+const commitSha =
+  process.env.VERCEL_GIT_COMMIT_SHA ??
+  process.env.RAILWAY_GIT_COMMIT_SHA ??
+  (() => {
+    try {
+      return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null
+    } catch {
+      return null // no .git in the build context (e.g. a CLI upload) — fall through to 'unknown'
+    }
+  })() ??
+  'unknown'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    COMMIT_SHA: commitSha,
+  },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'
       ? { exclude: ['error', 'warn'] }

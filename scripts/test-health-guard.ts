@@ -7,6 +7,7 @@
  * Run:  npx tsx scripts/test-health-guard.ts
  */
 
+import { readFileSync } from 'node:fs'
 import { computeHealth } from '../lib/health'
 
 let pass = 0, fail = 0
@@ -55,6 +56,17 @@ function main() {
   console.log('\n[7] an unparseable heartbeat is unknown, not a throw')
   const bad = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: 'not-a-date', nowMs: NOW })
   assert(bad.worker.status === 'unknown' && bad.worker.ageSec === null, 'garbage timestamp → unknown')
+
+  // ── [8] fingerprint honesty — the commit field can never silently be null ───
+  // Source-shape invariant (same style as the admin grep invariant): the SHA is baked at BUILD
+  // time in next.config.mjs, and the route reads the baked value with an 'unknown' fallback. A
+  // runtime read of the Vercel var went null on a non-git deploy — the regression this pins shut.
+  console.log('\n[8] deploy fingerprint is build-time-baked and never null')
+  const route = readFileSync(new URL('../app/api/health/route.ts', import.meta.url), 'utf8')
+  const config = readFileSync(new URL('../next.config.mjs', import.meta.url), 'utf8')
+  assert(/COMMIT_SHA:\s*commitSha/.test(config) && config.includes("'unknown'"), 'next.config bakes COMMIT_SHA with an unknown-terminated fallback chain')
+  assert(route.includes("process.env.COMMIT_SHA ?? 'unknown'"), "route reads the baked COMMIT_SHA, falling back to 'unknown'")
+  assert(!route.includes('VERCEL_GIT_COMMIT_SHA') && !route.includes('?? null'), 'route has NO runtime Vercel-var read and NO null fallback (the regression path)')
 
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} health-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
