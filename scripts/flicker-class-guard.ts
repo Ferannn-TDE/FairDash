@@ -55,6 +55,21 @@ const runnerDash = readFileSync('app/runner/[fairSlug]/dashboard/page.tsx', 'utf
 assert(/approvalStatus && approvalStatus !== 'APPROVED'/.test(runnerDash),
   'the pending banner renders only once the status has loaded (guards the null loading state)')
 
+// ── [D] runner dashboard stats + online status (6th instance: the 0/0/100% flash) ──
+console.log('\n[D] runner dashboard: skeletons, not 0/0/100% defaults; online status starts unknown')
+assert(!/completionRate\s*\?\?\s*1/.test(runnerDash),
+  'no "completionRate ?? 1" — 100% completion is a CLAIM, never a placeholder')
+assert(/stats \? String\(stats\.deliveriesToday\) : null/.test(runnerDash) && runnerDash.includes('animate-pulse'),
+  'TodayStats renders a skeleton (null branch) until the real stats load')
+const runnerCtx = readFileSync('app/runner/[fairSlug]/_context/RunnerContext.tsx', 'utf8')
+assert(/useState<boolean \| null>\(null\)/.test(runnerCtx),
+  "isOnline starts null (unknown), not false — an online runner never flashes 'Offline'")
+assert(/isOnline === null/.test(runnerDash),
+  'dashboard handles the unknown online state (skeleton, not the go-online prompt)')
+const shell = readFileSync('app/runner/[fairSlug]/RunnerPortalShell.tsx', 'utf8')
+assert((shell.match(/isOnline === null/g) ?? []).length >= 2,
+  'both shell status pills (desktop + mobile) show neutral while unknown, never a false Offline')
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

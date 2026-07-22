@@ -52,6 +52,20 @@ function OnlineToggle() {
   const [busy, setBusy] = useState(false)
   const approved = approvalStatus === 'APPROVED'
 
+  // Flicker class: until the real status loads, say "I don't know yet" — never flash
+  // "Offline" (a claim) at a runner who is actually online.
+  if (isOnline === null) {
+    return (
+      <div className="rounded-2xl p-5 border bg-white/[0.03] border-white/10">
+        <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-2">Status</p>
+        <div className="flex items-center justify-between gap-4 animate-pulse">
+          <div className="h-6 w-24 rounded bg-white/10" />
+          <div className="w-16 h-8 rounded-full bg-white/10" />
+        </div>
+      </div>
+    )
+  }
+
   async function toggle() {
     setBusy(true)
     const next = !isOnline
@@ -92,10 +106,13 @@ function OnlineToggle() {
 }
 
 function TodayStats({ stats }: { stats: EarningsData | null }) {
+  // Flicker class (4th instance): 0 deliveries / $0.00 / 100% completion were three plausible
+  // defaults rendering before the fetch — and "100%" is a CLAIM, not a placeholder. Until the
+  // data arrives, a skeleton says "I don't know yet"; a default says "here's the answer".
   const rows = [
-    { icon: Truck, iconColor: 'text-neon-pink', bg: 'bg-neon-pink/10', label: 'Deliveries', value: String(stats?.deliveriesToday ?? 0), color: 'text-white' },
-    { icon: DollarSign, iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Earned', value: `$${(stats?.earnedToday ?? 0).toFixed(2)}`, color: 'text-emerald-400' },
-    { icon: CheckCircle, iconColor: 'text-blue-400', bg: 'bg-blue-500/10', label: 'Completion', value: `${Math.round((stats?.completionRate ?? 1) * 100)}%`, color: 'text-white' },
+    { icon: Truck, iconColor: 'text-neon-pink', bg: 'bg-neon-pink/10', label: 'Deliveries', value: stats ? String(stats.deliveriesToday) : null, color: 'text-white' },
+    { icon: DollarSign, iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Earned', value: stats ? `$${stats.earnedToday.toFixed(2)}` : null, color: 'text-emerald-400' },
+    { icon: CheckCircle, iconColor: 'text-blue-400', bg: 'bg-blue-500/10', label: 'Completion', value: stats ? `${Math.round(stats.completionRate * 100)}%` : null, color: 'text-white' },
   ]
   return (
     <div className="bg-bg-card border border-white/10 rounded-2xl p-5 space-y-4">
@@ -105,7 +122,9 @@ function TodayStats({ stats }: { stats: EarningsData | null }) {
           <div className={`w-9 h-9 rounded-xl ${r.bg} flex items-center justify-center shrink-0`}><r.icon className={`w-4 h-4 ${r.iconColor}`} /></div>
           <div className="flex-1 flex items-center justify-between">
             <span className="text-text-gray text-sm">{r.label}</span>
-            <span className={`font-bebas text-xl tracking-wide ${r.color}`}>{r.value}</span>
+            {r.value === null
+              ? <span className="h-5 w-12 rounded bg-white/10 animate-pulse" />
+              : <span className={`font-bebas text-xl tracking-wide ${r.color}`}>{r.value}</span>}
           </div>
         </div>
       ))}
@@ -195,6 +214,10 @@ function DeliveryFeed({ fairSlug }: { fairSlug: string }) {
         <p className="text-text-gray text-xs mt-1">Your delivery list will refresh automatically.</p>
       </div>
     )
+  }
+  // null = status unknown yet → skeleton, never the "go online" prompt at an online runner.
+  if (isOnline === null) {
+    return <div className="bg-bg-card border border-white/10 rounded-2xl p-10 animate-pulse"><div className="h-4 w-48 mx-auto rounded bg-white/10" /></div>
   }
   if (!isOnline) {
     return <div className="bg-bg-card border border-white/10 rounded-2xl p-10 text-center"><p className="text-text-gray text-sm">Go online to start receiving deliveries.</p></div>
