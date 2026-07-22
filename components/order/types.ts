@@ -59,7 +59,7 @@ export interface Order {
   // Runner custody (delivery tracking): claim/collect timestamps + the runner's identity.
   dispatchedAt?: string | null
   collectedAt?: string | null
-  runner?: { user?: { name?: string | null; phone?: string | null } | null } | null
+  runner?: { phone?: string | null; user?: { name?: string | null } | null } | null
   // Claim-time vehicle SNAPSHOT (item D — columns pending). The driver card reads ONLY
   // these, never the runner's mutable profile: absent → the vehicle line doesn't render.
   runnerVehicleMake?: string | null
