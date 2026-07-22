@@ -53,7 +53,10 @@ export async function releaseOrder(input: {
       // guards — a concurrent collect (sets collectedAt) or a double-release matches zero here.
       where: { id: order.id, runnerId, status: OrderStatus.RUNNER_COLLECTED, collectedAt: null },
       // Asserted regression to a fresh unclaimed READY row + re-arm the window off releasedAt.
-      data: { status: OrderStatus.READY, runnerId: null, dispatchedAt: null, releasedAt: new Date() },
+      // Clear the vehicle SNAPSHOT columns (a re-claimer re-snapshots); the runner's vehicle
+      // is NOT lost — it stays in this claim's 'claimed' custody-event metadata.
+      data: { status: OrderStatus.READY, runnerId: null, dispatchedAt: null, releasedAt: new Date(),
+              runnerVehicleMake: null, runnerVehicleColor: null, runnerVehiclePlate: null },
     })
     if (upd.count === 0) return false
     await tx.deliveryCustodyEvent.create({
