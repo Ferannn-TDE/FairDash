@@ -60,6 +60,7 @@ assert(!route.includes('earningsStatus:'), 'route has NO inline field-by-field m
 const dash = readFileSync(new URL('../app/vendor/[fairSlug]/dashboard/page.tsx', import.meta.url), 'utf8')
 assert(dash.includes("from '@/lib/vendor-active-order'"), 'dashboard imports the shared contract type')
 assert(!/interface VendorOrder\s*\{/.test(dash), 'dashboard has NO hand-written VendorOrder interface (the hope that lied)')
+assert(dash.includes('order.customerName') && dash.includes('<CustomerLine'), 'kitchen cards render the customer line (name + fulfillment detail) from the contract')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} active-shape-guard: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
