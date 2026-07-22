@@ -1,16 +1,36 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { DollarSign, Truck, TrendingUp, Clock } from 'lucide-react'
+import { DollarSign, Truck, TrendingUp, Info } from 'lucide-react'
 
-interface EarningRow { orderId: string; amount: number; status: string; at: string }
+interface EarningRow {
+  orderId: string
+  amount: number
+  feeShare: number
+  tip: number
+  status: 'pending' | 'held' | 'paid' | 'cancelled'
+  at: string
+  paidAt: string | null
+}
 interface EarningsData {
-  trackedTotal: number
-  trackedToday: number
+  earnedTotal: number
+  earnedToday: number
+  paidTotal: number
+  pendingTotal: number
+  heldTotal: number
   deliveriesToday: number
   totalDeliveries: number
   completionRate: number
   recent: EarningRow[]
+}
+
+// Status chips: paid is the only green; pending/held are amber/blue claims-in-waiting;
+// cancelled renders struck-through and never sums.
+const STATUS_CHIP: Record<EarningRow['status'], { label: string; cls: string }> = {
+  paid:      { label: 'paid',      cls: 'text-emerald-400' },
+  pending:   { label: 'pending',   cls: 'text-amber-400/80' },
+  held:      { label: 'held',      cls: 'text-blue-400/80' },
+  cancelled: { label: 'cancelled', cls: 'text-red-400/70' },
 }
 
 function StatCard({ label, value, sub, icon: Icon, color = 'text-neon-pink' }: {
@@ -50,46 +70,59 @@ export default function RunnerEarningsPage() {
         Your <span className="text-neon-pink">Earnings</span>
       </h1>
 
-      {/* Honesty banner: these are TRACKED, not yet paid. */}
-      <div className="flex items-start gap-2.5 bg-amber-500/[0.07] border border-amber-500/20 rounded-xl px-4 py-3">
-        <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-        <p className="text-amber-200/80 text-xs leading-relaxed">
-          These are your <span className="font-semibold">tracked</span> earnings from completed deliveries —
-          the delivery fee the customer paid on each order. Runner payouts are processed separately;
-          this is what you’ve earned, not yet a transfer.
+      {/* What the number IS: the runner's share of the fee + 100% of tips — from the same
+          ledger the payout executor pays. Never described as "the fee the customer paid":
+          the organizer holds the other share of that fee. */}
+      <div className="flex items-start gap-2.5 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3">
+        <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+        <p className="text-text-gray text-xs leading-relaxed">
+          Each delivery earns you <span className="text-white font-semibold">your share of the delivery fee</span> plus{' '}
+          <span className="text-white font-semibold">100% of the tip</span>.{' '}
+          <span className="text-amber-300/90">Pending</span> amounts transfer automatically after the order&rsquo;s refund
+          window closes; <span className="text-emerald-300/90">paid</span> means the transfer went out.
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Tracked Today" value={loading ? '…' : fmt(data?.trackedToday ?? 0)} sub={`${data?.deliveriesToday ?? 0} deliveries`} icon={DollarSign} color="text-emerald-400" />
-        <StatCard label="Tracked Total" value={loading ? '…' : fmt(data?.trackedTotal ?? 0)} sub="all completed" icon={TrendingUp} color="text-neon-pink" />
+        <StatCard label="Earned Today" value={loading ? '…' : fmt(data?.earnedToday ?? 0)} sub={`${data?.deliveriesToday ?? 0} deliveries`} icon={DollarSign} color="text-emerald-400" />
+        <StatCard label="Earned Total" value={loading ? '…' : fmt(data?.earnedTotal ?? 0)} sub={loading ? undefined : `${fmt(data?.paidTotal ?? 0)} paid · ${fmt((data?.pendingTotal ?? 0) + (data?.heldTotal ?? 0))} to come`} icon={TrendingUp} color="text-neon-pink" />
         <StatCard label="Deliveries" value={loading ? '…' : String(data?.totalDeliveries ?? 0)} icon={Truck} color="text-blue-400" />
         <StatCard label="Completion" value={loading ? '…' : `${Math.round((data?.completionRate ?? 1) * 100)}%`} icon={TrendingUp} color="text-amber-400" />
       </div>
 
-      {/* Real delivery history (from RunnerEarning) */}
+      {/* Per-delivery breakdown, straight off the ledger */}
       <div>
         <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-3">Delivery History</p>
         <div className="bg-bg-card border border-white/10 rounded-2xl overflow-hidden">
           {loading ? (
             <div className="p-6 text-center text-text-gray text-sm">Loading…</div>
           ) : (data?.recent.length ?? 0) === 0 ? (
-            <div className="p-6 text-center text-text-gray text-sm">No completed deliveries yet.</div>
-          ) : data!.recent.map((e, i) => (
-            <div key={e.orderId} className={`flex items-center gap-3 px-4 py-3.5 ${i < data!.recent.length - 1 ? 'border-b border-white/5' : ''}`}>
-              <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
-                <Truck className="w-4 h-4 text-blue-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-semibold">#{e.orderId.slice(-8).toUpperCase()}</p>
-                <p className="text-text-gray text-xs">{new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-white text-sm font-semibold tabular-nums">{fmt(e.amount)}</p>
-                <p className="text-amber-400/70 text-[0.6rem] uppercase tracking-wide font-semibold">tracked</p>
-              </div>
+            <div className="p-8 text-center">
+              <p className="text-white text-sm font-semibold mb-1">No completed deliveries yet</p>
+              <p className="text-text-gray text-xs">Your first delivery&rsquo;s earnings will appear here with its fee-share and tip breakdown.</p>
             </div>
-          ))}
+          ) : data!.recent.map((e, i) => {
+            const chip = STATUS_CHIP[e.status] ?? STATUS_CHIP.pending
+            const cancelled = e.status === 'cancelled'
+            return (
+              <div key={e.orderId} className={`flex items-center gap-3 px-4 py-3.5 ${i < data!.recent.length - 1 ? 'border-b border-white/5' : ''} ${cancelled ? 'opacity-60' : ''}`}>
+                <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
+                  <Truck className="w-4 h-4 text-blue-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-semibold">#{e.orderId.slice(-8).toUpperCase()}</p>
+                  <p className="text-text-gray text-xs">
+                    {fmt(e.feeShare)} fee share{e.tip > 0 && <> + {fmt(e.tip)} tip</>}
+                    <span className="text-text-gray/50"> · {new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className={`text-sm font-semibold tabular-nums ${cancelled ? 'text-text-gray line-through' : 'text-white'}`}>{fmt(e.amount)}</p>
+                  <p className={`text-[0.6rem] uppercase tracking-wide font-semibold ${chip.cls}`}>{chip.label}</p>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
