@@ -2,12 +2,15 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireRunnerAuth } from '@/lib/auth'
+import { summarizeRunnerEarnings } from '@/lib/runner-earnings'
 
 // GET /api/runners/me/earnings
-// The authenticated runner's TRACKED earnings (from RunnerEarning, sourced from
-// each delivery's customer-paid delivery fee). Display only — these are tracked,
-// not yet paid (runner payout is a separate money-flow phase). NO tips: there is
-// no tip data model, so we never show a tips figure (it would be fabricated).
+// The authenticated runner's earnings from the RunnerEarning ledger. Each row's
+// amountCents = the runner's SHARE of the delivery/curbside fee (runnerFeePercent)
+// + 100% of the tip — never the whole customer-paid fee (the organizer holds the
+// other share). The shared summarizer decomposes each line (fee share + tip) and
+// splits paid (transferred, has paidAt) from pending (transfers after the refund
+// window) and held (admin freeze). Cancelled rows are listed but sum to nothing.
 export async function GET() {
   try {
     const clerkId = await requireRunnerAuth()
@@ -19,31 +22,36 @@ export async function GET() {
     })
     if (!runner) return apiError('No runner record found', 404, 'RUNNER_NOT_FOUND')
 
-    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0)
-
-    const earnings = await db.runnerEarning.findMany({
+    const rows = await db.runnerEarning.findMany({
       where: { runnerId: runner.id },
       orderBy: { createdAt: 'desc' },
       take: 100,
-      select: { orderId: true, amountCents: true, status: true, createdAt: true },
+      select: {
+        orderId: true, amountCents: true, status: true, paidAt: true, createdAt: true,
+        order: { select: { tip: true, fulfillmentType: true } },
+      },
     })
 
-    const totalCents  = earnings.reduce((s, e) => s + e.amountCents, 0)
-    const todayCents  = earnings.filter(e => e.createdAt >= startOfToday).reduce((s, e) => s + e.amountCents, 0)
-    const todayCount  = earnings.filter(e => e.createdAt >= startOfToday).length
+    const s = summarizeRunnerEarnings(rows)
+    const d = (cents: number) => parseFloat((cents / 100).toFixed(2))
 
     return success({
-      // All amounts are TRACKED (not yet paid) — the UI must label them so.
-      trackedTotal:   parseFloat((totalCents / 100).toFixed(2)),
-      trackedToday:   parseFloat((todayCents / 100).toFixed(2)),
-      deliveriesToday: todayCount,
+      earnedTotal:  d(s.earnedTotalCents),
+      earnedToday:  d(s.earnedTodayCents),
+      paidTotal:    d(s.paidTotalCents),
+      pendingTotal: d(s.pendingTotalCents),
+      heldTotal:    d(s.heldTotalCents),
+      deliveriesToday: s.deliveriesToday,
       totalDeliveries: runner.totalCompleted,
       completionRate:  runner.completionRate,
-      recent: earnings.slice(0, 25).map(e => ({
-        orderId: e.orderId,
-        amount:  parseFloat((e.amountCents / 100).toFixed(2)),
-        status:  e.status, // 'tracked'
-        at:      e.createdAt,
+      recent: s.lines.slice(0, 25).map(l => ({
+        orderId:  l.orderId,
+        amount:   d(l.totalCents),
+        feeShare: d(l.feeShareCents),
+        tip:      d(l.tipCents),
+        status:   l.status, // pending | held | paid | cancelled
+        at:       l.at,
+        paidAt:   l.paidAt,
       })),
     })
   } catch (err) {
