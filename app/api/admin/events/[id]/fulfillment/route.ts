@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
+import { checkRunnerFeeActivation } from '@/lib/runner-fee-gate'
 import { CurbsideMethod } from '@prisma/client'
 
 // GET /api/admin/events/[id]/fulfillment
@@ -40,6 +41,7 @@ interface FulfillmentBody {
   runnerTransportDescription?: string | null
   curbsideFee?: number
   runnerFeePercent?: number
+  runnerTipsOnlyAck?: boolean
 }
 
 export async function PATCH(
@@ -51,6 +53,10 @@ export async function PATCH(
     const { event } = await requireAdminFairContext(id)
 
     const body: FulfillmentBody = await req.json()
+
+    // One read of the current config — reused by curbside validation AND the fee-activation
+    // gate below, both of which reason about the MERGED resulting state (body ?? existing).
+    const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id } })
 
     // Validation: fee split + curbside fee (Part A)
     if (body.runnerFeePercent !== undefined) {
@@ -80,7 +86,6 @@ export async function PATCH(
 
     // Validation: if enabling curbside, coords + description are required
     if (body.curbsideEnabled === true) {
-      const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id } })
       const lat = body.curbsideZoneLat ?? existing?.curbsideZoneLat
       const lng = body.curbsideZoneLng ?? existing?.curbsideZoneLng
       const desc = body.curbsideZoneDescription ?? existing?.curbsideZoneDescription
@@ -93,6 +98,19 @@ export async function PATCH(
         )
       }
     }
+
+    // ── Runner-fee ACTIVATION gate ──────────────────────────────────────────────
+    // Reason about the state this write WOULD produce (merge body over existing, with the
+    // schema defaults for a first-time create). Enabling a runner-fulfilled mode with a
+    // 0% split is refused UNLESS the admin acknowledged tips-only — a decision, not a block.
+    const merged = checkRunnerFeeActivation({
+      homeDeliveryEnabled: body.homeDeliveryEnabled ?? existing?.homeDeliveryEnabled ?? false,
+      curbsideEnabled:     body.curbsideEnabled ?? existing?.curbsideEnabled ?? false,
+      curbsideMethod:      body.curbsideMethod ?? existing?.curbsideMethod ?? null,
+      runnerFeePercent:    body.runnerFeePercent ?? existing?.runnerFeePercent ?? 0,
+      runnerTipsOnlyAck:   body.runnerTipsOnlyAck ?? existing?.runnerTipsOnlyAck ?? false,
+    })
+    if (!merged.ok) throw new ApiError(merged.message, 400, merged.code)
 
     const config = await db.fulfillmentConfig.upsert({
       where: { eventId: event.id },
@@ -110,6 +128,7 @@ export async function PATCH(
         runnerTransportDescription: body.runnerTransportDescription ?? null,
         curbsideFee: body.curbsideFee ?? 0,
         runnerFeePercent: body.runnerFeePercent ?? 0,
+        runnerTipsOnlyAck: body.runnerTipsOnlyAck ?? false,
       },
       update: {
         ...(body.boothPickupEnabled !== undefined && { boothPickupEnabled: body.boothPickupEnabled }),
@@ -124,6 +143,7 @@ export async function PATCH(
         ...(body.runnerTransportDescription !== undefined && { runnerTransportDescription: body.runnerTransportDescription }),
         ...(body.curbsideFee !== undefined && { curbsideFee: body.curbsideFee }),
         ...(body.runnerFeePercent !== undefined && { runnerFeePercent: body.runnerFeePercent }),
+        ...(body.runnerTipsOnlyAck !== undefined && { runnerTipsOnlyAck: body.runnerTipsOnlyAck }),
       },
     })
 
