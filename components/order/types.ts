@@ -56,6 +56,15 @@ export interface Order {
   readyAt?: string | null
   completedAt?: string | null
   cancelledAt?: string | null
+  // Runner custody (delivery tracking): claim/collect timestamps + the runner's identity.
+  dispatchedAt?: string | null
+  collectedAt?: string | null
+  runner?: { user?: { name?: string | null; phone?: string | null } | null } | null
+  // Claim-time vehicle SNAPSHOT (item D — columns pending). The driver card reads ONLY
+  // these, never the runner's mutable profile: absent → the vehicle line doesn't render.
+  runnerVehicleMake?: string | null
+  runnerVehicleColor?: string | null
+  runnerVehiclePlate?: string | null
   vendor: { id: string; name: string; boothNumber?: string | null }
   orderItems: OrderItem[]
   vendorOrderStatuses?: VendorOrderStatus[]

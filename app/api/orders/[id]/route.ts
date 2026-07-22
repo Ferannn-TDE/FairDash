@@ -64,7 +64,17 @@ export async function GET(
       return apiError('Access denied', 403, 'FORBIDDEN')
     }
 
-    return success(order)
+    // Driver card (tracking view): the runner's display identity only — name for the card,
+    // phone for the Call button. Order has no runner relation (runnerId is a bare column),
+    // so this is a separate lookup; nothing else from the runner row leaves here.
+    const runner = order.runnerId
+      ? await db.runner.findUnique({
+          where: { id: order.runnerId },
+          select: { user: { select: { name: true, phone: true } } },
+        })
+      : null
+
+    return success({ ...order, runner })
   } catch (err) {
     return handleApiError(err)
   }
