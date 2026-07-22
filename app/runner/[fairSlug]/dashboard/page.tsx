@@ -21,7 +21,7 @@ interface DeliveryOrder {
   vendor?: { name?: string | null } | null
   orderItems?: { quantity: number }[]
 }
-interface EarningsData { trackedToday: number; deliveriesToday: number; completionRate: number }
+interface EarningsData { earnedToday: number; deliveriesToday: number; completionRate: number }
 
 /* ─── Approval banner — honest "why is my toggle dead" UX ──────────────────── */
 // Backend truth is the gate (see /api/runners/me + /api/orders/[id]/status); this
@@ -94,7 +94,7 @@ function OnlineToggle() {
 function TodayStats({ stats }: { stats: EarningsData | null }) {
   const rows = [
     { icon: Truck, iconColor: 'text-neon-pink', bg: 'bg-neon-pink/10', label: 'Deliveries', value: String(stats?.deliveriesToday ?? 0), color: 'text-white' },
-    { icon: DollarSign, iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Tracked', value: `$${(stats?.trackedToday ?? 0).toFixed(2)}`, color: 'text-emerald-400' },
+    { icon: DollarSign, iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Earned', value: `$${(stats?.earnedToday ?? 0).toFixed(2)}`, color: 'text-emerald-400' },
     { icon: CheckCircle, iconColor: 'text-blue-400', bg: 'bg-blue-500/10', label: 'Completion', value: `${Math.round((stats?.completionRate ?? 1) * 100)}%`, color: 'text-white' },
   ]
   return (
@@ -109,7 +109,7 @@ function TodayStats({ stats }: { stats: EarningsData | null }) {
           </div>
         </div>
       ))}
-      <p className="text-amber-400/60 text-[0.6rem]">Tracked = earned, not yet paid out.</p>
+      <p className="text-amber-400/60 text-[0.6rem]">Earned = your fee share + tips; pays out after each order&rsquo;s refund window.</p>
     </div>
   )
 }
@@ -299,7 +299,7 @@ export default function RunnerDashboard() {
       }
     }).catch(() => {})
     fetch('/api/runners/me/earnings').then(r => r.json()).then(j => {
-      if (j.success) setStats({ trackedToday: j.data.trackedToday, deliveriesToday: j.data.deliveriesToday, completionRate: j.data.completionRate })
+      if (j.success) setStats({ earnedToday: j.data.earnedToday, deliveriesToday: j.data.deliveriesToday, completionRate: j.data.completionRate })
     }).catch(() => {})
   }, [setIsOnline, setApprovalStatus])
 
