@@ -137,6 +137,12 @@ model FulfillmentConfig {
   // What % of the applicable runner-fulfilled fee (delivery or curbside) goes to
   // the RUNNER (0–100). The leftover (100 − this) is the ORGANIZER's earning.
   runnerFeePercent Int @default(0)
+  // Activation acknowledgment: enabling a runner-fulfilled mode (home delivery, or
+  // runner-delivers curbside) with runnerFeePercent = 0 means runners earn TIPS ONLY —
+  // a legitimate but unusual choice (volunteer/church-fair runners). The admin must set
+  // this true to confirm 0-by-intent; the config write refuses 0-by-absence otherwise.
+  // See lib/runner-fee-gate.ts.
+  runnerTipsOnlyAck Boolean @default(false)
   homeDeliveryRadiusKm       Float? // Max delivery radius from event coords
   runnerTransportDescription String? // e.g. "Delivered by golf cart"
 
@@ -524,6 +530,15 @@ model Order {
   // Home delivery — GPS confirmation (must be within 100m of address)
   runnerConfirmedLat Float?
   runnerConfirmedLng Float?
+
+  // Claim-time VEHICLE SNAPSHOT — the car that actually took THIS order, captured when the
+  // runner claims (the profile is mutable; the event is forever). Current-state for the
+  // customer's driver card; cleared on release/return-confirm so a re-claimer re-snapshots.
+  // The append-only record of runner A's vehicle lives in the 'claimed' DeliveryCustodyEvent
+  // metadata (written in the SAME claim transaction), so clearing these never loses history.
+  runnerVehicleMake  String?
+  runnerVehicleColor String?
+  runnerVehiclePlate String?
 
   // Estimated ready time (placedAt + max(item.prepTime) across order items)
   estimatedReadyAt DateTime?
@@ -1144,6 +1159,7 @@ model Runner {
   // Relations
   incidentReports IncidentReport[]
   earnings        RunnerEarning[]
+  profileChanges  RunnerProfileChange[]
 
   @@index([eventId])
   @@index([status])
@@ -1154,12 +1170,13 @@ model Runner {
 }
 
 // ============================================================================
-// RUNNER EARNINGS: tracked-but-not-yet-paid record of what a runner earned per
-// completed delivery. The amount is the customer-paid delivery fee
-// (Order.deliveryFee, "passed through to runner pool") — NOT a deduction from
-// the vendor or FairSynq. This is DISPLAY/TRACKING only: actual Stripe payouts
-// to runners are a separate money-flow phase (runners need their own Connect
-// accounts) and are deliberately NOT wired into process-payout.ts.
+// RUNNER EARNINGS: per completed delivery, what the runner earned. amountCents =
+// the runner's SHARE of the runner-fulfilled fee (runnerFeePercent × fee) + 100%
+// of the tip — NOT the whole customer-paid fee (the organizer holds the other
+// share as OrganizerEarning). Part B B2 DID wire runner payouts into the executor:
+// a row is 'tracked' until the refund window closes, then the B2 executor transfers
+// it (status='paid' + stripeTransferId). See lib/runner-earnings.ts (the display
+// decomposition) and process-payout.ts (the executor).
 // ============================================================================
 
 model RunnerEarning {
@@ -1662,4 +1679,29 @@ model VendorAuditLog {
 
   @@index([vendorId, createdAt])
   @@index([userId])
+}
+
+// ============================================================================
+// RUNNER PROFILE CHANGE LOG — append-only audit of edits to a runner's mutable
+// profile fields (phone + vehicle), old → new with a timestamp. Answers "what did
+// their profile say at time T" for dispute/incident review, complementing the
+// per-order vehicle SNAPSHOT (Order.runnerVehicle*, the direct answer for a given
+// delivery). PII-BEARING (phone numbers, old values): rows are PURGED 180 days
+// after the runner's event ends by reconciler Pattern W (a real deleter, not a
+// promise). License documents are versioned separately by the replace-upload flow.
+// PII exposure/retention decisions recorded in docs/PII_DECISIONS.md.
+// ============================================================================
+model RunnerProfileChange {
+  id       String @id @default(cuid())
+  runnerId String
+  runner   Runner @relation(fields: [runnerId], references: [id], onDelete: Cascade)
+
+  field    String  // 'phone' | 'vehicleMake' | 'vehicleModel' | 'vehicleColor' | 'vehiclePlate'
+  oldValue String?
+  newValue String?
+
+  changedAt DateTime @default(now())
+
+  @@index([runnerId, changedAt])
+  @@index([changedAt]) // Pattern W retention sweep scans by age
 }
