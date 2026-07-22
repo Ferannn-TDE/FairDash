@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { diffProfileChanges } from '@/lib/runner-profile-log'
 
 // GET  /api/runners/me  — return the authenticated user's Runner record + event
 // PATCH /api/runners/me — update runner status (ACTIVE | OFFLINE)
@@ -107,10 +108,21 @@ export async function PATCH(req: NextRequest) {
       throw new ApiError('No updatable fields provided', 400, 'VALIDATION_ERROR')
     }
 
-    const updated = await db.runner.update({
-      where: { id: runner.id },
-      data,
-      include: { event: { select: { id: true, name: true, urlSlug: true } } },
+    // Append-only audit of profile-identity edits (phone + vehicle), old → new. Computed from
+    // the pre-update runner row vs. the incoming patch, and written in the SAME transaction as
+    // the update so the log can never disagree with the row. PII-bearing → Pattern W purges it
+    // 180d after the event ends (lib/runner-profile-log). notify*/availableDays are settings,
+    // not identity, so they are not logged.
+    const changes = diffProfileChanges(runner.id, runner as Record<string, unknown>, data)
+
+    const updated = await db.$transaction(async tx => {
+      const u = await tx.runner.update({
+        where: { id: runner.id },
+        data,
+        include: { event: { select: { id: true, name: true, urlSlug: true } } },
+      })
+      if (changes.length) await tx.runnerProfileChange.createMany({ data: changes })
+      return u
     })
 
     return success({ runner: updated })

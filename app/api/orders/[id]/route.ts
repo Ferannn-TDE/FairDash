@@ -64,13 +64,15 @@ export async function GET(
       return apiError('Access denied', 403, 'FORBIDDEN')
     }
 
-    // Driver card (tracking view): the runner's display identity only — name for the card,
-    // phone for the Call button. Order has no runner relation (runnerId is a bare column),
-    // so this is a separate lookup; nothing else from the runner row leaves here.
+    // Driver card (tracking view): the runner's display identity only — the User's name, and
+    // the runner's delivery-contact phone (Runner.phone, the field the settings PATCH writes —
+    // NOT User.phone, the Clerk account number). Order has no runner relation (runnerId is a
+    // bare column), so this is a separate lookup; nothing else from the runner row leaves here.
+    // PII note: exposing this number to the customer is a recorded decision — docs/PII_DECISIONS.md.
     const runner = order.runnerId
       ? await db.runner.findUnique({
           where: { id: order.runnerId },
-          select: { user: { select: { name: true, phone: true } } },
+          select: { phone: true, user: { select: { name: true } } },
         })
       : null
 

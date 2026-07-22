@@ -62,7 +62,7 @@ export function DeliveryStatusLine({ progress }: { progress: DeliveryProgress })
 export function DriverCard({ order }: { order: Order }) {
   if (!order.runnerId) return null
   const name = order.runner?.user?.name ?? 'Your runner'
-  const phone = order.runner?.user?.phone ?? null
+  const phone = order.runner?.phone ?? null
   const vehicle = [order.runnerVehicleColor, order.runnerVehicleMake].filter(Boolean).join(' ')
   const plate = order.runnerVehiclePlate ?? null
   return (

@@ -55,6 +55,8 @@ export async function confirmReturn(input: {
     const upd = await tx.order.updateMany({
       where: { id: order.id, status: OrderStatus.RUNNER_COLLECTED, returnRequestedAt: { not: null } },
       // Asserted regression to a fresh unclaimed READY row; clear the whole custody lifecycle.
+      // Vehicle snapshot cleared too (re-claimer re-snapshots); runner A's vehicle survives in
+      // this claim's 'claimed' custody-event metadata — the return never erases the record.
       data: {
         status: OrderStatus.READY,
         runnerId: null,
@@ -62,6 +64,9 @@ export async function confirmReturn(input: {
         collectedAt: null,
         returnRequestedAt: null,
         releasedAt: new Date(),
+        runnerVehicleMake: null,
+        runnerVehicleColor: null,
+        runnerVehiclePlate: null,
       },
     })
     if (upd.count === 0) return false
