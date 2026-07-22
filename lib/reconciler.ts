@@ -202,6 +202,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     // no reader. Runs regardless of dryRun (it writes nothing).
     await patternU(sum, { maxPerPattern })
     await patternV(sum, { maxPerPattern })
+    await patternW(sum, { maxPerPattern, dryRun })
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -1416,6 +1417,23 @@ export async function patternV(sum: SweepSummary, o: { maxPerPattern: number }) 
     sum.alerted.push(
       `[STRAND ${reason}] ${rows.length} stranded (${newN} new, ${rows.length - newN} standing) — ${STRAND_ACTION[reason]}. ` +
       `ids: ${ids}${rows.length > 20 ? ` +${rows.length - 20} more` : ''}`,
+    )
+  }
+}
+
+/**
+ * Pattern W — PII RETENTION. Purge RunnerProfileChange rows past their window (180d after the
+ * runner's event ends). The enforcer behind the schema's retention promise, so the label has a
+ * reader. Thin wrapper over lib/runner-profile-log; respects dryRun; silent when nothing expired.
+ */
+export async function patternW(sum: SweepSummary, o: { maxPerPattern: number; dryRun: boolean }) {
+  const { purgeExpiredProfileChanges, PROFILE_CHANGE_RETENTION_DAYS } = await import('./runner-profile-log')
+  const r = await purgeExpiredProfileChanges({ dryRun: o.dryRun, maxPerPattern: o.maxPerPattern })
+  if (r.matched > 0) {
+    sum.alerted.push(
+      r.dryRun
+        ? `Pattern W (dry-run): ${r.matched} RunnerProfileChange row(s) past ${PROFILE_CHANGE_RETENTION_DAYS}d retention WOULD be purged`
+        : `Pattern W: purged ${r.purged} RunnerProfileChange row(s) past ${PROFILE_CHANGE_RETENTION_DAYS}d retention (PII hygiene)`,
     )
   }
 }

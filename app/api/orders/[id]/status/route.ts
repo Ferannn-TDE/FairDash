@@ -214,15 +214,44 @@ export async function PATCH(
       // pattern as placePaidOrder. `runnerId IS NULL` is the contested guard:
       // exactly one updateMany returns count 1 (the winner); the loser gets 0.
       if (newStatus === OrderStatus.RUNNER_COLLECTED && order.runnerId !== runner.id) {
-        const claim = await db.order.updateMany({
-          // Atomic AND status-aware: only an unclaimed, still-READY row matches. The
-          // status guard means a claim landing after the UNDELIVERABLE timeout fired
-          // can't even set runnerId on the terminal order (no stray assignment) —
-          // the resurrection is prevented at the claim, with canAdvance as backstop.
-          where: { id: order.id, runnerId: null, status: OrderStatus.READY, voidedAt: null },
-          data: { runnerId: runner.id, dispatchedAt: new Date() },
+        const claimed = await db.$transaction(async tx => {
+          const claim = await tx.order.updateMany({
+            // Atomic AND status-aware: only an unclaimed, still-READY row matches. The
+            // status guard means a claim landing after the UNDELIVERABLE timeout fired
+            // can't even set runnerId on the terminal order (no stray assignment) —
+            // the resurrection is prevented at the claim, with canAdvance as backstop.
+            where: { id: order.id, runnerId: null, status: OrderStatus.READY, voidedAt: null },
+            data: {
+              runnerId: runner.id,
+              dispatchedAt: new Date(),
+              // Claim-time VEHICLE SNAPSHOT — the car taking THIS order. The profile is
+              // mutable; the delivery is forever. Cleared on release/return-confirm.
+              runnerVehicleMake: runner.vehicleMake,
+              runnerVehicleColor: runner.vehicleColor,
+              runnerVehiclePlate: runner.vehiclePlate,
+            },
+          })
+          if (claim.count === 0) return false
+          // Append-only record of who + what car, in the SAME transaction — so the display
+          // columns (cleared on release) and the history can never drift, and a returned
+          // order never loses runner A's vehicle (it lives here, not just in the columns).
+          await tx.deliveryCustodyEvent.create({
+            data: {
+              orderId: order.id,
+              eventType: 'claimed',
+              actorId: clerkId,
+              actorRole: 'runner',
+              runnerId: runner.id,
+              metadata: {
+                vehicleMake: runner.vehicleMake ?? null,
+                vehicleColor: runner.vehicleColor ?? null,
+                vehiclePlate: runner.vehiclePlate ?? null,
+              },
+            },
+          })
+          return true
         })
-        if (claim.count === 0) {
+        if (!claimed) {
           // Lost the claim, or the order is no longer a claimable READY one (e.g. it
           // already timed out). Bail BEFORE the status flip.
           return apiError('This delivery is no longer claimable', 409, 'ALREADY_CLAIMED')
