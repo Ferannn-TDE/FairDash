@@ -18,22 +18,8 @@ import {
 import { TERMINAL_STATUSES, getMapEmbedUrl, formatDate } from './helpers'
 import type { OrderTrackingProps } from './types'
 import { StatusPill } from '@/components/ui/StatusPill'
-
-// Same mapping used by SingleVendorProgress — defined here too so badge and
-// bar always reference the identical variable.
-const PROGRESS_PERCENT: Record<string, number> = {
-  PENDING_PAYMENT:  10,
-  PLACED:           10,
-  ACCEPTED:         33,
-  PREPARING:        55,
-  READY:            80,
-  RUNNER_COLLECTED: 80,
-  COMPLETED:        100,
-  DELIVERED:        100,
-  CANCELLED:        0,
-  UNCOLLECTED:      0,
-  UNDELIVERABLE:    0,
-}
+import { deriveDeliveryProgress } from '@/lib/delivery-progress'
+import { DeliverySegmentBar, DeliveryStatusLine, DriverCard } from './DeliveryTracking'
 
 export default function SingleOrderTracking({
   order,
@@ -58,7 +44,17 @@ export default function SingleOrderTracking({
   const mapSrc          = getMapEmbedUrl(order)
   const runnerLocation: { lat: number; lng: number } | null = null
 
-  const progressWidth = `${PROGRESS_PERCENT[vendorStatus] ?? 10}%`
+  // Runner-fulfilled orders render from ONE derivation (bar + status line + timeline all
+  // read this) — the pill-vs-banner split ("Ready / 80%" while the banner had vanished in
+  // transit) is superseded, not layered over. Booth pickup keeps the vendor-stepper view.
+  const isRunnerOrder = order.fulfillmentType === 'HOME_DELIVERY' || order.fulfillmentType === 'CURBSIDE'
+  const progress = deriveDeliveryProgress({
+    vendorStatus,
+    masterStatus: order.status,
+    runnerId: order.runnerId,
+    collectedAt: order.collectedAt,
+    estimatedReadyAt: order.estimatedReadyAt ?? null,
+  })
 
   return (
     <>
@@ -82,21 +78,31 @@ export default function SingleOrderTracking({
                   #{order.id.slice(-8).toUpperCase()} · {order.vendor.name} · {formatDate(order.placedAt)}
                 </p>
               </div>
-              <StatusPill status={vendorStatus} />
+              {/* Runner orders: the segment bar + status line are the ONLY indicators —
+                  no pill, so a second reader can't disagree with the bar again. */}
+              {!isRunnerOrder && <StatusPill status={vendorStatus} />}
             </div>
           </div>
         </div>
 
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6">
-          <div className="mb-4">
-            <SingleVendorProgress
-              vendorName={order.vendor.name}
-              status={vendorStatus}
-              progressWidth={progressWidth}
-            />
+          <div className="mb-4 space-y-4">
+            {isRunnerOrder ? (
+              <>
+                <DeliverySegmentBar progress={progress} />
+                <DeliveryStatusLine progress={progress} />
+                <DriverCard order={order} />
+              </>
+            ) : (
+              <>
+                <SingleVendorProgress
+                  vendorName={order.vendor.name}
+                  status={vendorStatus}
+                />
+                <StatusBanner order={order} status={vendorStatus} />
+              </>
+            )}
           </div>
-
-          <StatusBanner order={order} status={vendorStatus} />
 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_22rem] gap-5">
             <div className="flex flex-col gap-5">

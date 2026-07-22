@@ -28,13 +28,14 @@ function DesktopSidebar({ fairSlug }: { fairSlug: string }) {
           <span className="font-bebas text-base tracking-widest text-white leading-none">FAIRSYNQ RUNNER</span>
         </div>
         <div className="flex items-center gap-1.5">
+          {/* null = not loaded yet → neutral pulse, never a false "Offline" (flicker class) */}
           <span className={`w-2 h-2 rounded-full transition-colors duration-300 ${
-            isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'
+            isOnline === null ? 'bg-white/20 animate-pulse' : isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'
           }`} />
           <span className={`text-xs font-semibold transition-colors duration-300 ${
-            isOnline ? 'text-emerald-400' : 'text-gray-500'
+            isOnline === null ? 'text-gray-600' : isOnline ? 'text-emerald-400' : 'text-gray-500'
           }`}>
-            {isOnline ? 'Online' : 'Offline'}
+            {isOnline === null ? '\u2026' : isOnline ? 'Online' : 'Offline'}
           </span>
         </div>
       </div>
@@ -73,12 +74,12 @@ function MobileHeader() {
       </div>
       <div className="ml-auto flex items-center gap-1.5">
         <span className={`w-2 h-2 rounded-full transition-colors duration-300 ${
-          isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'
+          isOnline === null ? 'bg-white/20 animate-pulse' : isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'
         }`} />
         <span className={`text-xs font-semibold transition-colors duration-300 ${
-          isOnline ? 'text-emerald-400' : 'text-gray-500'
+          isOnline === null ? 'text-gray-600' : isOnline ? 'text-emerald-400' : 'text-gray-500'
         }`}>
-          {isOnline ? 'Online' : 'Offline'}
+          {isOnline === null ? '\u2026' : isOnline ? 'Online' : 'Offline'}
         </span>
       </div>
     </header>

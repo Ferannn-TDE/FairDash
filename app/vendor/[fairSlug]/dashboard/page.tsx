@@ -95,10 +95,28 @@ function fmtItems(order: VendorOrder) {
 function fmtFulfillment(type: FulfillmentType) {
   return { BOOTH_PICKUP: 'Booth Pickup', CURBSIDE: 'Curbside', HOME_DELIVERY: 'Home Delivery' }[type]
 }
+// Fulfillment-appropriate detail, null-safe: absent fields drop out instead of rendering
+// the word "null" (or, before the shared contract, "undefined").
 function fmtDeliveryDetail(order: VendorOrder) {
-  if (order.fulfillmentType === 'CURBSIDE') return `${order.vehicleColor} ${order.vehicleMake}${order.vehiclePlate ? ' · ' + order.vehiclePlate : ''}`
-  if (order.fulfillmentType === 'HOME_DELIVERY') return `${order.deliveryStreet}, ${order.deliveryCity}`
+  if (order.fulfillmentType === 'CURBSIDE') {
+    const vehicle = [order.vehicleColor, order.vehicleMake].filter(Boolean).join(' ')
+    return [vehicle, order.vehiclePlate].filter(Boolean).join(' · ') || null
+  }
+  if (order.fulfillmentType === 'HOME_DELIVERY') {
+    return [order.deliveryStreet, order.deliveryCity].filter(Boolean).join(', ') || null
+  }
   return null
+}
+
+// Who the order is for + where/what to hand it to, one compact line for the kitchen cards.
+function CustomerLine({ order, className = 'mb-2' }: { order: VendorOrder; className?: string }) {
+  const detail = fmtDeliveryDetail(order)
+  return (
+    <p className={`text-text-gray text-[0.65rem] ${className}`}>
+      <span className="text-white/60 font-semibold">{order.customerName}</span>
+      {detail && <> · {detail}</>}
+    </p>
+  )
 }
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
@@ -147,8 +165,6 @@ function IncomingCard({ order, onAccept, onDecline, accepting }: {
   onDecline: (o: VendorOrder) => void
   accepting?: boolean
 }) {
-  const detail = fmtDeliveryDetail(order)
-
   return (
     <div className="bg-bg-card border border-neon-pink/30 rounded-xl p-3.5 shadow-[0_0_20px_rgba(255,0,119,0.07)]">
       <div className="flex items-start justify-between gap-2 mb-2.5">
@@ -162,7 +178,7 @@ function IncomingCard({ order, onAccept, onDecline, accepting }: {
       </div>
       <p className="text-[0.6875rem] text-text-gray mb-0.5">{fmtFulfillment(order.fulfillmentType)}</p>
       <p className="text-white/80 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
-      {detail && <p className="text-text-gray text-[0.65rem] mb-2.5">{detail}</p>}
+      <CustomerLine order={order} className="mb-2.5" />
       <div className="flex items-center justify-between mt-2.5">
         <EarningsBadge amount={order.earnings ?? order.vendorSubtotal} status={order.earningsStatus ?? 'estimated'} />
         <div className="flex gap-1.5">
@@ -194,7 +210,6 @@ function ActiveCard({ order, onStartPreparing, onMarkReady, submitting }: {
   onMarkReady: (o: VendorOrder) => void
   submitting?: boolean
 }) {
-  const detail = fmtDeliveryDetail(order)
   const isAccepted = order.status === 'ACCEPTED'
 
   return (
@@ -207,7 +222,7 @@ function ActiveCard({ order, onStartPreparing, onMarkReady, submitting }: {
         <span className="text-text-gray text-[0.65rem] shrink-0">{fmtFulfillment(order.fulfillmentType)}</span>
       </div>
       <p className="text-white/70 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
-      {detail && <p className="text-text-gray text-[0.65rem] mb-2">{detail}</p>}
+      <CustomerLine order={order} />
       <div className="flex items-center justify-between mt-2.5">
         <EarningsBadge amount={order.earnings ?? order.vendorSubtotal} status={order.earningsStatus ?? 'estimated'} />
         {isAccepted ? (
@@ -241,8 +256,6 @@ function ReadyCard({ order, runnerFulfilled, onComplete, submitting }: {
   onComplete: (o: VendorOrder) => void
   submitting?: boolean
 }) {
-  const detail = fmtDeliveryDetail(order)
-
   return (
     <div className="bg-bg-card border border-emerald-500/20 rounded-xl p-3.5">
       <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -253,7 +266,7 @@ function ReadyCard({ order, runnerFulfilled, onComplete, submitting }: {
         <span className="text-text-gray text-[0.65rem] shrink-0">{fmtFulfillment(order.fulfillmentType)}</span>
       </div>
       <p className="text-white/70 text-xs mb-1 leading-snug">{fmtItems(order)}</p>
-      {detail && <p className="text-text-gray text-[0.65rem] mb-2">{detail}</p>}
+      <CustomerLine order={order} />
       {/* A runner-fulfilled order (home delivery, or runner-delivers curbside) is completed by
           the RUNNER, never the vendor — so no "Mark Picked Up" (the server rejects it too, via
           the SAME shared predicate). The vendor's VOS advances automatically on delivery.

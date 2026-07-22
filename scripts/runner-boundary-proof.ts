@@ -251,8 +251,8 @@ async function main() {
     console.log('\n[A] "me" read routes isolate by session, never leak another runner')
     const eaA1 = await getEarnings(A1.user.clerkId!)   // A1 just delivered → should have earnings
     const eaB  = await getEarnings(B.user.clerkId!)     // B delivered nothing → zero
-    assert((eaA1.json?.data?.trackedTotal ?? 0) > 0 && (eaA1.json?.data?.deliveriesToday ?? 0) >= 1, `A1 sees own tracked earnings (trackedTotal=${eaA1.json?.data?.trackedTotal}, today=${eaA1.json?.data?.deliveriesToday})`)
-    assert((eaB.json?.data?.trackedTotal ?? -1) === 0 && (eaB.json?.data?.totalDeliveries ?? -1) === 0, 'B sees ZERO — none of A1’s earnings leak')
+    assert((eaA1.json?.data?.earnedTotal ?? 0) > 0 && (eaA1.json?.data?.deliveriesToday ?? 0) >= 1, `A1 sees own earnings (earnedTotal=${eaA1.json?.data?.earnedTotal}, today=${eaA1.json?.data?.deliveriesToday})`)
+    assert((eaB.json?.data?.earnedTotal ?? -1) === 0 && (eaB.json?.data?.totalDeliveries ?? -1) === 0, 'B sees ZERO — none of A1’s earnings leak')
     const ordB = await getOrders(B.user.clerkId!)
     const bSeesFairA = (ordB.json?.data?.orders ?? []).some((o: any) => o.eventId === evA.id || o.id === orderA.id)
     assert(!bSeesFairA, 'B’s order feed contains NO fair-A orders')

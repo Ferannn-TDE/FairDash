@@ -524,6 +524,20 @@ export function OrderMetaCard({ order, isMultiVendor }: { order: Order; isMultiV
                   </div>
                 </div>
               ))}
+              {/* Runner custody leg — same columns the escape path keys on, so the
+                  timeline finally covers transit instead of going dark after Ready. */}
+              {(order.dispatchedAt || order.collectedAt) && (
+                <div>
+                  <p className="text-white/30 text-[0.625rem] uppercase tracking-wider mb-1.5">Runner</p>
+                  <div className="ml-3 pl-3 border-l border-white/[0.08] space-y-1.5">
+                    {order.dispatchedAt && <TimelineRow label="Runner claimed" time={order.dispatchedAt} small />}
+                    {order.collectedAt && <TimelineRow label="Picked up from booth" time={order.collectedAt} small />}
+                    {order.status === 'DELIVERED' && order.completedAt && (
+                      <TimelineRow label="Delivered" time={order.completedAt} small green />
+                    )}
+                  </div>
+                </div>
+              )}
               {order.cancelledAt && (
                 <TimelineRow label="Order Cancelled" time={order.cancelledAt} red />
               )}
