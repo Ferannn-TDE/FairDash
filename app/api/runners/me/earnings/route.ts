@@ -42,7 +42,10 @@ export async function GET() {
       pendingTotal: d(s.pendingTotalCents),
       heldTotal:    d(s.heldTotalCents),
       deliveriesToday: s.deliveriesToday,
-      totalDeliveries: runner.totalCompleted,
+      // Derived from the RunnerEarning ledger (one row per delivered order, curbside included),
+      // NOT the dead runner.totalCompleted counter (never incremented → always 0, which
+      // contradicted "1 delivery today"). completionRate is set by the next commit (#4c).
+      totalDeliveries: s.deliveriesTotal,
       completionRate:  runner.completionRate,
       recent: s.lines.slice(0, 25).map(l => ({
         orderId:  l.orderId,
