@@ -4,7 +4,7 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: `main @ 7f6ea31` (deployed: `8180b69`), 2026-07-23 after the checkout-address
+> Snapshot taken: `main @ 827a700` (deployed: `8180b69`), 2026-07-23 after the dates/admin-surfaces
 > batch. Numbers below were measured against the live DB on the session that wrote them unless
 > marked otherwise.
 
@@ -19,9 +19,11 @@
   batch since the last snapshot; **prod now has custody-derived runner stats, the floor, and the
   ghost fix.** Note the local `origin/main` ref still reads `b694b1e` — this shell cannot fetch
   (no SSH key), so the served fingerprint is the authority, not the ref.
-- **Unpushed: 4 local commits** — browser-walkthrough batch 3 (`42ab797` slug flash, `022c9b2`
-  runners restyle, `d29cabd` docs) and the checkout address fix (`7f6ea31`). **The checkout fix
-  is the urgent one: home-delivery checkout is broken in the deployed build** until it ships.
+- **Unpushed: 10 local commits** — walkthrough batch 3 (`42ab797`, `022c9b2`, `d29cabd`), the
+  checkout address fix (`7f6ea31` + docs `42f9330`), and the dates/admin-surfaces batch
+  (`97ffe05` JSX space, `d6fccfd` event dates, `bc4a9ad` vendors page, `827a700` order log,
+  + this docs commit). **The checkout fix is still the urgent one: home-delivery checkout is
+  broken in the deployed build** until these ship. 13 days to the fair (Aug 5).
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -143,6 +145,33 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
 
+### Shipped 2026-07-23 — dates + admin surfaces batch
+
+- **Fair dates rendered one day early, everywhere** (`d6fccfd`). `Event.startDate` is a
+  UTC-midnight instant CARRYING a calendar date; eight surfaces hand-formatted it with
+  `toLocaleDateString` in the viewer's zone, so America/Chicago showed Aug 4–11 for a fair stored
+  Aug 5–12. **Stored data is correct — nothing migrated** (the admin round-trip already writes
+  `new Date('2026-08-05')` and reads back `toISOString().slice(0,10)`). `lib/event-date.ts` is now
+  the one zone-fixed formatter; eight per-surface copies deleted. The distinction it holds: a fair
+  date is a CALENDAR DATE (same for every viewer), an order's `placedAt` is an INSTANT (renders in
+  the viewer's clock) — `event-date-guard` (14 checks) asserts both directions, so over-applying
+  the fix is caught too. Suite count 56 → **57**.
+- **"Pendingamounts"** (`97ffe05`) — **I was wrong to close this as a stale bundle.** The source
+  line does contain a space, but Next builds with SWC, which strips the leading whitespace of a
+  JSXText node spanning a newline; the built chunk emitted `"Pending"` then `"amounts transfer…"`.
+  My previous "verification" compiled a hand-made snippet with `tsc`, which keeps that space — a
+  reconstruction, not the artifact. Fixed with explicit `{' '}` on both spans and re-verified
+  against the rebuilt chunk. **Rule worth keeping: for rendered output, the built artifact is the
+  evidence.**
+- **Admin vendors page** (`bc4a9ad`) — reorganised around "can this vendor take money on day one":
+  readiness cluster primary (Stripe · Live · Permit · Insurance, all four always listed), revenue
+  secondary and dimmed at $0, approval last. Missing vs present no longer relies on colour (filled
+  dot vs hollow ring + title text). Summary line uses the server's shared `ready` predicate.
+- **Admin order log** (`827a700`) — day grouping with sticky headers, age badge on active rows
+  (threshold read from `STRAND_THRESHOLDS_MS.claimedNotCollected`, colour only — never acts),
+  vendor + fulfillment filters, and filter/search/sort state in the URL. Header no longer implies
+  a total (see open item 6). Verified with a real `next build`.
+
 ### Shipped 2026-07-23 — browser-walkthrough batch 3 (admin UI)
 
 - **The slug flash (flicker class, 7th instance).** `AdminShell.tsx` rendered
@@ -203,6 +232,24 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
      is the PRIMARY path for this venue, not a fallback, and that form deserves more polish before
      the gates open. Manual test script is in the session notes; run it on localhost (the fix is
      not deployed yet).
+0b. **🔴 VENDOR STRIPE ONBOARDING — the longest-lead pre-fair item, measured 2026-07-23.**
+   Of **20 vendors on Italian Fest 2026: 3 have any Stripe Connect account** (`stripeAccountId`),
+   and the same **3 are `stripeVerified`** — ALL PRO TEES, Feran Eats, RANDY'S HOUSE OF BBQ.
+   **17 are approved (ACTIVE); 14 of those cannot receive a payout.** 17 have menu items, so
+   Stripe is the blocker, not the menu. Money still flows (customers can order; earnings accrue
+   and sit unpaid under Pattern P "pay-when-connected"), but 14 vendors would finish the fair
+   owed money with nowhere to send it. **This is other people's onboarding, not code — 13 days.**
+
+0c. **🟠 READINESS ENFORCEMENT DIVERGES BETWEEN LOCAL AND PROD.** `.env.local` sets
+   `ENFORCE_VENDOR_READINESS=true`; **prod does not** — `GET /api/fairs` on
+   fair-synq.vercel.app returns `vendorCount=17` while the same query locally returns **2**
+   (`readyVendorWhere` = ACTIVE + stripeVerified + ≥1 available menu item). So the public site
+   currently lists 17 vendors, 15 of whom cannot take an order end-to-end, and a customer can
+   reach a vendor with no Stripe account. **Which number should a customer see: 2.** Flipping the
+   flag in prod is a one-line env change with a real business consequence (the public list drops
+   to 2 until vendors connect) — it is a decision, not a bug, but the divergence itself should not
+   persist unnoticed.
+
 1. ~~Human push~~ — **done** (pushed + deployed, fingerprint above). Nothing is waiting on a push.
 2. **#1 Checkout Places autocomplete — Google Cloud console side ONLY.** The code path is complete
    and proven (`handlePlaceSelect` fills `deliveryCity` from the parsed `locality`; asserted by
@@ -229,6 +276,18 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
    `completedAt` precedent — an invented city/zip is worse than an honest wrong one, and these
    rows are the evidence of what the write path used to do. (Superseded the old wording of this
    item, which only counted them.)
+
+6. **Admin order log truncates at 100 — pagination PROPOSED, not built.**
+   `lib/fair-orders.ts:33` clamps `take` to a hard maximum of 100, and the page requested exactly
+   that, so "100 orders" was a CAP presented as a count. The page now says "Showing the 100 most
+   recent orders", but over an 8-day fair the log will genuinely stop showing older orders.
+   `nextCursor` is already returned (`:142`) and unused. **Proposed shape:** keep the cursor,
+   add a "Load older" button that appends the next page (not a page-number pager — the log is
+   read newest-first and an operator scrolls), plus a real total from a `count()` in `meta` so
+   the header can say "showing 100 of 340". Server-side filtering would follow, since client-side
+   vendor/status filters only see what has been loaded. Say the word and I'll build it.
+   _(Search already matches the short code — it is the cuid tail and the filter substring-matches
+   the id; that works today and is now documented in the code.)_
 
 ## Pre-fair critical path (ranked)
 
