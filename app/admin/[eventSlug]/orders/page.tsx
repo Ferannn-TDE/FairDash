@@ -84,28 +84,22 @@ function dayLabel(iso: string, nowMs: number): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
+// Tab VALUES mirror lib/fair-orders TAB_STATUSES — the server owns the status→tab mapping and
+// returns a count per tab, so nothing is re-derived here. No "refunded" tab: REFUNDED is not a
+// master OrderStatus (a refund is a Refund row; the order stays CANCELLED/COMPLETED), so that
+// tab was always empty. "Issues" is the fair-day question it replaces.
 const FILTER_TABS = [
   { value: 'all',       label: 'All' },
   { value: 'active',    label: 'Active' },
-  { value: 'COMPLETED', label: 'Completed' },
-  { value: 'CANCELLED', label: 'Cancelled' },
-  { value: 'REFUNDED',  label: 'Refunded' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'issues',    label: 'Issues' },
 ] as const
 
-/** The server's hard ceiling (lib/fair-orders clamps take to 100). Named so the "showing the
- *  most recent N" copy and the request can never disagree. */
+/** One page. The server clamps take to 100 (lib/fair-orders); "Load older" appends the next page
+ *  via nextCursor, so the log is no longer capped — just paged. */
 const PAGE_TAKE = 100
 
 const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED'])
-const COMPLETED_STATUSES = new Set(['COMPLETED', 'DELIVERED'])
-
-// Map a filter tab to the set of order statuses it should show.
-function matchesTab(status: string, tab: string): boolean {
-  if (tab === 'all') return true
-  if (tab === 'active') return ACTIVE_STATUSES.has(status)
-  if (tab === 'COMPLETED') return COMPLETED_STATUSES.has(status)
-  return status === tab
-}
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -214,21 +208,28 @@ function OrderRow({ order, nowMs }: { order: AdminOrder; nowMs: number }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+interface VendorOption { id: string; name: string }
+
 export default function AdminOrdersPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
   const params = use(paramsPromise)
   const [orders, setOrders] = useState<AdminOrder[]>([])
+  const [total, setTotal] = useState(0)
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({})
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([])
 
-  // ── Filter state lives in the URL ────────────────────────────────────────────
-  // A fair-day view ("Randy's, delivery, active") survives a refresh, can be kept open in a
-  // tab, and can be sent to someone else. Reading FROM the URL means there is one copy of the
-  // state, not a local mirror that drifts out of sync with the address bar.
+  // ── Filter state lives in the URL, and DRIVES THE SERVER QUERY ───────────────
+  // Every filter is whole-event: the server searches and filters all orders, not the loaded
+  // page. A fair-day view ("Randy's, delivery, active") survives a refresh, can be kept open in
+  // a tab, and can be sent to someone else — one copy of the state, in the address bar.
   const router = useRouter()
   const sp = useSearchParams()
   const filter     = sp.get('tab') ?? 'all'
-  const search     = sp.get('q') ?? ''
-  const vendorFilt = sp.get('vendor') ?? 'all'
+  const urlSearch  = sp.get('q') ?? ''
+  const vendorFilt = sp.get('vendor') ?? 'all'   // holds a vendorId
   const fulfilFilt = sp.get('type') ?? 'all'
   const sortNewest = sp.get('sort') !== 'oldest'
 
@@ -242,80 +243,90 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     router.replace(qs ? `?${qs}` : '?', { scroll: false })
   }, [router, sp])
 
-  // One clock for every age in the list, ticking each minute — so all rows agree, and a row
-  // does not silently age only when React happens to re-render it.
+  // Search input is debounced before it becomes a URL param (and thus a server query): a
+  // keystroke updates the box immediately, the fetch waits 350ms so typing doesn't hammer the DB.
+  const [searchInput, setSearchInput] = useState(urlSearch)
+  useEffect(() => { setSearchInput(urlSearch) }, [urlSearch])
+  useEffect(() => {
+    if (searchInput === urlSearch) return
+    const t = setTimeout(() => setParam({ q: searchInput }), 350)
+    return () => clearTimeout(t)
+  }, [searchInput, urlSearch, setParam])
+
+  // One clock for every age in the list, ticking each minute.
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 60_000)
     return () => clearInterval(t)
   }, [])
 
+  // Whole-event vendor list for the filter — fetched once, so the dropdown offers every vendor,
+  // not only those with an order on the loaded page.
+  useEffect(() => {
+    let active = true
+    fetch(`/api/admin/events/${params.eventSlug}/vendors?take=200`)
+      .then(r => r.json())
+      .then(json => { if (active && json.success) setVendorOptions(((json.data.vendors ?? []) as VendorOption[]).map(v => ({ id: v.id, name: v.name }))) })
+      .catch(() => { /* dropdown falls back to "All vendors" only */ })
+    return () => { active = false }
+  }, [params.eventSlug])
+
+  const buildUrl = useCallback((cursor?: string) => {
+    const qp = new URLSearchParams({ take: String(PAGE_TAKE), tab: filter, sort: sortNewest ? 'newest' : 'oldest' })
+    if (urlSearch)             qp.set('q', urlSearch)
+    if (vendorFilt !== 'all')  qp.set('vendorId', vendorFilt)
+    if (fulfilFilt !== 'all')  qp.set('type', fulfilFilt)
+    if (cursor)                qp.set('cursor', cursor)
+    return `/api/admin/events/${params.eventSlug}/orders?${qp.toString()}`
+  }, [params.eventSlug, filter, urlSearch, vendorFilt, fulfilFilt, sortNewest])
+
+  // First page — refetched whenever any server-scoped filter changes.
   useEffect(() => {
     let active = true
     setLoading(true)
     setError(null)
-    // NOTE: the shared query hard-caps take at 100 (lib/fair-orders). During an 8-day fair this
-    // log WILL truncate; the header says so plainly rather than implying a total. Cursor
-    // pagination exists server-side (nextCursor) and is the proposed follow-up.
-    fetch(`/api/admin/events/${params.eventSlug}/orders?take=${PAGE_TAKE}`)
+    fetch(buildUrl())
       .then((r) => r.json())
       .then((json) => {
         if (!active) return
         if (!json.success) { setError(json.error?.message ?? 'Failed to load orders'); return }
         setOrders((json.data.orders ?? []) as AdminOrder[])
+        setTotal(json.data.total ?? 0)
+        setTabCounts(json.data.meta?.tabCounts ?? {})
+        setNextCursor(json.data.nextCursor ?? null)
       })
       .catch(() => { if (active) setError('Failed to load orders') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [params.eventSlug])
+  }, [buildUrl])
 
-  const atCap = orders.length >= PAGE_TAKE
+  const loadOlder = useCallback(() => {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    fetch(buildUrl(nextCursor))
+      .then(r => r.json())
+      .then(json => {
+        if (!json.success) return
+        setOrders(prev => [...prev, ...((json.data.orders ?? []) as AdminOrder[])])
+        setNextCursor(json.data.nextCursor ?? null)
+      })
+      .finally(() => setLoadingMore(false))
+  }, [nextCursor, loadingMore, buildUrl])
 
-  const tabCounts = useMemo(() => ({
-    all:       orders.length,
-    active:    orders.filter((o) => ACTIVE_STATUSES.has(o.status)).length,
-    COMPLETED: orders.filter((o) => COMPLETED_STATUSES.has(o.status)).length,
-    CANCELLED: orders.filter((o) => o.status === 'CANCELLED').length,
-    REFUNDED:  orders.filter((o) => o.status === 'REFUNDED').length,
-  }), [orders])
+  const hasActiveFilter = filter !== 'all' || fulfilFilt !== 'all' || vendorFilt !== 'all' || Boolean(urlSearch)
 
-  // Vendor options come from the loaded rows — no second source, no invented list.
-  const vendorOptions = useMemo(
-    () => [...new Set(orders.map(o => o.vendorName))].sort((a, b) => a.localeCompare(b)),
-    [orders]
-  )
-
-  const filtered = useMemo(() => {
-    let list = orders.filter((o) => matchesTab(o.status, filter))
-    if (vendorFilt !== 'all') list = list.filter(o => o.vendorName === vendorFilt)
-    if (fulfilFilt !== 'all') list = list.filter(o => o.fulfillmentType === fulfilFilt)
-    if (search.trim()) {
-      const q = search.trim().toLowerCase()
-      // o.id.includes(q) is what makes the SHORT CODE work: "26685PS7" is the tail of the cuid,
-      // so a code read aloud at the tent matches without a separate index.
-      list = list.filter((o) =>
-        o.id.toLowerCase().includes(q) ||
-        o.customerName.toLowerCase().includes(q) ||
-        o.vendorName.toLowerCase().includes(q)
-      )
-    }
-    return [...list].sort((a, b) => {
-      const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
-      return sortNewest ? diff : -diff
-    })
-  }, [orders, filter, search, sortNewest, vendorFilt, fulfilFilt])
-
-  // Day buckets, in the order the sort produced them.
+  // Day buckets over the LOADED rows (server already applied filter/search/sort). Grouping and
+  // the age badge are the only client-side transforms left, and both are presentational.
   const grouped = useMemo(() => {
     const out: { key: string; label: string; orders: AdminOrder[] }[] = []
-    for (const o of filtered) {
+    for (const o of orders) {
       const k = dayKey(o.placedAt)
       const last = out[out.length - 1]
       if (last && last.key === k) last.orders.push(o)
       else out.push({ key: k, label: dayLabel(o.placedAt, nowMs), orders: [o] })
     }
     return out
-  }, [filtered, nowMs])
+  }, [orders, nowMs])
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
@@ -328,12 +339,9 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           <p className="text-text-gray text-sm mt-0.5">
             {loading
               ? 'Loading…'
-              : atCap
-                ? `Showing the ${orders.length} most recent orders`
-                : `${orders.length} order${orders.length === 1 ? '' : 's'}`}
-            {!loading && filtered.length !== orders.length && (
-              <span className="text-white/50"> · {filtered.length} shown</span>
-            )}
+              : total === orders.length
+                ? `${total} order${total === 1 ? '' : 's'}${hasActiveFilter ? ' match' : ''}`
+                : `Showing ${orders.length} of ${total}`}
           </p>
         </div>
         <button
@@ -345,21 +353,21 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
         </button>
       </div>
 
-      {/* Search */}
+      {/* Search — whole-event, server-side. Debounced. */}
       <div className="relative mb-4">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-gray" />
         <input
-          value={search}
-          onChange={(e) => setParam({ q: e.target.value })}
-          placeholder="Search order code (e.g. 26685PS7), customer, or vendor…"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search order code (e.g. 26685PS7), customer, or vendor — searches the whole fair"
           className="w-full bg-bg-card border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/50"
         />
       </div>
 
-      {/* Filter tabs */}
+      {/* Filter tabs — counts are whole-event (server), scoped to the current search/vendor/type */}
       <div className="flex gap-1.5 flex-wrap mb-5">
         {FILTER_TABS.map((tab) => {
-          const count = tabCounts[tab.value as keyof typeof tabCounts] ?? 0
+          const count = tabCounts[tab.value] ?? 0
           const isActive = filter === tab.value
           return (
             <button
@@ -372,14 +380,13 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
               }`}
             >
               {tab.label}
-              <span className={`ml-1.5 text-[0.625rem] ${isActive ? 'text-white/70' : 'text-white/30'}`}>{count}</span>
+              {!loading && <span className={`ml-1.5 text-[0.625rem] ${isActive ? 'text-white/70' : 'text-white/30'}`}>{count}</span>}
             </button>
           )
         })}
       </div>
 
-      {/* Vendor + fulfillment filters — "is one vendor falling behind" and "how many
-          deliveries are open" are two of the three questions this page exists to answer. */}
+      {/* Vendor + fulfillment filters — server-side, whole-event. */}
       <div className="flex gap-2 flex-wrap mb-5">
         <select
           value={vendorFilt}
@@ -387,7 +394,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           className="bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
         >
           <option value="all">All vendors</option>
-          {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
+          {vendorOptions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
         <select
           value={fulfilFilt}
@@ -397,7 +404,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           <option value="all">All fulfillment</option>
           {Object.entries(FULFILLMENT_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
         </select>
-        {(vendorFilt !== 'all' || fulfilFilt !== 'all' || filter !== 'all' || search) && (
+        {hasActiveFilter && (
           <button
             onClick={() => setParam({ vendor: null, type: null, tab: null, q: null })}
             className="px-3 py-2 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 transition-colors cursor-pointer"
@@ -419,11 +426,26 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           <Package className="w-10 h-10 text-white/10 mx-auto mb-3 animate-pulse" />
           <p className="text-text-gray text-xs">Loading orders…</p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : orders.length === 0 ? (
+        // The search/filter ran over the WHOLE event, so empty is a real answer, not "not loaded".
         <div className="bg-bg-card border border-white/10 rounded-2xl py-16 text-center">
           <Package className="w-10 h-10 text-white/10 mx-auto mb-3" />
-          <p className="text-white font-semibold text-sm mb-1">No orders found</p>
-          <p className="text-text-gray text-xs">Try adjusting your filter or search query.</p>
+          {urlSearch ? (
+            <>
+              <p className="text-white font-semibold text-sm mb-1">No order matches “{urlSearch}”</p>
+              <p className="text-text-gray text-xs">Searched every order in this fair — code, customer, and vendor.</p>
+            </>
+          ) : hasActiveFilter ? (
+            <>
+              <p className="text-white font-semibold text-sm mb-1">No orders match these filters</p>
+              <p className="text-text-gray text-xs">No order in the fair fits this combination.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-white font-semibold text-sm mb-1">No orders yet</p>
+              <p className="text-text-gray text-xs">Orders will appear here as customers check out.</p>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-5">
@@ -445,10 +467,18 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
             </div>
           ))}
 
-          {atCap && (
-            <p className="text-center text-[0.6875rem] text-text-gray py-3">
-              Showing the {PAGE_TAKE} most recent orders — older ones are not loaded yet.
-            </p>
+          {nextCursor ? (
+            <button
+              onClick={loadOlder}
+              disabled={loadingMore}
+              className="w-full py-3 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading…' : `Load older orders (${total - orders.length} more)`}
+            </button>
+          ) : (
+            orders.length > 0 && total > PAGE_TAKE && (
+              <p className="text-center text-[0.6875rem] text-text-gray py-3">End of the log — all {total} shown.</p>
+            )
           )}
         </div>
       )}

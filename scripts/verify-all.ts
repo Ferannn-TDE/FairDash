@@ -72,6 +72,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'strand-guard',           file: 'scripts/test-strand-guard.ts' },
   { group: 'correctness', name: 'ghost-guard',            file: 'scripts/test-ghost-guard.ts' },
   { group: 'correctness', name: 'resolve-order',         file: 'scripts/resolve-order-guard.ts' },
+  { group: 'correctness', name: 'order-log-search',      file: 'scripts/order-log-search-guard.ts' },
   { group: 'correctness', name: 'cancel-label-guard',     file: 'scripts/cancel-label-guard.ts' },
   { group: 'correctness', name: 'active-shape-guard',     file: 'scripts/active-shape-guard.ts' },
   { group: 'correctness', name: 'delivery-progress',      file: 'scripts/delivery-progress-guard.ts' },
