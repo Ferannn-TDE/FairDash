@@ -27,40 +27,59 @@ import { db } from './db'
  *
  * "Delivered by this runner" = the order is DELIVERED and still assigned to them (a confirmed
  * return nulls Order.runnerId, so a returned order can never be miscounted as their delivery).
- * No collected events → rate 1.0 (a runner who hasn't taken possession of anything has failed
+ * No possession → rate 1.0 (a runner who hasn't taken possession of anything has failed
  * nothing).
  *
- * The "today" bucket keys on the 'collected' event's timestamp: no deliveredAt column exists
- * (Order.completedAt is a load-bearing null on DELIVERED — Pattern C/S money windows — and
- * OrderEvent is not written on the DELIVERED transition). Collect→deliver is minutes on a fair
- * day, so the collect time is the honest available day-bucket; the only distortion is an order
- * collected before midnight and delivered after.
+ * A DELIVERY IS ITSELF PROOF OF POSSESSION. The status route permits RUNNER_COLLECTED →
+ * DELIVERED on the proof photo alone — no collectedAt precondition — so a runner can legally
+ * deliver without ever tapping "collect". Counting only tap-evidenced orders would erase that
+ * real delivery: the same evidence-shaped-undercount class as the fee-shaped count this module
+ * replaced (reconcile-order-status's "DELIVERED accrual is still a proxy for collection" note
+ * is the same acknowledgment). So the denominator is the UNION of tap-collected orders and
+ * delivered-assigned orders; the numerator is delivered-assigned.
+ *
+ * The "today" bucket keys on the 'collected' event's timestamp, falling back to dispatchedAt
+ * (claim time) when the tap was skipped: no deliveredAt column exists (Order.completedAt is a
+ * load-bearing null on DELIVERED — Pattern C/S money windows — and OrderEvent is not written
+ * on the DELIVERED transition). Claim→collect→deliver is minutes on a fair day, so the
+ * possession-window start is the honest available day-bucket; the only distortion is an order
+ * picked up before midnight and delivered after.
  */
 
-/** One distinct (order, runner) 'collected' custody row — the pure core's whole input. */
+/**
+ * One distinct order this runner is involved with — via a 'collected' custody event, a live
+ * DELIVERED assignment, or both. The pure core's whole input: no money field exists here.
+ */
 export interface CustodyCountRow {
-  timestamp: Date
+  /** 'collected' event timestamp; null = the tap was skipped (possession proven by delivery). */
+  collectedAt: Date | null
+  /** Fallback possession signal for the day bucket (Order.dispatchedAt — claim time). */
+  possessionAt: Date | null
   order: { status: string; runnerId: string | null }
 }
 
 export interface RunnerCustodyStats {
   collected: number      // distinct orders this runner took possession of (the denominator)
   delivered: number      // of those, DELIVERED and still assigned to them
-  deliveredToday: number // delivered, with the collect event stamped today
+  deliveredToday: number // delivered, with the possession window starting today
   rate: number           // 0..1; 1.0 when collected === 0 (failed nothing)
 }
 
 /**
- * The pure core — counts from custody rows alone. No fee, tip, or ledger field is even in the
- * input shape: a delivered order counts whether or not it accrued a cent (the fee-shaped-count
- * class this module exists to prevent).
+ * The pure core — counts from possession rows alone. No fee, tip, or ledger field is even in
+ * the input shape: a delivered order counts whether or not it accrued a cent (the
+ * fee-shaped-count class this module exists to prevent), and whether or not the collect tap
+ * was made (delivery proves possession).
  */
 export function summarizeCustody(rows: CustodyCountRow[], runnerId: string, nowMs = Date.now()): RunnerCustodyStats {
   const startOfToday = new Date(nowMs); startOfToday.setHours(0, 0, 0, 0)
-  const collected = rows.length
   const deliveredRows = rows.filter(r => r.order.status === 'DELIVERED' && r.order.runnerId === runnerId)
+  // The denominator: every row is a possession — a tap-collected order, a delivered order, or
+  // both (the caller de-duplicates per order). A row that is neither (defensive) doesn't count.
+  const collected = rows.filter(r => r.collectedAt !== null || (r.order.status === 'DELIVERED' && r.order.runnerId === runnerId)).length
   const delivered = deliveredRows.length
-  const deliveredToday = deliveredRows.filter(r => r.timestamp >= startOfToday).length
+  const dayOf = (r: CustodyCountRow) => r.collectedAt ?? r.possessionAt
+  const deliveredToday = deliveredRows.filter(r => { const d = dayOf(r); return d !== null && d >= startOfToday }).length
   return { collected, delivered, deliveredToday, rate: collected === 0 ? 1 : delivered / collected }
 }
 
@@ -78,25 +97,42 @@ export async function computeRunnerCompletionRates(
   const stats = new Map<string, RunnerCustodyStats>()
   if (runnerIds.length === 0) return stats
 
-  const events = await db.deliveryCustodyEvent.findMany({
-    // voidedAt: null — a voided (out-of-model test-junk) order must not score a runner, same
-    // as every other aggregate (fair-vendors, admin-fair-reports, organizer-payout). The
-    // custody WRITE paths refuse voided orders (collect-order returns order_voided), but a
-    // legacy event written before the void must not linger in the denominator. One filter
-    // covers both sides: delivered is derived from this same filtered list.
-    where: {
-      eventType: 'collected',
-      runnerId: { in: runnerIds },
-      order: { voidedAt: null, ...(scope?.eventId ? { eventId: scope.eventId } : {}) },
-    },
-    select: { runnerId: true, timestamp: true, order: { select: { status: true, runnerId: true } } },
-    // A re-collect after a confirmed return is a second chance on the same order, not a second
-    // order — distinct per (order, runner).
-    distinct: ['orderId', 'runnerId'],
-  })
+  // voidedAt: null on BOTH queries — a voided (out-of-model test-junk) order must not score a
+  // runner, same as every other aggregate (fair-vendors, admin-fair-reports, organizer-payout).
+  // The custody WRITE paths refuse voided orders (collect-order returns order_voided), but a
+  // legacy event written before the void must not linger in the denominator.
+  const orderScope = { voidedAt: null, ...(scope?.eventId ? { eventId: scope.eventId } : {}) }
+
+  const [events, deliveredOrders] = await Promise.all([
+    // Possession by tap: the 'collected' custody events. A re-collect after a confirmed return
+    // is a second chance on the same order, not a second order — distinct per (order, runner).
+    db.deliveryCustodyEvent.findMany({
+      where: { eventType: 'collected', runnerId: { in: runnerIds }, order: orderScope },
+      select: { orderId: true, runnerId: true, timestamp: true, order: { select: { status: true, runnerId: true } } },
+      distinct: ['orderId', 'runnerId'],
+    }),
+    // Possession by delivery: DELIVERED orders assigned to a roster runner whose collect tap
+    // was skipped would otherwise vanish from the count (the evidence-shaped-undercount class).
+    db.order.findMany({
+      where: { status: 'DELIVERED', runnerId: { in: runnerIds }, ...orderScope },
+      select: { id: true, runnerId: true, status: true, dispatchedAt: true },
+    }),
+  ])
+
+  // Union per (runner, order): a tap-collected row wins (it has the honest possession
+  // timestamp); a delivered order without a tap joins with dispatchedAt as the day signal.
+  const byRunner = new Map<string, Map<string, CustodyCountRow>>()
+  for (const id of runnerIds) byRunner.set(id, new Map())
+  for (const e of events) {
+    if (e.runnerId) byRunner.get(e.runnerId)?.set(e.orderId, { collectedAt: e.timestamp, possessionAt: null, order: e.order })
+  }
+  for (const o of deliveredOrders) {
+    const rows = byRunner.get(o.runnerId!)
+    if (rows && !rows.has(o.id)) rows.set(o.id, { collectedAt: null, possessionAt: o.dispatchedAt, order: { status: o.status, runnerId: o.runnerId } })
+  }
 
   for (const id of runnerIds) {
-    stats.set(id, summarizeCustody(events.filter(e => e.runnerId === id), id))
+    stats.set(id, summarizeCustody([...byRunner.get(id)!.values()], id))
   }
   return stats
 }
