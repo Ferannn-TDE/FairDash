@@ -532,8 +532,14 @@ export function OrderMetaCard({ order, isMultiVendor }: { order: Order; isMultiV
                   <div className="ml-3 pl-3 border-l border-white/[0.08] space-y-1.5">
                     {order.dispatchedAt && <TimelineRow label="Runner claimed" time={order.dispatchedAt} small />}
                     {order.collectedAt && <TimelineRow label="Picked up from booth" time={order.collectedAt} small />}
-                    {order.status === 'DELIVERED' && order.completedAt && (
-                      <TimelineRow label="Delivered" time={order.completedAt} small green />
+                    {/* Delivered keys on STATUS (like the progress bar), not on completedAt —
+                        which is null on DELIVERED orders on purpose. Timestamp = the
+                        RunnerEarning accrual time (the honest delivery time); if that's absent
+                        (legacy rows with no earning), the milestone still shows, untimed. */}
+                    {order.status === 'DELIVERED' && (
+                      order.runnerEarning?.createdAt
+                        ? <TimelineRow label="Delivered" time={order.runnerEarning.createdAt} small green />
+                        : <p className="text-[0.6875rem] text-emerald-400">Delivered</p>
                     )}
                   </div>
                 </div>

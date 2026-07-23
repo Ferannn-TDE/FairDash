@@ -33,7 +33,7 @@ const row: VendorActiveOrderRow = {
   fulfillmentType: 'HOME_DELIVERY',
   customerName: 'Cust', customerPhone: '+15550001111',
   vehicleMake: null, vehicleColor: null, vehiclePlate: null,
-  deliveryStreet: '1 Fair Way', deliveryCity: 'Fairville',
+  deliveryStreet: '1 Fair Way', deliveryCity: 'Fairville', collectedAt: null,
   vendorOrderStatuses: [{ vendorId: 'v1', status: 'ACCEPTED', version: 3 }],
   payouts: [], refunds: [],
   orderItems: [

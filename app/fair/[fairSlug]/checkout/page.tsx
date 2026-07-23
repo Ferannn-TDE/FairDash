@@ -391,7 +391,12 @@ export default function CheckoutPage() {
           }),
           ...(fulfillmentType === 'HOME_DELIVERY' && {
             deliveryStreet: form.deliveryStreet.trim(),
-            deliveryCity: form.deliveryCity.trim() || form.deliveryStreet.trim(),
+            // NEVER fabricate a city from the street. When autocomplete fires, handlePlaceSelect
+            // fills deliveryCity from the parsed `locality` component; when the customer types
+            // manually (autocomplete off — a config issue), city stays empty → null, and the
+            // card renders just the street. The old `|| deliveryStreet` fallback is what produced
+            // "417 Cougar Village, 417 Cougar Village" on vendor cards.
+            deliveryCity: form.deliveryCity.trim() || null,
             deliveryZip: form.deliveryZip.trim() || '00000',
           }),
         }),
