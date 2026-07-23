@@ -22,13 +22,16 @@ export async function GET(
 
     const { searchParams } = req.nextUrl
     const data = await getFairOrders(event.id, {
-      take:     parseInt(searchParams.get('take') ?? '50', 10),
-      cursor:   searchParams.get('cursor')   ?? undefined,
-      vendorId: searchParams.get('vendorId') ?? undefined,
-      dateFrom: searchParams.get('dateFrom') ?? undefined,
-      dateTo:   searchParams.get('dateTo')   ?? undefined,
-      tab:      searchParams.get('tab'),
-      status:   searchParams.get('status'),
+      take:            parseInt(searchParams.get('take') ?? '50', 10),
+      cursor:          searchParams.get('cursor')   ?? undefined,
+      vendorId:        searchParams.get('vendorId') ?? undefined,
+      fulfillmentType: searchParams.get('type')     ?? undefined,
+      search:          searchParams.get('q')        ?? undefined,
+      dateFrom:        searchParams.get('dateFrom') ?? undefined,
+      dateTo:          searchParams.get('dateTo')   ?? undefined,
+      tab:             searchParams.get('tab'),
+      status:          searchParams.get('status'),
+      sort:            searchParams.get('sort') === 'oldest' ? 'oldest' : 'newest',
     })
 
     return success(data)
