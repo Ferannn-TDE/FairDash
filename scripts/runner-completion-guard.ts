@@ -11,6 +11,9 @@
  *   [3] PRE-collect RELEASE does NOT count — no 'collected' event → not in the denominator at all.
  *   [4] the arithmetic — 2 delivered of 3 collected → 0.667; positive control that a bad delivery
  *       actually moves the number (not a vacuous 1.0).
+ *   [5] GHOST — a VOIDED order with a legacy 'collected' event is excluded from the denominator
+ *       (the ghost class: voided orders are dead to every runner surface). The [1..4] orders are
+ *       the positive control: the identical shape WITHOUT voidedAt does count.
  *
  * Seeds a throwaway event and cleans up. Run:  npx tsx scripts/runner-completion-guard.ts
  */
@@ -49,11 +52,12 @@ async function main() {
 
     // An order in a given final state; optionally with a 'collected' event by our runner, and
     // optionally a 'released' event (pre-collect release → NO collected event).
-    const mkOrder = async (o: { status: string; assignedToRunner: boolean; collected: boolean }) => {
+    const mkOrder = async (o: { status: string; assignedToRunner: boolean; collected: boolean; voided?: boolean }) => {
       const order = await prisma.order.create({ data: {
         eventId: ev.id, customerId: await mkUser(), vendorId: vendor.id, status: o.status as never,
         fulfillmentType: 'HOME_DELIVERY', runnerId: o.assignedToRunner ? runner.id : null,
         subtotal: 20, fairSynqFee: 2, total: 22, vendorPayout: 20, customerName: 'C', customerPhone: '+10000000000', placedAt: new Date(),
+        ...(o.voided ? { voidedAt: new Date(), voidReason: 'guard: ghost fixture' } : {}),
       } })
       if (o.collected) {
         await prisma.deliveryCustodyEvent.create({ data: { orderId: order.id, eventType: 'collected', actorRole: 'runner', runnerId: runner.id } })
@@ -75,6 +79,12 @@ async function main() {
     assert(c.collected === 3, 'denominator = 3 collected (the pre-collect release is NOT counted)')
     assert(c.delivered === 2, 'numerator = 2 delivered-by-this-runner (the returned one is excluded)')
     assert(Math.abs(c.rate - 2 / 3) < 1e-9, 'rate = 2/3 ≈ 0.667 — the return dragged it below 1.0 (not vacuous)')
+
+    console.log('\n[5] ghost: a VOIDED order with a collected event does not score the runner')
+    await mkOrder({ status: 'RUNNER_COLLECTED', assignedToRunner: true, collected: true, voided: true })
+    const c5 = await computeRunnerCompletionRate(runner.id)
+    assert(c5.collected === 3 && c5.delivered === 2,
+      'voided order excluded — counts unchanged (3/2); the [1..4] non-voided orders are the positive control')
   } finally {
     await cleanup()
     await prisma.$disconnect()

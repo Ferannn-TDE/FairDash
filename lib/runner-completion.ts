@@ -29,7 +29,12 @@ export interface RunnerCompletion {
 
 export async function computeRunnerCompletionRate(runnerId: string): Promise<RunnerCompletion> {
   const events = await db.deliveryCustodyEvent.findMany({
-    where: { eventType: 'collected', runnerId },
+    // voidedAt: null — a voided (out-of-model test-junk) order must not score a runner, same
+    // as every other aggregate (fair-vendors, admin-fair-reports, organizer-payout). The
+    // custody WRITE paths refuse voided orders (collect-order returns order_voided), but a
+    // legacy event written before the void must not linger in the denominator. One filter
+    // covers both sides: delivered is derived from this same filtered list.
+    where: { eventType: 'collected', runnerId, order: { voidedAt: null } },
     select: { orderId: true, order: { select: { status: true, runnerId: true } } },
     distinct: ['orderId'],
   })
