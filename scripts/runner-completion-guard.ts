@@ -14,6 +14,11 @@
  *   [5] GHOST — a VOIDED order with a legacy 'collected' event is excluded from the denominator
  *       (the ghost class: voided orders are dead to every runner surface). The [1..4] orders are
  *       the positive control: the identical shape WITHOUT voidedAt does count.
+ *   [6] DELIVERY PROVES POSSESSION — a DELIVERED order whose collect tap was SKIPPED (no
+ *       'collected' event; the status route permits deliver on proofPath alone) still counts in
+ *       both numerator and denominator. Caught live by the runner-boundary positive control.
+ *   [7] EVENT SCOPE — scoping to this event reproduces the counts; a foreign eventId sees zero
+ *       (the scope is real, with [6]'s nonzero counts as the positive control).
  *
  * Seeds a throwaway event and cleans up. Run:  npx tsx scripts/runner-completion-guard.ts
  */
@@ -85,6 +90,18 @@ async function main() {
     const c5 = await computeRunnerCompletionRate(runner.id)
     assert(c5.collected === 3 && c5.delivered === 2,
       'voided order excluded — counts unchanged (3/2); the [1..4] non-voided orders are the positive control')
+
+    console.log('\n[6] delivery proves possession: a DELIVERED order with NO collect tap still counts')
+    await mkOrder({ status: 'DELIVERED', assignedToRunner: true, collected: false }) // tap skipped
+    const c6 = await computeRunnerCompletionRate(runner.id)
+    assert(c6.collected === 4 && c6.delivered === 3,
+      'tap-skipped delivery enters BOTH sides (4 collected / 3 delivered) — a real delivery is never erased by a missing tap')
+
+    console.log('\n[7] event scope: this event reproduces the counts; a foreign event sees zero')
+    const cScoped = await computeRunnerCompletionRate(runner.id, { eventId: ev.id })
+    assert(cScoped.collected === 4 && cScoped.delivered === 3, 'scoped to THIS event = the same counts (positive control for the scope)')
+    const cForeign = await computeRunnerCompletionRate(runner.id, { eventId: 'no-such-event' })
+    assert(cForeign.collected === 0 && cForeign.rate === 1, 'a foreign eventId sees zero — the scope filter is real, not decorative')
   } finally {
     await cleanup()
     await prisma.$disconnect()

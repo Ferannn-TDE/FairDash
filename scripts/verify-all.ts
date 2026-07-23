@@ -85,6 +85,7 @@ const SUITES: Suite[] = [
   { group: 'money',       name: 'runner-earnings',        file: 'scripts/runner-earnings-guard.ts' },
   { group: 'money',       name: 'runner-fee-gate',        file: 'scripts/runner-fee-gate-guard.ts' },
   { group: 'money',       name: 'runner-completion',      file: 'scripts/runner-completion-guard.ts' },
+  { group: 'correctness', name: 'runner-stats-source',    file: 'scripts/runner-stats-source-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
   { group: 'money',       name: 'reverser-pattern-t',     file: 'scripts/reverser-pattern-t-guard.ts' },
   { group: 'money',       name: 'double-pay-guard',       file: 'scripts/test-double-pay-guard.ts' },
@@ -108,6 +109,10 @@ const AREA_SUITES: Record<string, string[]> = {
   money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t'],
   reconcile:['reverser-pattern-t', 'sweep-summary', 'stuck-money-reader', 'health-guard', 'incoming-divergence'],
   vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence'],
+  // Runner stats surfaces (runner-facing earnings + admin roster): the custody-for-counts /
+  // ledger-for-money split, the dead-column scan, the floor, and the flicker + boundary
+  // cross-cuts.
+  runner:   ['runner-earnings', 'runner-completion', 'runner-stats-source', 'runner-fee-gate', 'runner-boundary', 'flicker-class', 'typecheck'],
 }
 
 const argv = process.argv.slice(2)
