@@ -76,6 +76,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'delivery-progress',      file: 'scripts/delivery-progress-guard.ts' },
   { group: 'correctness', name: 'delivery-address',       file: 'scripts/delivery-address-guard.ts' },
   { group: 'correctness', name: 'ready-lane-eviction',    file: 'scripts/ready-lane-eviction-guard.ts' },
+  { group: 'correctness', name: 'delivered-timeline',     file: 'scripts/delivered-timeline-guard.ts' },
   { group: 'correctness', name: 'vehicle-snapshot',       file: 'scripts/vehicle-snapshot-guard.ts' },
   { group: 'correctness', name: 'profile-change',         file: 'scripts/profile-change-guard.ts' },
   { group: 'correctness', name: 'typecheck',              file: 'scripts/typecheck-gate.ts' },
