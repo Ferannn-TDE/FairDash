@@ -24,6 +24,7 @@ import { deriveOnlineState } from '@/lib/vendor-online-state'
 // Reading a field the route doesn't return is now a compile error.
 
 import type { VendorActiveOrder, VendorActiveOrderItem, VendorFulfillmentType } from '@/lib/vendor-active-order'
+import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
 
 export type VendorOrder = VendorActiveOrder
 export type OrderItem = VendorActiveOrderItem
@@ -103,7 +104,7 @@ function fmtDeliveryDetail(order: VendorOrder) {
     return [vehicle, order.vehiclePlate].filter(Boolean).join(' · ') || null
   }
   if (order.fulfillmentType === 'HOME_DELIVERY') {
-    return [order.deliveryStreet, order.deliveryCity].filter(Boolean).join(', ') || null
+    return formatDeliveryAddress(addr(order))
   }
   return null
 }

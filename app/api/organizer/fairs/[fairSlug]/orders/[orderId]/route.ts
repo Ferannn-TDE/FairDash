@@ -82,7 +82,9 @@ export async function GET(
       pickupLocation: order.pickupLocation,
       // Delivery address
       deliveryStreet: order.deliveryStreet,
+      deliveryUnit: order.deliveryUnit,
       deliveryCity: order.deliveryCity,
+      deliveryState: order.deliveryState,
       deliveryZip: order.deliveryZip,
       // Curbside
       vehicleMake: order.vehicleMake,

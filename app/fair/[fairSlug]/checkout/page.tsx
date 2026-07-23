@@ -17,6 +17,7 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
 import { calculateServiceFee } from '@/lib/constants'
+import { validateDeliveryAddress, type DeliveryAddressError } from '@/lib/delivery-address'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 import AddressAutocomplete from '../../../_components/AddressAutocomplete'
@@ -26,6 +27,16 @@ import AddressAutocomplete from '../../../_components/AddressAutocomplete'
 const inputClass =
   'w-full p-3 bg-[#0F0F0F] border border-white/10 rounded-xl text-white placeholder:text-[#A1A1A1] focus:border-[#FF0077] focus:outline-none transition-colors duration-200 text-sm'
 const labelClass = 'block text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-1.5'
+
+// Shared-validator field name → this form's input name, so a rule change in
+// lib/delivery-address lands on the right input instead of silently showing nothing.
+const FIELD_INPUT: Record<DeliveryAddressError['field'], string> = {
+  street: 'deliveryStreet',
+  unit:   'deliveryUnit',
+  city:   'deliveryCity',
+  state:  'deliveryState',
+  zip:    'deliveryZip',
+}
 const sectionClass = 'bg-[#1A1A1A] border border-white/10 rounded-2xl p-6'
 
 // ─── Vehicle data ─────────────────────────────────────────────────────────────
@@ -266,7 +277,9 @@ export default function CheckoutPage() {
     vehicleColor: '',
     vehiclePlate: '',
     deliveryStreet: '',
+    deliveryUnit: '',
     deliveryCity: '',
+    deliveryState: '',
     deliveryZip: '',
   })
 
@@ -317,12 +330,20 @@ export default function CheckoutPage() {
   const handlePlaceSelect = (place: google.maps.places.PlaceResult) => {
     const comps = place.address_components ?? []
     const get = (type: string) => comps.find(c => c.types.includes(type))?.long_name ?? ''
+    const short = (type: string) => comps.find(c => c.types.includes(type))?.short_name ?? ''
+    // Autocomplete FILLS these; it does not own them. Every field stays editable afterward —
+    // Places is unreliable on campus/dorm addresses, and a customer who has to correct the
+    // city must be able to. `deliveryUnit` is never touched here: address_components has no
+    // unit type, so the room/apartment is always the customer's to enter.
     setForm(prev => ({
       ...prev,
       deliveryStreet: place.formatted_address ?? prev.deliveryStreet,
       deliveryCity: get('locality') || get('sublocality') || get('administrative_area_level_2'),
+      deliveryState: short('administrative_area_level_1'),
       deliveryZip: get('postal_code'),
     }))
+    // A successful parse clears any stale per-field errors from a previous manual attempt.
+    setFieldErrors(prev => ({ ...prev, deliveryStreet: undefined, deliveryCity: undefined, deliveryState: undefined, deliveryZip: undefined }))
   }
 
   const validate = () => {
@@ -355,9 +376,19 @@ export default function CheckoutPage() {
       }
     }
     setFieldErrors({})
-    if (fulfillmentType === 'HOME_DELIVERY' && !form.deliveryStreet.trim()) {
-      toast.error('Delivery address is required')
-      return false
+    if (fulfillmentType === 'HOME_DELIVERY') {
+      // The SAME function the route runs (lib/delivery-address) — the form cannot build a
+      // payload the server will reject, which is the dead-end this replaces: the route
+      // required a city, the form had no city field, and the failure surfaced as a generic
+      // "failed to create order" with nothing the customer could act on.
+      const addressErrors = validateDeliveryAddress({
+        street: form.deliveryStreet, unit: form.deliveryUnit,
+        city: form.deliveryCity, state: form.deliveryState, zip: form.deliveryZip,
+      })
+      if (addressErrors.length > 0) {
+        setFieldErrors(Object.fromEntries(addressErrors.map(e => [FIELD_INPUT[e.field], e.message])))
+        return false
+      }
     }
     return true
   }
@@ -390,14 +421,16 @@ export default function CheckoutPage() {
             vehiclePlate: form.vehiclePlate || undefined,
           }),
           ...(fulfillmentType === 'HOME_DELIVERY' && {
+            // NOTHING here invents a value to satisfy the validator. Both fabrications are
+            // gone: `city || street` (which printed "417 Cougar Village, 417 Cougar Village")
+            // and `zip || '00000'` (a zip that does not exist, on all 10 legacy rows). Every
+            // field is either what the customer entered or null, and validate() has already
+            // proven the required ones are present via the SAME rule the route applies.
             deliveryStreet: form.deliveryStreet.trim(),
-            // NEVER fabricate a city from the street. When autocomplete fires, handlePlaceSelect
-            // fills deliveryCity from the parsed `locality` component; when the customer types
-            // manually (autocomplete off — a config issue), city stays empty → null, and the
-            // card renders just the street. The old `|| deliveryStreet` fallback is what produced
-            // "417 Cougar Village, 417 Cougar Village" on vendor cards.
+            deliveryUnit: form.deliveryUnit.trim() || null,
             deliveryCity: form.deliveryCity.trim() || null,
-            deliveryZip: form.deliveryZip.trim() || '00000',
+            deliveryState: form.deliveryState.trim() || null,
+            deliveryZip: form.deliveryZip.trim() || null,
           }),
         }),
       })
@@ -617,12 +650,80 @@ export default function CheckoutPage() {
                     <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ''}>
                       <div>
                         <label className={labelClass}>Street Address *</label>
-                        <div className="bg-[#0F0F0F] border border-white/10 rounded-xl focus-within:border-[#FF0077] transition-colors">
+                        <div className={`bg-[#0F0F0F] border rounded-xl focus-within:border-[#FF0077] transition-colors ${fieldErrors.deliveryStreet ? 'border-red-500' : 'border-white/10'}`}>
                           <AddressAutocomplete
                             value={form.deliveryStreet}
-                            onChange={val => setForm(prev => ({ ...prev, deliveryStreet: val }))}
+                            onChange={val => {
+                              setForm(prev => ({ ...prev, deliveryStreet: val }))
+                              setFieldErrors(prev => ({ ...prev, deliveryStreet: undefined }))
+                            }}
                             onPlaceSelect={handlePlaceSelect}
                           />
+                        </div>
+                        {fieldErrors.deliveryStreet && <p className="mt-1 text-xs text-red-400">{fieldErrors.deliveryStreet}</p>}
+                        <p className="mt-1.5 text-[11px] text-[#A1A1A1]">
+                          Pick a suggestion to fill the rest automatically — or type the address yourself if yours
+                          isn&rsquo;t listed.
+                        </p>
+                      </div>
+
+                      {/* Unit line — a dorm or apartment delivery is a building AND a door.
+                          Google's address components carry no unit type, so this is the ONLY
+                          place it can come from. Optional and never validated. */}
+                      <div className="mt-4">
+                        <label className={labelClass}>Apartment / Suite / Room</label>
+                        <input
+                          name="deliveryUnit"
+                          value={form.deliveryUnit}
+                          onChange={handleChange}
+                          className={inputClass}
+                          placeholder="e.g. Room 214"
+                          maxLength={40}
+                        />
+                      </div>
+
+                      {/* City / State / ZIP — autocomplete fills them, the customer can fix
+                          them. Before these existed, a customer whose address Places didn't
+                          return had no way to supply a city and hit an unclearable 400. */}
+                      <div className="mt-4 grid grid-cols-6 gap-3">
+                        <div className="col-span-3">
+                          <label className={labelClass}>City *</label>
+                          <input
+                            name="deliveryCity"
+                            value={form.deliveryCity}
+                            onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryCity: undefined })) }}
+                            className={`${inputClass} ${fieldErrors.deliveryCity ? 'border-red-500 focus:border-red-500' : ''}`}
+                            placeholder="Edwardsville"
+                          />
+                          {fieldErrors.deliveryCity && <p className="mt-1 text-xs text-red-400">{fieldErrors.deliveryCity}</p>}
+                        </div>
+                        <div className="col-span-1">
+                          <label className={labelClass}>State</label>
+                          <input
+                            name="deliveryState"
+                            value={form.deliveryState}
+                            onChange={e => {
+                              setForm(prev => ({ ...prev, deliveryState: e.target.value.toUpperCase() }))
+                              setFieldErrors(prev => ({ ...prev, deliveryState: undefined }))
+                            }}
+                            className={`${inputClass} uppercase ${fieldErrors.deliveryState ? 'border-red-500 focus:border-red-500' : ''}`}
+                            placeholder="IL"
+                            maxLength={2}
+                          />
+                          {fieldErrors.deliveryState && <p className="mt-1 text-xs text-red-400">{fieldErrors.deliveryState}</p>}
+                        </div>
+                        <div className="col-span-2">
+                          <label className={labelClass}>ZIP *</label>
+                          <input
+                            name="deliveryZip"
+                            value={form.deliveryZip}
+                            onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryZip: undefined })) }}
+                            className={`${inputClass} ${fieldErrors.deliveryZip ? 'border-red-500 focus:border-red-500' : ''}`}
+                            placeholder="62026"
+                            inputMode="numeric"
+                            maxLength={10}
+                          />
+                          {fieldErrors.deliveryZip && <p className="mt-1 text-xs text-red-400">{fieldErrors.deliveryZip}</p>}
                         </div>
                       </div>
                     </APIProvider>

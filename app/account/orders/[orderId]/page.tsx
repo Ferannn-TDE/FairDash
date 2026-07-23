@@ -5,6 +5,7 @@ import MarketplaceNavbar from '../../../_components/MarketplaceNavbar'
 import Link from 'next/link'
 import { MapPinIcon, BuildingStorefrontIcon } from '@heroicons/react/24/outline'
 import { getStatusConfig } from '@/lib/order-status-config'
+import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
 
 export const metadata = { title: 'Order Detail — FairSynq' }
 
@@ -186,7 +187,7 @@ export default async function OrderDetailPage({ params }: Props) {
                 <h2 className="font-bebas text-lg tracking-wide text-white">Delivery Address</h2>
               </div>
               <p className="text-text-gray text-sm">
-                {order.deliveryStreet}, {order.deliveryCity} {order.deliveryZip}
+                {formatDeliveryAddress(addr(order))}
               </p>
             </div>
           )}

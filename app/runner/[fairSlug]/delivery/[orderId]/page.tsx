@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronLeft, Car, MapPin, Phone, CheckSquare, Square, Package, Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatDeliveryAddressLines, deliveryMapsQuery, toDeliveryAddress as addr } from '@/lib/delivery-address'
 
 const FULFILLMENT_LABEL: Record<string, string> = {
   CURBSIDE: 'Curbside', HOME_DELIVERY: 'Home Delivery', BOOTH_PICKUP: 'Booth Pickup',
@@ -326,9 +327,13 @@ export default function DeliveryPage() {
         {order.fulfillmentType === 'HOME_DELIVERY' && order.deliveryStreet && (
           <div className="flex items-start gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
             <MapPin className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-            <div><p className="text-white font-semibold text-sm">{order.deliveryStreet}</p>
-              <p className="text-text-gray text-xs">{order.deliveryCity}, {order.deliveryZip}</p>
-              <a href={`https://maps.google.com/?q=${encodeURIComponent(`${order.deliveryStreet}, ${order.deliveryCity}`)}`} target="_blank" rel="noopener noreferrer" className="text-neon-pink text-xs mt-1 inline-block hover:underline">Open Maps</a></div>
+            <div>
+              {/* Shared formatter: line1 is the street AND the unit — a dorm delivery is a
+                  building plus a door, and the door only reaches the runner here. The maps
+                  query deliberately drops the unit (it degrades geocoding). */}
+              <p className="text-white font-semibold text-sm">{formatDeliveryAddressLines(addr(order))?.line1}</p>
+              <p className="text-text-gray text-xs">{formatDeliveryAddressLines(addr(order))?.line2}</p>
+              <a href={`https://maps.google.com/?q=${encodeURIComponent(deliveryMapsQuery(addr(order)) ?? '')}`} target="_blank" rel="noopener noreferrer" className="text-neon-pink text-xs mt-1 inline-block hover:underline">Open Maps</a></div>
           </div>
         )}
 

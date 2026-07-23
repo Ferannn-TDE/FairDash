@@ -66,7 +66,10 @@ export async function GET(
         vehicleColor: true,
         vehiclePlate: true,
         deliveryStreet: true,
+        deliveryUnit: true,
         deliveryCity: true,
+        deliveryState: true,
+        deliveryZip: true,
         collectedAt: true,
         vendorOrderStatuses: {
           where: { vendorId },

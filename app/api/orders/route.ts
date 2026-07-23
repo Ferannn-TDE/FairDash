@@ -6,6 +6,7 @@ import { FulfillmentType, EventStatus, VendorStatus, OrderStatus } from '@prisma
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
+import { validateDeliveryAddress } from '@/lib/delivery-address'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -37,9 +38,11 @@ interface CreateOrderBody {
   vehicleMake?: string
   vehicleColor?: string
   vehiclePlate?: string
-  // Home delivery
+  // Home delivery — shape mirrors lib/delivery-address (DeliveryAddressInput)
   deliveryStreet?: string
+  deliveryUnit?: string
   deliveryCity?: string
+  deliveryState?: string
   deliveryZip?: string
 }
 
@@ -87,7 +90,9 @@ export async function POST(req: NextRequest) {
       vehicleColor,
       vehiclePlate,
       deliveryStreet,
+      deliveryUnit,
       deliveryCity,
+      deliveryState,
       deliveryZip,
       tip: tipInput,
     } = body
@@ -131,11 +136,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (fulfillmentType === FulfillmentType.HOME_DELIVERY) {
-      if (!deliveryStreet || !deliveryCity || !deliveryZip) {
+      // ONE rule, shared with the checkout form (lib/delivery-address) — the form validates
+      // through the same function, so it cannot build a payload this route rejects. That
+      // dead-end is exactly what shipped when the form stopped fabricating a city: the route
+      // required one, the form had no city input, and the customer got an unclearable 400.
+      const addressErrors = validateDeliveryAddress({
+        street: deliveryStreet, unit: deliveryUnit, city: deliveryCity, state: deliveryState, zip: deliveryZip,
+      })
+      if (addressErrors.length > 0) {
+        // Field-named, so a client can attach each message to its own input instead of
+        // showing one opaque "failed to create order".
         throw new ApiError(
-          'deliveryStreet, deliveryCity, and deliveryZip are required for HOME_DELIVERY orders',
+          addressErrors.map(e => e.message).join('; '),
           400,
-          'VALIDATION_ERROR'
+          'VALIDATION_ERROR',
+          { fields: addressErrors },
         )
       }
     }
@@ -435,9 +450,13 @@ export async function POST(req: NextRequest) {
           vehicleMake: vehicleMake ?? null,
           vehicleColor: vehicleColor ?? null,
           vehiclePlate: vehiclePlate ?? null,
-          deliveryStreet: deliveryStreet ?? null,
-          deliveryCity: deliveryCity ?? null,
-          deliveryZip: deliveryZip ?? null,
+          // NEVER a fabricated stand-in — a missing optional field is stored NULL. (The old
+          // `deliveryZip || '00000'` on the client is gone; see lib/delivery-address.)
+          deliveryStreet: deliveryStreet?.trim() || null,
+          deliveryUnit: deliveryUnit?.trim() || null,
+          deliveryCity: deliveryCity?.trim() || null,
+          deliveryState: deliveryState?.trim().toUpperCase() || null,
+          deliveryZip: deliveryZip?.trim() || null,
           stripePaymentIntentId: paymentIntent.id,
           orderItems: {
             create: lineItems.map(item => ({
