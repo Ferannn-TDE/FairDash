@@ -59,27 +59,24 @@ console.log('\n[3] defensive honesty')
 const s3 = summarizeRunnerEarnings([row({ amountCents: 300, tip: 5 })], NOW) // tip 500c > amount 300c
 assert(s3.lines[0].feeShareCents === 0 && s3.lines[0].tipCents === 300, 'row smaller than its tip clamps: share 0, never negative')
 const s0 = summarizeRunnerEarnings([], NOW)
-assert(s0.earnedTotalCents === 0 && s0.deliveriesToday === 0 && s0.lines.length === 0, 'zero rows → all-zero summary (honest empty state)')
+assert(s0.earnedTotalCents === 0 && s0.lines.length === 0, 'zero rows → all-zero summary (honest empty state)')
 const sOld = summarizeRunnerEarnings([row({ amountCents: 400, tip: 0, createdAt: new Date('2026-07-20T12:00:00Z') })], NOW)
 assert(sOld.earnedTodayCents === 0 && sOld.earnedTotalCents === 400, "yesterday's earning counts in total but not today")
 
-console.log('\n[3b] delivery count is ONE truth from the ledger (curbside included, cancelled excluded)')
-const sMix = summarizeRunnerEarnings([
-  row({ amountCents: 1000, tip: 0, status: 'paid', paidAt: today, createdAt: today }),
-  row({ amountCents: 700, tip: 2, status: 'tracked', createdAt: today }),
-  row({ amountCents: 500, tip: 0, status: 'cancelled', createdAt: today }),
-  row({ amountCents: 900, tip: 0, status: 'tracked', createdAt: new Date('2026-07-20T12:00:00Z') }),
-], NOW)
-assert(sMix.deliveriesTotal === 3, 'deliveriesTotal counts every non-cancelled row (3, excludes the cancelled)')
-assert(sMix.deliveriesToday === 2, 'deliveriesToday is the same truth, scoped to today (2)')
-assert(sMix.deliveriesTotal >= sMix.deliveriesToday, 'all-time ≥ today (same underlying ledger, never two counters)')
-// 4b: the count derivation reads RunnerEarning rows, which accrue for ANY runner-fulfilled type
-// (the reconcile accrual keys on runnerId + fee/tip, never a HOME_DELIVERY literal) — so a
-// curbside RUNNER_DELIVERS row counts identically. The summarizer never inspects fulfillmentType.
+console.log('\n[3b] the summarizer is MONEY-ONLY — no delivery count is even available here')
+// Custody is the spine for COUNTS, the ledger for MONEY (lib/runner-completion.ts). The old
+// deliveriesTotal/deliveriesToday fields undercounted: a DELIVERED zero-fee no-tip order has
+// no RunnerEarning row, so the ledger showed "2 deliveries" for 3 made. The fields were
+// REMOVED, not paralleled — assert no count field survives for a future caller to reach.
+const sAny = summarizeRunnerEarnings([row({ amountCents: 1000, tip: 0, status: 'paid', paidAt: today, createdAt: today })], NOW) as unknown as Record<string, unknown>
+assert(!('deliveriesTotal' in sAny) && !('deliveriesToday' in sAny), 'summary exposes NO delivery counts (custody owns counts, the ledger owns money)')
 const earnSrc = readFileSync(new URL('../lib/runner-earnings.ts', import.meta.url), 'utf8')
-assert(!/HOME_DELIVERY/.test(earnSrc), 'the earnings summarizer has NO HOME_DELIVERY literal (curbside counts equally)')
+assert(!/HOME_DELIVERY/.test(earnSrc), 'the earnings summarizer has NO HOME_DELIVERY literal (money is fulfillment-agnostic)')
 const routeSrcCount = readFileSync(new URL('../app/api/runners/me/earnings/route.ts', import.meta.url), 'utf8')
-assert(/totalDeliveries:\s*s\.deliveriesTotal/.test(routeSrcCount) && !/totalDeliveries:\s*runner\.totalCompleted/.test(routeSrcCount), 'route derives totalDeliveries from the ledger, not the dead runner.totalCompleted counter')
+assert(/deliveriesToday:\s*custody\.deliveredToday/.test(routeSrcCount) && /totalDeliveries:\s*custody\.delivered\b/.test(routeSrcCount),
+  'route derives BOTH counts from the custody stats, not the ledger summary')
+assert(!/totalDeliveries:\s*runner\.totalCompleted/.test(routeSrcCount) && !/s\.deliveriesTotal/.test(routeSrcCount),
+  'neither the dead runner.totalCompleted counter nor a ledger-derived count feeds the route')
 
 console.log('\n[4] source shape: the lying copy is dead')
 const routeSrc = readFileSync(new URL('../app/api/runners/me/earnings/route.ts', import.meta.url), 'utf8')

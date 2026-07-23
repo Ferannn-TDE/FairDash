@@ -1,5 +1,6 @@
 /**
- * Runner earnings summarizer — the ONE derivation of "what does this runner see".
+ * Runner earnings summarizer — the ONE derivation of "what MONEY does this runner see".
+ * (Delivery COUNTS live in lib/runner-completion.ts — custody is the spine for counts.)
  *
  * History (2026-07-22 diagnosis): the LEDGER was already right — reconcileMasterStatus accrues
  * amountCents = runnerShare (runnerFeePercent × fee) + tip. But the earnings surfaces still
@@ -46,11 +47,11 @@ export interface RunnerEarningsSummary {
   pendingTotalCents: number  // tracked — transfers after the refund window
   heldTotalCents: number     // admin-frozen, still earned
   earnedTodayCents: number
-  deliveriesToday: number
-  /** All-time count of real deliveries — one RunnerEarning row per delivered order (any
-   *  runner-fulfilled type, so curbside counts), cancelled payouts excluded. The ONE truth
-   *  behind both "Deliveries" (all-time) and "N deliveries today". */
-  deliveriesTotal: number
+  // NO delivery counts here — CUSTODY IS THE SPINE FOR COUNTS, THE LEDGER FOR MONEY
+  // (lib/runner-completion.ts). This summary once exposed deliveriesToday/deliveriesTotal,
+  // and they undercounted: a DELIVERED zero-fee no-tip order accrues no RunnerEarning row,
+  // so it was invisible to a ledger-derived count. The fields were REMOVED, not kept in
+  // parallel, so no future caller can reach for the wrong spine.
 }
 
 const DISPLAY_STATUS: Record<string, RunnerEarningDisplayStatus> = {
@@ -85,7 +86,5 @@ export function summarizeRunnerEarnings(rows: RunnerLedgerRow[], nowMs = Date.no
     pendingTotalCents: sum(live.filter(l => l.status === 'pending')),
     heldTotalCents: sum(live.filter(l => l.status === 'held')),
     earnedTodayCents: sum(todayLive),
-    deliveriesToday: todayLive.length,
-    deliveriesTotal: live.length,
   }
 }

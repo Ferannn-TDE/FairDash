@@ -19,7 +19,7 @@ export async function GET() {
     if (!dbUser) return apiError('User not found', 404, 'USER_NOT_FOUND')
     const runner = await db.runner.findUnique({
       where: { userId: dbUser.id },
-      select: { id: true, completionRate: true, totalCompleted: true, totalDispatched: true },
+      select: { id: true },
     })
     if (!runner) return apiError('No runner record found', 404, 'RUNNER_NOT_FOUND')
 
@@ -34,9 +34,12 @@ export async function GET() {
     })
 
     const s = summarizeRunnerEarnings(rows)
-    // Completion rate from the custody events: delivered / collected (a pre-collect release
-    // never enters the denominator). Replaces the dead runner.completionRate default (1.0).
-    const completion = await computeRunnerCompletionRate(runner.id)
+    // CUSTODY IS THE SPINE FOR COUNTS; THE LEDGER IS THE SPINE FOR MONEY (lib/runner-completion).
+    // The dollar figures above come from RunnerEarning; the delivery COUNTS and the completion
+    // rate come from the custody events — the ledger only knows deliveries that generated money,
+    // so a DELIVERED zero-fee no-tip order was invisible to the old ledger-derived count ("2
+    // deliveries" shown for 3 made). A pre-collect release never enters the denominator.
+    const custody = await computeRunnerCompletionRate(runner.id)
     const d = (cents: number) => parseFloat((cents / 100).toFixed(2))
 
     return success({
@@ -45,12 +48,9 @@ export async function GET() {
       paidTotal:    d(s.paidTotalCents),
       pendingTotal: d(s.pendingTotalCents),
       heldTotal:    d(s.heldTotalCents),
-      deliveriesToday: s.deliveriesToday,
-      // Derived from the RunnerEarning ledger (one row per delivered order, curbside included),
-      // NOT the dead runner.totalCompleted counter (never incremented → always 0, which
-      // contradicted "1 delivery today"). completionRate is set by the next commit (#4c).
-      totalDeliveries: s.deliveriesTotal,
-      completionRate:  completion.rate,
+      deliveriesToday: custody.deliveredToday,
+      totalDeliveries: custody.delivered,
+      completionRate:  custody.rate,
       recent: s.lines.slice(0, 25).map(l => ({
         orderId:  l.orderId,
         amount:   d(l.totalCents),
