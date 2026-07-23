@@ -70,6 +70,29 @@ const shell = readFileSync('app/runner/[fairSlug]/RunnerPortalShell.tsx', 'utf8'
 assert((shell.match(/isOnline === null/g) ?? []).length >= 2,
   'both shell status pills (desktop + mobile) show neutral while unknown, never a false Offline')
 
+// ── [E] no fair display name is derived from a SLUG (7th instance) ──────────────
+// The admin sidebar's per-fair header fell back to the slug while /api/admin/fairs was in
+// flight, so every load flashed "SPRINGFIELD-STATE-FAIR-2026" (uppercased by its own CSS)
+// before settling to the real name, "Italian Fest 2026". A slug looks like a name and is a
+// different string — the plausible-but-wrong class, in its most literal form.
+console.log('\n[E] fair display names come from event.name, never from a slug')
+const shellSrc = readFileSync('app/admin/_components/AdminShell.tsx', 'utf8')
+
+// The scan rule: a display name assigned from a slug identifier. Positive control FIRST —
+// a broken regex must not let the real assertion pass vacuously.
+const NAME_FROM_SLUG = /\b(name|title|label)\b[^\n=]*=\s*[^\n]*\?\?\s*[a-zA-Z]*[sS]lug\b/
+assert(NAME_FROM_SLUG.test('  const name = fair?.name ?? slug'),
+  '[0] positive control: the scanner DOES flag `name = fair?.name ?? slug` (the exact line that shipped the flash)')
+assert(!NAME_FROM_SLUG.test('  const href = `/admin/${slug}/dashboard`'),
+  '[0] baseline: using a slug in a URL is NOT flagged — only naming a thing after it')
+
+assert(!NAME_FROM_SLUG.test(shellSrc),
+  'AdminShell derives NO display name from a slug (the fair header waits for event.name)')
+assert(/const name = fair\?\.name \?\? null/.test(shellSrc),
+  'the fair header name is null until the fairs list resolves (→ skeleton, not a guess)')
+assert(/loaded\s*$|loaded\s*\?/m.test(shellSrc) && /animate-pulse/.test(shellSrc),
+  'the header distinguishes loading (skeleton) from loaded-but-unknown — two different states, two different renders')
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

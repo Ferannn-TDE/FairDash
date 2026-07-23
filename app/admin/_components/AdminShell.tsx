@@ -70,19 +70,28 @@ function SidebarLink({
   )
 }
 
-function EventNav({ slug, fairs, onClose }: { slug: string; fairs: ShellFair[]; onClose?: () => void }) {
+function EventNav({ slug, fairs, loaded, onClose }: { slug: string; fairs: ShellFair[]; loaded: boolean; onClose?: () => void }) {
   const [open, setOpen] = useState(true)
   const fair = fairs.find(e => e.urlSlug === slug)
-  // Before the fairs list loads (or for a slug not in the list), fall back to the
-  // slug itself so the per-fair nav still renders.
-  const name = fair?.name ?? slug
+  // FLICKER CLASS: this header once fell back to the SLUG before the fairs list
+  // resolved, so every admin load flashed "SPRINGFIELD-STATE-FAIR-2026" (the slug,
+  // uppercased by this button's own CSS) for ~a second before settling to the real
+  // name, "Italian Fest 2026" — a slug is a plausible-looking name and a wrong one.
+  // A fair's display name comes from event.name or it is not rendered: skeleton
+  // while loading, and an explicit unknown-fair label once loaded (which is a
+  // genuinely different state, not a slower version of the same one).
+  const name = fair?.name ?? null
   return (
     <div className="mt-4 pt-3 border-t border-white/5">
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-[#555] uppercase tracking-widest hover:text-[#888] transition-colors"
       >
-        <span className="truncate">{name}</span>
+        {name
+          ? <span className="truncate">{name}</span>
+          : loaded
+            ? <span className="truncate text-[#444]">Unknown fair</span>
+            : <span className="h-2.5 w-28 rounded bg-white/10 animate-pulse" aria-hidden />}
         {open ? <ChevronDownIcon className="w-3 h-3 shrink-0" /> : <ChevronRightIcon className="w-3 h-3 shrink-0" />}
       </button>
       {open && (
@@ -101,7 +110,7 @@ function EventNav({ slug, fairs, onClose }: { slug: string; fairs: ShellFair[]; 
   )
 }
 
-function SidebarContent({ currentSlug, fairs, onClose }: { currentSlug: string | null; fairs: ShellFair[]; onClose?: () => void }) {
+function SidebarContent({ currentSlug, fairs, loaded, onClose }: { currentSlug: string | null; fairs: ShellFair[]; loaded: boolean; onClose?: () => void }) {
   return (
     <>
       {/* Logo */}
@@ -129,7 +138,7 @@ function SidebarContent({ currentSlug, fairs, onClose }: { currentSlug: string |
         <SidebarLink href="/admin/organizers" icon={UserGroupIcon} label="Organizers" exact onClick={onClose} />
 
         {/* Per-event nav */}
-        {currentSlug && <EventNav slug={currentSlug} fairs={fairs} onClose={onClose} />}
+        {currentSlug && <EventNav slug={currentSlug} fairs={fairs} loaded={loaded} onClose={onClose} />}
 
         {/* If no event selected, show all fairs */}
         {!currentSlug && (
@@ -159,6 +168,9 @@ function SidebarContent({ currentSlug, fairs, onClose }: { currentSlug: string |
 export default function AdminShell({ children, userName, userInitials, userEmail }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [fairs, setFairs] = useState<ShellFair[]>([])
+  // Distinguishes "still loading" from "loaded, no such fair" — without it the header
+  // can only guess, and guessing is what produced the slug flash.
+  const [fairsLoaded, setFairsLoaded] = useState(false)
   const pathname = usePathname()
   const { signOut } = useClerk()
 
@@ -168,7 +180,8 @@ export default function AdminShell({ children, userName, userInitials, userEmail
     fetch('/api/admin/fairs')
       .then(r => r.json())
       .then(json => { if (active && json.success) setFairs((json.data.fairs ?? []) as ShellFair[]) })
-      .catch(() => { /* switcher falls back to the current slug */ })
+      .catch(() => { /* leave the list empty; the header shows the loaded-but-unknown state */ })
+      .finally(() => { if (active) setFairsLoaded(true) })
     return () => { active = false }
   }, [])
 
@@ -193,7 +206,7 @@ export default function AdminShell({ children, userName, userInitials, userEmail
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
       >
-        <SidebarContent currentSlug={currentSlug} fairs={fairs} onClose={() => setSidebarOpen(false)} />
+        <SidebarContent currentSlug={currentSlug} fairs={fairs} loaded={fairsLoaded} onClose={() => setSidebarOpen(false)} />
 
         {/* Profile */}
         <div className="p-4 border-t border-white/5 shrink-0">
