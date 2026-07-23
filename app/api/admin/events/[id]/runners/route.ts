@@ -11,10 +11,12 @@ import { RUNNER_COMPLETION_MIN_DENOMINATOR } from '@/lib/constants'
 //
 // Stats are DERIVED per request from the custody events (lib/runner-completion — one batched
 // query for the whole roster, scoped to THIS event via order.eventId), never read from the
-// dead Runner.totalCompleted / completionRate columns (no write site anywhere; they sat at
-// 0 / 1.0 while real deliveries happened, and fed a <90% warning banner that could never
-// fire). `scored` is the ONE copy of the minimum-denominator predicate: below the floor the
-// page shows raw counts with "not enough deliveries" — no percentage, no banner.
+// dead Runner counter columns (deprecated in schema.prisma: no write site ever existed; they
+// sat at their defaults while real deliveries happened, and fed a <90% warning banner that
+// could never fire). `scored` is the ONE copy of the minimum-denominator predicate: below the
+// floor the page shows raw counts with "not enough deliveries" — no percentage, no banner.
+// runner-stats-source-guard pins all of this (including that those column names never
+// reappear in app/ or lib/ — which is why this comment doesn't name them).
 
 export async function GET(
   req: NextRequest,

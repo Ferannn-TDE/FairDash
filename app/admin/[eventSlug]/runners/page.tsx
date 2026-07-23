@@ -13,9 +13,9 @@ interface AdminRunner {
   approvalStatus: ApprovalStatus
   rejectionReason: string | null
   // Custody-derived, this event only (lib/runner-completion via the route) — never the dead
-  // Runner.totalCompleted/completionRate columns. `scored` is the route's one copy of the
-  // minimum-denominator predicate: false → render the raw counts with "not enough deliveries",
-  // no percentage, no bar, and the runner never enters the <90% banner.
+  // Runner counter columns (deprecated in schema.prisma). `scored` is the route's one copy of
+  // the minimum-denominator predicate: false → render the raw counts with "not enough
+  // deliveries", no percentage, no bar, and the runner never enters the <90% banner.
   completionRate: number
   collected: number
   delivered: number
@@ -103,8 +103,8 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
       )}
 
       {/* Warning for low completion rates — SCORED runners only (at or above the
-          minimum-denominator floor). An unscored runner's rate is noise over N<5 and
-          never fires the banner. */}
+          minimum-denominator floor). An unscored runner's rate is noise over a tiny
+          sample and never fires the banner. */}
       {!loading && runners.some(r => r.scored && r.completionRate < 0.90) && (
         <div className="mb-5 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
           <p className="text-sm text-yellow-300 font-inter">
