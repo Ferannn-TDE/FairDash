@@ -12,9 +12,14 @@ interface AdminRunner {
   status: RunnerStatus
   approvalStatus: ApprovalStatus
   rejectionReason: string | null
+  // Custody-derived, this event only (lib/runner-completion via the route) — never the dead
+  // Runner.totalCompleted/completionRate columns. `scored` is the route's one copy of the
+  // minimum-denominator predicate: false → render the raw counts with "not enough deliveries",
+  // no percentage, no bar, and the runner never enters the <90% banner.
   completionRate: number
-  totalDispatched: number
-  totalCompleted: number
+  collected: number
+  delivered: number
+  scored: boolean
   user: { name: string | null; email: string | null }
 }
 
@@ -97,8 +102,10 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
         />
       )}
 
-      {/* Warning for low completion rates */}
-      {!loading && runners.some(r => r.completionRate < 0.90) && (
+      {/* Warning for low completion rates — SCORED runners only (at or above the
+          minimum-denominator floor). An unscored runner's rate is noise over N<5 and
+          never fires the banner. */}
+      {!loading && runners.some(r => r.scored && r.completionRate < 0.90) && (
         <div className="mb-5 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
           <p className="text-sm text-yellow-300 font-inter">
             <span className="font-semibold">Warning:</span> Some runners are below the 90% completion rate threshold and may need to be reviewed.
@@ -131,18 +138,22 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
                 </div>
               </div>
 
-              {/* Completion rate */}
+              {/* Completion rate — a percentage only when scored (≥ the minimum-denominator
+                  floor); below it, the honest reading of a tiny sample */}
               <div className="hidden sm:block w-28 shrink-0">
                 <p className="text-[10px] text-[#555] font-inter uppercase tracking-wider mb-1">Completion</p>
-                <CompletionBar rate={runner.completionRate} />
+                {runner.scored
+                  ? <CompletionBar rate={runner.completionRate} />
+                  : <p className="text-xs text-[#666] font-inter">not enough deliveries</p>}
               </div>
 
-              {/* Dispatch stats */}
+              {/* Raw counts — always visible, so the admin sees the sample size behind (or
+                  instead of) the percentage */}
               <div className="hidden md:block shrink-0 text-right">
                 <p className="text-sm text-white font-inter tabular-nums">
-                  {runner.totalCompleted}/{runner.totalDispatched}
+                  {runner.delivered}/{runner.collected}
                 </p>
-                <p className="text-[10px] text-[#555] font-inter">dispatched</p>
+                <p className="text-[10px] text-[#555] font-inter">delivered / collected</p>
               </div>
 
               {/* Approval badge — only shown when not APPROVED (grandfathered/approved runners stay uncluttered) */}
