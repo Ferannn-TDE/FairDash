@@ -14,9 +14,10 @@
 
 - **`main` head: `b694b1e`** — "Merge: walkthrough batch 2 — address, Ready-lane, delivered timeline,
   runner stats (4a–4d)".
-- **Unpushed: 6 local commits** (2026-07-23): the CURRENT_STATE regeneration (`3b1d0ad`) + the
+- **Unpushed: 7 local commits** (2026-07-23): the CURRENT_STATE regeneration (`3b1d0ad`) + the
   admin runner-stats batch (`831e182` ghost fix, `ade9c73` custody-for-counts, `e0ef587` admin
-  wiring + floor, `0121c44` guard suite + possession amendment, + the docs commit). `origin/main`
+  wiring + floor, `0121c44` guard suite + possession amendment, `f2bb60f` docs, + the
+  comment-rewording commit at HEAD, which can't name its own hash). `origin/main`
   is at `b694b1e` — **what's deployed is the walkthrough batch, fingerprint-confirmed**
   (`/api/health` served `"commit":"b694b1e…"` on 2026-07-22); this batch deploys on the next human
   push.
