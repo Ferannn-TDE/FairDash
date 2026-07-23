@@ -4,8 +4,9 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: reading of `main @ b694b1e`. Numbers below were measured this session against the
-> live DB unless marked otherwise.
+> Snapshot taken: reading of `main @ b694b1e`, amended 2026-07-23 after the admin runner-stats
+> batch (5 local commits, see Git section). Numbers below were measured against the live DB on the
+> session that wrote them unless marked otherwise.
 
 ---
 
@@ -13,11 +14,12 @@
 
 - **`main` head: `b694b1e`** — "Merge: walkthrough batch 2 — address, Ready-lane, delivered timeline,
   runner stats (4a–4d)".
-- **Unpushed: 0 — and this time the deploy is fingerprint-CONFIRMED.** `origin/main` is at `b694b1e`
-  with a reflog entry `update by push` at 2026-07-22 22:00 (the merge was made locally at 19:52), and
-  `GET https://fair-synq.vercel.app/api/health` returns
-  `"commit":"b694b1ee329d8fd0f122af26d594d6baae2ffd7e"` → **the walkthrough batch is live in prod.**
-  The push/deploy step that the previous handoff listed as pending is DONE.
+- **Unpushed: 6 local commits** (2026-07-23): the CURRENT_STATE regeneration (`3b1d0ad`) + the
+  admin runner-stats batch (`831e182` ghost fix, `ade9c73` custody-for-counts, `e0ef587` admin
+  wiring + floor, `0121c44` guard suite + possession amendment, + the docs commit). `origin/main`
+  is at `b694b1e` — **what's deployed is the walkthrough batch, fingerprint-confirmed**
+  (`/api/health` served `"commit":"b694b1e…"` on 2026-07-22); this batch deploys on the next human
+  push.
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -99,7 +101,45 @@ Shipped, merged, and deployed this arc:
   (`lib/runner-completion.ts:13-17`): a post-collect return for spoiled/wrong food is scored the same
   as flaking, and a second runner completing the order does not un-damn the first.
 
-**Open findings from the walkthrough: none.** One NEW residual was found while sweeping (below).
+**Open findings from the walkthrough: none.**
+
+### Shipped 2026-07-23 — the admin runner-stats batch (closes what was open item 4)
+
+The dead-counter residual found during the regeneration sweep is FIXED, four commits, all local:
+
+- **The durable rule (both surfaces): CUSTODY IS THE SPINE FOR COUNTS; THE LEDGER IS THE SPINE FOR
+  MONEY.** Delivery counts, delivered/collected, completion denominators derive from
+  `DeliveryCustodyEvent` (`lib/runner-completion.ts`); dollars, paid/pending, per-delivery
+  breakdown derive from `RunnerEarning` (`lib/runner-earnings.ts`). The ledger only ever knew about
+  deliveries that generated money — a DELIVERED zero-fee no-tip order (real: `cmrwote7k…`) was
+  invisible to the #4a ledger count, so the runner saw "2 deliveries" for 3 made. The summary's
+  `deliveriesTotal`/`deliveriesToday` fields were REMOVED, not paralleled. Runner surface before →
+  after: deliveries 2 → 3. *Promotion-ready for PROJECT_INVARIANTS' through-line table next
+  session: the guard that holds it now exists (`scripts/runner-stats-source-guard.ts`).*
+- **Ghost fix (`831e182`):** the completion module was the ONLY custody aggregate without
+  `voidedAt: null` (audited; reconciler strand patterns and all money aggregates filter it). A
+  voided order was scoring the active runner: rate 0.60 → **0.75** (4 collected / 3 delivered).
+- **Delivery proves possession (`0121c44`, caught by the runner-boundary positive control):** the
+  status route permits `RUNNER_COLLECTED → DELIVERED` on proofPath alone — no `collectedAt`
+  precondition — so a tap-skipped delivery is legal and a tap-only count erased it. The denominator
+  is now the union of tap-collected and delivered-assigned orders; the today-bucket falls back to
+  `dispatchedAt`. Live numbers unchanged (every live delivery had a tap).
+- **Decision A (settled): admin stats are THIS event only**, explicitly scoped — the scoping
+  (`order.eventId`) lives inside the shared module so a future runner-facing per-fair caller reuses
+  it; batch form `computeRunnerCompletionRates(ids, { eventId })`, one roster query (no N+1 at
+  take=500).
+- **Decision B (settled): floor = 5** (`RUNNER_COMPLETION_MIN_DENOMINATOR`, `lib/constants.ts`,
+  beside the strand thresholds). Raw `delivered/collected` renders unconditionally; below the floor
+  no percentage, no bar, no `<90%` banner — the cell reads "not enough deliveries". Reasoning: over
+  N=1–4 one bad order is a 25–100-point swing on the screen where an admin decides who stays on the
+  roster; 5 is where the banner becomes actionable during a real fair day. The route computes
+  `scored` once (the one copy of the predicate). Today's real runner is 3/4 → unscored → honest.
+- **The dead columns** (`Runner.totalCompleted`/`totalDispatched`/`completionRate`) are unread by
+  all of `app/` + `lib/` (guard-enforced with a planted-fixture positive control), marked
+  DEPRECATED in `schema.prisma` naming the real sources; the **drop migration is deferred** as a
+  separate reviewed change. `scripts/screens-data-check.ts` keeps its select until the drop.
+- Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
+  `AREA_SUITES`).
 
 ## Open items
 
@@ -112,16 +152,14 @@ Shipped, merged, and deployed this arc:
    street, which is now the intended degradation, not a bug.
 3. **Railway-Redis migration** — unchanged and still the largest blocker: it gates the worker, and
    the worker gates every item on the pre-fair critical path.
-4. **NEW — the dead runner counters are still live on the ADMIN surface.** `Runner.totalCompleted` /
-   `Runner.completionRate` are never written anywhere in the codebase (the only non-comment hits are
-   selects), and the DB confirms it: all 3 runners are `totalCompleted=0, totalDispatched=0,
-   completionRate=1.0` while the ledger holds 2 real deliveries. The runner-facing surface was fixed
-   by #4a–4c; `app/api/admin/events/[id]/runners/route.ts:32-34` still selects those columns and
-   `app/admin/[eventSlug]/runners/page.tsx:137` / `:143` still render them as a completion bar and a
-   "0/0" ratio — plus a `< 0.90` warning banner at `:101` that can never fire. Same dead-counter
-   class, one surface later. Small, unbuilt. (Harmless cousin:
-   `app/api/runners/me/earnings/route.ts:22` still SELECTS the three columns it no longer returns —
-   a dead read, not a wrong number.)
+4. ~~Dead runner counters on the admin surface~~ — **SHIPPED 2026-07-23** (see the batch block in
+   the arc section: custody-derived stats, floor, deprecated columns, 56-suite gate). Two corrections
+   to the original finding: there are **4** Runner rows, not 3 (one ACTIVE/APPROVED, two PENDING,
+   one APPROVED/OFFLINE), and "the banner can never fire" was true of the column but not the derived
+   rate — the active runner's real rate was 0.60 (0.75 after the ghost fix), so wiring without the
+   floor would have fired it on day one. What remains of this item is only the **drop migration**
+   for the three deprecated columns — a separate, separately-reviewed change (grep
+   `DEPRECATED, write-dead` in `schema.prisma`).
 5. **10 legacy orders still have `deliveryStreet === deliveryCity`** (re-measured this session — the
    same 10, so the write-path fix is holding and no new ones appeared). The historical rows were not
    backfilled; they will keep rendering the duplicated address on vendor cards. Decide: backfill
@@ -146,9 +184,9 @@ Shipped, merged, and deployed this arc:
    - Context for triage: **56 orders sit at PLACED** and **44 at DELIVERED** (all 44 with
      `completedAt = null`, by design — see decision (a)).
 4. **Sweep duration / admin-504 slow-creep** — the sweep is O(orders) and `verify-all` is a growing
-   fixed cost: the registry is now **55 suites** (51 before this batch; +4 —
-   `delivery-address`, `ready-lane-eviction`, `delivered-timeline`, `runner-completion`).
-   _Watch-list, not now._
+   fixed cost: the registry is now **56 suites** (51 before the walkthrough batch, +4 there, +1 —
+   `runner-stats-source` — in the admin runner-stats batch). The admin runners route stayed
+   O(1 query) at take=500 via the batched completion form. _Watch-list, not now._
 5. **Railway-Redis migration** — unblocks the worker, which gates items 1–3's live testing.
    _Pending._
 
