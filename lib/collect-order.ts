@@ -1,5 +1,6 @@
 import { db } from './db'
 import { OrderStatus, FulfillmentType } from '@prisma/client'
+import { resolveOrder } from './resolve-order'
 
 /**
  * The "collect from vendor" core (Commit 2, U1) — the runner physically takes the bag.
@@ -30,8 +31,7 @@ export async function collectOrder(input: {
 }): Promise<CollectOutcome> {
   const { orderId, runnerId, eventId, actorId } = input
 
-  const order = await db.order.findUnique({
-    where: { id: orderId },
+  const order = await resolveOrder(orderId, {
     select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, fulfillmentType: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }

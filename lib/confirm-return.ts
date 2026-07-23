@@ -1,5 +1,6 @@
 import { db } from './db'
 import { OrderStatus } from '@prisma/client'
+import { resolveOrder } from './resolve-order'
 
 /**
  * POST-collection return, step 2 (Commit 2, U3) — the VENDOR confirms the food is physically
@@ -31,8 +32,7 @@ export async function confirmReturn(input: {
 }): Promise<ConfirmReturnOutcome> {
   const { orderId, vendorId, actorId } = input
 
-  const order = await db.order.findUnique({
-    where: { id: orderId },
+  const order = await resolveOrder(orderId, {
     select: { id: true, status: true, runnerId: true, returnRequestedAt: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }

@@ -7,6 +7,7 @@ import { requireAuth } from '@/lib/auth'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { refundVendorPortion } from '@/lib/process-refund'
 import { logger } from '@/lib/logger'
+import { resolveOrder } from '@/lib/resolve-order'
 
 // PATCH /api/orders/:id/cancel   body: { vendorId?: string, reason?: string }
 //
@@ -39,7 +40,7 @@ export async function PATCH(
 ) {
   try {
     const clerkId = await requireAuth()
-    const { id: orderId } = await params
+    const { id: rawOrderId } = await params
 
     const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? clerkId
     const { allowed } = await enforceRateLimit(ip, 'refund', { failClosed: false })
@@ -48,8 +49,9 @@ export async function PATCH(
     const body = await req.json().catch(() => ({})) as { vendorId?: string; reason?: string }
     const reason = body.reason ? String(body.reason).slice(0, 300) : 'Customer requested cancellation'
 
-    const order = await db.order.findUnique({
-      where: { id: orderId },
+    // Tolerant + unambiguous resolution (the client PATCHes the short code the customer sees).
+    // Resolution only — the voided 409 and the ownership check below are unchanged.
+    const order = await resolveOrder(rawOrderId, {
       select: {
         id: true, customerId: true, eventId: true, voidedAt: true,
         vendorOrderStatuses: { select: { vendorId: true, status: true } },
@@ -57,6 +59,10 @@ export async function PATCH(
     })
     if (!order) return apiError('Order not found', 404, 'ORDER_NOT_FOUND')
     if (order.voidedAt) return apiError('Order is not cancellable', 409, 'CANCEL_NOT_ALLOWED')
+
+    // From here everything keys on the CANONICAL cuid — a short code must never reach a refund,
+    // an upsert where-clause, or the reconciler.
+    const orderId = order.id
 
     const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
     if (!dbUser) return apiError('User not found', 404, 'USER_NOT_FOUND')

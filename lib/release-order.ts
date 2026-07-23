@@ -1,5 +1,6 @@
 import { db } from './db'
 import { OrderStatus, FulfillmentType } from '@prisma/client'
+import { resolveOrder } from './resolve-order'
 
 /**
  * PRE-collection release (Commit 2, U2) — a runner who claimed an order but has NOT yet
@@ -36,8 +37,7 @@ export async function releaseOrder(input: {
 }): Promise<ReleaseOutcome> {
   const { orderId, runnerId, eventId, actorId, actorRole } = input
 
-  const order = await db.order.findUnique({
-    where: { id: orderId },
+  const order = await resolveOrder(orderId, {
     select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, fulfillmentType: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }

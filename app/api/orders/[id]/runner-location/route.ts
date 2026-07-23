@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { resolveOrder } from '@/lib/resolve-order'
 
 // GET /api/orders/:id/runner-location — THE PRIVACY BOUNDARY.
 //
@@ -28,11 +29,7 @@ export async function GET(
     const clerkId = await requireAuth()
 
     const rawId = (await params).id
-    // Accept full cuid or the 8-char shortId, exactly like GET /api/orders/[id].
-    const order = await db.order.findFirst({
-      where: rawId.length <= 8
-        ? { id: { endsWith: rawId.toLowerCase() } }
-        : { id: rawId },
+    const order = await resolveOrder(rawId, {
       select: {
         id: true,
         customerId: true,

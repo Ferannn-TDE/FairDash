@@ -1,5 +1,6 @@
 import { db } from './db'
 import { OrderStatus } from '@prisma/client'
+import { resolveOrder } from './resolve-order'
 
 /**
  * POST-collection return, step 1 (Commit 2, U3) — a runner who has ALREADY COLLECTED the food
@@ -35,8 +36,7 @@ export async function requestReturn(input: {
 }): Promise<RequestReturnOutcome> {
   const { orderId, runnerId, eventId, actorId } = input
 
-  const order = await db.order.findUnique({
-    where: { id: orderId },
+  const order = await resolveOrder(orderId, {
     select: { id: true, eventId: true, status: true, runnerId: true, collectedAt: true, returnRequestedAt: true, voidedAt: true },
   })
   if (!order) return { outcome: 'not_found' }
