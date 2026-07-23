@@ -66,3 +66,37 @@ export function toEventDateInput(value: Dateish): string {
   const d = toDate(value)
   return d ? d.toISOString().slice(0, 10) : ''
 }
+
+export type EventLiveState = 'upcoming' | 'live' | 'ended'
+
+/**
+ * Is a fair before / during / after its run — derived from DATES, not from the admin status.
+ * The status is an ENABLEMENT flag (an organizer takes a fair ACTIVE), which does NOT mean the
+ * fair is happening today: an ACTIVE fair whose start is next week is UPCOMING, not "Live Now".
+ * Rendering "Live Now" off `status === 'ACTIVE'` is what said an Aug-5 fair was live on Jul 23.
+ *
+ * Compared as CALENDAR DATES in the carrier zone (the same handling as formatEventDate), so a
+ * fair is live on its start day THROUGH its end day inclusive, for every viewer, with no
+ * instant-vs-timezone shift. `en-CA` yields YYYY-MM-DD, which compares correctly as a string.
+ */
+export function deriveEventLiveState(start: Dateish, end: Dateish, nowMs = Date.now()): EventLiveState | null {
+  const s = toDate(start), e = toDate(end)
+  if (!s || !e) return null
+  const key = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: EVENT_DATE_ZONE })
+  const today = key(new Date(nowMs))
+  if (today < key(s)) return 'upcoming'
+  if (today > key(e)) return 'ended'
+  return 'live'
+}
+
+/**
+ * The badge token a public fair surface should show, combining enablement with the date window.
+ * An un-enabled fair (draft/paused/archived/…) never shows a live badge regardless of dates —
+ * enablement gates first, then dates decide live/upcoming/ended. Returns the raw status token
+ * for non-enabled states so StatusBadge maps them as before.
+ */
+export function fairBadgeState(status: string, start: Dateish, end: Dateish): string {
+  const enabled = status === 'active' || status === 'ACTIVE'
+  if (!enabled) return status
+  return deriveEventLiveState(start, end) ?? 'live'
+}

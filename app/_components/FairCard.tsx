@@ -24,7 +24,7 @@ export default function FairCard({ fair }: FairCardProps) {
         className="h-32 w-full relative flex items-end p-4"
         style={{ background: `linear-gradient(135deg, ${gradientFrom}, ${gradientTo})` }}
       >
-        <StatusBadge status={fair.status} className="shadow-lg" />
+        <StatusBadge status={fair.status} startDate={fair.startDate} endDate={fair.endDate} className="shadow-lg" />
       </div>
 
       {/* Body */}
