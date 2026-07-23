@@ -29,6 +29,12 @@ const STATUS_STYLES: Record<RunnerStatus, string> = {
   ON_DELIVERY: 'bg-sky-500/15 text-sky-400',
 }
 
+const DOT_STYLES: Record<RunnerStatus, string> = {
+  ACTIVE:      'bg-green-400',
+  OFFLINE:     'bg-[#666]',
+  ON_DELIVERY: 'bg-sky-400',
+}
+
 function initialsOf(name: string | null, email: string | null) {
   const src = (name ?? email ?? '?').trim()
   const parts = src.split(/\s+/).filter(Boolean)
@@ -126,51 +132,72 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
         </div>
       ) : (
         <div className="bg-[#111111] rounded-xl border border-white/5 divide-y divide-white/5">
-          {runners.map(runner => (
-            <div key={runner.id} className="flex items-center justify-between gap-3 p-4 hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-10 h-10 rounded-full bg-[#FF0077]/10 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-semibold text-[#FF0077] font-inter">{initialsOf(runner.user.name, runner.user.email)}</span>
+          {runners.map(runner => {
+            // A PENDING runner already has a row in the approval queue above; this roster row
+            // is the same person, subordinated so the screen doesn't read as two runners
+            // waiting. It stays present (the roster is the roster) but recedes.
+            const awaitingApproval = runner.approvalStatus === 'PENDING'
+            // Genuinely-null User.name (Clerk test accounts) — the route DOES select name, so
+            // this is absence, not a missing field. The email becomes the identity line and the
+            // placeholder says what it is, rather than dressing an em-dash up as a name.
+            const hasName = Boolean(runner.user.name)
+            return (
+            <div
+              key={runner.id}
+              className={`flex items-center gap-4 p-4 transition-colors ${awaitingApproval ? 'bg-white/[0.015] hover:bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
+            >
+              {/* ── Identity ───────────────────────────────────────────────── */}
+              <div className={`flex items-center gap-3 min-w-0 flex-1 ${awaitingApproval ? 'opacity-70' : ''}`}>
+                <div className="w-9 h-9 rounded-full bg-[#FF0077]/10 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-semibold text-[#FF0077] font-inter">{initialsOf(runner.user.name, runner.user.email)}</span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-inter font-medium text-white truncate">{runner.user.name ?? '— unnamed —'}</p>
-                  <p className="text-xs text-[#666] font-inter truncate">{runner.user.email ?? ''}</p>
+                  {hasName ? (
+                    <>
+                      <p className="text-sm font-inter font-medium text-white truncate">{runner.user.name}</p>
+                      <p className="text-xs text-[#666] font-inter truncate">{runner.user.email ?? ''}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-inter font-medium text-white truncate">{runner.user.email ?? 'Unknown runner'}</p>
+                      <p className="text-xs text-[#555] font-inter italic truncate">no name on file</p>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Completion rate — a percentage only when scored (≥ the minimum-denominator
-                  floor); below it, the honest reading of a tiny sample */}
-              <div className="hidden sm:block w-28 shrink-0">
-                <p className="text-[10px] text-[#555] font-inter uppercase tracking-wider mb-1">Completion</p>
-                {runner.scored
-                  ? <CompletionBar rate={runner.completionRate} />
-                  : <p className="text-xs text-[#666] font-inter">not enough deliveries</p>}
-              </div>
-
-              {/* Raw counts — always visible, so the admin sees the sample size behind (or
-                  instead of) the percentage */}
-              <div className="hidden md:block shrink-0 text-right">
-                <p className="text-sm text-white font-inter tabular-nums">
-                  {runner.delivered}/{runner.collected}
+              {/* ── One stats block: the count is primary (it is always true), the rate
+                     secondary (it exists only above the denominator floor) ─────────── */}
+              <div className="hidden sm:block w-32 shrink-0">
+                <p className="text-sm text-white font-inter tabular-nums leading-none">
+                  {runner.delivered}<span className="text-[#555]">/</span>{runner.collected}
+                  <span className="ml-1.5 text-[10px] text-[#555] font-normal">delivered</span>
                 </p>
-                <p className="text-[10px] text-[#555] font-inter">delivered / collected</p>
+                <div className="mt-1.5">
+                  {runner.scored
+                    ? <CompletionBar rate={runner.completionRate} />
+                    : <p className="text-[10px] text-[#555] font-inter">not enough deliveries</p>}
+                </div>
               </div>
 
-              {/* Approval badge — only shown when not APPROVED (grandfathered/approved runners stay uncluttered) */}
-              {runner.approvalStatus !== 'APPROVED' && (
-                <span
-                  title={runner.rejectionReason ?? undefined}
-                  className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${runner.approvalStatus === 'REJECTED' ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
-                  {runner.approvalStatus}
+              {/* ── Status, last and distinct: a filled dot + label, so it reads as state
+                     rather than another metric ───────────────────────────────────────── */}
+              <div className="flex items-center gap-2 shrink-0 w-28 justify-end">
+                {runner.approvalStatus !== 'APPROVED' && (
+                  <span
+                    title={runner.rejectionReason ?? undefined}
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide ${runner.approvalStatus === 'REJECTED' ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/10 text-yellow-500/80'}`}>
+                    {runner.approvalStatus}
+                  </span>
+                )}
+                <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wide ${STATUS_STYLES[runner.status]}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${DOT_STYLES[runner.status]}`} />
+                  {runner.status.replace('_', ' ')}
                 </span>
-              )}
-
-              {/* Status badge */}
-              <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${STATUS_STYLES[runner.status]}`}>
-                {runner.status}
-              </span>
+              </div>
             </div>
-          ))}
+            )
+          })}
 
           {runners.length === 0 && (
             <div className="py-12 text-center">
