@@ -454,7 +454,7 @@ export default function VendorDashboardPage() {
   // runner's court and it leaves this board. This matches /active, which excludes
   // RUNNER_COLLECTED from ACTIVE_VENDOR_STATUSES — so including it here was dead code that only
   // claimed to show orders the endpoint never delivers.
-  const ready        = useMemo(() => Object.values(ordersById).filter(o => o.status === 'READY'),                                    [ordersById])
+  const ready        = useMemo(() => Object.values(ordersById).filter(o => o.status === 'READY' && !o.collectedAt),                  [ordersById])
   const completed    = useMemo(() => Object.values(ordersById).filter(o => isCompleted(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()), [ordersById])
   const failedOrders = useMemo(() => Object.values(ordersById).filter(o => isFailed(o.status)).sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()),   [ordersById])
   const inQueue      = incoming.length + active.length + ready.length
@@ -534,10 +534,20 @@ export default function VendorDashboardPage() {
         if (ordersJson.data?.curbsideMethod !== undefined) setCurbsideMethod(ordersJson.data.curbsideMethod)
         const all = [...activeOrders, ...completedOrders]
         all.forEach(o => seenOrderIds.current.add(o.id))
-        // Merge into map — preserves any orders that arrived via Firebase
-        // after the last REST fetch and aren't in the fresh response yet.
+        // RECONCILE, don't just merge (the merge-never-evicts residual). /active is the
+        // authority for the live lanes: an order in an active-lane status locally but ABSENT
+        // from the fresh active response has LEFT the active set (e.g. a runner collected it,
+        // so /active now excludes it) — evict it. Non-active (completed/failed) rows and any
+        // in-flight optimistic transition are preserved, then the fresh rows are upserted.
+        const freshActiveIds = new Set(activeOrders.map(o => o.id))
+        const ACTIVE_LANE = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
         setOrdersById(prev => {
           const next = { ...prev }
+          for (const id of Object.keys(next)) {
+            if (ACTIVE_LANE.has(next[id].status) && !freshActiveIds.has(id) && !inFlightRef.current.has(id)) {
+              delete next[id]
+            }
+          }
           all.forEach(o => { next[o.id] = o })
           return next
         })
