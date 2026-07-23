@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useMemo, useEffect, use } from 'react'
+import { useState, useMemo, useEffect, use, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, ChevronDown, ChevronUp, Package, User, Store, Clock, ArrowUpDown } from 'lucide-react'
+import { STRAND_THRESHOLDS_MS } from '@/lib/constants'
 
 // ─── Types (the real /api/admin/events/[id]/orders shape) ─
 
@@ -46,6 +48,42 @@ const FULFILLMENT_LABEL: Record<string, string> = {
   HOME_DELIVERY: 'Home Delivery',
 }
 
+/**
+ * The "this looks stuck" threshold. Read from the SAME constant the reconciler's strand clocks
+ * use (lib/constants) — not a second number invented for this page, which would drift from the
+ * one that actually flags orders. This surface only COLOURS a number; timers flag, humans decide
+ * (PROJECT_INVARIANTS), so nothing here acts on an order.
+ */
+const STUCK_AFTER_MS = STRAND_THRESHOLDS_MS.claimedNotCollected
+
+/** Whole minutes since an order was placed — "stuck" without the arithmetic. */
+function minutesSince(iso: string, nowMs: number): number {
+  return Math.max(0, Math.floor((nowMs - new Date(iso).getTime()) / 60_000))
+}
+
+function formatAge(mins: number): string {
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  return h < 24 ? `${h}h ${mins % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
+/**
+ * Day bucket for grouping. An order's placedAt is an INSTANT, so it groups by the VIEWER's
+ * local day — the day the person reading the log lived through. (Fair start/end dates are the
+ * other kind and render zone-fixed via lib/event-date; see that module for why they differ.)
+ */
+function dayKey(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function dayLabel(iso: string, nowMs: number): string {
+  const d = new Date(iso)
+  if (dayKey(iso) === dayKey(new Date(nowMs).toISOString())) return 'Today'
+  if (dayKey(iso) === dayKey(new Date(nowMs - 86_400_000).toISOString())) return 'Yesterday'
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
 const FILTER_TABS = [
   { value: 'all',       label: 'All' },
   { value: 'active',    label: 'Active' },
@@ -53,6 +91,10 @@ const FILTER_TABS = [
   { value: 'CANCELLED', label: 'Cancelled' },
   { value: 'REFUNDED',  label: 'Refunded' },
 ] as const
+
+/** The server's hard ceiling (lib/fair-orders clamps take to 100). Named so the "showing the
+ *  most recent N" copy and the request can never disagree. */
+const PAGE_TAKE = 100
 
 const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED'])
 const COMPLETED_STATUSES = new Set(['COMPLETED', 'DELIVERED'])
@@ -76,9 +118,14 @@ function StatusBadge({ status }: { status: AdminOrderStatus }) {
   )
 }
 
-function OrderRow({ order }: { order: AdminOrder }) {
+function OrderRow({ order, nowMs }: { order: AdminOrder; nowMs: number }) {
   const [expanded, setExpanded] = useState(false)
   const placedTime = new Date(order.placedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  // Age is shown for ACTIVE orders only: on a finished order the number answers nothing, and a
+  // 6-day-old completed row glowing amber would train the eye to ignore the colour that matters.
+  const isActive = ACTIVE_STATUSES.has(order.status)
+  const ageMins = isActive ? minutesSince(order.placedAt, nowMs) : null
+  const stuck = ageMins !== null && ageMins * 60_000 >= STUCK_AFTER_MS
 
   return (
     <div className="border border-white/10 rounded-xl overflow-hidden bg-bg-card">
@@ -105,6 +152,16 @@ function OrderRow({ order }: { order: AdminOrder }) {
             {placedTime}
           </span>
         </div>
+        {ageMins !== null && (
+          <span
+            title={`Placed ${formatAge(ageMins)} ago`}
+            className={`shrink-0 tabular-nums text-xs font-semibold px-2 py-0.5 rounded-md ${
+              stuck ? 'bg-orange-500/15 text-orange-300' : 'bg-white/5 text-text-gray'
+            }`}
+          >
+            {formatAge(ageMins)}
+          </span>
+        )}
         <div className="flex items-center gap-2 shrink-0">
           <span className="font-bold text-neon-pink text-sm">${(order.total ?? 0).toFixed(2)}</span>
           {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
@@ -163,15 +220,44 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [filter, setFilter] = useState<string>('all')
-  const [search, setSearch] = useState('')
-  const [sortNewest, setSortNewest] = useState(true)
+  // ── Filter state lives in the URL ────────────────────────────────────────────
+  // A fair-day view ("Randy's, delivery, active") survives a refresh, can be kept open in a
+  // tab, and can be sent to someone else. Reading FROM the URL means there is one copy of the
+  // state, not a local mirror that drifts out of sync with the address bar.
+  const router = useRouter()
+  const sp = useSearchParams()
+  const filter     = sp.get('tab') ?? 'all'
+  const search     = sp.get('q') ?? ''
+  const vendorFilt = sp.get('vendor') ?? 'all'
+  const fulfilFilt = sp.get('type') ?? 'all'
+  const sortNewest = sp.get('sort') !== 'oldest'
+
+  const setParam = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(sp.toString())
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === '' || v === 'all') next.delete(k)
+      else next.set(k, v)
+    }
+    const qs = next.toString()
+    router.replace(qs ? `?${qs}` : '?', { scroll: false })
+  }, [router, sp])
+
+  // One clock for every age in the list, ticking each minute — so all rows agree, and a row
+  // does not silently age only when React happens to re-render it.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     let active = true
     setLoading(true)
     setError(null)
-    fetch(`/api/admin/events/${params.eventSlug}/orders?take=100`)
+    // NOTE: the shared query hard-caps take at 100 (lib/fair-orders). During an 8-day fair this
+    // log WILL truncate; the header says so plainly rather than implying a total. Cursor
+    // pagination exists server-side (nextCursor) and is the proposed follow-up.
+    fetch(`/api/admin/events/${params.eventSlug}/orders?take=${PAGE_TAKE}`)
       .then((r) => r.json())
       .then((json) => {
         if (!active) return
@@ -183,6 +269,8 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     return () => { active = false }
   }, [params.eventSlug])
 
+  const atCap = orders.length >= PAGE_TAKE
+
   const tabCounts = useMemo(() => ({
     all:       orders.length,
     active:    orders.filter((o) => ACTIVE_STATUSES.has(o.status)).length,
@@ -191,10 +279,20 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     REFUNDED:  orders.filter((o) => o.status === 'REFUNDED').length,
   }), [orders])
 
+  // Vendor options come from the loaded rows — no second source, no invented list.
+  const vendorOptions = useMemo(
+    () => [...new Set(orders.map(o => o.vendorName))].sort((a, b) => a.localeCompare(b)),
+    [orders]
+  )
+
   const filtered = useMemo(() => {
     let list = orders.filter((o) => matchesTab(o.status, filter))
+    if (vendorFilt !== 'all') list = list.filter(o => o.vendorName === vendorFilt)
+    if (fulfilFilt !== 'all') list = list.filter(o => o.fulfillmentType === fulfilFilt)
     if (search.trim()) {
       const q = search.trim().toLowerCase()
+      // o.id.includes(q) is what makes the SHORT CODE work: "26685PS7" is the tail of the cuid,
+      // so a code read aloud at the tent matches without a separate index.
       list = list.filter((o) =>
         o.id.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
@@ -205,7 +303,19 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
       const diff = new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
       return sortNewest ? diff : -diff
     })
-  }, [orders, filter, search, sortNewest])
+  }, [orders, filter, search, sortNewest, vendorFilt, fulfilFilt])
+
+  // Day buckets, in the order the sort produced them.
+  const grouped = useMemo(() => {
+    const out: { key: string; label: string; orders: AdminOrder[] }[] = []
+    for (const o of filtered) {
+      const k = dayKey(o.placedAt)
+      const last = out[out.length - 1]
+      if (last && last.key === k) last.orders.push(o)
+      else out.push({ key: k, label: dayLabel(o.placedAt, nowMs), orders: [o] })
+    }
+    return out
+  }, [filtered, nowMs])
 
   return (
     <div className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
@@ -215,10 +325,19 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
             Order <span className="text-neon-pink">Log</span>
           </h1>
-          <p className="text-text-gray text-sm mt-0.5">{loading ? 'Loading…' : `${orders.length} orders`}</p>
+          <p className="text-text-gray text-sm mt-0.5">
+            {loading
+              ? 'Loading…'
+              : atCap
+                ? `Showing the ${orders.length} most recent orders`
+                : `${orders.length} order${orders.length === 1 ? '' : 's'}`}
+            {!loading && filtered.length !== orders.length && (
+              <span className="text-white/50"> · {filtered.length} shown</span>
+            )}
+          </p>
         </div>
         <button
-          onClick={() => setSortNewest((v) => !v)}
+          onClick={() => setParam({ sort: sortNewest ? 'oldest' : null })}
           className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-semibold text-text-gray hover:text-white transition-all cursor-pointer"
         >
           <ArrowUpDown className="w-3.5 h-3.5" />
@@ -231,8 +350,8 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-gray" />
         <input
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by order ID, customer, or vendor…"
+          onChange={(e) => setParam({ q: e.target.value })}
+          placeholder="Search order code (e.g. 26685PS7), customer, or vendor…"
           className="w-full bg-bg-card border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/50"
         />
       </div>
@@ -245,7 +364,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           return (
             <button
               key={tab.value}
-              onClick={() => setFilter(tab.value)}
+              onClick={() => setParam({ tab: tab.value })}
               className={`px-3.5 py-1.5 rounded-full text-[0.6875rem] font-semibold border transition-all cursor-pointer ${
                 isActive
                   ? 'bg-neon-pink border-neon-pink text-white'
@@ -257,6 +376,35 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
             </button>
           )
         })}
+      </div>
+
+      {/* Vendor + fulfillment filters — "is one vendor falling behind" and "how many
+          deliveries are open" are two of the three questions this page exists to answer. */}
+      <div className="flex gap-2 flex-wrap mb-5">
+        <select
+          value={vendorFilt}
+          onChange={(e) => setParam({ vendor: e.target.value })}
+          className="bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
+        >
+          <option value="all">All vendors</option>
+          {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <select
+          value={fulfilFilt}
+          onChange={(e) => setParam({ type: e.target.value })}
+          className="bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
+        >
+          <option value="all">All fulfillment</option>
+          {Object.entries(FULFILLMENT_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
+        {(vendorFilt !== 'all' || fulfilFilt !== 'all' || filter !== 'all' || search) && (
+          <button
+            onClick={() => setParam({ vendor: null, type: null, tab: null, q: null })}
+            className="px-3 py-2 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 transition-colors cursor-pointer"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {/* Order list */}
@@ -278,10 +426,30 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
           <p className="text-text-gray text-xs">Try adjusting your filter or search query.</p>
         </div>
       ) : (
-        <div className="space-y-2.5">
-          {filtered.map((order) => (
-            <OrderRow key={order.id} order={order} />
+        <div className="space-y-5">
+          {/* Grouped by day with a sticky header: over an 8-day fair a bare "18:02" does not
+              say WHICH day, and scrolling loses the answer. */}
+          {grouped.map((group) => (
+            <div key={group.key}>
+              <div className="sticky top-0 z-10 -mx-1 px-1 py-2 bg-[#0a0a0a]/95 backdrop-blur-sm flex items-baseline gap-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-white/70 font-inter">{group.label}</h2>
+                <span className="text-[0.625rem] text-text-gray tabular-nums">
+                  {group.orders.length} order{group.orders.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="space-y-2.5 mt-1">
+                {group.orders.map((order) => (
+                  <OrderRow key={order.id} order={order} nowMs={nowMs} />
+                ))}
+              </div>
+            </div>
           ))}
+
+          {atCap && (
+            <p className="text-center text-[0.6875rem] text-text-gray py-3">
+              Showing the {PAGE_TAKE} most recent orders — older ones are not loaded yet.
+            </p>
+          )}
         </div>
       )}
     </div>
