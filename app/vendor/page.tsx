@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { MapPin, Calendar, ChevronRight, Users, Clock, XCircle, CalendarX } from 'lucide-react'
-import { formatEventDateRange } from '@/lib/event-date'
+import { formatEventDateRange, deriveEventLiveState } from '@/lib/event-date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,12 +26,6 @@ interface VendorFair {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function normalizeFairStatus(raw: string): 'active' | 'upcoming' | 'other' {
-  if (raw === 'ACTIVE') return 'active'
-  if (raw === 'UPCOMING') return 'upcoming'
-  return 'other'
-}
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 
@@ -118,8 +112,15 @@ function NoFairs() {
 
 function FairSelectionPage({ fairs }: { fairs: VendorFair[] }) {
   const router = useRouter()
-  const activeFairs  = fairs.filter(f => normalizeFairStatus(f.fairStatus) === 'active')
-  const upcomingFairs = fairs.filter(f => normalizeFairStatus(f.fairStatus) === 'upcoming')
+  // Live-ness derives from DATES (shared lib/event-date), gated by enablement — the same fix as
+  // the customer badges. An ACTIVE fair that hasn't started is Upcoming here, not "Live Now"; an
+  // ACTIVE fair that has ended drops out of both. (The auto-redirect below stays keyed on ACTIVE
+  // enablement — a vendor reaches their dashboard before the gates open.)
+  const liveOf = (f: VendorFair) =>
+    f.fairStatus === 'ACTIVE' ? deriveEventLiveState(f.startDate, f.endDate)
+    : f.fairStatus === 'UPCOMING' ? 'upcoming' : 'other'
+  const activeFairs  = fairs.filter(f => liveOf(f) === 'live')
+  const upcomingFairs = fairs.filter(f => liveOf(f) === 'upcoming')
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
