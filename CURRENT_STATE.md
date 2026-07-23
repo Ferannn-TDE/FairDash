@@ -4,9 +4,9 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: reading of `main @ b694b1e`, amended 2026-07-23 after the admin runner-stats
-> batch (5 local commits, see Git section). Numbers below were measured against the live DB on the
-> session that wrote them unless marked otherwise.
+> Snapshot taken: `main @ 7f6ea31` (deployed: `8180b69`), 2026-07-23 after the checkout-address
+> batch. Numbers below were measured against the live DB on the session that wrote them unless
+> marked otherwise.
 
 ---
 
@@ -14,14 +14,14 @@
 
 - **`main` head: `b694b1e`** — "Merge: walkthrough batch 2 — address, Ready-lane, delivered timeline,
   runner stats (4a–4d)".
-- **Unpushed: 10 local commits** (2026-07-23): the CURRENT_STATE regeneration (`3b1d0ad`), the
-  admin runner-stats batch (`831e182` ghost fix, `ade9c73` custody-for-counts, `e0ef587` admin
-  wiring + floor, `0121c44` guard suite + possession amendment, `f2bb60f` docs, `8180b69` comment
-  rewording), and browser-walkthrough batch 3 (`42ab797` slug flash, `022c9b2` runners restyle,
-  + this docs commit). `origin/main`
-  is at `b694b1e` — **what's deployed is the walkthrough batch, fingerprint-confirmed**
-  (`/api/health` served `"commit":"b694b1e…"` on 2026-07-22); this batch deploys on the next human
-  push.
+- **Deployed: `8180b69`** — fingerprint-confirmed 2026-07-23 (`/api/health` → `"commit":
+  "8180b699…"`). The human pushed the CURRENT_STATE regeneration + the whole admin runner-stats
+  batch since the last snapshot; **prod now has custody-derived runner stats, the floor, and the
+  ghost fix.** Note the local `origin/main` ref still reads `b694b1e` — this shell cannot fetch
+  (no SSH key), so the served fingerprint is the authority, not the ref.
+- **Unpushed: 4 local commits** — browser-walkthrough batch 3 (`42ab797` slug flash, `022c9b2`
+  runners restyle, `d29cabd` docs) and the checkout address fix (`7f6ea31`). **The checkout fix
+  is the urgent one: home-delivery checkout is broken in the deployed build** until it ships.
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -172,38 +172,37 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
 
 ## Open items
 
-0. **🔴 HOME_DELIVERY CHECKOUT IS BROKEN IN PROD — diagnosed 2026-07-23, fix NOT built (awaiting
-   a product decision).** `POST /api/orders` 400s with
-   `deliveryStreet, deliveryCity, and deliveryZip are required for HOME_DELIVERY orders`
-   (`app/api/orders/route.ts:134`, code `VALIDATION_ERROR`). Live since `b694b1e` deployed
-   (2026-07-22 22:00).
-   - **Mechanism:** the #2 fix stopped fabricating a city (`checkout/page.tsx:399`,
-     `deliveryCity: … || null`), and the route has always required a truthy city. Nothing else
-     can trip it — `deliveryZip` still gets a fabricated `|| '00000'` at `:400`, and street is
-     validated client-side.
-   - **The parser is NOT missing** (contradicts the working hypothesis): `handlePlaceSelect`
-     (`checkout/page.tsx:317-326`) extracts `locality || sublocality ||
-     administrative_area_level_2` plus `postal_code`, and the widget requests
-     `address_components` in its `fields` (`app/_components/AddressAutocomplete.tsx:23`). The
-     code is correct and **has never once run in production**: 10/10 home-delivery orders have
-     `street === city` AND `zip = '00000'`, i.e. `parsed_ok = 0` — with billing off, no
-     suggestion could ever be selected, so `place_changed` never fired.
-   - **The actual hole:** the form has **one input for a three-field requirement**. There is no
-     city or zip field anywhere in the checkout form (`:621-625` — `AddressAutocomplete` is the
-     only address control; `deliveryCity`/`deliveryZip` exist solely in state at `:269-270`), and
-     client `validate()` (`:358-361`) checks only `deliveryStreet`. So a customer who types an
-     address without picking a suggestion submits a form that cannot pass the server, and has no
-     field in which to supply what's missing. Selecting a suggestion now works (billing on) and
-     is the only path that succeeds.
-   - **Decision needed** (three shapes, in my order of preference): (a) add real city/state/zip
-     inputs that autocomplete fills and the customer can correct, require city+zip client-side
-     with named field errors, and drop the `'00000'` zip fabrication — the honest fix, and the
-     only one that yields an address a runner can actually deliver to; (b) require a suggestion
-     selection, blocking submit with "Select your address from the suggestions" — cheaper, but
-     dead-ends anyone whose address Google doesn't return; (c) relax the server to accept a null
-     city — do NOT do this alone: it ships delivery orders with no city to a runner.
-   - Note: `'00000'` is the same fabrication class as the city copy the #2 fix removed, still
-     standing one field over. Whichever option is chosen should take it out.
+0. **🟡 HOME_DELIVERY checkout — FIXED locally (`7f6ea31`), still broken in the deployed build.**
+   Ships on the next push; until then every manual-entry home-delivery checkout 400s in prod.
+   - **What it was:** `app/api/orders/route.ts` required a truthy `deliveryCity`; the #2 fix
+     stopped fabricating one (`checkout/page.tsx`, `|| null`); the form had **no city input**
+     and client `validate()` checked only the street — an unclearable dead end. The Places
+     parser was never the problem: it exists, is correct, requests `address_components`, and had
+     simply **never run** (billing off → no suggestion to select → `parsed_ok = 0` across all 10
+     home-delivery rows).
+   - **What shipped (decision (a)):** `lib/delivery-address.ts` is now the ONE definition —
+     `validateDeliveryAddress` (required street/city/zip, field-named errors, zip format) called
+     by **both** the form and the route, so the form cannot build a payload the route rejects;
+     `formatDeliveryAddress` replacing **five** hand-joined address renders. Real city/state/zip
+     inputs that autocomplete fills and the customer can correct, plus an **apartment/suite/room**
+     line (new `Order.deliveryUnit` column — `address_components` has no unit type, so a dorm
+     delivery was a building with no door). `deliveryZip || '00000'` is **gone** — the same
+     fabrication class as the street→city copy, one field over. Additive migration
+     `20260723000000_delivery_address_state_unit`, applied via `npm run migrate`; nothing
+     backfilled (the `completedAt` precedent).
+   - **Found while plumbing:** `lib/vendor-order-history`'s select never carried the address,
+     while the vendor orders page rendered `{deliveryStreet}, {deliveryCity}` — every
+     HOME_DELIVERY row printed "undefined, undefined". Pre-existing partial-rows bug, fixed.
+   - **Guard:** `delivery-address-guard` 3 → **32** checks (positive controls first; no
+     fabricated default; both callers on one rule; an input for every required field; no
+     hand-joined address on any of the five surfaces).
+   - **⚠️ BROWSER VERIFICATION NOT DONE — it is the only real test and it is outstanding.** No
+     browser automation was available this session, and the Places key is (correctly)
+     HTTP-referrer restricted, so it cannot be queried server-side either. **Unanswered and
+     load-bearing: does Places return "417 Cougar Village" at all?** If it does not, manual entry
+     is the PRIMARY path for this venue, not a fallback, and that form deserves more polish before
+     the gates open. Manual test script is in the session notes; run it on localhost (the fix is
+     not deployed yet).
 1. ~~Human push~~ — **done** (pushed + deployed, fingerprint above). Nothing is waiting on a push.
 2. **#1 Checkout Places autocomplete — Google Cloud console side ONLY.** The code path is complete
    and proven (`handlePlaceSelect` fills `deliveryCity` from the parsed `locality`; asserted by
@@ -221,10 +220,15 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
    floor would have fired it on day one. What remains of this item is only the **drop migration**
    for the three deprecated columns — a separate, separately-reviewed change (grep
    `DEPRECATED, write-dead` in `schema.prisma`).
-5. **10 legacy orders still have `deliveryStreet === deliveryCity`** (re-measured this session — the
-   same 10, so the write-path fix is holding and no new ones appeared). The historical rows were not
-   backfilled; they will keep rendering the duplicated address on vendor cards. Decide: backfill
-   `deliveryCity = NULL` for those 10, or leave them.
+5. **The 10 legacy address rows — classified 2026-07-23, do NOT backfill.** All 10 carry
+   `street === city` AND `zip = '00000'`. Provenance: **9 of 10 belong to
+   `feranodedairo@gmail.com` and 1 to `feranmidyro@gmail.com`** — both the operator's own
+   accounts, all on Italian Fest 2026. **There is no third-party customer address in the DB, so
+   nothing undeliverable belongs to a real customer.** 2 are voided; by status: 2 PLACED,
+   2 DELIVERED, 3 CANCELLED, 1 RUNNER_COLLECTED, 1 READY, 1 UNDELIVERABLE. Left as-is on the
+   `completedAt` precedent — an invented city/zip is worse than an honest wrong one, and these
+   rows are the evidence of what the write path used to do. (Superseded the old wording of this
+   item, which only counted them.)
 
 ## Pre-fair critical path (ranked)
 
