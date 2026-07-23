@@ -47,6 +47,10 @@ export interface RunnerEarningsSummary {
   heldTotalCents: number     // admin-frozen, still earned
   earnedTodayCents: number
   deliveriesToday: number
+  /** All-time count of real deliveries — one RunnerEarning row per delivered order (any
+   *  runner-fulfilled type, so curbside counts), cancelled payouts excluded. The ONE truth
+   *  behind both "Deliveries" (all-time) and "N deliveries today". */
+  deliveriesTotal: number
 }
 
 const DISPLAY_STATUS: Record<string, RunnerEarningDisplayStatus> = {
@@ -82,5 +86,6 @@ export function summarizeRunnerEarnings(rows: RunnerLedgerRow[], nowMs = Date.no
     heldTotalCents: sum(live.filter(l => l.status === 'held')),
     earnedTodayCents: sum(todayLive),
     deliveriesToday: todayLive.length,
+    deliveriesTotal: live.length,
   }
 }
