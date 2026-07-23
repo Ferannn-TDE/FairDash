@@ -4,9 +4,9 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: `main @ 827a700` (deployed: `8180b69`), 2026-07-23 after the dates/admin-surfaces
-> batch. Numbers below were measured against the live DB on the session that wrote them unless
-> marked otherwise.
+> Snapshot taken: `main @ 216e8ba` (deployed: `8180b69`), 2026-07-23 after the order-id / live-badge
+> / order-log batch. Numbers below were measured against the live DB on the session that wrote them
+> unless marked otherwise.
 
 ---
 
@@ -19,11 +19,12 @@
   batch since the last snapshot; **prod now has custody-derived runner stats, the floor, and the
   ghost fix.** Note the local `origin/main` ref still reads `b694b1e` — this shell cannot fetch
   (no SSH key), so the served fingerprint is the authority, not the ref.
-- **Unpushed: 10 local commits** — walkthrough batch 3 (`42ab797`, `022c9b2`, `d29cabd`), the
-  checkout address fix (`7f6ea31` + docs `42f9330`), and the dates/admin-surfaces batch
-  (`97ffe05` JSX space, `d6fccfd` event dates, `bc4a9ad` vendors page, `827a700` order log,
-  + this docs commit). **The checkout fix is still the urgent one: home-delivery checkout is
-  broken in the deployed build** until these ship. 13 days to the fair (Aug 5).
+- **Unpushed: 22 local commits** — walkthrough batch 3, the checkout address fix, the
+  dates/admin-surfaces batch, and this order-id/live-badge/order-log batch (`3d7d2be` resolveOrder,
+  `8ff5deb` order-log server search, `e04074b` live-badge from dates, `0548fc2` health flag,
+  `216e8ba` vendor-portal live-state, + docs). **The checkout fix (`7f6ea31`) is still the urgent
+  one: home-delivery checkout is broken in the deployed build** until these ship. 13 days to the
+  fair (Aug 5). Prod `/api/health` shows no `flags` field, confirming none of these 22 are live.
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -145,6 +146,38 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
 
+### Shipped 2026-07-23 — order-id / live-badge / order-log batch
+
+- **The cancel 404 — one `resolveOrder()`** (`3d7d2be`). `GET /orders/[id]` tolerated the 8-char
+  short code; cancel/status/the four custody libs did `findUnique` by primary key, so the order
+  page (loaded via the tolerant GET) PATCHed the short code to cancel → 404. `lib/resolve-order.ts`
+  is the single tolerant+**unambiguous** resolver (`take: 2` + throw on a short-code collision,
+  never picks one; DB measured: 377 orders, 377 distinct tails, zero collisions). All 8 sites
+  routed through it; cancel now keys its refunds/upserts/reconcile on the canonical `order.id`.
+  Every named refusal preserved (ghost-guard 22/22). `resolve-order-guard` (40). **ONLY the 404
+  is fixed — see the still-open 409 below.** Same-class-but-untouched (no short code reaches them):
+  organizer/admin refund routes + `runner-payout`/`tip-refund` (canonical ids).
+- **Order log searches the whole fair** (`8ff5deb`). Search/filter were client-side over the
+  capped 100 rows, so a code read aloud from two days ago returned empty and rendered "no order
+  found". Now server-side in `lib/fair-orders`: search matches id (short code = lowercased tail),
+  customer, phone, vendor — verified `26685PS7` → `total 1` of 377. Real `total` via `count()`
+  ("Showing 100 of 377"), "Load older" via `nextCursor`, server-side vendor/type/sort, and an empty
+  state that says "No order matches '…'" (whole-event answer) vs "No orders yet". **Removed the
+  dead "Refunded" tab** — REFUNDED is not a master `OrderStatus`, so it was always empty; replaced
+  with "Issues". `order-log-search-guard` (19).
+- **"Live Now" derives from dates** (`e04074b`, `216e8ba`). `StatusBadge` mapped
+  `status === 'ACTIVE'` → "Live Now" and the fair hero hardcoded it, so the landing page announced
+  an Aug-5 fair live on Jul 23. `deriveEventLiveState` (in `lib/event-date`, calendar-date /
+  zone-fixed like item 2) is the one derivation: before→upcoming, within→live (inclusive),
+  after→ended; enablement gates (a paused fair is never live). Brought onto it: StatusBadge, fair
+  card, fair-info, the fair detail hero, AND the vendor portal's Live/Upcoming split
+  (`normalizeFairStatus` retired). Proven today→upcoming, Aug 8→live, Aug 13→ended.
+  `live-badge-guard` (16).
+- **Health surfaces `enforceVendorReadiness`** (`0548fc2`) — the effective flag is now in
+  `/api/health` (`flags.enforceVendorReadiness`), so local/prod drift on a customer-facing filter
+  is one `curl` away. Local shows `true`; prod shows the field absent until deployed.
+- Gate: **ALL 60 SUITES PASS** (57 → 60). Verified with a real `next build` (dynamic routes).
+
 ### Shipped 2026-07-23 — dates + admin surfaces batch
 
 - **Fair dates rendered one day early, everywhere** (`d6fccfd`). `Event.startDate` is a
@@ -232,23 +265,42 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
      is the PRIMARY path for this venue, not a fallback, and that form deserves more polish before
      the gates open. Manual test script is in the session notes; run it on localhost (the fix is
      not deployed yet).
+0a. **🟠 CANCEL 409 — STILL UNEXPLAINED (only the 404 is fixed).** `3d7d2be` fixed the 404
+   (short-code resolution). The reported 409 remains open: cancel's only 409 is the voided refusal
+   (`CANCEL_NOT_ALLOWED`), and order `26685PS7` (`cmrxn8bhq0002go5826685ps7`) is **PLACED, not
+   voided** — so that path can't produce it. New: the ambiguous-short-code path now also returns a
+   409 (`AMBIGUOUS_ORDER_CODE`), but there are zero collisions in the DB, so that isn't it either.
+   Needs the Network evidence (method + URL + response body of the 409 request) before any theory.
+   Do not build for it until captured.
+
 0b. **🔴 VENDOR STRIPE ONBOARDING — the longest-lead pre-fair item, measured 2026-07-23.**
    Of **20 vendors on Italian Fest 2026: 3 have any Stripe Connect account** (`stripeAccountId`),
    and the same **3 are `stripeVerified`** — ALL PRO TEES, Feran Eats, RANDY'S HOUSE OF BBQ.
    **17 are approved (ACTIVE); 14 of those cannot receive a payout.** 17 have menu items, so
-   Stripe is the blocker, not the menu. Money still flows (customers can order; earnings accrue
-   and sit unpaid under Pattern P "pay-when-connected"), but 14 vendors would finish the fair
-   owed money with nowhere to send it. **This is other people's onboarding, not code — 13 days.**
+   Stripe is the blocker, not the menu. **What a Stripe-less order does (traced in code):** with
+   enforcement OFF (prod), the order backstop (`app/api/orders/route.ts:232`) is skipped, so
+   checkout COMPLETES — the customer pays the platform account and the `VendorEarning` accrues at
+   COMPLETED/DELIVERED (accrual is Stripe-independent). At payout, `classifyVendorSlice`
+   (`lib/process-payout.ts:74`) sees `connected=false` → outcome **`hold`** (reason `unconnected`):
+   the slice enters a "waiting room", not lost. **Pattern D** (`lib/reconciler.ts:518-521`,
+   `vendor: { stripeVerified: true, stripeAccountId: not null, payoutsFrozenAt: null }`) drains it
+   when the vendor connects later — so a vendor who connects AFTER accruing DOES get paid **by
+   design**. **⚠️ Has this ever been exercised? NO.** The worker is OFF (Redis quota), so no
+   sweep runs in prod — Pattern D has never fired, and no vendor has connected-after-accruing to
+   test it. Right now NO vendor payout happens at all (even the 3 connected), because the worker is
+   down. This is the assumption the current prod setting rests on, unverified end-to-end.
+   **Other people's onboarding + the worker — 13 days.**
 
-0c. **🟠 READINESS ENFORCEMENT DIVERGES BETWEEN LOCAL AND PROD.** `.env.local` sets
-   `ENFORCE_VENDOR_READINESS=true`; **prod does not** — `GET /api/fairs` on
-   fair-synq.vercel.app returns `vendorCount=17` while the same query locally returns **2**
-   (`readyVendorWhere` = ACTIVE + stripeVerified + ≥1 available menu item). So the public site
-   currently lists 17 vendors, 15 of whom cannot take an order end-to-end, and a customer can
-   reach a vendor with no Stripe account. **Which number should a customer see: 2.** Flipping the
-   flag in prod is a one-line env change with a real business consequence (the public list drops
-   to 2 until vendors connect) — it is a decision, not a bug, but the divergence itself should not
-   persist unnoticed.
+0c. **🟠 READINESS ENFORCEMENT DIVERGES BETWEEN LOCAL AND PROD — now VISIBLE.** `.env.local` sets
+   `ENFORCE_VENDOR_READINESS=true`; **prod does not** — `GET /api/fairs` returns `vendorCount=17`
+   while the same query locally returns **2** (`readyVendorWhere` = ACTIVE + stripeVerified + ≥1
+   available menu item). So the public site lists 17 vendors, 15 of whom cannot take an order
+   end-to-end. **Which number should a customer see: 2.** The flag is read at
+   `lib/vendor-readiness.ts:49` and spread into the marketplace list, the fairs vendorCount badge,
+   vendor detail + menu, event/menu queries, and the order backstop. `0548fc2` surfaced the
+   effective value at `/api/health` → `flags.enforceVendorReadiness`, so the drift is no longer
+   invisible (local=true, prod=absent until the batch ships). **NOT flipped** — that is a business
+   decision (the public list drops to 2 until vendors connect); the visibility was the fix.
 
 1. ~~Human push~~ — **done** (pushed + deployed, fingerprint above). Nothing is waiting on a push.
 2. **#1 Checkout Places autocomplete — Google Cloud console side ONLY.** The code path is complete
@@ -277,17 +329,10 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
    rows are the evidence of what the write path used to do. (Superseded the old wording of this
    item, which only counted them.)
 
-6. **Admin order log truncates at 100 — pagination PROPOSED, not built.**
-   `lib/fair-orders.ts:33` clamps `take` to a hard maximum of 100, and the page requested exactly
-   that, so "100 orders" was a CAP presented as a count. The page now says "Showing the 100 most
-   recent orders", but over an 8-day fair the log will genuinely stop showing older orders.
-   `nextCursor` is already returned (`:142`) and unused. **Proposed shape:** keep the cursor,
-   add a "Load older" button that appends the next page (not a page-number pager — the log is
-   read newest-first and an operator scrolls), plus a real total from a `count()` in `meta` so
-   the header can say "showing 100 of 340". Server-side filtering would follow, since client-side
-   vendor/status filters only see what has been loaded. Say the word and I'll build it.
-   _(Search already matches the short code — it is the cuid tail and the filter substring-matches
-   the id; that works today and is now documented in the code.)_
+6. ~~Admin order log truncates at 100~~ — **BUILT (`8ff5deb`).** Server-side search over the whole
+   event, real `count()` total ("Showing 100 of 377"), "Load older" via `nextCursor`, server-side
+   vendor/type/sort, and an empty state that distinguishes no-results from not-loaded. The dead
+   "Refunded" tab (REFUNDED is not a master status) became "Issues". `order-log-search-guard`.
 
 ## Pre-fair critical path (ranked)
 
