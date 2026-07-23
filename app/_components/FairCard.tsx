@@ -6,15 +6,7 @@ import { MapPinIcon, CalendarIcon, UsersIcon } from '@heroicons/react/24/outline
 import StatusBadge from './StatusBadge'
 import { EASE } from '@/components/animations/motion'
 import type { PublicFairCard } from '@/lib/fair-view'
-
-function formatDateRange(startDate: string, endDate: string) {
-  const start = new Date(startDate)
-  const end   = new Date(endDate)
-  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
-  const startStr = start.toLocaleDateString('en-US', opts)
-  const endStr   = end.toLocaleDateString('en-US', { ...opts, year: 'numeric' })
-  return `${startStr} – ${endStr}`
-}
+import { formatEventDateRange } from '@/lib/event-date'
 
 interface FairCardProps {
   fair: PublicFairCard
@@ -53,7 +45,7 @@ export default function FairCard({ fair }: FairCardProps) {
           )}
           <div className="flex items-center gap-2 text-text-gray text-sm">
             <CalendarIcon className="w-4 h-4 shrink-0" />
-            <span>{formatDateRange(fair.startDate, fair.endDate)}</span>
+            <span>{formatEventDateRange(fair.startDate, fair.endDate)}</span>
           </div>
           <div className="flex items-center gap-2 text-text-gray text-sm">
             <UsersIcon className="w-4 h-4 shrink-0" />

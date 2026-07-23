@@ -14,17 +14,9 @@ import {
 import { SignedIn } from '@clerk/clerk-react'
 import { useFair } from '../../_contexts/FairContext'
 import FoodCard from '@/components/ui/FoodCard'
+import { formatEventDate } from '@/lib/event-date'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
 
 function formatCountdown(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now()
@@ -90,7 +82,7 @@ function FairComingSoon({ accentColor, gradientFrom, gradientTo }: {
               aren't stored on the Event, so they're omitted rather than shown blank). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
             {[
-              { icon: CalendarIcon, label: 'Start Date', value: formatDate(fair.dates.startDate) },
+              { icon: CalendarIcon, label: 'Start Date', value: formatEventDate(fair.dates.startDate) },
               ...(fair.operatingHours.open ? [{ icon: ClockIcon, label: 'Hours', value: `${fair.operatingHours.open} – ${fair.operatingHours.close}` }] : []),
               ...(fair.location.address || fair.location.city ? [{ icon: MapPinIcon, label: 'Location', value: fair.location.address || `${fair.location.city}${fair.location.state ? `, ${fair.location.state}` : ''}` }] : []),
               { icon: TicketIcon, label: 'Admission', value: fair.admissionFree ? 'Free entry' : 'Paid entry' },
@@ -156,7 +148,7 @@ function FairEnded({ accentColor, gradientFrom, gradientTo }: {
       {/* Body */}
       <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-16 text-center">
         <p className="text-text-gray text-sm mb-2">This fair ended on</p>
-        <p className="text-white font-semibold text-lg mb-8">{formatDate(fair.dates.endDate)}</p>
+        <p className="text-white font-semibold text-lg mb-8">{formatEventDate(fair.dates.endDate)}</p>
         <Link
           href="/fairs"
           className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white transition-opacity hover:opacity-80"

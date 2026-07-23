@@ -4,22 +4,7 @@ import { MapPinIcon, ClockIcon, CalendarIcon, EnvelopeIcon, TicketIcon } from '@
 import { useFair } from '../../../_contexts/FairContext'
 import StatusBadge from '../../../_components/StatusBadge'
 import Breadcrumb from '../_components/Breadcrumb'
-
-function formatDate(iso: string | null | undefined) {
-  if (!iso) return null
-  // Handle both full ISO datetimes and date-only strings (YYYY-MM-DD)
-  const d = iso.includes('T') ? new Date(iso) : new Date(iso + 'T00:00:00')
-  if (isNaN(d.getTime())) return null
-  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-}
-
-function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
-  const s = formatDate(start)
-  if (!s) return 'Dates TBA'
-  const e = formatDate(end)
-  if (!e || e === s) return s
-  return `${s} – ${e}`
-}
+import { formatEventDateRange } from '@/lib/event-date'
 
 function formatTime(t: string) {
   const [h, m] = t.split(':').map(Number)
@@ -72,7 +57,7 @@ export default function FairInfoPage() {
 
         {/* Dates */}
         <InfoCard icon={CalendarIcon} label="Dates" accentColor={accentColor}>
-          {formatDateRange(fair.dates.startDate, fair.dates.endDate)}
+          {formatEventDateRange(fair.dates.startDate, fair.dates.endDate)}
         </InfoCard>
 
         {/* Admission */}

@@ -10,6 +10,7 @@ import {
   PauseIcon,
 } from '@heroicons/react/24/outline'
 import type { GoLiveChecklist } from '@/lib/go-live-checklist'
+import { formatEventDateRange } from '@/lib/event-date'
 
 // ─── API response types ───────────────────────────────────────────────────────
 
@@ -350,7 +351,7 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
   // null until we know the truth; the render shows a skeleton, not a lie.
   const eventName = dashboardData?.event.name ?? null
   const eventDates = dashboardData
-    ? `${new Date(dashboardData.event.startDate).toLocaleDateString()} – ${new Date(dashboardData.event.endDate).toLocaleDateString()}`
+    ? formatEventDateRange(dashboardData.event.startDate, dashboardData.event.endDate)
     : ''
 
   // Go-live readiness — the SAME checklist the status route enforces (server-computed).

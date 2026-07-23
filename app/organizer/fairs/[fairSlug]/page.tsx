@@ -12,6 +12,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { OrganizerBreadcrumb } from '../../_components/Breadcrumb'
 import { getFirebaseApp } from '@/lib/firebase-client'
+import { formatEventDate } from '@/lib/event-date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,10 +92,6 @@ function timeAgo(dateStr: string) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
   return `${Math.floor(diff / 86400)}d ago`
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
@@ -265,7 +262,7 @@ export default function FairDashboardPage() {
               </div>
               {event && (
                 <p className="text-[#555] text-sm font-inter mt-1">
-                  {formatDate(event.startDate)} – {formatDate(event.endDate)}
+                  {formatEventDate(event.startDate)} – {formatEventDate(event.endDate)}
                 </p>
               )}
             </>
