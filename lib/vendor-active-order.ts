@@ -35,6 +35,9 @@ export interface VendorActiveOrderRow {
   vehiclePlate: string | null
   deliveryStreet: string | null
   deliveryCity: string | null
+  // Custody: a collected order (runner physically has the bag) drops off the vendor's Ready
+  // lane until a confirmed return nulls this — the vendor's work on it is done.
+  collectedAt: Date | string | null
   vendorOrderStatuses: { vendorId: string; status: string; version: number }[]
   payouts: { vendorId: string; netAmount: number; reversedAt: Date | null }[]
   refunds: { vendorId: string; status: string; amountCents: number }[]
@@ -60,6 +63,8 @@ export interface VendorActiveOrder {
   vehiclePlate: string | null
   deliveryStreet: string | null
   deliveryCity: string | null
+  /** Set once the runner physically collects — the Ready lane gates on `!collectedAt`. */
+  collectedAt: Date | string | null
   /** This vendor's gross slice (their items only) — never the full order total. */
   vendorSubtotal: number
   /** Take-home via the one shared earnings helper (estimate pre-payout). */
@@ -86,6 +91,7 @@ export function toVendorActiveOrder(o: VendorActiveOrderRow, vendorId: string): 
     vehiclePlate: o.vehiclePlate,
     deliveryStreet: o.deliveryStreet,
     deliveryCity: o.deliveryCity,
+    collectedAt: o.collectedAt,
     vendorSubtotal: parseFloat(myItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0).toFixed(2)),
     earnings: parseFloat((earn.cents / 100).toFixed(2)),
     earningsStatus: earn.status,

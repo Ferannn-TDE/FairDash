@@ -40,6 +40,12 @@ export async function GET(
         // reader can't re-introduce the split by forgetting either the fallback or the void filter.
         ...vendorOrderScope(vendorId),
         ...statusWhere(vendorId, ACTIVE_VENDOR_STATUSES),
+        // Custody-reader class: a runner-collected order keeps its VOS at READY (VOS only
+        // advances to COMPLETED on DELIVERED), so without this it stays in the vendor's Ready
+        // lane after the runner physically took the bag. Exclude collected orders; a confirmed
+        // return nulls collectedAt and the order reappears. NOT added to vendorOrderScope —
+        // history must still show collected/delivered orders; this is the LIVE lane only.
+        collectedAt: null,
       },
       orderBy: [{ placedAt: 'asc' }],
       take: 50,
@@ -61,6 +67,7 @@ export async function GET(
         vehiclePlate: true,
         deliveryStreet: true,
         deliveryCity: true,
+        collectedAt: true,
         vendorOrderStatuses: {
           where: { vendorId },
           select: { vendorId: true, status: true, version: true },

@@ -53,6 +53,7 @@ function StatCard({ label, value, sub, icon: Icon, color = 'text-neon-pink' }: {
 export default function RunnerEarningsPage() {
   const [data, setData] = useState<EarningsData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [range, setRange] = useState<'today' | 'all'>('today')
 
   useEffect(() => {
     fetch('/api/runners/me/earnings')
@@ -83,10 +84,31 @@ export default function RunnerEarningsPage() {
         </p>
       </div>
 
+      {/* Today / All-time toggle — the earned + deliveries figures switch scope; completion
+          rate is inherently all-time (delivered / collected across the runner's history). */}
+      <div className="flex gap-2" role="tablist">
+        {(['today', 'all'] as const).map(r => (
+          <button key={r} role="tab" aria-selected={range === r} onClick={() => setRange(r)}
+            className={`flex-1 h-9 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+              range === r ? 'bg-neon-pink text-white border-neon-pink' : 'bg-white/5 text-text-gray border-white/10 hover:bg-white/10'
+            }`}>
+            {r === 'today' ? 'Today' : 'All-time'}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Earned Today" value={loading ? '…' : fmt(data?.earnedToday ?? 0)} sub={`${data?.deliveriesToday ?? 0} deliveries`} icon={DollarSign} color="text-emerald-400" />
-        <StatCard label="Earned Total" value={loading ? '…' : fmt(data?.earnedTotal ?? 0)} sub={loading ? undefined : `${fmt(data?.paidTotal ?? 0)} paid · ${fmt((data?.pendingTotal ?? 0) + (data?.heldTotal ?? 0))} to come`} icon={TrendingUp} color="text-neon-pink" />
-        <StatCard label="Deliveries" value={loading ? '…' : String(data?.totalDeliveries ?? 0)} icon={Truck} color="text-blue-400" />
+        {range === 'today' ? (
+          <>
+            <StatCard label="Earned Today" value={loading ? '…' : fmt(data?.earnedToday ?? 0)} sub={`${data?.deliveriesToday ?? 0} deliveries`} icon={DollarSign} color="text-emerald-400" />
+            <StatCard label="Deliveries Today" value={loading ? '…' : String(data?.deliveriesToday ?? 0)} icon={Truck} color="text-blue-400" />
+          </>
+        ) : (
+          <>
+            <StatCard label="Earned Total" value={loading ? '…' : fmt(data?.earnedTotal ?? 0)} sub={loading ? undefined : `${fmt(data?.paidTotal ?? 0)} paid · ${fmt((data?.pendingTotal ?? 0) + (data?.heldTotal ?? 0))} to come`} icon={TrendingUp} color="text-neon-pink" />
+            <StatCard label="Deliveries" value={loading ? '…' : String(data?.totalDeliveries ?? 0)} icon={Truck} color="text-blue-400" />
+          </>
+        )}
         <StatCard label="Completion" value={loading ? '…' : `${Math.round((data?.completionRate ?? 1) * 100)}%`} icon={TrendingUp} color="text-amber-400" />
       </div>
 
