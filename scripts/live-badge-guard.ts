@@ -70,6 +70,9 @@ assert(/startDate=\{fair\.dates\.startDate\}/.test(info), 'fair-info passes date
 const heroPage = readFileSync('app/fair/[fairSlug]/page.tsx', 'utf8')
 assert(/deriveEventLiveState\(/.test(heroPage) && /liveState === 'upcoming'/.test(heroPage) && /liveState === 'ended'/.test(heroPage),
   'the fair hero is gated on the derived live-state — the hardcoded "Live Now" is only reached when live')
+const vendorPortal = readFileSync('app/vendor/page.tsx', 'utf8')
+assert(/deriveEventLiveState\(/.test(vendorPortal) && !/normalizeFairStatus/.test(vendorPortal),
+  'the vendor portal partitions Live/Upcoming by the derived state, not the raw status (normalizeFairStatus retired)')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} live-badge-guard: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
