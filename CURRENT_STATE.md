@@ -14,10 +14,11 @@
 
 - **`main` head: `b694b1e`** — "Merge: walkthrough batch 2 — address, Ready-lane, delivered timeline,
   runner stats (4a–4d)".
-- **Unpushed: 7 local commits** (2026-07-23): the CURRENT_STATE regeneration (`3b1d0ad`) + the
+- **Unpushed: 10 local commits** (2026-07-23): the CURRENT_STATE regeneration (`3b1d0ad`), the
   admin runner-stats batch (`831e182` ghost fix, `ade9c73` custody-for-counts, `e0ef587` admin
-  wiring + floor, `0121c44` guard suite + possession amendment, `f2bb60f` docs, + the
-  comment-rewording commit at HEAD, which can't name its own hash). `origin/main`
+  wiring + floor, `0121c44` guard suite + possession amendment, `f2bb60f` docs, `8180b69` comment
+  rewording), and browser-walkthrough batch 3 (`42ab797` slug flash, `022c9b2` runners restyle,
+  + this docs commit). `origin/main`
   is at `b694b1e` — **what's deployed is the walkthrough batch, fingerprint-confirmed**
   (`/api/health` served `"commit":"b694b1e…"` on 2026-07-22); this batch deploys on the next human
   push.
@@ -142,8 +143,67 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
 
+### Shipped 2026-07-23 — browser-walkthrough batch 3 (admin UI)
+
+- **The slug flash (flicker class, 7th instance).** `AdminShell.tsx` rendered
+  `fair?.name ?? slug` in the sidebar's per-fair header, so every admin load flashed the slug —
+  `springfield-state-fair-2026`, uppercased by the button's own CSS — before settling to the real
+  name, "Italian Fest 2026" (the two diverged long ago; slugs are frozen at creation by design).
+  Now: `event.name` or nothing — skeleton while `/api/admin/fairs` is in flight, explicit
+  "Unknown fair" once loaded without a match (a `fairsLoaded` flag keeps those two states
+  distinct). Two diagnosis corrections: **nothing title-cases a slug anywhere in the repo**, and
+  **no mock data reaches the admin console** — the only "Springfield State Fair" literals are in
+  `lib/mock/{organizer,runner}.ts`, which admin does not import. Worth noting the rule was already
+  written down at `app/admin/[eventSlug]/dashboard/page.tsx:348-350` and simply not followed by
+  the sidebar. `flicker-class-guard [E]` now scans for a display name assigned from a slug, with
+  the positive control asserted first (17/17).
+- **Admin runners row restyle** — one stats block (count primary, rate secondary, mirroring the
+  floor decision), pending rows subordinated (they already appear in the approval queue above),
+  status badge last with a state dot. The two "— unnamed —" rows are genuinely null `User.name`
+  (verified against the DB; the route does select it), so the email is now the identity line with
+  an explicit "no name on file". No derivation, floor constant, or banner predicate touched.
+- **Two reported items were NOT bugs** (repo wins, nothing changed): the runners table renders
+  exactly **one** ratio app-wide (`runners/page.tsx`, grep-confirmed) — the "duplicate count" was
+  the cramped two-block layout, fixed by the restyle; and the runner earnings banner's
+  `Pending amounts` space is **present in source and preserved through JSX compilation** (checked
+  by compiling the snippet), identical in the deployed commit, with zero `</span>[A-Za-z]`
+  occurrences anywhere in `app/`. If the missing space is still visible in a browser, it is a
+  stale bundle, not the source.
+
 ## Open items
 
+0. **🔴 HOME_DELIVERY CHECKOUT IS BROKEN IN PROD — diagnosed 2026-07-23, fix NOT built (awaiting
+   a product decision).** `POST /api/orders` 400s with
+   `deliveryStreet, deliveryCity, and deliveryZip are required for HOME_DELIVERY orders`
+   (`app/api/orders/route.ts:134`, code `VALIDATION_ERROR`). Live since `b694b1e` deployed
+   (2026-07-22 22:00).
+   - **Mechanism:** the #2 fix stopped fabricating a city (`checkout/page.tsx:399`,
+     `deliveryCity: … || null`), and the route has always required a truthy city. Nothing else
+     can trip it — `deliveryZip` still gets a fabricated `|| '00000'` at `:400`, and street is
+     validated client-side.
+   - **The parser is NOT missing** (contradicts the working hypothesis): `handlePlaceSelect`
+     (`checkout/page.tsx:317-326`) extracts `locality || sublocality ||
+     administrative_area_level_2` plus `postal_code`, and the widget requests
+     `address_components` in its `fields` (`app/_components/AddressAutocomplete.tsx:23`). The
+     code is correct and **has never once run in production**: 10/10 home-delivery orders have
+     `street === city` AND `zip = '00000'`, i.e. `parsed_ok = 0` — with billing off, no
+     suggestion could ever be selected, so `place_changed` never fired.
+   - **The actual hole:** the form has **one input for a three-field requirement**. There is no
+     city or zip field anywhere in the checkout form (`:621-625` — `AddressAutocomplete` is the
+     only address control; `deliveryCity`/`deliveryZip` exist solely in state at `:269-270`), and
+     client `validate()` (`:358-361`) checks only `deliveryStreet`. So a customer who types an
+     address without picking a suggestion submits a form that cannot pass the server, and has no
+     field in which to supply what's missing. Selecting a suggestion now works (billing on) and
+     is the only path that succeeds.
+   - **Decision needed** (three shapes, in my order of preference): (a) add real city/state/zip
+     inputs that autocomplete fills and the customer can correct, require city+zip client-side
+     with named field errors, and drop the `'00000'` zip fabrication — the honest fix, and the
+     only one that yields an address a runner can actually deliver to; (b) require a suggestion
+     selection, blocking submit with "Select your address from the suggestions" — cheaper, but
+     dead-ends anyone whose address Google doesn't return; (c) relax the server to accept a null
+     city — do NOT do this alone: it ships delivery orders with no city to a runner.
+   - Note: `'00000'` is the same fabrication class as the city copy the #2 fix removed, still
+     standing one field over. Whichever option is chosen should take it out.
 1. ~~Human push~~ — **done** (pushed + deployed, fingerprint above). Nothing is waiting on a push.
 2. **#1 Checkout Places autocomplete — Google Cloud console side ONLY.** The code path is complete
    and proven (`handlePlaceSelect` fills `deliveryCity` from the parsed `locality`; asserted by
