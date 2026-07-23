@@ -68,6 +68,10 @@ function main() {
   assert(route.includes("process.env.COMMIT_SHA ?? 'unknown'"), "route reads the baked COMMIT_SHA, falling back to 'unknown'")
   assert(!route.includes('VERCEL_GIT_COMMIT_SHA') && !route.includes('?? null'), 'route has NO runtime Vercel-var read and NO null fallback (the regression path)')
 
+  console.log('\n[9] effective feature flags are surfaced (local/prod drift is visible)')
+  assert(/flags:\s*\{/.test(route) && /enforceVendorReadiness:\s*isVendorReadinessEnforced\(\)/.test(route),
+    'health exposes the effective enforceVendorReadiness — a curl on each env shows whether they agree')
+
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} health-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }

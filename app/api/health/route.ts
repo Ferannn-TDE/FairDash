@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { runHealthChecks } from '@/lib/health'
+import { isVendorReadinessEnforced } from '@/lib/vendor-readiness'
 
 // GET /api/health — real measurements, not stubs. Returns 200 when healthy, 503 when degraded,
 // so an external dead-man's-switch monitor can watch it directly. The `commit` field remains the
@@ -19,6 +20,14 @@ export async function GET() {
         database: health.database,
         redis: health.redis,
         worker: health.worker,
+      },
+      // EFFECTIVE feature flags — the runtime value, per environment. Surfaced because a
+      // customer-facing filter (vendor readiness) was set true locally and unset in prod, so the
+      // public site listed vendors who can't take payment while local hid them, and nothing made
+      // the drift visible. A boolean env value is not a secret; a `curl /api/health` on each
+      // environment now shows whether they agree.
+      flags: {
+        enforceVendorReadiness: isVendorReadinessEnforced(),
       },
     },
     { status: health.status === 'ok' ? 200 : 503 },
