@@ -21,6 +21,7 @@ import { refundVendorPortion } from '@/lib/process-refund'
 import { enqueueJobSafely } from '@/lib/queue-safe'
 import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M, REFUND_WINDOW_MS } from '@/lib/constants'
 import { logger } from '@/lib/logger'
+import { resolveOrder } from '@/lib/resolve-order'
 
 // PATCH /api/orders/:id/status
 // Advance an order through its lifecycle.
@@ -103,8 +104,7 @@ export async function PATCH(
     }
 
     // ── 1. Load order ──────────────────────────────────────────────────────
-    const order = await db.order.findUnique({
-      where: { id: (await params).id },
+    const order = await resolveOrder((await params).id, {
       include: { vendor: true },
     })
 

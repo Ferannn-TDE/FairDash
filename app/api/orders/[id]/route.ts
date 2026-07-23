@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
+import { resolveOrder } from '@/lib/resolve-order'
 
 // GET /api/orders/:id — fetch a single order with full detail.
 // Accessible by the order's customer OR any VendorMember of the order's vendor.
@@ -16,11 +17,8 @@ export async function GET(
     const clerkId = await requireAuth()
 
     const rawId = (await params).id
-    // Accept either the full cuid or the 8-char shortId (last 8 chars, uppercased)
-    const order = await db.order.findFirst({
-      where: rawId.length <= 8
-        ? { id: { endsWith: rawId.toLowerCase() } }
-        : { id: rawId },
+    // Full cuid or the 8-char short code — resolved (and disambiguated) in one place.
+    const order = await resolveOrder(rawId, {
       include: {
         vendor: { select: { id: true, name: true, boothNumber: true } },
         orderItems: {
