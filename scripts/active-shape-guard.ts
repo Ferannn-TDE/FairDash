@@ -33,7 +33,8 @@ const row: VendorActiveOrderRow = {
   fulfillmentType: 'HOME_DELIVERY',
   customerName: 'Cust', customerPhone: '+15550001111',
   vehicleMake: null, vehicleColor: null, vehiclePlate: null,
-  deliveryStreet: '1 Fair Way', deliveryCity: 'Fairville', collectedAt: null,
+  deliveryStreet: '1 Fair Way', deliveryUnit: 'Room 214', deliveryCity: 'Fairville',
+  deliveryState: 'IL', deliveryZip: '62026', collectedAt: null,
   vendorOrderStatuses: [{ vendorId: 'v1', status: 'ACCEPTED', version: 3 }],
   payouts: [], refunds: [],
   orderItems: [
@@ -46,7 +47,7 @@ const dto = toVendorActiveOrder(row, 'v1')
 // Every contract field present — `undefined` can never reach a card again.
 const missing = (Object.keys(dto) as (keyof VendorActiveOrder)[]).filter(k => dto[k] === undefined)
 assert(missing.length === 0, `no contract field is undefined (missing: ${missing.join(', ') || 'none'})`)
-for (const k of ['customerName', 'customerPhone', 'deliveryStreet', 'deliveryCity'] as const) {
+for (const k of ['customerName', 'customerPhone', 'deliveryStreet', 'deliveryUnit', 'deliveryCity', 'deliveryState', 'deliveryZip'] as const) {
   assert(dto[k] === row[k], `${k} passes through (the field that used to render "undefined")`)
 }
 assert(dto.status === 'ACCEPTED' && dto.version === 3, 'status + version come from THIS vendor\'s VOS row')

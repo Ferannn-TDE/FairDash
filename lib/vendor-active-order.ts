@@ -34,7 +34,10 @@ export interface VendorActiveOrderRow {
   vehicleColor: string | null
   vehiclePlate: string | null
   deliveryStreet: string | null
+  deliveryUnit: string | null
   deliveryCity: string | null
+  deliveryState: string | null
+  deliveryZip: string | null
   // Custody: a collected order (runner physically has the bag) drops off the vendor's Ready
   // lane until a confirmed return nulls this — the vendor's work on it is done.
   collectedAt: Date | string | null
@@ -62,7 +65,10 @@ export interface VendorActiveOrder {
   vehicleColor: string | null
   vehiclePlate: string | null
   deliveryStreet: string | null
+  deliveryUnit: string | null
   deliveryCity: string | null
+  deliveryState: string | null
+  deliveryZip: string | null
   /** Set once the runner physically collects — the Ready lane gates on `!collectedAt`. */
   collectedAt: Date | string | null
   /** This vendor's gross slice (their items only) — never the full order total. */
@@ -89,8 +95,13 @@ export function toVendorActiveOrder(o: VendorActiveOrderRow, vendorId: string): 
     vehicleMake: o.vehicleMake,
     vehicleColor: o.vehicleColor,
     vehiclePlate: o.vehiclePlate,
+    // The FULL address — a vendor card shows the building the runner is taking it to, and
+    // the unit line rides with it (formatted via lib/delivery-address, never hand-joined).
     deliveryStreet: o.deliveryStreet,
+    deliveryUnit: o.deliveryUnit,
     deliveryCity: o.deliveryCity,
+    deliveryState: o.deliveryState,
+    deliveryZip: o.deliveryZip,
     collectedAt: o.collectedAt,
     vendorSubtotal: parseFloat(myItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0).toFixed(2)),
     earnings: parseFloat((earn.cents / 100).toFixed(2)),

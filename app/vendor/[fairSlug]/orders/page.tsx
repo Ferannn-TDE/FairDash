@@ -10,6 +10,7 @@ import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { EarningsBadge } from '@/app/_components/EarningsBadge'
 import { getStatusMeta, TAB_STATUS_MAP } from '@/lib/order-status'
+import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -212,7 +213,7 @@ function OrderCard({ order }: { order: Order }) {
                   </p>
                 )}
                 {order.fulfillmentType === 'HOME_DELIVERY' && (
-                  <p className="text-text-gray text-xs">{order.deliveryStreet}, {order.deliveryCity}</p>
+                  <p className="text-text-gray text-xs">{formatDeliveryAddress(addr(order))}</p>
                 )}
               </div>
             </div>

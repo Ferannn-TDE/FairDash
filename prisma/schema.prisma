@@ -478,8 +478,13 @@ model Order {
   vehiclePlate String? // e.g. "ABC 1234"
 
   // ── Home delivery address ──────────────────────────────────────────────────
+  // Validated and rendered through lib/delivery-address.ts — the one definition of a
+  // deliverable address (required: street/city/zip) and the one formatter. Nothing on the
+  // write path may invent a value to satisfy a validator: a missing field stays NULL.
   deliveryStreet String?
+  deliveryUnit   String? // apartment / suite / room — Places never supplies it; a dorm needs it
   deliveryCity   String?
+  deliveryState  String? // 2-letter code, from administrative_area_level_1 when autocomplete fires
   deliveryZip    String?
 
   // Operator service charge collected at checkout (goes to event operator, not FairSynq)

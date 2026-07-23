@@ -14,6 +14,7 @@ import {
 import { getStatusConfig } from '@/lib/order-status-config'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
 import toast from 'react-hot-toast'
+import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -374,7 +375,7 @@ function OrderModal({
               <div className="bg-white/[0.03] rounded-xl p-3">
                 <p className="text-[0.6rem] uppercase tracking-wider text-white/30 font-semibold mb-1">Delivery address</p>
                 <p className="text-white/70 text-sm font-inter">
-                  {[order.deliveryStreet, order.deliveryCity, order.deliveryZip].filter(Boolean).join(', ')}
+                  {formatDeliveryAddress(addr(order))}
                 </p>
               </div>
             )}
