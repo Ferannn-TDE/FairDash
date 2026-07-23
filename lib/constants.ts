@@ -144,3 +144,15 @@ export const STRAND_THRESHOLDS_MS = {
   runnerUnreachable:     10 * 60 * 1000, // 10 minutes
   awaitingVendorConfirm: 10 * 60 * 1000, // 10 minutes
 } as const
+
+/**
+ * Minimum collected-order denominator before a runner's completion RATE is shown or judged
+ * (decided 2026-07-23). Below this, the admin surface shows the raw delivered/collected counts
+ * with "not enough deliveries" — no percentage, no bar, no <90% warning banner. A ratio over
+ * N=1–4 turns one bad order into a 25–100-point swing, and the runners screen is where an admin
+ * decides whether to keep someone on the roster — a percent sign over that little data is the
+ * render-something-untrue class pointed at a human. Five is roughly where the banner becomes
+ * actionable during a real fair day rather than during warm-up. One named home so retuning
+ * after the first real event is a one-line change, like the strand thresholds above.
+ */
+export const RUNNER_COMPLETION_MIN_DENOMINATOR = 5

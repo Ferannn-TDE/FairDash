@@ -1101,8 +1101,15 @@ model Runner {
   approvedBy      String?        // admin User.id who approved/rejected
   rejectionReason String?
 
-  // Performance — used to enforce 90% minimum completion rate
-  completionRate  Float @default(1.0) // 0.0–1.0
+  // ── DEPRECATED, write-dead (2026-07-23) — do NOT wire these back up ─────────
+  // No write site has ever existed; they sat at 0 / 0 / 1.0 while real deliveries
+  // happened, and fed an admin <90% warning banner that could never fire. The REAL
+  // sources: delivery counts + completion rate derive from DeliveryCustodyEvent via
+  // lib/runner-completion.ts (custody is the spine for COUNTS); money derives from
+  // RunnerEarning via lib/runner-earnings.ts (the ledger is the spine for MONEY).
+  // Guarded by scripts/runner-stats-source-guard.ts. Drop migration pending as a
+  // separate reviewed change.
+  completionRate  Float @default(1.0)
   totalDispatched Int   @default(0)
   totalCompleted  Int   @default(0)
 
@@ -1614,7 +1621,7 @@ model PostEventReport {
   revenueByType     Json  // { BOOTH_PICKUP: x, CURBSIDE: y, HOME_DELIVERY: z }
   vendorBreakdown   Json  // [{ vendorId, name, revenue, orderCount, avgFulfillmentMins, cancellationRate }]
   peakWindows       Json  // [{ windowStart, windowEnd, orderCount }] — 30-min buckets
-  runnerPerformance Json  // [{ runnerId, name, completionRate, totalDispatched, incidents }]
+  runnerPerformance Json  // [{ runnerId, name, delivered, collected, rate, incidents }] — from lib/runner-completion (custody events), NOT the deprecated Runner counter columns; nothing writes this field yet
   cancellationLog   Json  // [{ orderId, reason, cancelledBy, refundIssued, refundAmount }]
   platformIssues    Json? // any outages, heartbeat drops, Stripe errors
 
