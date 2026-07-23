@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
+import { formatEventDate } from '@/lib/event-date'
 
 interface Fair {
   id: string
@@ -19,10 +20,6 @@ interface Fair {
   enableBoothPickup: boolean
   enableCurbside: boolean
   enableHomeDelivery: boolean
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 export default function OrganizerFairsPage() {
@@ -82,7 +79,7 @@ export default function OrganizerFairsPage() {
                       </span>
                     </div>
                     <p className="text-xs text-[#666] font-inter truncate mt-0.5">
-                      {formatDate(fair.startDate)} · {fair.vendorCount} vendors · {fair.orderCount} orders
+                      {formatEventDate(fair.startDate)} · {fair.vendorCount} vendors · {fair.orderCount} orders
                     </p>
                     <div className="flex gap-1 mt-1.5 flex-wrap">
                       {fair.enableBoothPickup && (

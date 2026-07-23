@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { MapPin, Calendar, ChevronRight, Users, Clock, XCircle, CalendarX } from 'lucide-react'
+import { formatEventDateRange } from '@/lib/event-date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,14 +26,6 @@ interface VendorFair {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatDateRange(start: string, end: string) {
-  const s = new Date(start)
-  const e = new Date(end)
-  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
-  const year = e.getFullYear()
-  return `${s.toLocaleDateString('en-US', opts)} – ${e.toLocaleDateString('en-US', { ...opts, year: 'numeric' })}`
-}
 
 function normalizeFairStatus(raw: string): 'active' | 'upcoming' | 'other' {
   if (raw === 'ACTIVE') return 'active'
@@ -175,7 +168,7 @@ function FairSelectionPage({ fairs }: { fairs: VendorFair[] }) {
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-gray">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 shrink-0" />
-                          {formatDateRange(fair.startDate, fair.endDate)}
+                          {formatEventDateRange(fair.startDate, fair.endDate)}
                         </span>
                         <span className="flex items-center gap-1">
                           <Users className="w-3 h-3 shrink-0" />
@@ -215,7 +208,7 @@ function FairSelectionPage({ fairs }: { fairs: VendorFair[] }) {
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-gray">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 shrink-0" />
-                          {formatDateRange(fair.startDate, fair.endDate)}
+                          {formatEventDateRange(fair.startDate, fair.endDate)}
                         </span>
                       </div>
                       {fair.boothNumber && (
