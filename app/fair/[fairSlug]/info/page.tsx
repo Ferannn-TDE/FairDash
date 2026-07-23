@@ -39,7 +39,7 @@ export default function FairInfoPage() {
       <Breadcrumb crumbs={[{ label: 'Info' }]} />
       <div className="flex items-center gap-3 mb-8">
         <h1 className="font-bebas text-4xl text-white tracking-wide">Fair Info</h1>
-        <StatusBadge status={fair.status} />
+        <StatusBadge status={fair.status} startDate={fair.dates.startDate} endDate={fair.dates.endDate} />
       </div>
 
       {fair.description && (

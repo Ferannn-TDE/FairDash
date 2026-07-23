@@ -14,7 +14,7 @@ import {
 import { SignedIn } from '@clerk/clerk-react'
 import { useFair } from '../../_contexts/FairContext'
 import FoodCard from '@/components/ui/FoodCard'
-import { formatEventDate } from '@/lib/event-date'
+import { formatEventDate, deriveEventLiveState } from '@/lib/event-date'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -186,11 +186,14 @@ export default function FairHomePage() {
   const featuredFirst = featuredParts[0]
   const featuredRest  = featuredParts.slice(1).join(' ')
 
-  // Delegate to status-specific views
-  if (fair.status === 'upcoming') {
+  // Delegate to status-specific views. Live-ness derives from DATES, not just the admin status:
+  // an enabled ('active') fair that hasn't started yet is Coming Soon, not Live — the same
+  // derivation the badges use, so the hero below is reached ONLY when the fair is genuinely live.
+  const liveState = deriveEventLiveState(fair.dates.startDate, fair.dates.endDate)
+  if (fair.status === 'upcoming' || liveState === 'upcoming') {
     return <FairComingSoon accentColor={accentColor} gradientFrom={gradientFrom} gradientTo={gradientTo} />
   }
-  if (fair.status === 'completed') {
+  if (fair.status === 'completed' || liveState === 'ended') {
     return <FairEnded accentColor={accentColor} gradientFrom={gradientFrom} gradientTo={gradientTo} />
   }
 
