@@ -79,8 +79,15 @@ export default function RunnerEarningsPage() {
         <p className="text-text-gray text-xs leading-relaxed">
           Each delivery earns you <span className="text-white font-semibold">your share of the delivery fee</span> plus{' '}
           <span className="text-white font-semibold">100% of the tip</span>.{' '}
-          <span className="text-amber-300/90">Pending</span> amounts transfer automatically after the order&rsquo;s refund
-          window closes; <span className="text-emerald-300/90">paid</span> means the transfer went out.
+          {/* Spaces around these spans are EXPLICIT. A literal space next to a JSX tag is not
+              reliable: this text node spans a newline, and the compiler strips the node's
+              leading whitespace — the built bundle emitted "Pending" followed by
+              "amounts transfer…", rendering "Pendingamounts". Both sides are pinned with
+              {' '} so a future re-wrap cannot silently close a gap again. */}
+          <span className="text-amber-300/90">Pending</span>{' '}
+          amounts transfer automatically after the order&rsquo;s refund window closes;{' '}
+          <span className="text-emerald-300/90">paid</span>{' '}
+          means the transfer went out.
         </p>
       </div>
 
