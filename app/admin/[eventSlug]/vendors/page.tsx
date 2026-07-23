@@ -1,9 +1,6 @@
 'use client'
 
 import { useState, useEffect, useMemo, use } from 'react'
-import {
-  DocumentTextIcon,
-} from '@heroicons/react/24/outline'
 import { Store, AlertTriangle } from 'lucide-react'
 
 // ─── Types (real /api/admin/events/[id]/vendors shape via getFairVendors) ──────
@@ -34,11 +31,22 @@ const STATUS_STYLES: Record<string, string> = {
   REJECTED:  'bg-red-500/15 text-red-400',
 }
 
-function DocBadge({ present, label }: { present: boolean; label: string }) {
+/**
+ * One readiness requirement. Shape carries the state as well as colour — a filled dot for met,
+ * a hollow ring for missing — so the row is readable without relying on red-vs-green, and the
+ * title spells it out for a screen reader. Four of these form the cluster an organizer scans
+ * before a fair: can this vendor take money and serve customers on day one?
+ */
+function ReadyDot({ met, label, missingLabel }: { met: boolean; label: string; missingLabel?: string }) {
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase
-      ${present ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
-      <DocumentTextIcon className="w-3 h-3" />
+    <span
+      title={met ? `${label}: yes` : `${missingLabel ?? label}: missing`}
+      className={`inline-flex items-center gap-1.5 text-[11px] font-inter ${met ? 'text-[#9a9a9a]' : 'text-orange-300'}`}
+    >
+      <span
+        aria-hidden
+        className={`w-2 h-2 rounded-full shrink-0 ${met ? 'bg-emerald-400' : 'border border-orange-400/70 bg-transparent'}`}
+      />
       {label}
     </span>
   )
@@ -73,6 +81,11 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
   )
   const pendingCount = vendors.filter(v => v.status === 'PENDING').length
   const activeCount  = vendors.filter(v => v.status === 'ACTIVE').length
+  // `ready` is the server's shared predicate (lib/vendor-readiness — ACTIVE + Stripe verified
+  // + at least one available menu item), not a local re-derivation. "Ready to take payment" is
+  // the question this page exists to answer, so it leads.
+  const readyCount   = vendors.filter(v => v.ready).length
+  const noStripe     = vendors.filter(v => v.status === 'ACTIVE' && !v.stripeVerified).length
 
   return (
     <div>
@@ -80,14 +93,35 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
         <div>
           <h1 className="font-bebas text-3xl text-white tracking-wide">Vendors</h1>
           <p className="text-sm text-[#666] font-inter mt-1">
-            {loading ? 'Loading…' : `${activeCount} active`}
-            {pendingCount > 0 && (
-              <span className="ml-2 px-1.5 py-0.5 bg-yellow-500/15 text-yellow-400 text-[10px] font-semibold rounded">
-                {pendingCount} pending review
+            {loading ? 'Loading…' : `${activeCount} approved · ${pendingCount} pending review`}
+          </p>
+        </div>
+      </div>
+
+      {/* ── Readiness summary: the one number an organizer needs before a fair ──
+             Skeleton while loading — a count of 0 is a claim, not a placeholder. */}
+      <div className="mb-6 bg-[#111111] border border-white/5 rounded-xl px-4 py-3">
+        {loading ? (
+          <div className="h-4 w-64 rounded bg-white/10 animate-pulse" aria-hidden />
+        ) : (
+          <p className="text-sm font-inter text-white">
+            <span className="font-semibold tabular-nums">{readyCount}</span>
+            <span className="text-[#888]"> of {vendors.length} ready to take payment</span>
+            {noStripe > 0 && (
+              <span className="text-[#888]">
+                {' · '}
+                <span className="text-orange-300 font-semibold tabular-nums">{noStripe}</span>
+                {' approved '}{noStripe === 1 ? 'vendor has' : 'vendors have'} no Stripe account
               </span>
             )}
           </p>
-        </div>
+        )}
+        {!loading && readyCount < activeCount && (
+          <p className="text-xs text-[#666] font-inter mt-1">
+            A vendor is ready when they are approved, connected to Stripe, and have at least one
+            available menu item. Until then customers can&rsquo;t order from them.
+          </p>
+        )}
       </div>
 
       {/* Tabs */}
@@ -122,41 +156,45 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
       ) : (
         <div className="bg-[#111111] rounded-xl border border-white/5 divide-y divide-white/5">
           {filtered.map(vendor => (
-            <div key={vendor.id} className="flex items-center justify-between gap-3 p-4 hover:bg-white/[0.02] transition-colors">
+            <div key={vendor.id} className="flex items-center gap-4 p-4 hover:bg-white/[0.02] transition-colors">
+              {/* ── Identity ─────────────────────────────────────────────── */}
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-10 h-10 rounded-lg bg-[#FF0077]/10 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bebas text-[#FF0077]">{vendor.name[0]}</span>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${vendor.ready ? 'bg-[#FF0077]/10' : 'bg-white/5'}`}>
+                  <span className={`text-sm font-bebas ${vendor.ready ? 'text-[#FF0077]' : 'text-[#777]'}`}>{vendor.name[0]}</span>
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-inter font-medium text-white truncate">{vendor.name}</p>
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    {vendor.cuisineType && <span className="text-xs text-[#666] font-inter">{vendor.cuisineType}</span>}
-                    {vendor.boothNumber && (
-                      <span className="text-xs text-[#555] font-inter">· Booth {vendor.boothNumber}</span>
-                    )}
-                    <DocBadge present={vendor.docs.foodHandlerPermit} label="Permit" />
-                    <DocBadge present={vendor.docs.insurance} label="Insurance" />
-                  </div>
+                  <p className="text-xs text-[#666] font-inter truncate">
+                    {[vendor.cuisineType, vendor.boothNumber && `Booth ${vendor.boothNumber}`].filter(Boolean).join(' · ') || '—'}
+                  </p>
                 </div>
               </div>
 
-              {/* Stats */}
-              <div className="hidden md:block shrink-0 text-right">
-                <p className="text-sm text-white font-inter tabular-nums">${vendor.revenue.toFixed(2)}</p>
-                <p className="text-[10px] text-[#555] font-inter">{vendor.ordersToday} today · {vendor.orderCount} total</p>
+              {/* ── Readiness cluster: the primary signal. Every requirement is listed
+                     whether met or not, so a gap is a visible hollow dot rather than an
+                     absent badge — missing must never look like "not applicable". ── */}
+              <div className="hidden sm:grid grid-cols-2 gap-x-4 gap-y-1 shrink-0 w-52">
+                <ReadyDot met={vendor.stripeVerified} label="Stripe" missingLabel="Stripe payouts" />
+                <ReadyDot met={!vendor.isOffline && vendor.ready} label="Live" missingLabel="Live to customers" />
+                <ReadyDot met={vendor.docs.foodHandlerPermit} label="Permit" missingLabel="Food handler permit" />
+                <ReadyDot met={vendor.docs.insurance && !vendor.docs.insuranceExpired} label="Insurance"
+                  missingLabel={vendor.docs.insuranceExpired ? 'Insurance (expired)' : 'Insurance'} />
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                {!vendor.ready && vendor.status === 'ACTIVE' && (
-                  <span className="hidden sm:inline px-2 py-0.5 bg-orange-500/15 text-orange-400 text-[10px] font-semibold rounded uppercase">Not live</span>
-                )}
+              {/* ── Revenue: secondary. Before the gates open every value here is $0.00,
+                     so it must not out-shout the readiness cluster. ── */}
+              <div className="hidden lg:block shrink-0 text-right w-24">
+                <p className={`text-sm font-inter tabular-nums ${vendor.revenue > 0 ? 'text-white' : 'text-[#555]'}`}>
+                  ${vendor.revenue.toFixed(2)}
+                </p>
+                <p className="text-[10px] text-[#555] font-inter">{vendor.orderCount} orders</p>
+              </div>
+
+              {/* ── Approval status: last. ── */}
+              <div className="shrink-0 w-20 text-right">
                 <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${STATUS_STYLES[vendor.status] ?? STATUS_STYLES.INACTIVE}`}>
                   {vendor.status}
                 </span>
-                {vendor.stripeVerified
-                  ? <span className="hidden sm:inline px-2 py-0.5 bg-green-500/15 text-green-400 text-[10px] font-semibold rounded uppercase">Stripe ✓</span>
-                  : <span className="hidden sm:inline px-2 py-0.5 bg-white/5 text-[#555] text-[10px] font-semibold rounded uppercase">No Stripe</span>
-                }
               </div>
             </div>
           ))}
