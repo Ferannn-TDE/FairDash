@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // GET /api/organizer/vendors
 // Returns all vendors across all events for the authenticated organizer,
@@ -43,6 +44,7 @@ export async function GET(_req: NextRequest) {
       db.order.groupBy({
         by: ['vendorId'],
         where: {
+          ...IN_MODEL_ORDERS,
           vendorId: { in: vendorIds },
           status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] },
         },
@@ -51,6 +53,7 @@ export async function GET(_req: NextRequest) {
       db.order.groupBy({
         by: ['vendorId'],
         where: {
+          ...IN_MODEL_ORDERS,
           vendorId: { in: vendorIds },
           status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] },
         },

@@ -6,26 +6,28 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { OrderStatus } from '@prisma/client'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // ── Cached sub-queries ───────────────────────────────────────────────────────
 
 async function getEventStats(eventId: string, todayStart: Date) {
   const [todayOrders, liveOrders, totalRevenue, platformFee] = await Promise.all([
     db.order.count({
-      where: { eventId, placedAt: { gte: todayStart } },
+      where: { ...IN_MODEL_ORDERS, eventId, placedAt: { gte: todayStart } },
     }),
     db.order.count({
       where: {
+        ...IN_MODEL_ORDERS,
         eventId,
         status: { in: [OrderStatus.PLACED, OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY] },
       },
     }),
     db.order.aggregate({
-      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      where: { ...IN_MODEL_ORDERS, eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
       _sum: { total: true },
     }),
     db.order.aggregate({
-      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      where: { ...IN_MODEL_ORDERS, eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
       _sum: { fairSynqFee: true },
     }),
   ])
@@ -75,6 +77,7 @@ export async function GET(
         const [allTime, statusBreakdown, vendorRevenue] = await Promise.all([
           db.order.aggregate({
             where: {
+              ...IN_MODEL_ORDERS,
               eventId: event.id,
               status: { in: [OrderStatus.COMPLETED, OrderStatus.DELIVERED] },
             },
@@ -83,12 +86,13 @@ export async function GET(
           }),
           db.order.groupBy({
             by: ['status'],
-            where: { eventId: event.id },
+            where: { ...IN_MODEL_ORDERS, eventId: event.id },
             _count: { id: true },
           }),
           db.order.groupBy({
             by: ['vendorId'],
             where: {
+              ...IN_MODEL_ORDERS,
               eventId: event.id,
               status: { in: [OrderStatus.COMPLETED, OrderStatus.DELIVERED] },
             },
@@ -112,6 +116,7 @@ export async function GET(
       db.order.groupBy({
         by: ['vendorId'],
         where: {
+          ...IN_MODEL_ORDERS,
           eventId: event.id,
           placedAt: { gte: todayStart },
           status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] },
@@ -121,6 +126,7 @@ export async function GET(
       db.order.groupBy({
         by: ['vendorId'],
         where: {
+          ...IN_MODEL_ORDERS,
           eventId: event.id,
           placedAt: { gte: todayStart },
           status: { in: [OrderStatus.COMPLETED, OrderStatus.DELIVERED] },

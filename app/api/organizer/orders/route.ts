@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { OrderStatus } from '@prisma/client'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 const PAID_STATUSES: OrderStatus[] = [
   'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED',
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     }
 
     const orders = await db.order.findMany({
-      where: { eventId: { in: eventIds }, status: { in: PAID_STATUSES } },
+      where: { ...IN_MODEL_ORDERS, eventId: { in: eventIds }, status: { in: PAID_STATUSES } },
       orderBy: [{ placedAt: 'desc' }, { id: 'desc' }],
       take,
       cursor: cursor ? { id: cursor } : undefined,

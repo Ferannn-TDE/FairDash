@@ -6,6 +6,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { OrderStatus } from '@prisma/client'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 async function computeRevenueSeries(eventId: string, days: number) {
   const periodStart = new Date()
@@ -14,6 +15,7 @@ async function computeRevenueSeries(eventId: string, days: number) {
 
   const orders = await db.order.findMany({
     where: {
+      ...IN_MODEL_ORDERS,
       eventId,
       status: { in: [OrderStatus.COMPLETED, OrderStatus.DELIVERED] },
       placedAt: { gte: periodStart },

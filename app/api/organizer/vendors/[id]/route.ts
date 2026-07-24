@@ -8,6 +8,7 @@ import { notifyVendorStatusChange } from '@/lib/notify'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
 import { VendorStatus } from '@prisma/client'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 const ALLOWED_STATUSES: VendorStatus[] = ['ACTIVE', 'PAUSED', 'SUSPENDED', 'REJECTED']
 
@@ -66,12 +67,12 @@ export async function GET(
     // Parallel: aggregate stats + order history + revenue by fulfillment type
     const [orderStats, orderHistory, fulfillmentBreakdown, todayStats] = await Promise.all([
       db.order.aggregate({
-        where: { vendorId, status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] } },
+        where: { ...IN_MODEL_ORDERS, vendorId, status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] } },
         _count: { id: true },
         _sum: { subtotal: true, vendorPayout: true },
       }),
       db.order.findMany({
-        where: { vendorId, status: { notIn: ['PENDING_PAYMENT'] } },
+        where: { ...IN_MODEL_ORDERS, vendorId, status: { notIn: ['PENDING_PAYMENT'] } },
         orderBy: [{ placedAt: 'desc' }, { id: 'desc' }],
         take: orderTake,
         cursor: orderCursor ? { id: orderCursor } : undefined,
@@ -88,12 +89,13 @@ export async function GET(
       }),
       db.order.groupBy({
         by: ['fulfillmentType'],
-        where: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } },
+        where: { ...IN_MODEL_ORDERS, vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } },
         _count: { id: true },
         _sum: { vendorPayout: true },
       }),
       db.order.aggregate({
         where: {
+          ...IN_MODEL_ORDERS,
           vendorId,
           placedAt: { gte: todayStart },
           status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] },
