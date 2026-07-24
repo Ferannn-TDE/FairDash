@@ -128,6 +128,26 @@ async function main() {
     const confAfter = await prisma.order.findUnique({ where: { id: confGhost.id }, select: { status: true, runnerId: true } })
     assert(confAfter?.status === 'RUNNER_COLLECTED' && confAfter.runnerId === runner.id, 'no resurrection: status/runnerId untouched')
 
+    // ── [5b] THE ORDER LOG — the aggregate that was NOT ghost-aware ───────────────
+    // Third instance of this class: lib/fair-orders had no voidedAt filter, so the admin/
+    // organizer log counted out-of-model rows as live work (measured on the real fair: 92
+    // "active" when 4 were real, 377 total when 152 were). The live twins seeded above are the
+    // positive control — if the filter were over-broad and hid everything, they would vanish too.
+    console.log('\n[5b] the order log excludes ghosts by default, and can opt in')
+    const { getFairOrders } = await import('../lib/fair-orders')
+    const logDefault = await getFairOrders(ev.id, { take: 100 })
+    const logIds = new Set(logDefault.orders.map(o => o.id))
+    assert(logIds.has(feedLive.id), 'POSITIVE CONTROL: the LIVE twin IS in the log (the filter is not hiding everything)')
+    assert(!logIds.has(feedGhost.id), 'the VOIDED twin is absent from the log')
+    assert(logDefault.total === logDefault.orders.length && !logIds.has(collGhost.id),
+      'the total counts only what is listed — ghosts are out of the count, not just the page')
+    const ghostTabs = logDefault.meta.tabCounts
+    const logAll = await getFairOrders(ev.id, { take: 100, includeVoided: true })
+    assert(logAll.total > logDefault.total, 'includeVoided is a real OPT-IN — it returns strictly more')
+    assert(new Set(logAll.orders.map(o => o.id)).has(feedGhost.id), 'the opt-in DOES surface the voided row (an admin can still audit it)')
+    assert((logAll.meta.tabCounts.all ?? 0) > (ghostTabs.all ?? 0),
+      'TAB COUNTS honour the filter too — a badge cannot claim more than the list shows')
+
     // ── [6] SOURCE SHAPE — the paths this guard cannot call directly ──────────────
     console.log('\n[6] source shape: claim guard + shared predicates + named 409 mappings')
     const statusRoute = readFileSync(new URL('../app/api/orders/[id]/status/route.ts', import.meta.url), 'utf8')

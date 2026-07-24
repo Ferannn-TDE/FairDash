@@ -33,6 +33,8 @@ export interface FairOrdersOpts {
   tab?:             string | null
   status?:          string | null
   sort?:            'newest' | 'oldest'
+  /** Opt-IN to out-of-model rows. Default false — see the voidedAt note in the query. */
+  includeVoided?:   boolean
 }
 
 const FULFILLMENT_TYPES = ['BOOTH_PICKUP', 'CURBSIDE', 'HOME_DELIVERY']
@@ -84,8 +86,22 @@ export async function getFairOrders(eventId: string, opts: FairOrdersOpts = {}) 
 
   // Everything EXCEPT the status tab — so the status-tab counts can be computed over the same
   // search/vendor/type/date scope (a tab badge tells you what CLICKING it would show).
+  //
+  // GHOST FILTER — voided orders are OUT OF MODEL and excluded by default.
+  // Measured before this landed: the log showed 92 "active" when 4 were real, 70 "issues" when
+  // 12 were real, and 377 total against 152 real — 225 voided test rows presented as live work,
+  // making the pre-fair picture 25x busier than the fair actually is. Every comparable aggregate
+  // already filters ghosts (lib/fair-vendors.ts, lib/admin-fair-reports.ts, lib/organizer-payout.ts,
+  // lib/runner-completion.ts); this log was the outlier — the same class, third instance.
+  //
+  // includeVoided is an explicit OPT-IN, never a default, deliberately mirroring the money
+  // carve-out's shape (`includeArchived: true` is passed by name on the paths that need it). An
+  // admin auditing WHAT WAS VOIDED is a real need; having ghosts silently inflate every count is
+  // not. Applied to baseWhere so the list, the total, the tab counts and search all agree —
+  // a filter on the list alone would leave the badges lying.
   const baseWhere = {
     eventId,
+    ...(opts.includeVoided ? {} : { voidedAt: null }),
     ...(vendorId ? { vendorId } : {}),
     ...(fulfillmentType ? { fulfillmentType: fulfillmentType as FulfillmentType } : {}),
     ...(dateFrom || dateTo ? {
