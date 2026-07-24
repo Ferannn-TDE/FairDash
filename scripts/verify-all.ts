@@ -90,6 +90,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'runner-stats-source',    file: 'scripts/runner-stats-source-guard.ts' },
   { group: 'correctness', name: 'event-date',            file: 'scripts/event-date-guard.ts' },
   { group: 'correctness', name: 'live-badge',            file: 'scripts/live-badge-guard.ts' },
+  { group: 'boundary',    name: 'preview-bypass',       file: 'scripts/preview-bypass-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
   { group: 'money',       name: 'reverser-pattern-t',     file: 'scripts/reverser-pattern-t-guard.ts' },
   { group: 'money',       name: 'double-pay-guard',       file: 'scripts/test-double-pay-guard.ts' },
