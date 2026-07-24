@@ -93,6 +93,25 @@ assert(/const name = fair\?\.name \?\? null/.test(shellSrc),
 assert(/loaded\s*$|loaded\s*\?/m.test(shellSrc) && /animate-pulse/.test(shellSrc),
   'the header distinguishes loading (skeleton) from loaded-but-unknown — two different states, two different renders')
 
+// ── [F] a <select> whose options arrive late (8th instance) ─────────────────────
+// The vendor filter rendered with only "All vendors" while the vendor list was in flight, then
+// snapped wider when it landed — a narrow dropdown that appears to offer nothing is a
+// plausible-but-wrong intermediate, and the reflow is the visible tell. The existing rules all
+// key on defaulted STATE; none covered "options not fetched yet", so this is a new rule.
+console.log('\n[F] a select with late-arriving options reserves space instead of rendering empty')
+const ordersPage = readFileSync('app/admin/[eventSlug]/orders/page.tsx', 'utf8')
+
+// The anti-pattern: mapping fetched options into a <select> with no loaded-flag guarding it.
+const LOADED_GATE = /vendorsLoaded \?[\s\S]{0,400}<select/
+assert(/const \[vendorsLoaded, setVendorsLoaded\] = useState\(false\)/.test(ordersPage),
+  '[0] positive control: a loaded flag exists and starts FALSE (not-loaded is the initial truth)')
+assert(LOADED_GATE.test(ordersPage),
+  'the vendor select renders only once its options have loaded')
+assert(/animate-pulse/.test(ordersPage) && /w-44 h-\[34px\]/.test(ordersPage),
+  'a skeleton of the SAME footprint holds the space (no reflow when options land)')
+assert(!/<select[\s\S]{0,200}vendorOptions\.map[\s\S]{0,80}<\/select>\s*\n\s*<select/.test(ordersPage),
+  'the two filter selects are not rendered as a bare adjacent pair with unreserved widths')
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

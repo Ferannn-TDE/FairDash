@@ -220,6 +220,10 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([])
+  // Distinguishes "no vendors yet" from "not loaded" — without it the select renders as if the
+  // fair had no vendors, then snaps wider when they arrive (the flicker class: a
+  // plausible-but-wrong intermediate). Width is reserved either way so nothing shifts.
+  const [vendorsLoaded, setVendorsLoaded] = useState(false)
 
   // ── Filter state lives in the URL, and DRIVES THE SERVER QUERY ───────────────
   // Every filter is whole-event: the server searches and filters all orders, not the loaded
@@ -267,7 +271,8 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     fetch(`/api/admin/events/${params.eventSlug}/vendors?take=200`)
       .then(r => r.json())
       .then(json => { if (active && json.success) setVendorOptions(((json.data.vendors ?? []) as VendorOption[]).map(v => ({ id: v.id, name: v.name }))) })
-      .catch(() => { /* dropdown falls back to "All vendors" only */ })
+      .catch(() => { /* dropdown stays at "All vendors"; the loaded flag still flips below */ })
+      .finally(() => { if (active) setVendorsLoaded(true) })
     return () => { active = false }
   }, [params.eventSlug])
 
@@ -388,18 +393,23 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
 
       {/* Vendor + fulfillment filters — server-side, whole-event. */}
       <div className="flex gap-2 flex-wrap mb-5">
-        <select
-          value={vendorFilt}
-          onChange={(e) => setParam({ vendor: e.target.value })}
-          className="bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
-        >
-          <option value="all">All vendors</option>
-          {vendorOptions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-        </select>
+        {vendorsLoaded ? (
+          <select
+            value={vendorFilt}
+            onChange={(e) => setParam({ vendor: e.target.value })}
+            className="w-44 bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
+          >
+            <option value="all">All vendors</option>
+            {vendorOptions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        ) : (
+          // Same footprint as the real control, so the row does not reflow when options land.
+          <div className="w-44 h-[34px] rounded-xl bg-white/5 border border-white/10 animate-pulse" aria-hidden />
+        )}
         <select
           value={fulfilFilt}
           onChange={(e) => setParam({ type: e.target.value })}
-          className="bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
+          className="w-44 bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer"
         >
           <option value="all">All fulfillment</option>
           {Object.entries(FULFILLMENT_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
