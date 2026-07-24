@@ -36,7 +36,11 @@ const END = '2026-08-12T00:00:00.000Z'
 
 // A local-zone format applied to an EVENT date field. Keyed on the field name (startDate /
 // endDate), so an order timestamp formatted locally — which is correct — never trips it.
-const LOCAL_EVENT_FORMAT = /(?:start|end)Date[^\n]*\.toLocaleDateString|new Date\([^)]*(?:start|end)Date[^)]*\)\s*\.toLocale/
+// Keyed on the FIELD NAME (startDate/endDate)… and on the shape that slipped past it: a fair's
+// dates copied into local vars first (`const s = new Date(start)` → `s.toLocaleDateString([])`),
+// which is exactly how app/admin/_components/FairPicker.tsx kept hand-formatting a date range
+// after the sweep. A `[]`-locale toLocaleDateString on a fair range is the tell.
+const LOCAL_EVENT_FORMAT = /(?:start|end)Date[^\n]*\.toLocaleDateString|new Date\([^)]*(?:start|end)Date[^)]*\)\s*\.toLocale|function fmtRange[\s\S]{0,200}toLocaleDateString\(\s*\[\s*\]/
 
 console.log('[0] positive controls')
 assert(LOCAL_EVENT_FORMAT.test("new Date(fair.startDate).toLocaleDateString('en-US', opts)"),
@@ -45,6 +49,8 @@ assert(LOCAL_EVENT_FORMAT.test('return new Date(dateStr).toLocaleDateString(); /
   'flags it through a renamed local variable too')
 assert(!LOCAL_EVENT_FORMAT.test("new Date(order.placedAt).toLocaleDateString([], opts)"),
   'baseline: an INSTANT (order.placedAt) formatted locally is NOT flagged — that is correct behavior')
+assert(LOCAL_EVENT_FORMAT.test("function fmtRange(start: string, end: string) {\n  const s = new Date(start)\n  return `${s.toLocaleDateString([], opts)}`\n}"),
+  'flags a fair range hand-formatted via local vars — the shape that slipped past the field-name rule (FairPicker)')
 
 console.log('\n[1] the rule: zone-fixed, so the calendar day survives the viewer')
 assert(EVENT_DATE_ZONE === 'UTC', 'the carrier zone is explicit (UTC — where the admin form writes)')

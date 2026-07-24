@@ -9,6 +9,7 @@ import {
   organizerRowView,
   type OrganizerApproval,
 } from '@/lib/organizer-admin-view'
+import { formatAuditTimestamp, formatAuditDate } from '@/lib/audit-time'
 
 /**
  * The admin Organizers panel — the surface for two capabilities that were built and proven
@@ -75,7 +76,7 @@ const OPERATING_BADGE = {
 } as const
 
 function fmt(d: string | null) {
-  return d ? new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+  return formatAuditDate(d)
 }
 
 function Badge({ label, cls, Icon }: { label: string; cls: string; Icon: React.ElementType }) {
@@ -270,7 +271,7 @@ export default function OrganizersPanel() {
               {view.operating === 'SUSPENDED' && (
                 <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/[0.06] px-3 py-2">
                   <p className="text-[0.6875rem] uppercase tracking-wide text-red-400/80 font-semibold">
-                    Suspended {o.suspendedAt && `· ${new Date(o.suspendedAt).toLocaleString()}`}
+                    Suspended {o.suspendedAt && `· ${formatAuditTimestamp(o.suspendedAt)}`}
                   </p>
                   <p className="text-xs text-red-400/80 font-inter mt-0.5">
                     {o.suspendedReason || 'No reason recorded.'} — approved, then stopped. Every organizer
