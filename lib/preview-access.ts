@@ -39,3 +39,32 @@ export function isPreviewBypassEnabled(): boolean {
 export function computePreviewAccess(input: { flagEnabled: boolean; isAdmin: boolean }): boolean {
   return input.flagEnabled === true && input.isAdmin === true
 }
+
+/**
+ * The live decision, server-side, NON-THROWING — the one function every caller uses.
+ *
+ * Two callers now share it: the /api/preview-access probe the storefront asks, and the ORDER
+ * WRITE PATH (POST /api/orders), which must refuse an order for a fair that isn't open unless
+ * the same preview conditions hold. They must never drift into two answers — that split is
+ * exactly what this codebase's through-line class is about, and on the order path the cost is
+ * a real charge for a fair that hasn't opened.
+ *
+ * Returns false (never throws) for a signed-out or non-admin caller: refusal is the ordinary
+ * path here, not an error.
+ */
+export async function hasPreviewAccess(): Promise<boolean> {
+  const flagEnabled = isPreviewBypassEnabled()
+  // Short-circuit before touching auth: with the flag off, no session can grant access, and an
+  // anonymous storefront request shouldn't pay for a Clerk lookup to be told no.
+  if (!flagEnabled) return false
+
+  let isAdmin = false
+  try {
+    const { requireStrictAdminAuth } = await import('./auth')
+    await requireStrictAdminAuth()
+    isAdmin = true
+  } catch {
+    isAdmin = false
+  }
+  return computePreviewAccess({ flagEnabled, isAdmin })
+}

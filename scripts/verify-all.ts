@@ -92,6 +92,7 @@ const SUITES: Suite[] = [
   { group: 'money',       name: 'audit-time',            file: 'scripts/audit-time-guard.ts' },
   { group: 'correctness', name: 'live-badge',            file: 'scripts/live-badge-guard.ts' },
   { group: 'boundary',    name: 'preview-bypass',       file: 'scripts/preview-bypass-guard.ts' },
+  { group: 'boundary',    name: 'fair-open-gate',      file: 'scripts/fair-open-gate-guard.ts' },
   { group: 'money',       name: 'accrual-exclusion',      file: 'scripts/accrual-exclusion-guard.ts' },
   { group: 'money',       name: 'reverser-pattern-t',     file: 'scripts/reverser-pattern-t-guard.ts' },
   { group: 'money',       name: 'double-pay-guard',       file: 'scripts/test-double-pay-guard.ts' },

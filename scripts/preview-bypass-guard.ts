@@ -55,9 +55,18 @@ assert(!/ALLOW_PREVIEW_BYPASS\s*!==\s*'false'|\?\?\s*true/.test(lib), 'no defaul
 console.log('\n[2] the decision is server-side and unflippable from a bundle')
 assert(!/NEXT_PUBLIC_/.test(lib) && !/NEXT_PUBLIC_/.test(route),
   'the flag is NOT NEXT_PUBLIC_ — it cannot be set in client code')
-assert(/requireStrictAdminAuth|requireAdminAuth/.test(route), 'the API runs a real admin check per request')
-assert(/computePreviewAccess\(/.test(route), 'the API ANDs both conditions through the shared pure decision')
-assert(!/computePreviewAccess\(/.test(page), 'the client never computes access itself — it consumes the server boolean')
+// Assert the FLOW, not which file holds a string: the decision lives in one function, that
+// function does the admin check and ANDs via the pure core, and every caller routes through it.
+// (These previously keyed on the API route file and broke the moment the decision was shared
+// with the order path — a guard matching locations is defeated by moving the code.)
+assert(/export async function hasPreviewAccess/.test(lib), 'ONE server-side decision function exists')
+assert(/requireStrictAdminAuth/.test(lib), 'the decision runs a real admin check per request')
+assert(/computePreviewAccess\(/.test(lib), 'the decision ANDs both conditions through the pure core')
+assert(/hasPreviewAccess\(\)/.test(route), 'the storefront probe routes through the shared decision')
+assert(!/requireStrictAdminAuth/.test(route) && !/computePreviewAccess\(/.test(route),
+  'the probe does NOT reimplement the decision (one copy, not two)')
+assert(!/computePreviewAccess\(/.test(page) && !/ALLOW_PREVIEW_BYPASS/.test(page),
+  'the client never computes access itself — it consumes the server boolean')
 
 console.log('\n[3] access only: no display surface consults the bypass')
 // The badge must key on liveState alone. If `previewing` appeared in the badge expression, a
