@@ -1,11 +1,11 @@
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireStrictAdminAuth } from '@/lib/auth'
-import { isPreviewBypassEnabled, computePreviewAccess } from '@/lib/preview-access'
+import { isPreviewBypassEnabled, hasPreviewAccess } from '@/lib/preview-access'
 
 // GET /api/preview-access
 //
-// The ONE place the preview bypass is decided. Both conditions run HERE, server-side:
+// The storefront's capability probe. The decision itself lives in lib/preview-access
+// (hasPreviewAccess), shared with the ORDER WRITE PATH. Both conditions run server-side:
 // the ALLOW_PREVIEW_BYPASS env flag (never NEXT_PUBLIC_, so it can't be flipped in a bundle)
 // AND a live strict-admin session, re-checked per request via currentUser() inside
 // requireStrictAdminAuth — so a signed-out visitor, or a demoted admin, is refused even if the
@@ -16,18 +16,13 @@ import { isPreviewBypassEnabled, computePreviewAccess } from '@/lib/preview-acce
 // error. Nothing about the fair is disclosed either way.
 export async function GET() {
   try {
+    // The SAME decision the order write path calls — one function, so the storefront probe and
+    // the server-side order gate can never disagree about who may preview a closed fair.
+    const allowed = await hasPreviewAccess()
     const flagEnabled = isPreviewBypassEnabled()
 
-    let isAdmin = false
-    try {
-      await requireStrictAdminAuth()
-      isAdmin = true
-    } catch {
-      isAdmin = false // signed out, or not an admin — the ordinary path
-    }
-
     return success({
-      allowed: computePreviewAccess({ flagEnabled, isAdmin }),
+      allowed,
       // Surfaced so a previewing admin's banner can explain WHY they are inside a closed fair.
       // Never enough on its own: `allowed` is the only field that grants anything.
       flagEnabled,

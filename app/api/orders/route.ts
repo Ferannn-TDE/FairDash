@@ -7,6 +7,8 @@ import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
 import { validateDeliveryAddress } from '@/lib/delivery-address'
+import { deriveEventLiveState, formatEventDateRange } from '@/lib/event-date'
+import { hasPreviewAccess } from '@/lib/preview-access'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -168,6 +170,34 @@ export async function POST(req: NextRequest) {
 
     if (event.status !== EventStatus.ACTIVE) {
       throw new ApiError('This event is not currently active', 409, 'EVENT_INACTIVE')
+    }
+
+    // ── The fair must be OPEN, not merely ENABLED ────────────────────────────────
+    // Event.status is the organizer's enablement flag; it says nothing about whether the fair
+    // is happening today. Until now this route accepted an order for an ACTIVE fair starting
+    // in twelve days — while the storefront said "Upcoming". Two answers to "is the fair
+    // open", and the API's answer was the one that took money.
+    //
+    // Both must hold: enabled (above) AND inside the run (here), from the SAME
+    // deriveEventLiveState the badges and the storefront gate use — one derivation, not a
+    // second date comparison that can drift from it.
+    const liveState = deriveEventLiveState(event.startDate, event.endDate)
+    if (liveState !== 'live') {
+      // The preview bypass, honoured SERVER-SIDE through the same two-condition decision as the
+      // storefront (env flag + strict-admin session) — so testing still works before Aug 5 and
+      // nothing else gets through. Checked only when the fair is closed, so the ordinary
+      // customer path costs no auth lookup.
+      const previewing = await hasPreviewAccess()
+      if (!previewing) {
+        const runs = formatEventDateRange(event.startDate, event.endDate)
+        throw new ApiError(
+          liveState === 'upcoming'
+            ? `${event.name} isn't open for orders yet — it runs ${runs}.`
+            : `${event.name} has ended — it ran ${runs}.`,
+          409,
+          'FAIR_NOT_OPEN',
+        )
+      }
     }
 
     if (event.isPaused) {

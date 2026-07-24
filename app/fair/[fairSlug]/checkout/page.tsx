@@ -437,7 +437,18 @@ export default function CheckoutPage() {
 
       const json = await res.json()
       if (!json.success) {
-        toast.error('Failed to create order — please try again')
+        // Surface the SERVER'S OWN sentence. A generic "failed to create order" hides the one
+        // thing the customer can act on — that the fair isn't open yet (FAIR_NOT_OPEN names the
+        // dates), or which address field is missing. Field-named address errors attach to their
+        // inputs via the shared validator's field map; everything else becomes a readable toast.
+        const message: string | undefined = json.error?.message
+        const fields = (json.error?.details as { fields?: DeliveryAddressError[] } | undefined)?.fields
+        if (fields?.length) {
+          setFieldErrors(Object.fromEntries(fields.map(e => [FIELD_INPUT[e.field], e.message])))
+          toast.error(message ?? 'Please check the delivery address')
+          return
+        }
+        toast.error(message ?? 'Failed to create order — please try again')
         return
       }
 
