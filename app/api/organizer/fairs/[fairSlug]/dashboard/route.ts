@@ -6,23 +6,24 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { OrderStatus } from '@prisma/client'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 const LIVE_STATUSES: OrderStatus[] = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY']
 
 async function getEventStats(eventId: string, todayStart: Date) {
   const [todayOrders, liveOrders, revenueAgg, feeAgg] = await Promise.all([
     db.order.count({
-      where: { eventId, placedAt: { gte: todayStart } },
+      where: { ...IN_MODEL_ORDERS, eventId, placedAt: { gte: todayStart } },
     }),
     db.order.count({
-      where: { eventId, status: { in: LIVE_STATUSES } },
+      where: { ...IN_MODEL_ORDERS, eventId, status: { in: LIVE_STATUSES } },
     }),
     db.order.aggregate({
-      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      where: { ...IN_MODEL_ORDERS, eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
       _sum: { total: true },
     }),
     db.order.aggregate({
-      where: { eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
+      where: { ...IN_MODEL_ORDERS, eventId, placedAt: { gte: todayStart }, status: { not: OrderStatus.CANCELLED } },
       _sum: { fairSynqFee: true },
     }),
   ])
@@ -79,6 +80,7 @@ export async function GET(
     const vendorOrderGroups = await db.order.groupBy({
       by: ['vendorId'],
       where: {
+        ...IN_MODEL_ORDERS,
         eventId: event.id,
         placedAt: { gte: todayStart },
         status: { notIn: ['PENDING_PAYMENT', 'CANCELLED'] },
@@ -125,7 +127,7 @@ export async function GET(
 
     // Recent orders (last 10, all vendors)
     const recentOrders = await db.order.findMany({
-      where: { eventId: event.id, status: { notIn: ['PENDING_PAYMENT'] } },
+      where: { ...IN_MODEL_ORDERS, eventId: event.id, status: { notIn: ['PENDING_PAYMENT'] } },
       orderBy: [{ placedAt: 'desc' }, { id: 'desc' }],
       take: 10,
       select: {

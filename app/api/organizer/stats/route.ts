@@ -5,6 +5,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 async function computeOrganizerStats(organizerId: string) {
   const events = await db.event.findMany({
@@ -22,7 +23,7 @@ async function computeOrganizerStats(organizerId: string) {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
-  const baseWhere = {
+  const baseWhere = { ...IN_MODEL_ORDERS,
     eventId: { in: eventIds },
     status: { notIn: ['PENDING_PAYMENT' as const] },
   }
