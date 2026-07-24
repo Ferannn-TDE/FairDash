@@ -4,19 +4,20 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: `main @ 2ec51d1` (deployed: `b45c230`), 2026-07-23 after the organizer-ghost batch. Numbers below were measured against the live DB on the session that wrote them
+> Snapshot taken: `main @ 7f8e10e` (deployed: `b45c230`), 2026-07-23 after the vendor-ghost batch. Numbers below were measured against the live DB on the session that wrote them
 > unless marked otherwise.
 
 ---
 
 ## Git / deploy reality
 
-- **`main` head: `2ec51d1`** — the organizer-ghost batch.
+- **`main` head: `7f8e10e`** — the vendor-ghost batch.
 - **Deployed: `5741008`** — fingerprint-confirmed (`/api/health` → `commit: 5741008`,
   `flags: { enforceVendorReadiness: false }`). **The order-id / live-badge / order-log batch IS
   live**, including the checkout address fix — home-delivery checkout is no longer broken in prod.
   The absent `previewBypass` flag confirms this batch is not deployed yet.
-- **Unpushed: 1 commit** (`2ec51d1`, the organizer ghost filter). Everything before it is
+- **Unpushed: 3 commits** (`2ec51d1` organizer ghost filter, `7f8e10e` vendor ghost filter +
+  scanner exclusions, + this docs commit). Everything before it is
   **pushed and DEPLOYED** — prod serves `b45c230`, confirmed by `/api/health` now carrying
   `flags.previewBypass`. 13 days to the fair (Aug 5).
 
@@ -147,6 +148,40 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
   separate reviewed change. `scripts/screens-data-check.ts` keeps its select until the drop.
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
+
+### Shipped 2026-07-23 — vendor ghost filter + the scanner's own hazard
+
+Vendor-facing money (analytics / revenue / stats) counted struck orders as sales, and it
+**reaches the vendors with real volume**, not just the $0 ones:
+
+| Vendor | Shown | Real | Inflated |
+|---|---|---|---|
+| RANDY'S HOUSE OF BBQ | $2,229 | $1,460 | **-$769 (34%)** — 108 line items → 54 |
+| ALL PRO TEES | $2,570 | $2,270 | **-$300** — 53 → 46 |
+| Feran Eats | $0 | $0 | none (no completed items) |
+
+These are `orderItem` aggregates, so the fragment goes on the PARENT
+(`order: { ...IN_MODEL_ORDERS, … }`) merged INSIDE the existing constraint — spreading it as a
+sibling would have silently overwritten the status clause. 10 queries across 3 files.
+
+**🔒 The scanner's own hazard is now closed.** Four queries MUST NOT carry the filter, and that
+was previously invisible — so the obvious "fix" the next time one surfaced a failure was to add
+it, which on the Stripe webhook means a payment for a later-voided order never reconciles. They
+are now an explicit `MUST_NOT_FILTER` set with reasons inline, **asserted to stay unfiltered**:
+`webhooks/stripe`, `process-chargeback`, `resolve-order`, `runners/me/location`.
+
+The scanner now also covers `db.orderItem` — and caught a **second** query a careful manual pass
+had missed (the active-orders count in vendor stats). Twice in two batches.
+
+### 🟡 Ghost class — the remainder, with recommendations
+
+- **`orders/history` + `orders/recent` (customer's own orders).** I do NOT recommend the filter
+  here as-is. A voided order the customer actually **paid for** should not silently vanish from
+  their history — that looks like the order never existed. The right behavior is probably: show
+  it, marked cancelled/voided, with any refund state — i.e. a DISPLAY decision, not a filter.
+  If a voided order has no charge, hiding it is fine. **Needs a product call, not a one-liner.**
+- **`organizer/fairs`** (per-fair order count) — same class, low stakes, one clause. Safe to fix.
+- **Correctly unfiltered, now guard-enforced:** the four in `MUST_NOT_FILTER` above.
 
 ### Shipped 2026-07-23 — organizer ghost filter (the number a customer reads)
 
