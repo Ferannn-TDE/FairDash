@@ -4,22 +4,33 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: `main @ c41e8b0` (deployed: `5741008`), 2026-07-23 after the preview-bypass /
-> money-page batch. Numbers below were measured against the live DB on the session that wrote them
+> Snapshot taken: `main @ 11d0169` (deployed: `5741008`), 2026-07-23 after the fair-open-gate /
+> voided-filter batch. Numbers below were measured against the live DB on the session that wrote them
 > unless marked otherwise.
 
 ---
 
 ## Git / deploy reality
 
-- **`main` head: `76c467c`** — the preview-bypass / money-page batch.
+- **`main` head: `11d0169`** — the fair-open-gate / voided-filter batch.
 - **Deployed: `5741008`** — fingerprint-confirmed (`/api/health` → `commit: 5741008`,
   `flags: { enforceVendorReadiness: false }`). **The order-id / live-badge / order-log batch IS
   live**, including the checkout address fix — home-delivery checkout is no longer broken in prod.
   The absent `previewBypass` flag confirms this batch is not deployed yet.
-- **Unpushed: 6 local commits** — `34b305c` (PROJECT_INVARIANTS, committed by the human) plus this
-  batch: `799bd2d` preview bypass, `77926df` audit timestamps, `5942be6` dropdown flicker,
-  `c41e8b0` money page, `76c467c` docs. 13 days to the fair (Aug 5).
+- **Unpushed: 8 local commits** — `34b305c` (PROJECT_INVARIANTS), the preview/money batch
+  (`799bd2d`, `77926df`, `5942be6`, `c41e8b0`, `76c467c`), and this one: `87776b0` server
+  fair-open gate, `11d0169` voided-order filter. **PUSH IS THE NEXT ACTION** — see the prod
+  section below. 13 days to the fair (Aug 5).
+
+### 🔴 What the DEPLOYED build (`5741008`) still does wrong
+
+Everything below is FIXED locally and NOT live. Until the push, prod:
+- accepts orders for a fair that opens Aug 5 (the server gate is in `87776b0`, unpushed) —
+  **this is the one that takes money**;
+- shows the order log inflated ~25× by voided rows (`11d0169`, unpushed);
+- has no preview bypass, so the storefront entry page is closed to testers too.
+Already live and correct as of `5741008`: the dates render right, "Live Now" derives from
+dates, checkout accepts manual addresses, and cancel resolves short codes.
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -140,6 +151,42 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
   separate reviewed change. `scripts/screens-data-check.ts` keeps its select until the drop.
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
+
+### Shipped 2026-07-23 — fair-open gate / voided filter
+
+- **The server now refuses orders for a fair that isn't open** (`87776b0`). `POST /api/orders`
+  gated on `Event.status` (enablement) and never on dates, so the API accepted orders — and
+  created PaymentIntents — for a fair twelve days out while the UI said "Upcoming". The gate was
+  cosmetic: only the entry page checked dates, so a direct URL always went through. Now BOTH must
+  hold (ACTIVE **and** inside the run), from the SAME `deriveEventLiveState`; refusal is a named
+  **409 `FAIR_NOT_OPEN`** carrying the dates, and checkout shows the server's sentence instead of
+  a bare "failed to create order". The preview bypass is honoured server-side via a single
+  non-throwing `hasPreviewAccess()` shared with the storefront probe.
+  **Deliberately NOT gated: the settle paths** (payout/refund/tip-refund/reconciler) — an order
+  placed during a fair must still pay out after it ends; gating those would strand money. The
+  guard asserts that non-over-reach explicitly. `fair-open-gate-guard` (16).
+- **Order log excludes voided orders** (`11d0169`) — ghost class, third instance. 92 active → **4**,
+  70 issues → **12**, 377 total → **152**. Filter lives in `baseWhere` so list, total, tab counts
+  and search agree; `includeVoided` is an explicit opt-in mirroring the money carve-out's shape.
+  Extended the ghost-guard family behaviorally (its live/ghost twins were already seeded).
+- Gate: **ALL 63 SUITES PASS**.
+
+### 🟠 Reported, not fixed — the same ghost hole on organizer surfaces
+
+`organizer/fairs/[fairSlug]/dashboard`, `analytics`, `analytics/revenue`, `stats`,
+`organizer/orders`, `organizer/vendors` have **zero** `voidedAt` filters. It is money-visible
+there: completed orders **215 vs 136** real, revenue **$10,222.38 vs $8,810.38** real — a
+**~$1,412 overstatement on the organizer's own dashboard**. Same one-clause fix; wants its own
+commit and guard extension.
+
+### Correction to last batch's dry-run reading
+
+The sweep came back all-zeros because the **24h lookback excluded every stale order** (oldest
+Jun 11) — that is "the patterns won't SEE this data", **not** "the patterns are safe on it".
+The narrower, genuine reassurance: Pattern V is unwindowed and has **0** candidates, and Pattern
+E / the backstop / Pattern T are env-gated **off**. Nobody should later read "all zeros" as
+evidence the sweep was exercised. **Re-run the dry-run after the Redis migration, before the
+worker is allowed to act.**
 
 ### Shipped 2026-07-23 — preview bypass / money page / locale batch
 
