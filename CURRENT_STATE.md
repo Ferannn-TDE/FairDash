@@ -4,27 +4,22 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: `main @ 216e8ba` (deployed: `8180b69`), 2026-07-23 after the order-id / live-badge
-> / order-log batch. Numbers below were measured against the live DB on the session that wrote them
+> Snapshot taken: `main @ c41e8b0` (deployed: `5741008`), 2026-07-23 after the preview-bypass /
+> money-page batch. Numbers below were measured against the live DB on the session that wrote them
 > unless marked otherwise.
 
 ---
 
 ## Git / deploy reality
 
-- **`main` head: `b694b1e`** — "Merge: walkthrough batch 2 — address, Ready-lane, delivered timeline,
-  runner stats (4a–4d)".
-- **Deployed: `8180b69`** — fingerprint-confirmed 2026-07-23 (`/api/health` → `"commit":
-  "8180b699…"`). The human pushed the CURRENT_STATE regeneration + the whole admin runner-stats
-  batch since the last snapshot; **prod now has custody-derived runner stats, the floor, and the
-  ghost fix.** Note the local `origin/main` ref still reads `b694b1e` — this shell cannot fetch
-  (no SSH key), so the served fingerprint is the authority, not the ref.
-- **Unpushed: 22 local commits** — walkthrough batch 3, the checkout address fix, the
-  dates/admin-surfaces batch, and this order-id/live-badge/order-log batch (`3d7d2be` resolveOrder,
-  `8ff5deb` order-log server search, `e04074b` live-badge from dates, `0548fc2` health flag,
-  `216e8ba` vendor-portal live-state, + docs). **The checkout fix (`7f6ea31`) is still the urgent
-  one: home-delivery checkout is broken in the deployed build** until these ship. 13 days to the
-  fair (Aug 5). Prod `/api/health` shows no `flags` field, confirming none of these 22 are live.
+- **`main` head: `76c467c`** — the preview-bypass / money-page batch.
+- **Deployed: `5741008`** — fingerprint-confirmed (`/api/health` → `commit: 5741008`,
+  `flags: { enforceVendorReadiness: false }`). **The order-id / live-badge / order-log batch IS
+  live**, including the checkout address fix — home-delivery checkout is no longer broken in prod.
+  The absent `previewBypass` flag confirms this batch is not deployed yet.
+- **Unpushed: 6 local commits** — `34b305c` (PROJECT_INVARIANTS, committed by the human) plus this
+  batch: `799bd2d` preview bypass, `77926df` audit timestamps, `5942be6` dropdown flicker,
+  `c41e8b0` money page, `76c467c` docs. 13 days to the fair (Aug 5).
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -145,6 +140,78 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
   separate reviewed change. `scripts/screens-data-check.ts` keeps its select until the drop.
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
+
+### Shipped 2026-07-23 — preview bypass / money page / locale batch
+
+- **Admin preview bypass** (`799bd2d`). ANALYSIS CORRECTED THE PREMISE: the date gate is ONE
+  client chokepoint (`app/fair/[fairSlug]/page.tsx`), not several — `/menu`, `/vendors`, `/cart`,
+  `/checkout`, `/browse` have NO live-state check, and **ordering isn't gated on dates at all**
+  (`app/api/orders/route.ts:169` gates on `Event.status`, which is ACTIVE). The storefront was
+  reachable by direct URL; only the entry point was blocked. So the bypass is a **UI unlock, not
+  an authorization change**. Requires BOTH `ALLOW_PREVIEW_BYPASS` (server-only, default OFF) AND a
+  strict-admin session, ANDed server-side at `/api/preview-access`. Wording untouched — the badge
+  still reads "Upcoming" (the hardcoded "Live Now" now derives from liveState); an amber banner
+  says the fair is not live and **orders placed here are REAL**. `flags.previewBypass` in
+  `/api/health`. `preview-bypass-guard` (17). **Removal: 2026-08-05 — `grep -ri preview`.**
+- **Money/audit timestamps** (`77926df`). `19/07/2026, 12:21:50` was a bare `toLocaleString()` —
+  DD/MM/YYYY for any non-US browser, a reconciliation hazard on a money surface. `lib/audit-time.ts`
+  now formats INSTANTS with an explicit locale and a **named zone** ("Jul 19, 2026, 12:21:50 PM
+  CDT"). Kept deliberately separate from `lib/event-date` (calendar dates) — neither imports the
+  other, asserted. **Also found a second instance of last batch's calendar-date bug**:
+  `FairPicker.tsx` hand-formatted a fair range with a `[]` locale; the event-date guard's rule
+  keyed on field names and missed the local-var shape — fixed, and the rule extended.
+  `audit-time-guard` (17).
+- **Money page** (`c41e8b0`). Platform-wide balances are now a visually separate band with a
+  "Platform-wide · all fairs" chip and an explicit "this fair only" divider — the scope confusion
+  was the highest-stakes issue on the page. Section nav (Vendors/Runners/Organizer/Audit).
+  **The audit trail WAS capped at 50 with 161 rows — 111 invisible**; it now has server-side
+  filters, search, real total, day grouping and "Load older" via a NEW dedicated endpoint, so no
+  money derivation was touched. Hold/Release/Cancel/Freeze unchanged. **c1's money-route tripwire
+  fired on the new route (correctly)** — replaced the bare count with a named closed set.
+- **Vendor-filter dropdown flicker** (`5942be6`) — reserved width + skeleton; flicker rule [F]
+  added (existing rules covered defaulted state, not late-arriving options).
+- Gate: **ALL 62 SUITES PASS**.
+
+### 🔴 Reported this batch — the order log counts VOIDED orders
+
+`lib/fair-orders.ts` has **no `voidedAt` filter**, so the admin/organizer order log counts
+out-of-model ghosts as live work:
+
+| Shown | Real (non-voided) | Voided |
+|---|---|---|
+| 92 active | **4** | 88 |
+| 70 issues | **12** | 58 |
+| 377 total | **152** | 225 |
+
+Every comparable aggregate filters ghosts (`fair-vendors`, `admin-fair-reports`,
+`organizer-payout`, `runner-completion`). This one doesn't — the same ghost class, on the
+operational surface. **Not fixed** (outside this batch's scope); it is a one-clause change plus a
+guard, and it makes the pre-fair picture look 25× busier than it is.
+
+### Reported this batch — what the first sweep would do
+
+Ran `scripts/run-reconcile.ts` (dry-run is the DEFAULT; every pattern short-circuits before any
+write) — **it works WITHOUT Redis**, 5.2s, against the live DB:
+
+- **Nothing would move money.** `repaired` A–T all **0** except `Q=1` (the per-event summary line,
+  not a repair). One alert: Pattern K — 3 open dispute debts totalling **$101.96**, chase-only,
+  explicitly no auto-deduct.
+- **`scanned` was all zeros**, because the DB lookback is **24h** (`DEFAULTS.windowHours`) and
+  every stale order predates it (oldest active: 2026-06-11). Patterns B/C/E/S are windowed →
+  they'd see none of them.
+- **Pattern V (strand clocks) is NOT windowed**, but keys on `RUNNER_COLLECTED`/`strandedAt` →
+  **0 candidates**, and it only ever FLAGS.
+- **Pattern E (accept timeout), the backstop, and Pattern T are all env-gated OFF** by default —
+  none is set locally, so they don't act even when the worker returns.
+- **Conclusion:** the 92 "active" orders are not a landmine — 88 are voided, the 4 real ones are
+  outside every window, and no pattern would touch them. The dry-run should still be re-run
+  immediately after the Redis migration, before the worker is allowed to act.
+- **Bulk-archiving the stale test orders:** 225 are ALREADY voided, which is the existing
+  out-of-model marker and the mechanism the ghost class is built around — so the honest cleanup is
+  to void the remaining stale ones rather than delete anything. Voiding touches: the order log
+  counts (once the filter above lands), custody/runner surfaces (already ghost-aware), accrual
+  (`process-refund` refuses voided orders), and Pattern V candidacy. **Recommended, not executed**
+  — and it should follow the `voidedAt` filter fix, not precede it.
 
 ### Shipped 2026-07-23 — order-id / live-badge / order-log batch
 
