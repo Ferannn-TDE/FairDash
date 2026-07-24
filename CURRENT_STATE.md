@@ -4,33 +4,29 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot taken: `main @ 11d0169` (deployed: `5741008`), 2026-07-23 after the fair-open-gate /
-> voided-filter batch. Numbers below were measured against the live DB on the session that wrote them
+> Snapshot taken: `main @ 2ec51d1` (deployed: `b45c230`), 2026-07-23 after the organizer-ghost batch. Numbers below were measured against the live DB on the session that wrote them
 > unless marked otherwise.
 
 ---
 
 ## Git / deploy reality
 
-- **`main` head: `11d0169`** — the fair-open-gate / voided-filter batch.
+- **`main` head: `2ec51d1`** — the organizer-ghost batch.
 - **Deployed: `5741008`** — fingerprint-confirmed (`/api/health` → `commit: 5741008`,
   `flags: { enforceVendorReadiness: false }`). **The order-id / live-badge / order-log batch IS
   live**, including the checkout address fix — home-delivery checkout is no longer broken in prod.
   The absent `previewBypass` flag confirms this batch is not deployed yet.
-- **Unpushed: 8 local commits** — `34b305c` (PROJECT_INVARIANTS), the preview/money batch
-  (`799bd2d`, `77926df`, `5942be6`, `c41e8b0`, `76c467c`), and this one: `87776b0` server
-  fair-open gate, `11d0169` voided-order filter. **PUSH IS THE NEXT ACTION** — see the prod
-  section below. 13 days to the fair (Aug 5).
+- **Unpushed: 1 commit** (`2ec51d1`, the organizer ghost filter). Everything before it is
+  **pushed and DEPLOYED** — prod serves `b45c230`, confirmed by `/api/health` now carrying
+  `flags.previewBypass`. 13 days to the fair (Aug 5).
 
-### 🔴 What the DEPLOYED build (`5741008`) still does wrong
+### ✅ Prod is now correct on everything previously flagged
 
-Everything below is FIXED locally and NOT live. Until the push, prod:
-- accepts orders for a fair that opens Aug 5 (the server gate is in `87776b0`, unpushed) —
-  **this is the one that takes money**;
-- shows the order log inflated ~25× by voided rows (`11d0169`, unpushed);
-- has no preview bypass, so the storefront entry page is closed to testers too.
-Already live and correct as of `5741008`: the dates render right, "Live Now" derives from
-dates, checkout accepts manual addresses, and cancel resolves short codes.
+The deployed `b45c230` **refuses orders for the not-yet-open fair** (the one that took money),
+excludes voided rows from the order log, renders the dates right, derives "Live Now" from dates,
+accepts manually-entered checkout addresses, and resolves short codes on cancel. The red block
+that stood here is closed. Still true: `redis: unreachable`, worker down (see Infra).
+
 - **Caveat (unchanged): this shell has no SSH key** — `git ls-remote` fails with `Permission denied
   (publickey)`, so branch-level origin state is inferred from local remote-tracking refs. The head
   claim above does not rest on that inference: the served `/api/health` fingerprint is direct
@@ -151,6 +147,48 @@ The dead-counter residual found during the regeneration sweep is FIXED, four com
   separate reviewed change. `scripts/screens-data-check.ts` keeps its select until the drop.
 - Gate: **ALL 56 SUITES PASS** (55 → 56; new: `runner-stats-source`; new `runner` area in
   `AREA_SUITES`).
+
+### Shipped 2026-07-23 — organizer ghost filter (the number a customer reads)
+
+The organizer's own dashboard was counting deleted test orders as takings — **~30% of headline
+revenue**. Before → after, measured live:
+
+| Surface | Before | After |
+|---|---|---|
+| revenue | **$12,748.13** | **$8,946.35** |
+| completed orders | 215 | 136 |
+| live orders | 92 | 4 |
+| orders today / total | 377 | 152 |
+| orders list (paid) | 307 | 140 |
+
+- **One fragment, not 22 literals.** The six named surfaces share NO query helper (22 separate
+  `db.order` calls), so `lib/order-scope.ts` exports `IN_MODEL_ORDERS` and every aggregate spreads
+  it. `organizer/stats` already had a `baseWhere`, so its three queries were fixed at one point.
+- **A seventh surface** turned up in the sweep: `organizer/vendors/[id]` sums `vendorPayout` and
+  was unfiltered. Fixed — leaving it would have made vendor detail contradict the dashboard.
+- **No opt-in here** (unlike the admin log's `includeVoided`): an organizer never needs revenue
+  including struck orders. That opt-in stays an admin capability.
+- **Guard is a SCANNER** (`organizer-ghost-guard`, 22, money group): brace-matches every
+  `db.order` aggregate in those files and requires the fragment in its own where block, so a
+  *newly added* query fails by default. It caught a multi-line `groupBy` my own edit pass missed.
+- Gate: **ALL 64 SUITES PASS**.
+
+### 🟠 Ghost class — what is still unfiltered (swept repo-wide)
+
+Closed: all organizer surfaces, the order log, runner completion, fair-vendors, admin reports,
+admin dashboard/money/revenue, reconciler, vendor order history, `/vendors/[id]/orders/active`
+(via `vendorOrderScope`).
+
+**Still unfiltered, by category:**
+- **Vendor-facing money — same class, not yet fixed:** `vendors/[id]/analytics`,
+  `vendors/[id]/revenue`, `vendors/[id]/stats`. A vendor's own revenue figures are inflated the
+  same way the organizer's were. **Recommended next.**
+- **Customer-facing:** `orders/history`, `orders/recent` — a customer would see their own voided
+  order. Low stakes, still wrong.
+- **Organizer fair list:** `organizer/fairs` (per-fair order count).
+- **Correctly unfiltered, do NOT "fix":** `webhooks/stripe` (must find any order to reconcile a
+  payment), `process-chargeback` (settlement must handle voided), `resolve-order` (resolves by id;
+  the caller decides), `runners/me/location`.
 
 ### Shipped 2026-07-23 — fair-open gate / voided filter
 
