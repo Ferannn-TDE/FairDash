@@ -180,8 +180,13 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 4. **Live-mode Stripe verification** (webhooks, real transfers). Not started.
 5. **The books** (re-measured): `refund_reversal` **46 events / $975.40** open, unclassified;
    `dispute_clawback` **3 / $101.96** open (Pattern K alerts; chase, no auto-deduct);
-   `payoutStatus=FAILED` **0**; legacy never-paid obligation **~$135.78** *(prior session, not
-   re-measured)*.
+   legacy never-paid obligation **~$135.78** *(prior session, not re-measured)*.
+   **`payoutStatus=FAILED` is `0`, and that is a VACUOUS ZERO — not "no payout failed".** The
+   worker is OFF and the runner/organizer legs have never executed, so no payout job has ever
+   reached the failed handler that would write a marker; the marking machinery has never run
+   (`docs/reports/failed-marker-taxonomy.md` §1.3). Read it with the dry-run discipline: a `0`
+   from a path that never executed is not evidence. (The marker machinery itself works — but has
+   three gaps to fix before the worker is trusted; see the report.)
 6. **`ENFORCE_VENDOR_READINESS` divergence** — `true` locally, `false` in prod, so the public site
    lists 17 vendors when **2** are transactable. Which number a customer should see: **2**.
    Flipping it is a business decision; the divergence is now visible in `/api/health.flags`.
