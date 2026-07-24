@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { runHealthChecks } from '@/lib/health'
 import { isVendorReadinessEnforced } from '@/lib/vendor-readiness'
+import { isPreviewBypassEnabled } from '@/lib/preview-access'
 
 // GET /api/health — real measurements, not stubs. Returns 200 when healthy, 503 when degraded,
 // so an external dead-man's-switch monitor can watch it directly. The `commit` field remains the
@@ -28,6 +29,11 @@ export async function GET() {
       // environment now shows whether they agree.
       flags: {
         enforceVendorReadiness: isVendorReadinessEnforced(),
+        // Temporary preview scaffolding (removed when the fair opens). Surfaced for the same
+        // reason as the line above: a flag that changes who can reach a storefront must never
+        // drift silently between environments. NOTE this is the FLAG only — access also
+        // requires an admin session, which this endpoint does not and cannot report.
+        previewBypass: isPreviewBypassEnabled(),
       },
     },
     { status: health.status === 'ok' ? 200 : 503 },

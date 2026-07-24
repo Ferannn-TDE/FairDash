@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
   MapPinIcon,
@@ -15,6 +15,38 @@ import { SignedIn } from '@clerk/clerk-react'
 import { useFair } from '../../_contexts/FairContext'
 import FoodCard from '@/components/ui/FoodCard'
 import { formatEventDate, deriveEventLiveState } from '@/lib/event-date'
+
+/**
+ * PREVIEW BYPASS (temporary — remove when the fair opens 2026-08-05; see lib/preview-access).
+ * Asks the server whether THIS visitor may preview a not-yet-live fair. Both conditions (env
+ * flag + strict-admin session) are evaluated server-side; the client only consumes the boolean
+ * and cannot assemble one. `null` while in flight — treated as "no", so a closed fair never
+ * flashes its storefront before the answer arrives (the flicker class).
+ */
+function usePreviewAccess(): boolean | null {
+  const [allowed, setAllowed] = useState<boolean | null>(null)
+  useEffect(() => {
+    let active = true
+    fetch('/api/preview-access')
+      .then(r => r.json())
+      .then(j => { if (active) setAllowed(Boolean(j?.success && j.data?.allowed)) })
+      .catch(() => { if (active) setAllowed(false) })
+    return () => { active = false }
+  }, [])
+  return allowed
+}
+
+/** Unmissable, and explicit that the money is real. Orders placed here are real rows. */
+function PreviewBanner({ state }: { state: 'upcoming' | 'ended' }) {
+  return (
+    <div className="sticky top-0 z-50 bg-amber-500 text-black px-4 py-2.5 text-center">
+      <p className="text-xs sm:text-sm font-bold uppercase tracking-wide">
+        Preview mode — this fair is {state === 'upcoming' ? 'not live yet' : 'over'}.
+        Orders placed here are REAL.
+      </p>
+    </div>
+  )
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -183,6 +215,7 @@ export default function FairHomePage() {
 
   const featuredLabel = fair.featuredLabel ?? 'Featured Today'
   const featuredParts = featuredLabel.split(' ')
+  const previewAllowed = usePreviewAccess()
   const featuredFirst = featuredParts[0]
   const featuredRest  = featuredParts.slice(1).join(' ')
 
@@ -190,16 +223,28 @@ export default function FairHomePage() {
   // an enabled ('active') fair that hasn't started yet is Coming Soon, not Live — the same
   // derivation the badges use, so the hero below is reached ONLY when the fair is genuinely live.
   const liveState = deriveEventLiveState(fair.dates.startDate, fair.dates.endDate)
-  if (fair.status === 'upcoming' || liveState === 'upcoming') {
+  const notOpen = fair.status === 'upcoming' || liveState === 'upcoming'
+  const isOver  = fair.status === 'completed' || liveState === 'ended'
+
+  // PREVIEW BYPASS (temporary — see lib/preview-access): an admin with the env flag set may walk
+  // the storefront of a fair that isn't open, because the (correct) date gate also hides it from
+  // the people who have to test it. ACCESS only — `previewing` never feeds the badge or any copy
+  // below, so the surface still reads "Upcoming"; the banner states the fair is not live and that
+  // orders placed here are real. While the probe is in flight (null) the gate holds closed.
+  const previewing = previewAllowed === true && (notOpen || isOver)
+
+  if (notOpen && !previewing) {
     return <FairComingSoon accentColor={accentColor} gradientFrom={gradientFrom} gradientTo={gradientTo} />
   }
-  if (fair.status === 'completed' || liveState === 'ended') {
+  if (isOver && !previewing) {
     return <FairEnded accentColor={accentColor} gradientFrom={gradientFrom} gradientTo={gradientTo} />
   }
 
   // ── Active fair ──────────────────────────────────────────────────────────────
   return (
     <div className="text-white">
+
+      {previewing && <PreviewBanner state={notOpen ? 'upcoming' : 'ended'} />}
 
       {/* ── Immersive hero banner ── */}
       <div
@@ -220,11 +265,19 @@ export default function FairHomePage() {
 
         {/* Fair info overlay */}
         <div className="relative z-10 max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 pb-7 sm:pb-10 w-full">
-          {/* Live badge */}
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 text-[0.65rem] font-semibold uppercase tracking-wider mb-3">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            Live Now
-          </span>
+          {/* State badge — reads from the DERIVED live state, never a hardcoded "Live Now".
+              In preview the fair is NOT live, and this must keep saying so. */}
+          {liveState === 'live' ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 text-[0.65rem] font-semibold uppercase tracking-wider mb-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              Live Now
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-500/15 text-sky-400 text-[0.65rem] font-semibold uppercase tracking-wider mb-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+              {liveState === 'ended' ? 'Event Ended' : 'Upcoming'}
+            </span>
+          )}
 
           <h1 className="font-bebas text-4xl sm:text-5xl md:text-[3.75rem] tracking-wide leading-none mb-1">
             {fair.name}
