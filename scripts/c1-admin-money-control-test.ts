@@ -492,7 +492,22 @@ async function main() {
     }
     walk(moneyDir)
     const allGated = routeFiles.every(f => readFileSync(f, 'utf8').includes('requireAdminFairContext'))
-    assert(routeFiles.length === 4, `4 money routes found (${routeFiles.length})`)
+    // A CLOSED SET, named rather than counted. A bare `length === 4` fired on any addition but
+    // said nothing about WHICH route appeared; naming them means a new money route fails with
+    // its own path in the message, and adding it here is a deliberate act a reviewer sees.
+    // 'actions' is the READ-ONLY audit trail (GET only, no mutation) — it is in the set because
+    // it lives under the money namespace and must ride the same chokepoint, which it does.
+    const EXPECTED_MONEY_ROUTES = [
+      'app/api/admin/events/[id]/money/route.ts',
+      'app/api/admin/events/[id]/money/actions/route.ts',
+      'app/api/admin/events/[id]/money/freeze/route.ts',
+      'app/api/admin/events/[id]/money/payout/route.ts',
+      'app/api/admin/events/[id]/money/refund/route.ts',
+    ]
+    const unexpected = routeFiles.filter(f => !EXPECTED_MONEY_ROUTES.includes(f))
+    const missing = EXPECTED_MONEY_ROUTES.filter(f => !routeFiles.includes(f))
+    assert(unexpected.length === 0 && missing.length === 0,
+      `money routes are exactly the known set${unexpected.length ? ` — UNEXPECTED: ${unexpected.join(', ')}` : ''}${missing.length ? ` — MISSING: ${missing.join(', ')}` : ''}`)
     assert(allGated, 'EVERY money route rides requireAdminFairContext — none skips the chokepoint')
 
     // ── [17] ADMIN REFUND control point ───────────────────────────────────────

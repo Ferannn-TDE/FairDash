@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use, useCallback } from 'react'
 import { Banknote, Lock, Snowflake, AlertTriangle, RotateCcw } from 'lucide-react'
-import { formatAuditTimestamp } from '@/lib/audit-time'
+import { formatAuditTimestamp, formatAuditDate } from '@/lib/audit-time'
 
 // ─── Admin MONEY panel ────────────────────────────────────────────────────────
 //
@@ -92,6 +92,200 @@ function Stat({ label, value, sub, tone = 'default' }: {
   )
 }
 
+interface AuditAction {
+  id: string; actorId: string; actorType: string; action: string
+  payeeType: string; payeeId: string; orderId: string | null
+  amountCents: number | null; reason: string; createdAt: string
+}
+
+/**
+ * The money AUDIT TRAIL — the record if a payee ever contests a hold, a cancel, or a freeze.
+ *
+ * It was an unbounded-looking list that silently stopped at 50 (the /money route's `take: 50`,
+ * no total, no cursor) while this fair already has 161 rows — 111 of them invisible, and 148 of
+ * them near-identical reconciler Pattern-T cancels drowning the 12 real admin actions. So it now
+ * gets the order-log treatment: server-side filters + search + a real total + "Load older",
+ * against a dedicated endpoint so none of it can perturb a money derivation.
+ *
+ * Filters are server-scoped (whole fair, not the loaded page) — the same reason as the order
+ * log: "did an admin touch this?" must never be answered from a truncated page.
+ */
+function AuditTrail({ eventSlug }: { eventSlug: string }) {
+  const [actions, setActions] = useState<AuditAction[]>([])
+  const [total, setTotal] = useState(0)
+  const [actorCounts, setActorCounts] = useState<Record<string, number>>({})
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [actorType, setActorType] = useState('all')
+  const [action, setAction] = useState('all')
+  const [payeeType, setPayeeType] = useState('all')
+  const [searchInput, setSearchInput] = useState('')
+  const [q, setQ] = useState('')
+
+  // Debounced — a keystroke updates the box now, the query waits.
+  useEffect(() => {
+    if (searchInput === q) return
+    const t = setTimeout(() => setQ(searchInput), 350)
+    return () => clearTimeout(t)
+  }, [searchInput, q])
+
+  const buildUrl = useCallback((cursor?: string) => {
+    const p = new URLSearchParams()
+    if (actorType !== 'all') p.set('actorType', actorType)
+    if (action !== 'all')    p.set('action', action)
+    if (payeeType !== 'all') p.set('payeeType', payeeType)
+    if (q)                   p.set('q', q)
+    if (cursor)              p.set('cursor', cursor)
+    return `/api/admin/events/${eventSlug}/money/actions?${p.toString()}`
+  }, [eventSlug, actorType, action, payeeType, q])
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    fetch(buildUrl())
+      .then(r => r.json())
+      .then(j => {
+        if (!active || !j.success) return
+        setActions(j.data.actions ?? [])
+        setTotal(j.data.total ?? 0)
+        setActorCounts(j.data.actorCounts ?? {})
+        setNextCursor(j.data.nextCursor ?? null)
+      })
+      .catch(() => {})
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [buildUrl])
+
+  const loadOlder = useCallback(() => {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    fetch(buildUrl(nextCursor))
+      .then(r => r.json())
+      .then(j => {
+        if (!j.success) return
+        setActions(prev => [...prev, ...(j.data.actions ?? [])])
+        setNextCursor(j.data.nextCursor ?? null)
+      })
+      .finally(() => setLoadingMore(false))
+  }, [nextCursor, loadingMore, buildUrl])
+
+  // Day buckets over the loaded rows — 148 near-identical cancels are unreadable as a flat list.
+  const groups: { key: string; label: string; rows: AuditAction[] }[] = []
+  for (const a of actions) {
+    const key = formatAuditDate(a.createdAt)
+    const last = groups[groups.length - 1]
+    if (last && last.key === key) last.rows.push(a)
+    else groups.push({ key, label: key, rows: [a] })
+  }
+
+  const SELECT = 'bg-bg-card border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-neon-pink transition-colors cursor-pointer'
+  const filtered = actorType !== 'all' || action !== 'all' || payeeType !== 'all' || Boolean(q)
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="font-bebas text-lg tracking-wide text-white flex items-center gap-2">
+          <RotateCcw className="w-4 h-4 text-text-gray" /> Money actions
+        </h2>
+        <p className="text-xs text-text-gray">
+          {loading ? 'Loading…'
+            : total === actions.length ? `${total} action${total === 1 ? '' : 's'}${filtered ? ' match' : ''}`
+            : `Showing ${actions.length} of ${total}`}
+        </p>
+      </div>
+
+      <input
+        value={searchInput}
+        onChange={e => setSearchInput(e.target.value)}
+        placeholder="Search order code, payee, actor, or reason — searches every action on this fair"
+        className="w-full bg-bg-card border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/50"
+      />
+
+      <div className="flex gap-2 flex-wrap">
+        <select value={actorType} onChange={e => setActorType(e.target.value)} className={SELECT}>
+          <option value="all">All actors</option>
+          {['admin', 'organizer', 'reconciler', 'system'].map(a => (
+            <option key={a} value={a}>{a}{actorCounts[a] != null ? ` (${actorCounts[a]})` : ''}</option>
+          ))}
+        </select>
+        <select value={action} onChange={e => setAction(e.target.value)} className={SELECT}>
+          <option value="all">All actions</option>
+          {['HOLD', 'RELEASE', 'CANCEL', 'FREEZE', 'UNFREEZE'].map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select value={payeeType} onChange={e => setPayeeType(e.target.value)} className={SELECT}>
+          <option value="all">All parties</option>
+          {['vendor', 'runner', 'organizer'].map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        {filtered && (
+          <button
+            onClick={() => { setActorType('all'); setAction('all'); setPayeeType('all'); setSearchInput(''); setQ('') }}
+            className="px-3 py-2 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 cursor-pointer"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="space-y-1.5" aria-hidden>
+          {[0, 1, 2].map(i => <div key={i} className="h-14 rounded-xl bg-white/5 border border-white/10 animate-pulse" />)}
+        </div>
+      ) : actions.length === 0 ? (
+        <div className="bg-bg-card border border-white/10 rounded-xl py-10 text-center">
+          <p className="text-white font-semibold text-sm mb-1">
+            {filtered ? 'No money actions match these filters' : 'No money actions on this fair yet'}
+          </p>
+          <p className="text-text-gray text-xs">
+            {filtered ? 'Searched every action on this fair.' : 'Holds, releases, cancels and freezes will appear here.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map(g => (
+            <div key={g.key}>
+              <div className="sticky top-0 z-10 -mx-1 px-1 py-1.5 bg-[#0a0a0a]/95 backdrop-blur-sm flex items-baseline gap-2">
+                <h3 className="text-[0.65rem] font-semibold uppercase tracking-wider text-white/70">{g.label}</h3>
+                <span className="text-[0.6rem] text-text-gray tabular-nums">{g.rows.length}</span>
+              </div>
+              <div className="space-y-1.5 mt-1">
+                {g.rows.map(a => (
+                  <div key={a.id} className="grid grid-cols-[1fr_auto] gap-3 bg-bg-card border border-white/10 rounded-xl px-4 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm text-white">
+                        <span className="font-semibold">{a.action}</span>
+                        <span className="text-text-gray"> · {a.payeeType}</span>
+                        {a.amountCents != null && <span className="text-text-gray tabular-nums"> · {money(a.amountCents)}</span>}
+                        {a.orderId && <span className="text-text-gray/70"> · order {a.orderId.slice(-8).toUpperCase()}</span>}
+                      </p>
+                      <p className="text-xs text-text-gray truncate">{a.reason}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[0.6rem] text-text-gray">{formatAuditTimestamp(a.createdAt)}</p>
+                      <p className="text-[0.6rem] text-text-gray/60 truncate max-w-[12rem]">
+                        by {a.actorId}{a.actorType !== 'admin' && <span className="text-neon-pink/70"> ({a.actorType})</span>}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {nextCursor && (
+            <button
+              onClick={loadOlder}
+              disabled={loadingMore}
+              className="w-full py-2.5 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 cursor-pointer disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading…' : `Load older actions (${total - actions.length} more)`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Every admin money action REQUIRES a stated reason — the API rejects a blank one
  *  (REASON_REQUIRED), because the AdminMoneyAction row is the defence when a payee
  *  contests it. So the UI must collect it, not invent one. */
@@ -148,6 +342,10 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
   const [pending, setPending] = useState<PendingAction | null>(null)
   const [acting, setActing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  // Section nav — the page was one long scroll, so reaching Runners meant passing every vendor
+  // row and reaching the audit meant passing both. Purely which SECTION is shown; no data,
+  // derivation, or control behavior changes with it.
+  const [section, setSection] = useState<'vendors' | 'runners' | 'organizer' | 'audit'>('vendors')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -193,7 +391,10 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
   if (error)   return <div className="p-6 text-red-400 text-sm">{error}</div>
   if (!data)   return null
 
-  const { vendors, runners, organizer, platformBalance, passiveHolds, recentAdminActions } = data
+  // recentAdminActions is intentionally NOT destructured: the audit is now owned by <AuditTrail/>,
+  // which reads the paginated endpoint. The /money response still returns the field (untouched)
+  // so nothing else that consumes it changes.
+  const { vendors, runners, organizer, platformBalance, passiveHolds } = data
 
   return (
     <div className="p-6 md:p-4 space-y-6 max-w-[80rem]">
@@ -211,17 +412,58 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
         </div>
       )}
 
-      {/* Platform balance — labelled account-wide, NOT this fair's, exactly as the API says.
-          Stripe has no concept of fairs; presenting it as this fair's money would be a lie. */}
+      {/* ── SCOPE BOUNDARY ──────────────────────────────────────────────────────────
+          Platform balance is ACCOUNT-WIDE across every fair; everything below it is scoped to
+          THIS fair. They previously sat adjacent with only a caption between them, which is how
+          an admin reading fast reads a platform figure as this fair's cash. Now it is a visibly
+          separate, differently-styled band with the scope in the heading — the caption is the
+          explanation, not the only signal. */}
       {platformBalance && (
-        <div>
+        <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="px-2 py-0.5 rounded-md bg-white/10 text-white/70 text-[0.6rem] font-bold uppercase tracking-wider">
+              Platform-wide · all fairs
+            </span>
+            <span className="text-[0.6rem] text-text-gray">not scoped to {data.fair.name}</span>
+          </div>
           <div className="grid grid-cols-2 gap-2 max-w-md">
             <Stat label="Platform Available" value={money(platformBalance.availableCents)} tone="settled" />
             <Stat label="Platform Pending" value={money(platformBalance.pendingCents)} />
           </div>
-          <p className="text-[0.6rem] text-text-gray mt-1.5">{data.platformBalanceNote}</p>
+          <p className="text-[0.6rem] text-text-gray mt-2">{data.platformBalanceNote}</p>
         </div>
       )}
+
+      {/* Everything from here down is THIS fair. */}
+      <div className="flex items-center gap-2 pt-1">
+        <div className="h-px flex-1 bg-white/10" />
+        <span className="text-[0.6rem] uppercase tracking-wider text-text-gray font-semibold shrink-0">
+          {data.fair.name} — this fair only
+        </span>
+        <div className="h-px flex-1 bg-white/10" />
+      </div>
+
+      {/* Section nav */}
+      <div className="flex gap-1.5 flex-wrap">
+        {([
+          { key: 'vendors',   label: 'Vendors' },
+          { key: 'runners',   label: 'Runners' },
+          { key: 'organizer', label: 'Organizer' },
+          { key: 'audit',     label: 'Audit' },
+        ] as const).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setSection(t.key)}
+            className={`px-3.5 py-1.5 rounded-full text-[0.6875rem] font-semibold border transition-all cursor-pointer ${
+              section === t.key
+                ? 'bg-neon-pink border-neon-pink text-white'
+                : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
       {/* Per-payee ledger. SETTLED (paid) and OWED (payable/held) are separate figures —
           never blended, so an estimate can't read as cash in hand. */}
@@ -229,7 +471,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
         { key: 'vendors',   label: 'Vendors',   t: vendors.totals },
         { key: 'runners',   label: 'Runners',   t: runners.totals },
         { key: 'organizer', label: 'Organizer', t: organizer.totals },
-      ] as const).map(({ key, label, t }) => (
+      ] as const).filter(({ key }) => key === section).map(({ key, label, t }) => (
         <div key={key} className="space-y-2">
           <h2 className="font-bebas text-lg tracking-wide text-white">{label}</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -261,7 +503,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
       ))}
 
       {/* Frozen payees — the kill-switch state, with the release control. */}
-      {vendors.frozen.length > 0 && (
+      {section === 'vendors' && vendors.frozen.length > 0 && (
         <div className="space-y-2">
           <h2 className="font-bebas text-lg tracking-wide text-white flex items-center gap-2">
             <Snowflake className="w-4 h-4 text-amber-400" /> Frozen vendors
@@ -285,7 +527,8 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
         </div>
       )}
 
-      {/* Per-order vendor earnings + the HOLD / RELEASE / CANCEL controls. */}
+      {/* Per-order vendor earnings + the HOLD / RELEASE / CANCEL controls. Behavior untouched. */}
+      {section === 'vendors' && (
       <div className="space-y-2">
         <h2 className="font-bebas text-lg tracking-wide text-white">Vendor payouts</h2>
         {vendors.earnings.length === 0 ? (
@@ -353,9 +596,10 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
           </div>
         )}
       </div>
+      )}
 
-      {/* Runner payouts — same controls, per order. */}
-      {runners.earnings.length > 0 && (
+      {/* Runner payouts — same controls, per order. Behavior untouched. */}
+      {section === 'runners' && runners.earnings.length > 0 && (
         <div className="space-y-2">
           <h2 className="font-bebas text-lg tracking-wide text-white">Runner payouts</h2>
           <div className="space-y-1.5">
@@ -403,7 +647,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
 
       {/* Passive holds — NOT admin holds. Kept visually distinct so an admin never mistakes
           "waiting for the vendor to connect Stripe" for "I stopped this". */}
-      {passiveHolds.length > 0 && (
+      {(section === 'vendors' || section === 'runners') && passiveHolds.length > 0 && (
         <div className="space-y-2">
           <h2 className="font-bebas text-lg tracking-wide text-white">Waiting on the payee</h2>
           <p className="text-xs text-text-gray">
@@ -420,38 +664,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
         </div>
       )}
 
-      {/* The audit trail, surfaced. Every action is attributed to WHO actually acted
-          (AdminMoneyAction.actorId + actorType — admin / organizer / reconciler / system) —
-          this is the record if a payee contests it. */}
-      <div className="space-y-2">
-        <h2 className="font-bebas text-lg tracking-wide text-white flex items-center gap-2">
-          <RotateCcw className="w-4 h-4 text-text-gray" /> Recent money actions
-        </h2>
-        {recentAdminActions.length === 0 ? (
-          <p className="text-text-gray text-xs">No admin money actions on this fair yet.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {recentAdminActions.map(a => (
-              <div key={a.id} className="grid grid-cols-[1fr_auto] gap-3 bg-bg-card border border-white/10 rounded-xl px-4 py-2.5">
-                <div className="min-w-0">
-                  <p className="text-sm text-white">
-                    <span className="font-semibold">{a.action}</span>
-                    <span className="text-text-gray"> · {a.payeeType}</span>
-                    {a.amountCents != null && <span className="text-text-gray tabular-nums"> · {money(a.amountCents)}</span>}
-                  </p>
-                  <p className="text-xs text-text-gray truncate">{a.reason}</p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[0.6rem] text-text-gray">{formatAuditTimestamp(a.createdAt)}</p>
-                  <p className="text-[0.6rem] text-text-gray/60 truncate max-w-[12rem]">
-                    by {a.actorId}{a.actorType !== 'admin' && <span className="text-neon-pink/70"> ({a.actorType})</span>}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {section === 'audit' && <AuditTrail eventSlug={params.eventSlug} />}
 
       {pending && (
         <ReasonPrompt
