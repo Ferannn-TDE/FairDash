@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { formatAuditTimestamp } from '@/lib/audit-time'
 
 export interface OrganizerState {
   id: string
@@ -61,7 +62,7 @@ export default function OrganizerControl({ organizer }: { organizer: OrganizerSt
               <div className="text-xs">
                 <span className="font-semibold">Suspended</span>
                 {state.suspendedAt && (
-                  <span className="text-red-400/70"> · {new Date(state.suspendedAt).toLocaleString()}</span>
+                  <span className="text-red-400/70"> · {formatAuditTimestamp(state.suspendedAt)}</span>
                 )}
                 {state.suspendedReason && <p className="text-red-400/70 mt-0.5">{state.suspendedReason}</p>}
               </div>

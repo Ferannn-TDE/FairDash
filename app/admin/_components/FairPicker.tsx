@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Calendar, Store, ChevronRight, AlertTriangle, Users } from 'lucide-react'
+import { formatEventDateRange } from '@/lib/event-date'
 
 interface Fair {
   id: string
@@ -23,11 +24,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   INACTIVE: { label: 'Ended',    cls: 'bg-white/5 text-text-gray border-white/10' },
 }
 
-function fmtRange(start: string, end: string) {
-  const s = new Date(start), e = new Date(end)
-  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
-  return `${s.toLocaleDateString([], opts)} – ${e.toLocaleDateString([], { ...opts, year: 'numeric' })}`
-}
+
 
 export default function FairPicker() {
   const [fairs, setFairs] = useState<Fair[]>([])
@@ -124,7 +121,7 @@ export default function FairPicker() {
                 </div>
 
                 <div className="flex items-center gap-4 text-xs text-text-gray mt-auto pt-1">
-                  <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {fmtRange(f.startDate, f.endDate)}</span>
+                  <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {formatEventDateRange(f.startDate, f.endDate)}</span>
                   <span className="flex items-center gap-1"><Store className="w-3.5 h-3.5" /> {f.vendorCount} vendor{f.vendorCount === 1 ? '' : 's'}</span>
                 </div>
               </Link>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use, useCallback } from 'react'
 import { Banknote, Lock, Snowflake, AlertTriangle, RotateCcw } from 'lucide-react'
+import { formatAuditTimestamp } from '@/lib/audit-time'
 
 // ─── Admin MONEY panel ────────────────────────────────────────────────────────
 //
@@ -441,7 +442,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
                   <p className="text-xs text-text-gray truncate">{a.reason}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-[0.6rem] text-text-gray">{new Date(a.createdAt).toLocaleString()}</p>
+                  <p className="text-[0.6rem] text-text-gray">{formatAuditTimestamp(a.createdAt)}</p>
                   <p className="text-[0.6rem] text-text-gray/60 truncate max-w-[12rem]">
                     by {a.actorId}{a.actorType !== 'admin' && <span className="text-neon-pink/70"> ({a.actorType})</span>}
                   </p>
