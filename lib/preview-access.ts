@@ -17,10 +17,16 @@
  * never sufficient. This is why the decision lives here and is exposed only through an API that
  * runs the auth check, rather than as a client-readable boolean.
  *
- * WHAT IT CHANGES: access to the storefront UI, nothing else. It grants NO data the APIs don't
- * already serve — /api/events/[slug], /api/vendors and the menu queries gate on
- * Event.status === ACTIVE (which an upcoming-but-enabled fair already satisfies), and
- * POST /api/orders likewise. The bypass is a UI unlock, not an authorization change.
+ * WHAT IT CHANGES — TWO REAL GATES, and one of them takes money:
+ *   1. The storefront UI (app/fair/[fairSlug]/page.tsx) — an upcoming fair's page renders.
+ *   2. POST /api/orders (app/api/orders/route.ts:190) — the FAIR_NOT_OPEN refusal is SKIPPED, so
+ *      an order can be PLACED and CHARGED for a fair that has not opened.
+ * It grants no data the read APIs don't already serve — /api/events/[slug], /api/vendors and the
+ * menu queries gate on Event.status === ACTIVE, which an upcoming-but-enabled fair satisfies.
+ *
+ * ⚠️ It is therefore NOT merely a UI unlock. (This comment previously said it was, and said the
+ * order route was unaffected — stale prose on the exact module someone reads to answer that
+ * question. The order gate is real; see :46-50 below and orders/route.ts:190.)
  *
  * WHAT IT MUST NOT CHANGE: what any surface SAYS. A previewing admin still sees "Upcoming" on the
  * badge; no copy may claim the fair is live because a tester is inside it. Orders placed in

@@ -40,10 +40,28 @@ add a guard that fails if a second copy reappears.** Confirmed instances, each n
 | admin money-audit writer | `lib/admin-money.ts:84` (`writeMoneyAudit`, "two-writers-one-truth trap") | (in-tx audit assertion) |
 | cross-fair resolution | `lib/admin-fair-context.ts` (`requireAdminFairContext`) | `scripts/p6-admin-fair-chokepoint-proof.ts` |
 | plausible-but-wrong value flashed before load | (skeletons; no defaulted initial state) | `scripts/flicker-class-guard.ts` |
+| order identity (cuid vs short code) | `lib/resolve-order.ts` | `scripts/resolve-order-guard.ts` |
+| "which orders are in-model" (ghost/void filter) | `lib/order-scope.ts` | `scripts/organizer-ghost-guard.ts` |
+| delivery address validation + formatting | `lib/delivery-address.ts` | `scripts/delivery-address-guard.ts` |
+| fair CALENDAR dates + live/upcoming/ended state | `lib/event-date.ts:82` (`deriveEventLiveState`) | `scripts/fair-open-gate-guard.ts` |
+| BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | — **unguarded; see below** |
+
+**The one derivation whose "single source" spans a boundary a guard cannot reach.**
+`getQueuePrefix()` (`lib/queues.ts:58`) is genuinely single-sourced — all three construction sites
+read it (`lib/queues.ts:157`, `workers/order-worker.ts:810`, `:854`) and none hardcodes a prefix. But
+its **input is an environment variable**, and producer (Vercel) and consumer (Railway) are separate
+deployments. `TEST_REDIS_PREFIX` set in one and not the other splits the namespace with **no error on
+either side**: the producer enqueues happily, the worker listens elsewhere. **Three payout-breaking
+bugs have come from this.** A repo-scanning guard cannot catch it — the divergence lives in config,
+not code. The check is operational: after any Redis or deployment change, confirm
+`<prefix>:<queue>:id` exists under the expected prefix (`scripts/step-b-inspect.ts`).
 
 A companion class: **prose has no drift-guard.** UI copy, code comments, and docs describe behavior
 the code no longer has, and a reviewer who reads the stale prose repeats it as fact (see _How we
 work → prose_). Every _derivation_ here is guarded; _prose_ is not, so it is the residual leak.
+**Landed again this session** on `lib/preview-access.ts`, whose header claimed the bypass was "a UI
+unlock, not an authorization change" — on the very module you read to answer whether it gates order
+placement. It does gate it (`app/api/orders/route.ts:190`). Fixed in the same commit as this note.
 
 ---
 
@@ -187,6 +205,38 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
 - **Verify deploys by content fingerprint, not logs.** `/api/health` returns a build `commit` field
   baked at build time and a worker heartbeat; a served response's shape is the fingerprint
   (`app/api/health/route.ts`, `lib/health.ts`).
+- **fingerprint-over-git-ref.** The served `/api/health` `commit` is the authority on what is
+  deployed — the local `origin/main` ref has been wrong **twice**. Reconcile against the served
+  value, never the ref.
+- **custody-for-counts / ledger-for-money.** Two spines answering different questions:
+  `lib/runner-completion.ts` owns delivery counts and completion, `lib/runner-earnings.ts` owns
+  money. They are never averaged into one number — the ledger-derived count under-reports (a
+  DELIVERED zero-fee order accrues nothing), so count fields were **removed** from the earnings
+  summary rather than paralleled. Guarded.
+- **named-sets-over-counts.** `4 money routes found (5)` says something changed; a **named set**
+  says *what*, and fails with the offending path. Applies to reports as much as to guards — a
+  candidate count is not a finding until its members are enumerated.
+- **guards-scan-code-not-prose.** Three guards failed on their own explanatory comments. Strip
+  comments before scanning, or the reasoning gets deleted to keep the suite green — which is the
+  guard destroying the thing it exists to protect.
+- **guards-match-shape-not-names-or-locations.** A guard keyed on `startDate`/`endDate` missed an
+  aliased copy; one keyed on a filename broke when the code improved. Shape-keyed scanners caught
+  two queries that careful manual passes had missed.
+- **test-the-artifact-not-a-reconstruction.** A hand-made snippet compiled with `tsc` "proved" a JSX
+  space that SWC actually stripped. Read the built bundle, not a model of it.
+- **"Newest" needs null handling, or it answers about the wrong rows.** Postgres sorts `DESC` as
+  **NULLS FIRST**, so `orderBy: { completedAt: 'desc' }` returns a NULL row first. That produced a
+  confident, wrong conclusion this session — that the Pattern C/S unpaid-payout backstop was
+  *structurally dead* — when in fact 133 of 136 rows had the timestamp set. Same family as the
+  vacuous zero: a query shape that returns something true-looking **about rows you did not mean to
+  ask about**. When a max/min drives a conclusion, filter the null explicitly or state the ordering.
+- **constructed-is-not-used: a side effect the constructor makes unconditionally is not evidence the
+  thing was exercised.** BullMQ's `Queue` constructor `hmset`s `<prefix>:<queue>:meta` on
+  instantiation and **swallows the error** (`bullmq/dist/cjs/classes/queue.js:45-53`), while
+  `<prefix>:<queue>:id` increments only inside the add\* Lua on a successful `add()`
+  (`bullmq/dist/cjs/scripts/addDelayedJob-6.js:541`). So `meta` proves **constructed**; `:id` proves
+  **used**. Reading the first as the second points at a producer defect that does not exist. Holds
+  for any external system: separate "we opened a handle" from "we did the thing".
 - **Agents never push.** An automated session commits and merges locally; a human pushes (the deploy
   trigger).
 
@@ -194,8 +244,15 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
 
 ## Things that look like bugs but aren't
 
-- **Vendor slugs are frozen on rename.** `Vendor.slug` is set at creation and intentionally NOT
-  regenerated when the name changes (`schema.prisma:221`) — a live link stays stable.
+- **Slugs are frozen on rename — fairs as well as vendors.** `Vendor.slug` is set at creation and
+  intentionally NOT regenerated when the name changes (`schema.prisma:221`) — a live link stays
+  stable. `Event.urlSlug` follows the same rule: assigned once by `uniqueEventSlug`
+  (`app/api/organizer/fairs/route.ts:139`) and deliberately excluded from the settings PATCH
+  (`app/api/admin/events/[id]/settings/route.ts:20` names the exclusion). So a fair renamed
+  Springfield State Fair 2026 → **Italian Fest 2026** keeps `springfield-state-fair-2026` in its
+  URL, and the admin money page shows the new name against the old slug. That is the design, not a
+  resolution bug: `requireAdminFairContext` resolved correctly in both directions. Expect this to
+  read as a mismatch on first sight — it has fooled at least one careful reader.
 - **An order drops off the vendor's board at DELIVERED.** On DELIVERED the vendor's VOS advances
   READY→COMPLETED (`reconcile-order-status.ts:523-531`) and the order leaves the active lanes — the
   vendor's work is done; it is not lost.
