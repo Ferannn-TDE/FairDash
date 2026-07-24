@@ -7,6 +7,7 @@ import { sumVendorEarnings } from '@/lib/vendor-earnings'
 import { logger } from '@/lib/logger'
 import { requireVendorMembershipById } from '@/lib/auth'
 import { isCompleted, isFailed } from '@/lib/order-status'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // GET /api/vendors/:id/analytics
 //
@@ -86,7 +87,7 @@ async function queryTopItems(vendorId: string, startDate: Date, endDate: Date) {
     where: {
       vendorId,
       createdAt: { gte: startDate, lte: endDate },
-      order: { vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } } },
+      order: { ...IN_MODEL_ORDERS, vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } } },
     },
     _sum: { totalPrice: true, quantity: true },
     orderBy: { _sum: { totalPrice: 'desc' } },
@@ -112,7 +113,7 @@ async function querySummary(vendorId: string, startDate: Date, endDate: Date) {
     where: {
       vendorId,
       createdAt: { gte: startDate, lte: endDate },
-      order: { vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } } },
+      order: { ...IN_MODEL_ORDERS, vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } } },
     },
     _sum: { totalPrice: true },
     _count: { id: true },
@@ -205,7 +206,7 @@ export async function GET(
     // NOT blended with the gross "revenue/sales" totals above. settled =
     // Payout.netAmount; estimated = slice − conservative Stripe-fee share.
     const earningsOrders = await db.order.findMany({
-      where: { orderItems: { some: { vendorId: id } }, placedAt: { gte: startDate, lte: endDate } },
+      where: { ...IN_MODEL_ORDERS, orderItems: { some: { vendorId: id } }, placedAt: { gte: startDate, lte: endDate } },
       select: {
         total: true,
         vendorOrderStatuses: { where: { vendorId: id }, select: { vendorId: true, status: true } },
