@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { requireVendorAuth, requireVendorMembership } from '@/lib/auth'
 import { FLAGS } from '@/lib/feature-flags'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // GET /api/vendors/:id/stats?range=24h|7d|30d
 // Revenue and order counts computed entirely in SQL — no JS aggregation.
@@ -26,7 +27,7 @@ export async function GET(
 
       const [allItems, todayItems] = await Promise.all([
         db.orderItem.findMany({
-          where: { vendorId },
+          where: { vendorId, order: { ...IN_MODEL_ORDERS } },
           select: {
             unitPrice: true,
             quantity: true,
@@ -34,7 +35,7 @@ export async function GET(
           },
         }),
         db.orderItem.findMany({
-          where: { vendorId, order: { placedAt: { gte: todayStart } } },
+          where: { vendorId, order: { ...IN_MODEL_ORDERS, placedAt: { gte: todayStart } } },
           select: {
             unitPrice: true,
             quantity: true,
@@ -93,7 +94,7 @@ export async function GET(
             where: {
               vendorId: vid,
               createdAt: { gte: sinceDate },
-              order: { status: { in: ['COMPLETED', 'DELIVERED'] } },
+              order: { ...IN_MODEL_ORDERS, status: { in: ['COMPLETED', 'DELIVERED'] } },
             },
             _sum:   { totalPrice: true },
             _count: { id: true },
@@ -104,8 +105,8 @@ export async function GET(
           // so multi-vendor orders count for every vendor that has a line item, and
           // orders whose primary stamp has no matching items don't inflate counts.
           Promise.all([
-            db.order.count({ where: { orderItems: { some: { vendorId: vid } }, placedAt: { gte: sinceDate } } }),
-            db.order.count({ where: { orderItems: { some: { vendorId: vid } }, status: 'CANCELLED', placedAt: { gte: sinceDate } } }),
+            db.order.count({ where: { ...IN_MODEL_ORDERS, orderItems: { some: { vendorId: vid } }, placedAt: { gte: sinceDate } } }),
+            db.order.count({ where: { ...IN_MODEL_ORDERS, orderItems: { some: { vendorId: vid } }, status: 'CANCELLED', placedAt: { gte: sinceDate } } }),
           ]),
 
           // Average order value (COMPLETED only) — average of this vendor's per-order
@@ -127,7 +128,7 @@ export async function GET(
           // Top 5 selling items by revenue
           db.orderItem.groupBy({
             by:    ['menuItemId', 'itemName'],
-            where: { vendorId: vid, createdAt: { gte: sinceDate } },
+            where: { vendorId: vid, createdAt: { gte: sinceDate }, order: { ...IN_MODEL_ORDERS } },
             _sum:  { quantity: true, totalPrice: true },
             orderBy: { _sum: { totalPrice: 'desc' } },
             take: 5,
@@ -136,7 +137,7 @@ export async function GET(
           // Currently active orders (real-time — not cached separately).
           // Also scoped by OrderItem participation, matching the counts above.
           db.order.count({
-            where: { orderItems: { some: { vendorId: vid } }, status: { in: ['PLACED', 'ACCEPTED', 'PREPARING'] } },
+            where: { ...IN_MODEL_ORDERS, orderItems: { some: { vendorId: vid } }, status: { in: ['PLACED', 'ACCEPTED', 'PREPARING'] } },
           }),
         ])
 

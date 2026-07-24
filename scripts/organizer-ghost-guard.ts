@@ -42,6 +42,34 @@ const SURFACES = [
   // A SEVENTH surface the sweep turned up: organizer vendor-detail, which sums vendorPayout.
   // Left unfiltered it would contradict the now-correct dashboard — worse than either alone.
   'app/api/organizer/vendors/[id]/route.ts',
+  // VENDOR-facing money — the counterparty's own revenue, inflated the same way. Measured before
+  // this landed: RANDY'S HOUSE OF BBQ $2,229 shown vs $1,460 real (half their line items were
+  // ghosts); ALL PRO TEES $2,570 vs $2,270.
+  'app/api/vendors/[id]/analytics/route.ts',
+  'app/api/vendors/[id]/revenue/route.ts',
+  'app/api/vendors/[id]/stats/route.ts',
+]
+
+/**
+ * THE DELIBERATE EXCLUSIONS — queries that MUST NOT carry the ghost filter, named with the reason.
+ *
+ * This list is the point of the section. Without it the exclusion is invisible, and the obvious
+ * "fix" the next time one of these surfaces a failure is to add IN_MODEL_ORDERS — which on the
+ * Stripe webhook means a payment for an order that was later voided can no longer be found, so it
+ * never reconciles. That is real money lost to a well-meaning edit. Naming them turns the omission
+ * into a recorded decision (same reasoning as replacing c1's money-route COUNT with a named set).
+ *
+ * If you are here because one of these is "missing" the filter: it is not missing. Read the reason.
+ */
+const MUST_NOT_FILTER: { file: string; why: string }[] = [
+  { file: 'app/api/webhooks/stripe/route.ts',
+    why: 'must find ANY order to reconcile a payment — a voided order still has a real charge' },
+  { file: 'lib/process-chargeback.ts',
+    why: 'settlement: a chargeback on an order voided after payment must still claw back' },
+  { file: 'lib/resolve-order.ts',
+    why: 'resolves an identifier to a row; the CALLER decides what is in model' },
+  { file: 'app/api/runners/me/location/route.ts',
+    why: 'operational lookup for a runner already holding the order, not an aggregate' },
 ]
 
 /**
@@ -50,7 +78,7 @@ const SURFACES = [
  */
 function orderAggregates(src: string): { start: number; body: string }[] {
   const out: { start: number; body: string }[] = []
-  const re = /db\.order\.(count|aggregate|groupBy|findMany|findFirst)\(\s*\{/g
+  const re = /db\.(?:order|orderItem)\.(count|aggregate|groupBy|findMany|findFirst)\(\s*\{/g
   let m: RegExpExecArray | null
   while ((m = re.exec(src))) {
     let depth = 1
@@ -97,6 +125,15 @@ for (const f of SURFACES) {
   assert(bad.length === 0, `${f.split('/').slice(-2).join('/')} — all ${aggs.length} carry IN_MODEL_ORDERS`)
 }
 assert(total >= 20, `scanned the whole set (${total} aggregates — not an empty walk)`)
+
+console.log('\n[1b] the deliberate exclusions are still excluded (and still named)')
+for (const { file, why } of MUST_NOT_FILTER) {
+  const src = readFileSync(file, 'utf8')
+  // Not a style rule — a REGRESSION alarm. If one of these grows the filter, money stops
+  // reconciling, so it fails here with the reason attached rather than in production.
+  assert(!/IN_MODEL_ORDERS/.test(src), `${file.split('/').slice(-2).join('/')} must NOT filter ghosts — ${why}`)
+}
+assert(MUST_NOT_FILTER.length === 4, 'the exclusion set is explicit — adding one is a decision, not a drift')
 
 console.log('\n[2] the fragment is one definition and means what it says')
 assert(JSON.stringify(IN_MODEL_ORDERS) === '{"voidedAt":null}', 'IN_MODEL_ORDERS is exactly { voidedAt: null }')

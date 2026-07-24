@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
 import { requireVendorAuth, requireVendorMembership } from '@/lib/auth'
 import { FLAGS } from '@/lib/feature-flags'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // GET /api/vendors/:id/revenue?range=7d|30d|90d
 //                            ?from=ISO&to=ISO   (custom range)
@@ -40,6 +41,7 @@ export async function GET(
 
       const orders = await db.order.findMany({
         where: {
+          ...IN_MODEL_ORDERS,
           vendorId,
           status: { in: ['COMPLETED', 'DELIVERED'] },
           placedAt: { gte: periodStart },
