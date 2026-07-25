@@ -38,6 +38,20 @@ export function handleApiError(err: unknown) {
     return apiError(err.message, err.statusCode, err.code, err.details)
   }
 
+  // DB connection-pool exhaustion (Prisma P2024) is a LOAD condition, not a bug in the
+  // handler — it must be named and retryable, never an anonymous 500. With connection_limit=1
+  // per serverless instance this is the shape overload takes, and a generic INTERNAL_ERROR
+  // would send someone hunting a logic bug that isn't there. 503 + Retry-After is the honest
+  // answer: the request was never served, and retrying is the correct client behaviour.
+  if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2024') {
+    console.error('[API Error] DB pool timeout (P2024) — connection pool exhausted under load')
+    return apiError(
+      'Server is busy — please retry in a moment',
+      503,
+      'DB_POOL_TIMEOUT',
+    )
+  }
+
   if (err instanceof Error) {
     console.error('[API Error]', err.message, err.stack)
   } else {

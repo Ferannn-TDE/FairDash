@@ -58,6 +58,12 @@ export interface SweepOptions {
   stripeWindowHours?: number
   /** Max rows acted on per pattern per run (bound). */
   maxPerPattern?: number
+  /**
+   * Row ceiling for the whole-live-space scanners (M, N, O, R). Separate from maxPerPattern
+   * because their candidate pool is "every active order" and grows with the rush. Hitting it
+   * is ALERTED, never silent — see DEFAULTS.scanCeiling.
+   */
+  scanCeiling?: number
   /** Max Stripe list pages for Pattern A (each page ≤100 PIs). */
   maxStripePages?: number
   /** Age (hours) a PENDING_PAYMENT order must exceed before Pattern F touches it. */
@@ -94,6 +100,24 @@ const DEFAULTS = {
   maxPerPattern: 100,
   maxStripePages: 5,
   pendingStaleHours: 2,
+  /**
+   * Cap for the four patterns that scan the WHOLE live-order space (M, N, O, R) rather than an
+   * exception set. Their candidate pool is "every active order", which grows with the RUSH —
+   * exactly when they matter.
+   *
+   * MEASURED (scripts/mn-coverage-guard.ts): with 153 active orders and an unordered
+   * `take: 100`, five consecutive scans returned the IDENTICAL 100 ids and 53 orders were
+   * NEVER returned. Not "rotates across sweeps" — permanently invisible.
+   *
+   * WHY A BIGGER SINGLE FETCH RATHER THAN PAGING: the sweep is LATENCY-bound, not row-bound
+   * (every all-time query measured ≤49 rows in 97–306ms), so extra round-trips cost far more
+   * than extra rows. One ordered fetch of 1000 covers ~10× any realistic fair peak in a single
+   * trip. Paging would add 10 round-trips to save memory we are not short of.
+   *
+   * ORDERING IS WHAT MAKES THE CAP SAFE: oldest-first is now total and stable, so the cap
+   * truncates the NEWEST rather than an arbitrary set — and truncation is ALERTED, never silent.
+   */
+  scanCeiling: 1000,
 }
 
 export interface SweepSummary {
@@ -143,6 +167,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   const windowHours = opts.windowHours ?? DEFAULTS.windowHours
   const stripeWindowHours = opts.stripeWindowHours ?? DEFAULTS.stripeWindowHours
   const maxPerPattern = opts.maxPerPattern ?? DEFAULTS.maxPerPattern
+  const scanCeiling = opts.scanCeiling ?? DEFAULTS.scanCeiling
   const maxStripePages = opts.maxStripePages ?? DEFAULTS.maxStripePages
   const pendingStaleHours = opts.pendingStaleHours ?? DEFAULTS.pendingStaleHours
   const patternEEnabled =
@@ -190,12 +215,12 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternJ(sum, { maxPerPattern })
     await patternK(sum, { maxPerPattern })
     await patternL(sum, { windowStart, maxPerPattern })
-    await patternM(sum, { maxPerPattern })
-    await patternN(sum, { maxPerPattern, backstopEnabled })
-    await patternO(sum, { maxPerPattern })
+    await patternM(sum, { maxPerPattern, scanCeiling })
+    await patternN(sum, { maxPerPattern, scanCeiling, backstopEnabled })
+    await patternO(sum, { maxPerPattern, scanCeiling })
     await patternP(sum, { maxPerPattern, dryRun })
     await patternQ(sum, { maxPerPattern, dryRun })
-    await patternR(sum, { maxPerPattern, dryRun })
+    await patternR(sum, { maxPerPattern, scanCeiling, dryRun })
     await patternT(sum, { maxPerPattern, dryRun, patternTEnabled })
     // U is a read-only alerter (never moves money) — always runs live, no env gate. It reads
     // the durable payout-failure markers so a permanently-failed payout can't stay a flag with
@@ -522,6 +547,7 @@ async function patternD(
       order: { voidedAt: null },
     },
     select: { orderId: true, eventId: true, vendorId: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   sum.scanned.unresolvedHolds += holds.length
@@ -666,6 +692,7 @@ async function patternG(
       order: { voidedAt: null },
     },
     select: { orderId: true, vendorId: true, reason: true },
+    orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
 
@@ -701,6 +728,7 @@ async function patternH(
       order: { voidedAt: null },
     },
     select: { orderId: true, vendorId: true },
+    orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   if (rows.length === 0) return
@@ -739,6 +767,7 @@ async function patternI(
   const stuck = await db.chargeback.findMany({
     where: { clawbackStatus: { in: ['pending', 'partial'] } },
     select: { id: true, orderId: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   for (const cb of stuck) {
@@ -763,6 +792,7 @@ async function patternJ(
   const open = await db.chargeback.findMany({
     where: { status: { notIn: ['won', 'lost', 'warning_closed'] }, createdAt: { lt: cutoff } },
     select: { id: true, stripeDisputeId: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   for (const cb of open) {
@@ -781,6 +811,7 @@ async function patternK(
   const debts = await db.negativeBalanceEvent.findMany({
     where: { status: 'open', kind: { in: ['dispute_clawback', 'dispute_fee'] } },
     select: { id: true, vendorId: true, amountCents: true, kind: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   let total = 0
@@ -820,6 +851,7 @@ async function patternL(
       organizerEarning: { select: { amountCents: true } },
       event: { select: { fulfillmentConfig: { select: { runnerFeePercent: true } } } },
     },
+    orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   for (const ord of delivered) {
@@ -855,6 +887,7 @@ async function patternL(
   const cancelledTipped = await db.order.findMany({
     where: { status: OrderStatus.CANCELLED, tip: { gt: 0 }, runnerEarning: { is: null }, tipRefundId: null },
     select: { id: true, tip: true },
+    orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
   for (const ord of cancelledTipped) {
@@ -882,7 +915,7 @@ async function patternL(
 // PLACED".
 async function patternM(
   sum: SweepSummary,
-  o: { maxPerPattern: number },
+  o: { scanCeiling: number; maxPerPattern: number },
 ) {
   const FAILED = new Set(['DECLINED', 'REFUNDED', 'CANCELLED'])
 
@@ -890,8 +923,13 @@ async function patternM(
   const candidates = await db.order.findMany({
     where: { status: { in: ACTIVE_STATES }, voidedAt: null },
     select: { id: true, status: true, vendorOrderStatuses: { select: { status: true } } },
-    take: o.maxPerPattern,
+    orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
+    take: o.scanCeiling,
   })
+
+  if (candidates.length >= o.scanCeiling) sum.alerted.push(
+    `Pattern M: SCAN CEILING HIT — ${candidates.length} rows at the ${o.scanCeiling} limit. Orders beyond it were NOT examined this sweep. Raise scanCeiling.`,
+  )
 
   for (const ord of candidates) {
     const rows = ord.vendorOrderStatuses
@@ -925,7 +963,7 @@ async function patternM(
 // derivation can't see them, so it abstains and canAdvance refuses; they're skipped.
 async function patternN(
   sum: SweepSummary,
-  o: { maxPerPattern: number; backstopEnabled: boolean },
+  o: { scanCeiling: number; maxPerPattern: number; backstopEnabled: boolean },
 ) {
   const DERIVED_OK = new Set<MasterStatus>(['READY', 'RUNNER_COLLECTED', 'COMPLETED', 'DELIVERED', 'CANCELLED'])
 
@@ -935,8 +973,13 @@ async function patternN(
       id: true, status: true, fulfillmentType: true, runnerId: true,
       deliveryProofPath: true, vendorOrderStatuses: { select: { status: true } },
     },
-    take: o.maxPerPattern,
+    orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
+    take: o.scanCeiling,
   })
+
+  if (candidates.length >= o.scanCeiling) sum.alerted.push(
+    `Pattern N: SCAN CEILING HIT — ${candidates.length} rows at the ${o.scanCeiling} limit. Orders beyond it were NOT examined this sweep. Raise scanCeiling.`,
+  )
 
   for (const ord of candidates) {
     if (ord.vendorOrderStatuses.length === 0) continue // no jurisdiction (pre-placement / legacy)
@@ -973,7 +1016,7 @@ async function patternN(
 // driver) for ops visibility. ALERT-only — the timeout owns the terminal write.
 async function patternO(
   sum: SweepSummary,
-  o: { maxPerPattern: number },
+  o: { scanCeiling: number; maxPerPattern: number },
 ) {
   const cutoff = new Date(Date.now() - CURBSIDE_WAIT_TIMEOUT_MS)
   const stranded = await db.order.findMany({
@@ -985,8 +1028,13 @@ async function patternO(
       readyAt: { lt: cutoff },
     },
     select: { id: true, fulfillmentType: true, readyAt: true },
-    take: o.maxPerPattern,
+    orderBy: [{ readyAt: 'asc' }, { id: 'asc' }],
+    take: o.scanCeiling,
   })
+
+  if (stranded.length >= o.scanCeiling) sum.alerted.push(
+    `Pattern O: SCAN CEILING HIT — ${stranded.length} rows at the ${o.scanCeiling} limit. Orders beyond it were NOT examined this sweep. Raise scanCeiling.`,
+  )
   for (const ord of stranded) {
     const mins = ord.readyAt ? Math.round((Date.now() - ord.readyAt.getTime()) / 60000) : null
     sum.details.O.push(ord.id)
@@ -1017,6 +1065,7 @@ async function patternP(
         runner: { stripeVerified: true, stripeAccountId: { not: null } },
       },
       select: { orderId: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: o.maxPerPattern,
     })
     for (const e of eligible) { sum.repaired.P++; sum.details.P.push(e.orderId) }
@@ -1047,6 +1096,7 @@ async function patternQ(
         order: { voidedAt: null },
       },
       select: { eventId: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: o.maxPerPattern * 10,
     })
     const events = [...new Set(accrued.map(a => a.eventId))].slice(0, o.maxPerPattern)
@@ -1069,7 +1119,7 @@ async function patternQ(
 // keeps alerting on any R couldn't auto-execute (e.g. no charge).
 async function patternR(
   sum: SweepSummary,
-  o: { maxPerPattern: number; dryRun: boolean },
+  o: { scanCeiling: number; maxPerPattern: number; dryRun: boolean },
 ) {
   if (o.dryRun) {
     const owed = await db.order.findMany({
@@ -1078,8 +1128,13 @@ async function patternR(
         runnerEarning: { is: null }, tipRefundId: null, voidedAt: null,
       },
       select: { id: true },
-      take: o.maxPerPattern,
+      orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
+      take: o.scanCeiling,
     })
+
+  if (owed.length >= o.scanCeiling) sum.alerted.push(
+    `Pattern R: SCAN CEILING HIT — ${owed.length} rows at the ${o.scanCeiling} limit. Orders beyond it were NOT examined this sweep. Raise scanCeiling.`,
+  )
     for (const ord of owed) { sum.repaired.R++; sum.details.R.push(ord.id) }
     return
   }
@@ -1194,6 +1249,7 @@ async function patternT(
       orderId: true, vendorId: true, subtotalCents: true,
       order: { select: { vendorOrderStatuses: { select: { vendorId: true, status: true } } } },
     },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
 
@@ -1290,6 +1346,7 @@ export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) 
 
   // ── vendor: Order.payoutStatus='FAILED' ──
   const vFailed = await db.order.findMany({
+    orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
     where: { payoutStatus: 'FAILED' }, select: { id: true, vendorPayout: true }, take: o.maxPerPattern,
   })
   emit('vendor', vFailed.map(r => ({
@@ -1298,6 +1355,7 @@ export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) 
 
   // ── runner: RunnerEarning.status='failed' ──
   const rFailed = await db.runnerEarning.findMany({
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     where: { status: 'failed' }, select: { orderId: true, amountCents: true }, take: o.maxPerPattern,
   })
   emit('runner', rFailed.map(r => ({
@@ -1306,6 +1364,7 @@ export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) 
 
   // ── organizer: OrganizerPayout.status='failed' ── (aged by eventId — batch-level failure)
   const oFailed = await db.organizerPayout.findMany({
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     where: { status: 'failed' }, select: { id: true, eventId: true, totalCents: true }, take: o.maxPerPattern,
   })
   emit('organizer', oFailed.map(r => ({
@@ -1380,6 +1439,7 @@ export async function patternV(sum: SweepSummary, o: { maxPerPattern: number }) 
       id: true, status: true, collectedAt: true, returnRequestedAt: true, dispatchedAt: true,
       strandedAt: true, strandedReason: true,
     },
+    orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
 

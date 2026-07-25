@@ -27,9 +27,22 @@ function buildDatabaseUrl(): string {
       if (!url.searchParams.has('connection_limit')) {
         url.searchParams.set('connection_limit', '1')
       }
-      // pool_timeout=0 prevents "connection pool timeout" on cold starts
+      // POOL TIMEOUT — MUST be finite, and MUST expire before the platform does.
+      //
+      // This was `0`, which in Prisma DISABLES the timeout: a request contending for the
+      // single pooled connection waits FOREVER. It never errors — it hangs until Vercel kills
+      // the function, so pool exhaustion surfaces as a 504 with no attribution instead of a
+      // fast, named failure. "Prevents connection pool timeout on cold starts" was true in the
+      // sense that a hang is not a timeout error; it converted a clean failure into a silent one.
+      //
+      // WHY 5s: the ordering that matters is pool < platform. `vercel.json` sets no
+      // `maxDuration`, so functions run on Vercel's default (10s Hobby / 15s Pro) — 5s expires
+      // first on either, leaving headroom to serialise the error response. It is also ~50× the
+      // real work: region iad1 sits in the same AWS region as the Supabase project, and the
+      // heaviest route (POST /api/orders) issues 6 queries plus a Stripe call. A request waiting
+      // 5s for a connection is not slow, it is stuck, and it should say so.
       if (!url.searchParams.has('pool_timeout')) {
-        url.searchParams.set('pool_timeout', '0')
+        url.searchParams.set('pool_timeout', '5')
       }
     }
     return url.toString()
