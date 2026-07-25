@@ -24,11 +24,11 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient } from '@prisma/client'
 import { releaseOrder } from '../lib/release-order'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const SLUG = 'release-', MAIL = '@release.local', rand = () => Math.random().toString(36).slice(2, 10)
 
 let pass = 0, fail = 0

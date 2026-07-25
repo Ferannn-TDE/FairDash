@@ -14,11 +14,12 @@
 // ESM static imports are resolved before this body runs, but Queue/Worker/Prisma
 // are only instantiated inside functions called later, so env vars are available.
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.TEST_REDIS_PREFIX = 'test'   // isolate from production queue
 
 import { Queue, Worker, Job, ConnectionOptions } from 'bullmq'
-import { PrismaClient, PayoutStatus } from '@prisma/client'
+import { PayoutStatus } from '@prisma/client'
 import Stripe from 'stripe'
 import {
   ORDER_QUEUE_NAME,
@@ -31,9 +32,7 @@ import { enqueueOrderPayout } from '../lib/order-side-effects.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const prisma = new PrismaClient({
-  datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
-})
+const prisma = testPrisma()
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
   apiVersion: '2023-10-16' as any,

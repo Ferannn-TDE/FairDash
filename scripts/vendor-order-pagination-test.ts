@@ -23,11 +23,11 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient } from '@prisma/client'
 import { fetchVendorOrderHistory } from '../lib/vendor-order-history'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 
 const SLUG = 'pgtest-'
 const MAIL = '@pgtest.local'

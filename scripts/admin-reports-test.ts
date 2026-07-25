@@ -20,13 +20,14 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 import { readFileSync } from 'node:fs'
-import { PrismaClient, OrderStatus } from '@prisma/client'
+import { OrderStatus } from '@prisma/client'
 import { computeFairReport } from '../lib/admin-fair-reports'
 import { estimateStripeFeeCents } from '../lib/vendor-earnings'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const PFX = 'reptest-'
 const MAIL = '@reptest.local'
 const rand = () => Math.random().toString(36).slice(2, 10)

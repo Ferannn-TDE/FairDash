@@ -21,12 +21,13 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient, StrandedReason } from '@prisma/client'
+import { StrandedReason } from '@prisma/client'
 import { patternV, type SweepSummary } from '../lib/reconciler'
 import { releaseOrder } from '../lib/release-order'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const SLUG = 'strand-', MAIL = '@strand.local', rand = () => Math.random().toString(36).slice(2, 10)
 const minsAgo = (m: number) => new Date(Date.now() - m * 60_000)
 

@@ -17,12 +17,12 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 import { readFileSync } from 'node:fs'
-import { PrismaClient } from '@prisma/client'
 import { diffProfileChanges, purgeExpiredProfileChanges, PROFILE_CHANGE_RETENTION_DAYS } from '../lib/runner-profile-log'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const SLUG = 'pchg-', MAIL = '@pchg.local', rand = () => Math.random().toString(36).slice(2, 10)
 
 let pass = 0, fail = 0

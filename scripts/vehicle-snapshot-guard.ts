@@ -19,13 +19,13 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 import { readFileSync } from 'node:fs'
-import { PrismaClient } from '@prisma/client'
 import { releaseOrder } from '../lib/release-order'
 import { confirmReturn } from '../lib/confirm-return'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const SLUG = 'vsnap-', MAIL = '@vsnap.local', rand = () => Math.random().toString(36).slice(2, 10)
 
 let pass = 0, fail = 0

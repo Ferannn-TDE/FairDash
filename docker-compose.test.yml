@@ -1,0 +1,40 @@
+# Local test database — the isolation boundary.
+#
+# WHY THIS EXISTS: 84 scripts write to a database, 67 of them registered in the gate. Until
+# now that database was PRODUCTION. Three separate incidents came from it, and once the
+# Railway worker went live the 60s sweep started mutating test rows mid-run, so gate results
+# stopped meaning what they used to (1 failure in 8 on a money suite, retried into green).
+#
+# The property this buys is STRUCTURAL, not procedural: when the gate runs against this
+# container, the production connection string is not present in the suite's environment, so
+# no suite can reach prod regardless of which Prisma client it happens to construct. That is
+# what makes it trustworthy — not that the runs come back green.
+#
+# Deliberately NOT Supavisor: this is plain Postgres, so pooling-specific behaviour is not
+# exercised here. Accepted — pooling is verified separately (CURRENT_STATE §2) and is not what
+# these suites test.
+#
+#   npm run test:db:up     start + wait for health
+#   npm run gate           full gate against it (starts the DB itself)
+#   npm run test:db:down   stop and DESTROY the volume
+
+services:
+  fairsynq-test-db:
+    image: postgres:16-alpine
+    container_name: fairsynq-test-db
+    environment:
+      POSTGRES_USER: fairsynq
+      POSTGRES_PASSWORD: fairsynq
+      POSTGRES_DB: fairsynq_test
+    ports:
+      # 55432, not 5432 — a stray client on the default port must never silently find this.
+      - '55432:5432'
+    tmpfs:
+      # Ephemeral by construction: nothing survives a container restart, so no test run can
+      # inherit another's state. Also makes the suite considerably faster.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fairsynq -d fairsynq_test']
+      interval: 1s
+      timeout: 3s
+      retries: 30

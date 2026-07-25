@@ -25,13 +25,12 @@
 
 // ─── Env setup ────────────────────────────────────────────────────────────────
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 
-import { PrismaClient, OrderStatus, FulfillmentType } from '@prisma/client'
+import { OrderStatus, FulfillmentType } from '@prisma/client'
 
-const db = new PrismaClient({
-  datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
-})
+const db = testPrisma()
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -27,6 +27,7 @@
  * Run: npx tsx scripts/runner-onboarding-proof.ts   (self-cleaning, prefix ronb-)
  */
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.REDIS_URL = ''            // DELIVERED payout enqueues become inert no-ops
 delete process.env.RATE_LIMIT_TEST    // never trigger any route's test-bypass stub
@@ -34,11 +35,10 @@ delete process.env.RATE_LIMIT_TEST    // never trigger any route's test-bypass s
 import { register } from 'node:module'
 register('./_clerk-loader.mjs', import.meta.url)  // substitute Clerk before any handler import
 
-import { PrismaClient } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { resolveOnboardingRedirect } from '../lib/runner-onboarding-guard'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 
 const PFX = 'ronb-'
 const MAIL = '@ronb.local'
@@ -239,8 +239,26 @@ async function main() {
 
     // ── 8. Grandfather: pre-migration rows were promoted to APPROVED ────────────
     console.log('\n[8] Grandfather: pre-migration Runner rows promoted to APPROVED (no lockout of existing runners)')
+    // REFRAMED for the isolated test database. This counted PRODUCTION rows the grandfather
+    // migration promoted; on a clean database that is 0, and seeding an APPROVED runner to then
+    // assert it is APPROVED would be CIRCULAR. The durable claim is about the MIGRATION SQL —
+    // reviewable, database-independent — plus a fixture proving the code admits such a row.
+    const { readFileSync: readSql } = await import('node:fs')
+    const gfSql = readSql('prisma/migrations/20260712000000_add_runner_approval_status/migration.sql', 'utf8')
+    assert(/UPDATE\s+"Runner"[\s\S]*APPROVED/i.test(gfSql),
+      'the migration GRANDFATHERS pre-existing runners to APPROVED (no lockout on deploy)')
+    assert(/system-grandfather/.test(gfSql),
+      "grandfathered runners are attributed to 'system-grandfather', not to a real admin")
+
+    // Uses the suite's own PFX/MAIL namespace so the existing prefix-based cleanup removes it.
+    const gfUser = await prisma.user.create({
+      data: { clerkId: `${PFX}gf-${rand()}`, email: `${PFX}gf-${rand()}${MAIL}`, name: 'GF' }, select: { id: true },
+    })
+    await prisma.runner.create({
+      data: { userId: gfUser.id, eventId: ev.id, status: 'OFFLINE', approvalStatus: 'APPROVED', approvedBy: 'system-grandfather' },
+    })
     const grandfathered = await prisma.runner.findMany({ where: { approvedBy: 'system-grandfather' }, select: { approvalStatus: true } })
-    assert(grandfathered.length >= 1, `≥1 pre-existing runner was grandfathered (found ${grandfathered.length})`)
+    assert(grandfathered.length >= 1, `≥1 grandfathered runner fixture present (found ${grandfathered.length})`)
     assert(grandfathered.every(r => r.approvalStatus === 'APPROVED'), 'every grandfathered runner is APPROVED (none left PENDING)')
 
     // ── 9. RETURNING-RUNNER GUARD — existing APPROVED runner not downgraded ─────

@@ -15,14 +15,15 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient, OrderStatus } from '@prisma/client'
+import { OrderStatus } from '@prisma/client'
 import { reverseAccrualForRefundedPortion } from '../lib/reverse-accrual'
 import { runReconciliationSweep } from '../lib/reconciler'
 import { deriveMoneyActor } from '../lib/process-refund'
 import { readFileSync } from 'node:fs'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const SLUG = 'revt-', MAIL = '@revt.local', rand = () => Math.random().toString(36).slice(2, 10)
 
 let pass = 0, fail = 0

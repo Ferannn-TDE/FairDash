@@ -32,9 +32,29 @@ const seededUserIds: string[] = []
 async function main() {
   console.log(`\n${CYN}Phase 6 staging — reconciler backstop + strand alert + Pattern L fix${RESET}\n`)
 
-  const it = await db.menuItem.findFirst({ select: { id: true, vendorId: true, vendor: { select: { eventId: true } } } })
-  if (!it?.vendor?.eventId) { console.error('no fixture'); process.exit(1) }
-  const eventId = it.vendor.eventId, vendorId = it.vendorId, menuItemId = it.id
+  // SELF-CONTAINED FIXTURE. This used to grab whatever menu item happened to exist and bail
+  // with "no fixture" if none did — ambient production state, and the reason this script sat
+  // red and unnoticed once suites moved to an isolated database. It seeds its own event,
+  // vendor and menu item, and tears them down with the rest of the RUN-tagged rows.
+  const fxEvent = await db.event.create({
+    data: {
+      name: `p6 ${RUN}`, urlSlug: `p6seed-${RUN}`, status: 'ACTIVE',
+      startDate: new Date(), endDate: new Date(Date.now() + 86_400_000),
+    },
+    select: { id: true },
+  })
+  await db.fulfillmentConfig.create({
+    data: { eventId: fxEvent.id, homeDeliveryEnabled: true, homeDeliveryFee: 10, runnerFeePercent: 50 },
+  })
+  const fxVendor = await db.vendor.create({
+    data: { eventId: fxEvent.id, name: `p6v ${RUN}`, slug: `p6seed-v-${RUN}`, cuisineType: 'Test', status: 'ACTIVE' },
+    select: { id: true },
+  })
+  const fxItem = await db.menuItem.create({
+    data: { vendorId: fxVendor.id, name: 'p6 item', price: 10, category: 'Test' },
+    select: { id: true },
+  })
+  const eventId = fxEvent.id, vendorId = fxVendor.id, menuItemId = fxItem.id
   const cfg = await db.fulfillmentConfig.findUnique({ where: { eventId }, select: { runnerFeePercent: true } }).catch(() => null)
   const pct = cfg?.runnerFeePercent ?? 0
   const customer = await db.user.create({ data: { clerkId: `p6c_${RUN}`, email: `p6c_${RUN}@test.invalid`, name: 'P6C' }, select: { id: true } })
@@ -109,6 +129,15 @@ async function cleanup() {
   if (seededUserIds.length) {
     await db.runner.deleteMany({ where: { userId: { in: seededUserIds } } }).catch(() => {})
     await db.user.deleteMany({ where: { id: { in: seededUserIds } } }).catch(() => {})
+  }
+  // The seeded event/vendor/menu-item fixture (RUN-tagged), removed innermost-first.
+  const fx = await db.event.findMany({ where: { urlSlug: { startsWith: 'p6seed-' } }, select: { id: true } }).catch(() => [])
+  if (fx.length) {
+    const ids = fx.map(e => e.id)
+    await db.menuItem.deleteMany({ where: { vendor: { eventId: { in: ids } } } }).catch(() => {})
+    await db.vendor.deleteMany({ where: { eventId: { in: ids } } }).catch(() => {})
+    await db.fulfillmentConfig.deleteMany({ where: { eventId: { in: ids } } }).catch(() => {})
+    await db.event.deleteMany({ where: { id: { in: ids } } }).catch(() => {})
   }
   await db.$disconnect()
 }

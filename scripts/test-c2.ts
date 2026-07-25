@@ -21,20 +21,18 @@
 
 // ─── Env setup — must precede all lib imports ─────────────────────────────────
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.RATE_LIMIT_TEST = 'true'   // activates test-mode bypass in routes
 process.env.TEST_REDIS_PREFIX = 'test' // isolates BullMQ jobs (unused here but harmless)
 
 import { NextRequest } from 'next/server'
-import { PrismaClient } from '@prisma/client'
 import { PATCH as statusPATCH } from '../app/api/orders/[id]/status/route.js'
 import { PATCH as vendorStatusPATCH } from '../app/api/orders/[id]/vendor-status/route.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const prisma = new PrismaClient({
-  datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
-})
+const prisma = testPrisma()
 
 // Unique run ID prevents Redis key collisions between test runs
 const RUN_ID = Date.now()

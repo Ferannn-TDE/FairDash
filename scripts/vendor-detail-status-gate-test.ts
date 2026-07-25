@@ -19,11 +19,11 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient } from '@prisma/client'
 import { callerMayViewInactiveVendor } from '../lib/vendor-visibility'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const PFX = 'sgtest-'
 const MAIL = '@sgtest.local'
 const rand = () => Math.random().toString(36).slice(2, 10)

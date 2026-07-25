@@ -13,12 +13,13 @@
  * the REAL resolveOwnedFair. Final proof remains the human browser pass.
  */
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.REDIS_URL = ''
 
-import { PrismaClient, EventStatus } from '@prisma/client'
+import { EventStatus } from '@prisma/client'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 
 const SLUG = 'p2vis-'
 const MAIL = '@p2vis.local'

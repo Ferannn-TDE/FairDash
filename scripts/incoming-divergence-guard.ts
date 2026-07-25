@@ -24,12 +24,13 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient, OrderStatus } from '@prisma/client'
+import { OrderStatus } from '@prisma/client'
 import { statusWhere, vendorOrderScope, fetchVendorOrderHistory } from '../lib/vendor-order-history'
 import { ACTIVE_VENDOR_STATUSES } from '../app/api/vendors/[id]/orders/active/route'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 
 const SLUG = 'incdiv-'
 const MAIL = '@incdiv.local'

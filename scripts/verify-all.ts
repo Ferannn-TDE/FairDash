@@ -28,6 +28,12 @@ const SUITES: Suite[] = [
   { group: 'money',    name: 'c1-admin-money-control', file: 'scripts/c1-admin-money-control-test.ts' },
   { group: 'correctness', name: 'sweep-coverage',       file: 'scripts/mn-coverage-guard.ts' },
   { group: 'correctness', name: 'status-write-guard',   file: 'scripts/status-write-guard.ts' },
+  { group: 'boundary',    name: 'test-isolation',        file: 'scripts/test-isolation-guard.ts' },
+  { group: 'boundary',    name: 'protected-membership',  file: 'scripts/protected-events-membership-guard.ts' },
+  // Previously UNREGISTERED and silently red — an unregistered script is one nobody runs,
+  // which is exactly how both drifted onto ambient production data without anyone noticing.
+  { group: 'correctness', name: 'phase6-backstop',       file: 'scripts/test-phase6-backstop.ts' },
+  { group: 'boundary',    name: 'runner-onboarding',     file: 'scripts/runner-onboarding-proof.ts' },
   { group: 'money',    name: 'b2-runner-payout',       file: 'scripts/b2-runner-payout-test.ts' },
   { group: 'money',    name: 'b3-organizer-batch',     file: 'scripts/b3-organizer-payout-test.ts' },
   { group: 'money',    name: 'b4-tip-refund',          file: 'scripts/b4-tip-refund-test.ts' },
@@ -125,7 +131,21 @@ const AREA_SUITES: Record<string, string[]> = {
   runner:   ['runner-earnings', 'runner-completion', 'runner-stats-source', 'runner-fee-gate', 'runner-boundary', 'flicker-class', 'typecheck'],
 }
 
+// ─── Network tier ─────────────────────────────────────────────────────────────
+// Six suites drive real Stripe test-mode calls (~2 min each). A gate that takes 12 minutes of
+// network gets run less often, and an UNRUN GATE PROTECTS NOTHING — so `--fast` skips them.
+//
+// ⚠️ THE BARE COMMAND IS ALWAYS THE FULL GATE. `--fast` is an explicit opt-in and nothing else
+// may imply it. The discipline in this repo is "judged by exit code, full batch"; if the bare
+// command silently became the fast subset, every habit built around it would become a FALSE
+// GREEN BY CONVENIENCE — the same class as the grep-summariser this runner exists to replace.
+const NETWORK_SUITES = new Set([
+  'c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch',
+  'b4-tip-refund', 'double-pay-guard', 'refund-engine',
+])
+
 const argv = process.argv.slice(2)
+const fast = argv.includes('--fast')
 let suites = SUITES
 if (argv[0] === '--for') {
   const area = argv[1]
@@ -136,8 +156,14 @@ if (argv[0] === '--for') {
   suites = SUITES.filter(s => names.includes(s.name))
 } else if (argv[0] === '--group') {
   suites = SUITES.filter(s => s.group === argv[1])
-} else if (argv[0]) {
+} else if (argv[0] && argv[0] !== '--fast') {
   suites = SUITES.filter(s => s.group === argv[0] || s.name === argv[0])
+}
+if (fast) {
+  const skipped = suites.filter(s => NETWORK_SUITES.has(s.name)).map(s => s.name)
+  suites = suites.filter(s => !NETWORK_SUITES.has(s.name))
+  console.log(`⚡ --fast: SKIPPING ${skipped.length} network suite(s): ${skipped.join(', ')}`)
+  console.log('   This is NOT the batch gate. Run `npx tsx scripts/verify-all.ts` (no args) before committing.')
 }
 if (!suites.length) {
   console.error(`No suite or group matched "${argv.join(' ')}".`)
@@ -214,7 +240,7 @@ for (const s of suites) {
 
 console.log(`\n${'═'.repeat(52)}`)
 if (failed.length === 0) {
-  console.log(`  ✅ ALL ${suites.length} SUITES PASS`)
+  console.log(`  ✅ ALL ${suites.length} SUITES PASS${fast ? ' (⚡ FAST TIER — network suites NOT run)' : ''}`)
 } else {
   console.log(`  ❌ ${failed.length} of ${suites.length} SUITES FAILED: ${failed.join(', ')}`)
 }

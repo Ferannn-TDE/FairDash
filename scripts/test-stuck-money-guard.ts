@@ -19,11 +19,11 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient } from '@prisma/client'
 import { patternU, type SweepSummary } from '../lib/reconciler'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const SLUG = 'stuck-', MAIL = '@stuck.local', rand = () => Math.random().toString(36).slice(2, 10)
 const minsAgo = (m: number) => new Date(Date.now() - m * 60_000)
 
