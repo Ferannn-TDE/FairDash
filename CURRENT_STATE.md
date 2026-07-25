@@ -4,7 +4,7 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot: `main @ 4a7d69b`, **deployed: UNVERIFIED THIS SESSION** (see §1), 2026-07-25. Every
+> Snapshot: `main @ ad59773`, **deployed `ee233ec`** (measured — 4 commits behind, see §1), 2026-07-25. Every
 > number below was re-measured this session against the live DB unless marked otherwise; anything
 > taken on report rather than measured here says so inline.
 >
@@ -14,16 +14,29 @@
 
 ## 1. Git / deploy reality
 
-- **⚠️ THERE IS UNPUSHED WORK. The previous "nothing unpushed" line was stale and is corrected.**
-  Local head is **`4a7d69b`** (`test: make PROJECT_INVARIANTS.md enforceable`), which is **1 commit
-  ahead of `origin/main`** — plus the current session's uncommitted changes on top. The old claim
-  ("served `5300a76` — matches local head, nothing unpushed") was true when written and drifted.
-- **The served fingerprint was NOT re-measured this session — do not treat any value here as the
-  deployed one.** `GET /api/health` (`commit` field) is the authority and this shell cannot reach
-  it, nor can it fetch (`git ls-remote` → `Permission denied (publickey)`). Per
-  **fingerprint-over-git-ref** (the local ref has been wrong twice), the honest state is *unknown*,
-  not *assumed-equal-to-head*. **Re-measure before believing anything about what is live:**
-  `curl -s https://<prod-host>/api/health | jq .commit`.
+- **⚠️ THERE IS UNPUSHED WORK — 4 commits. MEASURED, not inferred.**
+
+  ```
+  served (GET /api/health .commit)  ee233ec   ← what is actually running
+  origin/main                       ee233ec   ← agrees, this time
+  local main                        ad59773   ← 4 ahead
+  ```
+
+  The four unpushed: `4a7d69b` (invariants enforceable), `836259e` (logger.money — seven money
+  outcomes were deleted from the prod build), `1a56a8d` (ghost-filter walk — three live revenue
+  violations), `ad59773` (doc pass). The old claim (`served 5300a76 — matches local head, nothing
+  unpushed`) was true when written and drifted.
+
+- **The served fingerprint WAS re-measured, 2026-07-25T19:10:24Z.** Command that worked, verbatim:
+  `curl -s https://fair-synq.vercel.app/api/health`. **Correction to the previous line here, which
+  claimed this shell cannot reach prod: it can.** That claim was inherited, not tested, and it was
+  wrong — it had the effect of making an easily-measured fact look unmeasurable. The *fetch*
+  limitation is real and separate (`git ls-remote` → `Permission denied (publickey)`), which is why
+  `origin/main` above is only corroboration; the served value is the authority
+  (**fingerprint-over-git-ref** — the local ref has been wrong twice).
+- **Nothing from the last three sessions is deployed.** The two money-behaviour commits above are
+  local only. In particular the ghost-filter fixes are NOT live, so organizer/vendor revenue
+  surfaces are still showing inflated numbers until someone pushes.
 - **The vendor + organizer revenue corrections are LIVE.** They were the 4 unpushed commits in the
   previous snapshot; RANDY'S HOUSE OF BBQ no longer sees the 34%-ghost revenue figure. Vendor
   onboarding links are safe to send on this axis.
@@ -40,6 +53,12 @@ is running. Re-measured `GET /api/health` at 2026-07-24T23:13:46Z:
     "worker": { "status": "ok", "lastSweepAt": "2026-07-24T23:13:15.191Z", "ageSec": 31 } },
   "flags": { "enforceVendorReadiness": false, "previewBypass": true } }
 ```
+
+**Re-confirmed 2026-07-25T19:10:24Z — still green a day later**, `commit ee233ec` (§1),
+`database ok`, `redis ok`, `worker ok` with `ageSec: 4`. The heartbeat is the point: a dead worker
+looks exactly like a calm day from every other surface, so this is the one check that distinguishes
+them. Both flags unchanged (`enforceVendorReadiness: false`, `previewBypass: true`), which
+independently corroborates §6 items 6 and 10 rather than restating them from memory.
 
 - **Redis is Railway** — TCP proxy `tokaido.proxy.rlwy.net:47918`, scheme `redis://`, so **no TLS is
   applied. That is correct for Railway, not a misconfiguration**: `buildConnectionOptions`
