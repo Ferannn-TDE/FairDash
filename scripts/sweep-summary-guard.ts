@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs'
 import { formatSweepSummary, type SweepSummary, type LedgerBreakdown } from '../lib/reconciler'
+import { stripComments } from './_strip-comments'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -80,6 +81,42 @@ function main() {
   assert(/logger\.warn\(formatSweepSummary\(/.test(recSrc), 'the reconciler emits the summary via logger.warn(formatSweepSummary(...)) every sweep')
   assert(readFileSync('lib/process-payout.ts', 'utf8').includes("logger.warn(\n      `[Ledger] accrued") || /logger\.warn\([\s\S]{0,40}\[Ledger\] accrued/.test(readFileSync('lib/process-payout.ts', 'utf8')),
     'accrueVendorEarnings emits a [Ledger] ledger-delta at warn on a NEW accrual (the silent path is now visible)')
+
+  // ── [5] logger.money REACHES PRODUCTION — the sink, not the callers ─────────────
+  // Q5 fixed the reconciler's summary one call site at a time and deliberately left
+  // logger.info alone ("the info line is kept for dev detail", f1306be). Seven money-move
+  // OUTCOMES stayed on info and were invisible in prod — every payout we did not make was
+  // visible, every one we did was not. logger.money is the fix, and its correctness rests
+  // entirely on which console method it calls:
+  //
+  //   console.warn/error → survives BOTH sinks (the !isDev guard AND next.config.mjs's
+  //                        removeConsole, which excludes exactly 'error' and 'warn').
+  //   console.info/log/debug → DELETED by the Next compiler in the Vercel build. The call
+  //                        site is gone; no runtime guard can rescue it.
+  //
+  // So "money must not sit on console.info" is the whole property, and until now it was
+  // protected by a comment — and prose has no drift-guard. Someone normalising the logger
+  // flips it to console.info, every money line dies on Vercel again, and it is SILENT:
+  // the call sites still read logger.money, so a scanner that checks the CALLERS stays green.
+  // This checks the SINK.
+  console.log('\n[5] static: logger.money routes through console.warn/error (survives BOTH prod sinks)')
+  const loggerCode = stripComments(readFileSync('lib/logger.ts', 'utf8'))
+  const moneyBody = loggerCode.match(/money:\s*\([^)]*\)\s*=>\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? ''
+  assert(moneyBody !== '', 'lib/logger.ts exports a `money` member (the money-visible level exists)')
+  assert(/console\.(warn|error)\s*\(/.test(moneyBody),
+    'logger.money calls console.warn or console.error — reaches prod on Vercel AND the worker')
+  assert(!/console\.(info|log|debug)\s*\(/.test(moneyBody),
+    '⛔ logger.money does NOT call console.info/log/debug (the Next compiler deletes those — silent death on Vercel)')
+  // The second sink, asserted from its own source rather than trusted: removeConsole must keep
+  // excluding warn. If someone drops the exclude list, console.warn dies too and logger.money
+  // goes with it — a change in next.config.mjs that would otherwise look unrelated to money.
+  const nextCfg = stripComments(readFileSync('next.config.mjs', 'utf8'))
+  assert(/removeConsole[\s\S]{0,120}exclude:\s*\[[^\]]*'warn'/.test(nextCfg),
+    "next.config.mjs removeConsole still excludes 'warn' (the sink logger.money depends on)")
+  // Not vacuous: prove the SAME probe rejects the bad shape it is meant to catch.
+  const BAD = " console.info('[MONEY]', msg, payload ?? '')\n "
+  assert(!/console\.(warn|error)\s*\(/.test(BAD) && /console\.(info|log|debug)\s*\(/.test(BAD),
+    'POSITIVE CONTROL on the probe: a console.info money body is rejected by these same tests')
 
   console.log(`\n${'─'.repeat(52)}`)
   console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)

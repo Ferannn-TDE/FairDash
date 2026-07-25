@@ -258,7 +258,7 @@ export async function processEventOrganizerPayout(eventId: string): Promise<Orga
     }),
   ])
 
-  logger.info('[OrganizerPayout] batch paid', { eventId, batchId: batch.id, totalCents: batch.totalCents, transferId: transfer.id })
+  logger.money('[OrganizerPayout] batch paid', { eventId, batchId: batch.id, totalCents: batch.totalCents, transferId: transfer.id })
   return { eventId, outcome: 'paid', batchId: batch.id, totalCents: batch.totalCents, transferId: transfer.id }
 }
 

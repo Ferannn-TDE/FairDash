@@ -201,6 +201,6 @@ export async function handleChargebackClosed(dispute: Stripe.Dispute): Promise<v
       disputeId: dispute.id, orderId: cb.orderId,
     })
   } else {
-    logger.info('[Chargeback] LOST — clawback stands; gaps finalized.', { disputeId: dispute.id, orderId: cb.orderId })
+    logger.money('[Chargeback] LOST — clawback stands; gaps finalized.', { disputeId: dispute.id, orderId: cb.orderId })
   }
 }
