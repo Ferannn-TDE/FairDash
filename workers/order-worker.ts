@@ -725,8 +725,49 @@ async function recordPayoutFailure(job: Job<JobData>) {
  * PLACED orders) is detect-and-alert by default; it only acts when
  * RECONCILER_PATTERN_E_ENABLED=true.
  */
+/**
+ * SELF-OVERLAP GUARD — a sweep must never run concurrently with itself.
+ *
+ * WHY IT CAN: the worker runs at `concurrency: 5`, and BullMQ 5.76.8 schedules the NEXT
+ * repeat when the current job is PICKED UP, not when it finishes (`worker.js:539-547`,
+ * `jobScheduler.upsertJobScheduler` on the fetch path). So a sweep that outruns its 60s
+ * interval meets its own successor with four free concurrency slots — BullMQ does not skip it.
+ * Two reconcilers on the same rows has never been exercised, and the monotonic fixed-point
+ * guarantees were never designed under it.
+ *
+ * WHY NOT `concurrency: 1`: that is worker-wide in this version (no per-job-name concurrency —
+ * checked `interfaces/worker-options.d.ts`), and would serialise all 13 handlers behind the
+ * ~14s sweep. Payouts and timeouts would queue behind reconciliation. Wrong trade.
+ *
+ * SCOPE — an in-process flag, honest about its limit: it makes self-overlap impossible within
+ * ONE worker process, which is the deployment today (a single Railway service). It would NOT
+ * hold across replicas; scaling the worker horizontally requires promoting this to a Redis
+ * lock (SET NX PX) before it is safe. Named here so that change is not made unknowingly.
+ *
+ * Skips rather than queues: a delayed duplicate sweep has no value — the next tick is 60s away
+ * and will see the same state. The skip is logged, never silent.
+ */
+let sweepInFlight = false
+
 async function handleReconcile(_job: Job<JobData>) {
-  await runReconciliationSweep()
+  if (sweepInFlight) {
+    console.warn(
+      '[Worker] reconcile-sweep SKIPPED — the previous sweep is still running. ' +
+      'The sweep is exceeding its 60s interval; profile it (CURRENT_STATE §6).',
+    )
+    return
+  }
+  sweepInFlight = true
+  const startedAt = Date.now()
+  try {
+    await runReconciliationSweep()
+  } finally {
+    sweepInFlight = false
+    const ms = Date.now() - startedAt
+    if (ms > 60_000) {
+      console.error(`[Worker] reconcile-sweep took ${ms}ms — LONGER THAN ITS 60s INTERVAL. Overlap is being prevented by the guard, meaning sweeps are now being dropped.`)
+    }
+  }
 }
 
 // ─── Worker ───────────────────────────────────────────────────────────────────

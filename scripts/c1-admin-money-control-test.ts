@@ -388,8 +388,23 @@ async function main() {
     // cross-fair admin action left NO mark on it.
     const bUntouched = await prisma.vendorEarning.findFirst({ where: { orderId: orderB } })
     assert(bUntouched?.status !== 'held' && bUntouched?.status !== 'cancelled', "Fair B's earning was NOT held or cancelled by Fair A's admin")
-    const bAudits = await prisma.adminMoneyAction.count({ where: { eventId: evB.id } })
-    assert(bAudits === 0, 'no audit row leaked into Fair B')
+    // SCOPED TO actorType:'admin' — deliberately, not a weakened assertion.
+    //
+    // What this test means to forbid is an ADMIN in Fair A leaving a mark on Fair B. It cannot
+    // forbid ALL AdminMoneyAction rows for Fair B, because writeMoneyAudit is shared by design
+    // (lib/admin-money.ts:81-85): reverseAccrualForRefundedPortion writes one scoped to the
+    // EARNING's event (lib/reverse-accrual.ts:67) with actorType 'reconciler'/'system'. Fair B's
+    // order is in scope for the global sweeps this test runs (:267,:302,:424,:609) AND for the
+    // LIVE production worker now sweeping the same database every 60s — so an unscoped count is
+    // a race, and it failed 1 run in 8 once the worker went live.
+    //
+    // ⚠️ INTERIM. The cause is structural (no test/prod isolation), so scoping fixes THIS suite
+    // and not the class. Any suite seeding into the shared DB and asserting on a global side
+    // effect is now racy — see the report's named set.
+    const bAdminAudits = await prisma.adminMoneyAction.count({
+      where: { eventId: evB.id, actorType: 'admin' },
+    })
+    assert(bAdminAudits === 0, "no ADMIN audit row leaked into Fair B (non-admin actors may legitimately write here)")
 
     // ── [14] ⛔⛔ THE STICKY TEST (vendor) ─────────────────────────────────────
     // The whole point of an admin hold. There are TWO kinds of hold in this system:

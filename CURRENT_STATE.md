@@ -202,8 +202,10 @@ Re-measured 2026-07-24 (`stripeVerified: true AND stripeAccountId NOT NULL` for 
 | Organizers | **0** | 3 |
 
 - **17 vendors cannot receive a payout.** Stripe is the blocker, not the menu.
-- **Organizers re-measured at 0 of 3**, not "1 organizer, not connected" as the previous snapshot
-  said. The count of organizer records changed; the connected count did not.
+- **Organizers read 0 of 3 — the "3" is NOT a bug and does not need re-investigating.** The three
+  `FairOrganizer` records are **2 test accounts created during onboarding testing + 1 real organizer
+  (unconnected)**. The previous snapshot said "1 organizer"; only the test rows are new. The
+  connected count has always been 0. *(The 2 test rows are part of the pre-fair data reset, §6.)*
 - **No runner or organizer payout leg has EVER executed end-to-end.** RunnerEarning: 2 rows,
   both `tracked`, **$23.00**, never `paid`. OrganizerEarning: 2 rows, both `accrued`, **$12.98**,
   with **0 `OrganizerPayout` rows** — no batch has ever been created.
@@ -296,13 +298,29 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
    split that caused the prefix bug.
 2. **Stripe onboarding: 17 vendors, 4 runners, 3 organizers unconnected.** Longest lead, not code,
    cannot be compressed by working harder. §3.
-3. **Pre-fair data reset — test orders and their accruals.** Today's prod test orders accrued real
-   `VendorEarning` rows: payable moved **$287.00 → $344.00**, and **$57.00 across 4 rows created
-   2026-07-24** is test-order money now mixed into the live ledger. It must be cleared (void +
-   Pattern T, not delete) before Aug 5 or the organizer's opening-day payable is wrong.
-4. **The three payout legs end-to-end.** Runner and organizer have never executed once. The
-   production *producer* is now proven (`bull:…:id` exists), but no payout has completed under the
-   live worker — §3. Watch a single leg execute end-to-end before anything runs unattended.
+3. **Pre-fair data reset — DELIBERATELY NOT DOING THE TEST-ORDER CLEANUP.** The prod test orders
+   accrued, and the live worker then **paid** them: payable went $287 → $344 → back to **$287.00**
+   as $53.98 settled to RANDY'S HOUSE OF BBQ. That is test-mode money in a test-mode Stripe
+   account against the test vendor — **not worth engineering time**, and the decision is recorded
+   so it is not re-opened.
+
+   ⚠️ **KEEP THE PRINCIPLE THE ATTEMPT SURFACED — it will be true with REAL money at the fair:**
+
+   > **Voiding an order does NOT reverse a settled transfer.** `voidedAt` is an out-of-model
+   > exclusion marker (`schema.prisma`, `Order.voidedAt`) — the reconciler skips the order and
+   > Stripe is untouched. Once the worker has executed a payout, the money is gone from the
+   > platform balance and only a **Pattern-T reversal or a Stripe-side reversal** brings it back.
+   > Any future "just void the bad orders" cleanup plan is wrong the moment a payout has fired.
+   > Check `Payout` / `VendorEarning.status = 'paid'` **before** assuming a void is sufficient.
+4. **The three payout legs end-to-end — ✅ VENDOR LEG PROVEN IN PRODUCTION, runner + organizer
+   still never executed.** On 2026-07-25 the full production loop ran unattended for the first
+   time: **prod producer → Railway Redis → live Railway worker → Stripe transfer.** Measured:
+   `Payout` rows **136 → 140**, orders with `payoutStatus` **4 → 8**, paid **$3,109.15 →
+   $3,163.13** (+$53.98), four payouts between **00:33 and 01:19**. One of them is
+   `cmrzeiyty000lqu5l59lz051a` — the order placed to prove the producer enqueues. Producer,
+   queue, consumer and Stripe are now all verified on the vendor path.
+   **Still unexecuted: the runner and organizer legs**, blocked on payee onboarding (§3), not on
+   code. Watch each execute once before trusting it unattended.
 5. 🔬 **Profile the sweep — which pattern owns the 14s?** Unprofiled. At fair scale a sweep over 60s
    means overlapping sweeps on the same rows (§2).
 6. **Remove the preview-bypass scaffold — AFTER 2026-08-05.** Full removal list in §7.
@@ -370,6 +388,29 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 - **Stale-order cleanup: recommended, NOT executed.** 225 of 377 orders are already voided; the
   honest path is voiding the remaining stale ones rather than deleting. Should follow the ghost
   filters (now shipped), not precede them.
+- **🔴 THE LIVE WORKER MAKES THE TEST GATE UNRELIABLE. Interim discipline, until isolation exists:
+  SCALE THE RAILWAY WORKER TO ZERO BEFORE ANY FULL GATE, AND BACK UP AFTER.**
+  Suites seed into the shared prod DB; the 60s sweep mutates their rows mid-run. `verify-all`
+  retries and exits **0** while printing `⚠️ FLAKY (passed only on retry)` — so a money suite can
+  fail and the gate still reads green. **Judge a gate run by exit code AND zero FLAKY lines.**
+  Measured: `c1-admin-money-control` failed **1 run in 8** with the worker live; with the worker
+  at zero, **4 consecutive clean runs** (65/65 gate + 3 isolated, 94 assertions each).
+  This is a workaround, not a fix — the cause is the absence of a test database (§ top open item).
+
+  **The nine suites at risk — named set, not an estimate:**
+
+  *(A) Seeds AND drives the reconciler — races the live worker head-on:*
+  `c1-admin-money-control-test.ts` (4 × `runReconciliationSweep`) · `reverser-pattern-t-guard.ts` (1)
+  · `test-phase6-backstop.ts` (1) · `b2-runner-payout-test.ts` · `b3-organizer-payout-test.ts` ·
+  `b4-tip-refund-test.ts` (the last three call `reconcileRunnerPayouts` / `reconcileOrganizerPayouts`
+  / `reconcileTipRefunds` directly)
+
+  *(B) Seeds AND asserts on an unscoped aggregate:*
+  `organizer-bootstrap-test.ts` (`orgMember.count`) · `runner-onboarding-proof.ts`
+  (`runner.count` before/after)
+
+  Only `c1-admin-money-control-test.ts` has been hardened (scoped to `actorType: 'admin'`,
+  `:392`). **The other eight are unfixed** — they simply have not been unlucky yet.
 - **Two enqueue-observability asymmetries (found in the swallowed-error audit, §2). Neither is
   silent; both are thinner than their vendor twin.** The vendor payout checks the return and logs a
   CRITICAL line naming the order (`lib/reconcile-order-status.ts:505-509`), plus

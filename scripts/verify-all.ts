@@ -26,6 +26,7 @@ interface Suite { group: string; name: string; file: string }
 const SUITES: Suite[] = [
   // Money — the payout/refund engines and the admin money controls.
   { group: 'money',    name: 'c1-admin-money-control', file: 'scripts/c1-admin-money-control-test.ts' },
+  { group: 'correctness', name: 'sweep-coverage',       file: 'scripts/mn-coverage-guard.ts' },
   { group: 'money',    name: 'b2-runner-payout',       file: 'scripts/b2-runner-payout-test.ts' },
   { group: 'money',    name: 'b3-organizer-batch',     file: 'scripts/b3-organizer-payout-test.ts' },
   { group: 'money',    name: 'b4-tip-refund',          file: 'scripts/b4-tip-refund-test.ts' },
