@@ -34,6 +34,11 @@ const SUITES: Suite[] = [
   // which is exactly how both drifted onto ambient production data without anyone noticing.
   { group: 'correctness', name: 'phase6-backstop',       file: 'scripts/test-phase6-backstop.ts' },
   { group: 'boundary',    name: 'runner-onboarding',     file: 'scripts/runner-onboarding-proof.ts' },
+  // Proves the soft-delete MONEY FLOOR (money/audit include archived fairs). Cited in
+  // PROJECT_INVARIANTS as the proof of that invariant and never registered — the gate has
+  // never run it. Surfaced by scripts/invariant-guard-refs.ts.
+  { group: 'money',       name: 'archived-money-safety',  file: 'scripts/p1-archived-money-safety-test.ts' },
+  { group: 'correctness', name: 'invariant-guard-refs',   file: 'scripts/invariant-guard-refs.ts' },
   { group: 'money',    name: 'b2-runner-payout',       file: 'scripts/b2-runner-payout-test.ts' },
   { group: 'money',    name: 'b3-organizer-batch',     file: 'scripts/b3-organizer-payout-test.ts' },
   { group: 'money',    name: 'b4-tip-refund',          file: 'scripts/b4-tip-refund-test.ts' },

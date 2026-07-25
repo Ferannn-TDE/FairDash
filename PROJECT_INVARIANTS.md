@@ -37,14 +37,14 @@ add a guard that fails if a second copy reappears.** Confirmed instances, each n
 | delivery-state wording (bar/line/timeline) | `lib/delivery-progress.ts:40` (`deriveDeliveryProgress`) | `scripts/delivery-progress-guard.ts` |
 | runner earnings decomposition (share + tip) | `lib/runner-earnings.ts` (`summarizeRunnerEarnings`) | `scripts/runner-earnings-guard.ts` |
 | terminal-failed status set (cancel-button, tabs) | `lib/order-status.ts` (`FAILED_STATUSES`) | `scripts/cancel-label-guard.ts` |
-| admin money-audit writer | `lib/admin-money.ts:84` (`writeMoneyAudit`, "two-writers-one-truth trap") | (in-tx audit assertion) |
+| admin money-audit writer | `lib/admin-money.ts:84` (`writeMoneyAudit`, "two-writers-one-truth trap") | `scripts/c1-admin-money-control-test.ts` |
 | cross-fair resolution | `lib/admin-fair-context.ts` (`requireAdminFairContext`) | `scripts/p6-admin-fair-chokepoint-proof.ts` |
 | plausible-but-wrong value flashed before load | (skeletons; no defaulted initial state) | `scripts/flicker-class-guard.ts` |
 | order identity (cuid vs short code) | `lib/resolve-order.ts` | `scripts/resolve-order-guard.ts` |
 | "which orders are in-model" (ghost/void filter) | `lib/order-scope.ts` | `scripts/organizer-ghost-guard.ts` |
 | delivery address validation + formatting | `lib/delivery-address.ts` | `scripts/delivery-address-guard.ts` |
 | fair CALENDAR dates + live/upcoming/ended state | `lib/event-date.ts:82` (`deriveEventLiveState`) | `scripts/fair-open-gate-guard.ts` |
-| BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | — **unguarded; see below** |
+| BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | <!-- guard: none — the single source is real, but its INPUT is an env var spanning two deployments (Vercel producer, Railway consumer). A repo scanner cannot see config divergence. Operational check only: scripts/step-b-inspect.ts. --> **unguarded — declared, see below** |
 
 **The one derivation whose "single source" spans a boundary a guard cannot reach.**
 `getQueuePrefix()` (`lib/queues.ts:58`) is genuinely single-sourced — all three construction sites
@@ -78,6 +78,7 @@ Each is a rule that, if violated, silently loses money or leaks data.
   4 files use `includeArchived` (INCLUDE side), 22 `archivedAt: null` occurrences (EXCLUDE side) —
   _the count drifts with routes; the PRINCIPLE is the invariant, not the number._ Proven by
   `scripts/p1-archived-money-safety-test.ts`.
+  <!-- guard: scripts/p1-archived-money-safety-test.ts -->
 
 - **Admin cross-fair chokepoint — exactly one unscoped Event resolve.** `requireAdminFairContext`
   (`lib/admin-fair-context.ts`) is the single place an admin resolves a fair without an ownership
@@ -85,6 +86,7 @@ Each is a rule that, if violated, silently loses money or leaks data.
   inventing its own unscoped `event.findUnique` (a cross-tenant read hole). Enforced by
   `scripts/p6-admin-fair-chokepoint-proof.ts` (the grep invariant: the unscoped resolve exists in
   exactly one place).
+  <!-- guard: scripts/p6-admin-fair-chokepoint-proof.ts -->
 
 - **Money attribution — every admin money action writes an `AdminMoneyAction` in the same
   transaction, attributed to `adminClerkId`.** `lib/admin-money.ts:31` (audit in the same tx),
@@ -92,6 +94,7 @@ Each is a rule that, if violated, silently loses money or leaks data.
   `ctx.adminClerkId` actor). **Protects:** untraceable money moves, and the organizer-refund route
   carrying admin authority — organizer money paths must attribute to the organizer, never borrow
   admin identity.
+  <!-- guard: scripts/c1-admin-money-control-test.ts -->
 
 - **Reconcile is a monotonic fixed-point.** `lib/reconcile-order-status.ts:46` (`MASTER_RANK`
   drives monotonicity — the aggregator only ADVANCES, rank must strictly increase); `:170` (a vendor
@@ -99,11 +102,13 @@ Each is a rule that, if violated, silently loses money or leaks data.
   DELIVERED is set from the proof photo, not a vendor write. **`COMPLETED` and `DELIVERED` share
   rank 6 and are mutually exclusive by arm** (`:50`). **Protects:** a late/stale writer regressing a
   delivered order back to READY.
+  <!-- guard: scripts/status-write-guard.ts -->
 
 - **Accrual is VOS-independent.** Runner/organizer earnings accrue on the ORDER reaching DELIVERED
   with `runnerId` and a fee/tip — `lib/reconcile-order-status.ts:557` (the condition), `:575`
   (`runnerEarning.upsert`), `:581` (`organizerEarning.upsert`) — not on any VendorOrderStatus row.
   **Protects:** runner/organizer earnings being dropped because a vendor's VOS row is missing.
+  <!-- guard: scripts/accrual-exclusion-guard.ts -->
 
   ⚠️ **VENDOR accrual is NOT VOS-independent — it is VOS-consulting but FAIL-OPEN.** *(Corrected
   2026-07-25; this bullet previously claimed all three legs ignored VOS, which would mislead
@@ -121,10 +126,12 @@ Each is a rule that, if violated, silently loses money or leaks data.
   `APPROVED`, `approvedBy = 'system-grandfather'`), mirrored for organizers at
   `20260714000000_add_organizer_approval_status/migration.sql:25-30`. **Protects:** a new gate
   locking out every existing user on deploy.
+  <!-- guard: scripts/organizer-approval-gate-test.ts -->
 
 - **Shared predicates are the single source (see the through-line table).** In addition to those:
   `payableVendorIds` (`lib/process-payout.ts:131`) + `NON_PAYABLE_VENDOR_STATUSES` (`:129`,
   `DECLINED/REFUNDED/CANCELLED`) is the one definition of who may be paid.
+  <!-- guard: scripts/accrual-exclusion-guard.ts -->
 
 ---
 
@@ -135,12 +142,14 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
 
 - **Accrual** happens once, at DELIVERED (runner + organizer) and at COMPLETED/DELIVERED (vendor),
   idempotent via `@unique(orderId)` on the earning rows (`reconcile-order-status.ts:557`, `:463`).
+  <!-- guard: scripts/accrual-exclusion-guard.ts -->
 - **The three payout legs**, each a delayed transfer fired after the refund window, each with a
   **durable pre-check that refuses re-pay BEFORE Stripe** (the double-pay guard):
   - Vendor — `lib/process-payout.ts:59` (`classifyVendorSlice`, pure), `:68` (`paid → already_paid`).
   - Runner — `lib/runner-payout.ts:135` (`earning.status === 'paid' → already_paid`, before Stripe).
   - Organizer — `lib/organizer-payout.ts` batched per event; batch status guards (`:173`, `:183`) +
     `idempotencyKey = organizer_payout_${batch.id}` (`:137`).
+  <!-- guard: scripts/test-double-pay-guard.ts -->
 - **Refund / tip-refund / chargeback**, the other three money-move sites, each idempotent on a
   durable flag:
   - Refund — `lib/process-refund.ts:118` (already-fully-refunded check on `Refund` rows).
@@ -148,16 +157,19 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
   - Chargeback — `lib/process-chargeback.ts` claws back every already-paid vendor proportionally via
     the shared `reverseVendorPayout` (`:20`), recording a `NegativeBalanceEvent(kind=dispute_clawback)`
     when balance is insufficient (`:9`).
+  <!-- guard: scripts/b4-tip-refund-test.ts -->
 - **The six money-move sites are exactly those six** (vendor/runner/organizer payout,
   refund/tip-refund/chargeback). **All six have a durable DB-state pre-check today** — the point of
   the double-pay fix was that the vendor slow-recovery path was relying on Stripe's idempotency key,
   which EXPIRES, so a late retry could double-pay; the fix moved the guard to the durable earning
   status (`classifyVendorSlice`, `process-payout.ts:52` documents this exact reasoning).
+  <!-- guard: none — nothing enumerates the six sites as a named set; a seventh could be added silently. Needs a MONEY_MOVE_SITES constant + a scanner before it is guardable. -->
 - **The reconciler is the backstop, never the primary.** `lib/reconciler.ts` runs lettered patterns
   each sweep; any repair means a real-time path leaked. Key money ones: Pattern C/D (unpaid-payout
   backstop, `:490`/`:537`), Pattern L (accrual-mismatch _alert_, `:836-846`), Pattern T
   (phantom-accrual reverser, `:81`), Pattern K (open dispute-debt alert, `:792`). Timer/alert
   patterns flag humans; they do not auto-move money.
+  <!-- guard: none — a design principle about which path is PRIMARY, not a property of any one file. Not mechanisable as written; would need rewording into a checkable claim. -->
 
 ---
 
@@ -171,24 +183,29 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
   `schema.prisma:499-500`: `collectedAt NULL` = claimed, food still on the vendor's counter;
   `collectedAt SET` = the runner physically has the bag. A deferred cleanup note lives at
   `reconcile-order-status.ts:542` (DELIVERED accrual is still a proxy for collection).
+  <!-- guard: scripts/test-collect-guard.ts -->
 - **The escape path (reversible custody).** Pre-collection, the runner RELEASES back to the pool
   (`lib/release-order.ts`, gated on `collectedAt IS NULL`); post-collection, the runner REQUESTS a
   return (`lib/request-return.ts`) and the VENDOR confirms it (`lib/confirm-return.ts`), which resets
   the order to a fresh READY. Each transition is one atomic conditional update + one custody event in
   one transaction.
+  <!-- guard: scripts/test-release-guard.ts -->
 - **Custody events are the audit spine.** `DeliveryCustodyEvent` records `claimed` / `collected` /
   `released` / `return_requested` / `return_confirmed` / `stranded` / `strand_cleared`, append-only,
   in the same transaction as the column write.
+  <!-- guard: scripts/vehicle-snapshot-guard.ts -->
 - **Vehicle snapshot — two truths, one transaction.** At claim, the runner's vehicle is snapshotted
   onto `Order.runnerVehicle{Make,Color,Plate}` (display, cleared on release/return) AND into the
   `'claimed'` custody-event metadata (append-only, never cleared), so a returned order never loses
   which car took it. (`app/api/orders/[id]/status/route.ts` claim transaction.)
+  <!-- guard: scripts/vehicle-snapshot-guard.ts -->
 - **Strand clocks are flag-only and action-named.** After a threshold
   (`lib/constants.ts:142`, e.g. `claimedNotCollected: 15min`), reconciler Pattern V FLAGS the order
   for a human (`constants.ts:131` — "flag only, never [acts]"); the reason is named for the human
   action to take (`STRAND_ACTION`, `reconciler.ts:1366`). **Clearing resets, it does not immunize:**
   a legitimate action clears the flag (+ a `strand_cleared` event, `reconciler.ts:1332`/`:1399`), and
   the next sweep re-evaluates from scratch — if the condition recurs, it re-flags.
+  <!-- guard: scripts/test-strand-guard.ts -->
 
 ---
 
@@ -262,16 +279,20 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
   URL, and the admin money page shows the new name against the old slug. That is the design, not a
   resolution bug: `requireAdminFairContext` resolved correctly in both directions. Expect this to
   read as a mismatch on first sight — it has fooled at least one careful reader.
+  <!-- guard: none — vendor-slug-per-fair-test proves per-fair UNIQUENESS, not FREEZING on rename. Nothing asserts that a rename leaves Vendor.slug / Event.urlSlug untouched. Guardable, not yet guarded. -->
 - **An order drops off the vendor's board at DELIVERED.** On DELIVERED the vendor's VOS advances
   READY→COMPLETED (`reconcile-order-status.ts:523-531`) and the order leaves the active lanes — the
   vendor's work is done; it is not lost.
+  <!-- guard: scripts/vendor-vos-advance-guard.ts -->
 - **Curbside `CUSTOMER_WALKS` is vendor-completed, not runner-fulfilled.** `isRunnerFulfilled`
   (`lib/order-status.ts:90`) is true only for `HOME_DELIVERY` or `CURBSIDE + RUNNER_DELIVERS`; a
   customer-walks curbside order has no runner leg and no runner fee — that is correct.
+  <!-- guard: scripts/vendor-vos-advance-guard.ts -->
 - **`/api/health` reporting `redis: error` / `worker: stale` is the endpoint WORKING.** It returns
   200 healthy / 503 degraded (`app/api/health/route.ts:24`); when the worker is off it honestly
   reports a stale heartbeat (`lib/health.ts:19`, `WORKER_STALE_SEC = 180`). That is the design
   ("a dead worker looks like a calm day" — closed), not a new failure.
+  <!-- guard: scripts/test-health-guard.ts -->
 
 ---
 
