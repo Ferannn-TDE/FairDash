@@ -79,13 +79,32 @@ is **false** and both the vendor `payoutStatus='FAILED'` write (`:835-840`) **an
 `recordPayoutFailure` (`:843`) are **skipped** — so the **loudest, most-serious failure class
 (ledger drift) would produce NO durable marker**, only a log line that scrolls away.
 
-I **cannot confirm** this from the code alone — it depends on whether BullMQ sets `attemptsMade`
-to the max when `UnrecoverableError` is thrown, which is version-specific runtime behavior, and
-the worker is OFF so I cannot execute it. **Direction of risk if true:** an inversion — the
-transient/unrecoverable-Stripe failures get markers (after retries), while the deterministic
-money-correctness halt does not. This should be verified before the worker is trusted, and is a
-one-line fix if real (`recordPayoutFailure` should run for any payout job in the failed handler,
-gated on "no more attempts will run", not on `attemptsMade >= attempts`).
+~~I **cannot confirm** this from the code alone~~ — **CONFIRMED REAL, 2026-07-25.** Resolved by
+reading the installed BullMQ (`5.76.8`) rather than by running the worker, so it needed no live
+job:
+
+- `job.js:483 shouldRetryJob()` — returns `[false, 0]` immediately when
+  `err instanceof UnrecoverableError`, **without touching `attemptsMade`**.
+- `job.js:549` — `this.attemptsMade += 1` runs once on the non-retry branch.
+
+So a `PayoutReconciliationError` on the first attempt reaches `worker.on('failed')` with
+`attemptsMade = 1` against `opts.attempts = 3` (`lib/queue-safe.ts:50`). The gate at
+`workers/order-worker.ts:869` computes `exhausted = 1 >= 3` → **false**, and `:872` returns early:
+**both the vendor `payoutStatus='FAILED'` write and `recordPayoutFailure` are skipped.**
+
+**The inversion is real, and it is the wrong way round.** Transient blips and dead Stripe accounts
+get durable markers (after burning 3 attempts); the deterministic money-correctness halt — ledger
+drift, the loudest failure this system can produce — gets a log line that scrolls away and no row
+anywhere. Pattern U reads the `PAYOUT_FAILED` audit for its failed-since timestamp, so a
+ledger-drift halt is invisible to the stuck-money reader too.
+
+**This has never fired in prod** — not because it is safe, but because the runner/organizer legs
+had never executed when this was written. The worker is now LIVE (`CURRENT_STATE §2`, heartbeat
+green), so the path is reachable for the first time. **Fix before the fair.**
+
+The fix is still one line, and the fix is the gate, not the throw site: `recordPayoutFailure` must
+run for any payout job whose failure is final — `exhausted || err instanceof UnrecoverableError` —
+rather than on attempt-count alone, which silently assumes every terminal failure exhausts retries.
 
 ---
 
@@ -176,8 +195,11 @@ empty denominator, the vacuous-gate class. Lower operational stakes than the adm
 
 1. **Unrecoverable-vs-transient share one retry branch** (§1.2) — a dangling-account transfer
    burns 3 retries before being marked; no fast-fail for permanently-unrecoverable Stripe errors.
-2. **⚠️ Ledger-drift halts may write no marker** (§1.2 gap) — `exhausted` gate + `UnrecoverableError`;
-   **verify against BullMQ runtime before trusting the worker.**
+2. **🔴 Ledger-drift halts write NO marker — CONFIRMED 2026-07-25, no longer "verify"** (§1.2 gap).
+   BullMQ 5.76.8 fails an `UnrecoverableError` job at `attemptsMade = 1`, so the
+   `exhausted >= 3` gate at `order-worker.ts:869` skips the marker AND the `PAYOUT_FAILED` audit
+   Pattern U reads. The worst failure class is the one that goes unrecorded. Reachable for the
+   first time now that the worker is live. **Highest-priority item in this list.**
 3. **Tip-refund and chargeback have no durable failure marker** (§1.3) — alert-only.
 4. **No site flips `stripeVerified` to false on a dead destination** (§1.4) — a stale `true`
    re-fails every sweep; the executors read the flag the invariant says never to trust.
