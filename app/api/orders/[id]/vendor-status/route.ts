@@ -129,16 +129,58 @@ export async function PATCH(
     // Apply the vendor-level status update, timestamp, and monotonic version counter.
     // version is used by the dashboard's onChildChanged handler to discard
     // out-of-order Firebase pushes — higher version always wins.
+    // ── RACE-SAFE VENDOR ADVANCE ───────────────────────────────────────────────
+    // The guard above read `vendorStatus.status` in a SEPARATE query, so a plain
+    // `update({ where: { orderId_vendorId } })` is a read-then-write: two taps (a
+    // double-click, two tablets on one booth) both pass the check and the second
+    // overwrites the first. It is money-relevant — DECLINED/REFUNDED/CANCELLED are
+    // exactly what payableVendorIds excludes (lib/process-payout.ts:129), so a lost
+    // race can flip a portion between payable and not.
+    //
+    // It also races the SWEEP: reconcile-order-status.ts:547 advances READY→COMPLETED
+    // on DELIVERED, and that write IS status-filtered — so before this fix the
+    // unconditional vendor write always won, including backwards.
+    //
+    // The fix is the pattern already proven in this codebase for the runner claim
+    // (app/api/orders/[id]/status/route.ts:216-258): put the CONTESTED value in the
+    // where clause and let the database arbitrate. Exactly one writer matches;
+    // count === 0 means someone else moved it first.
     const tsField = TIMESTAMP_FIELD[newStatus]
-    const updated = await db.vendorOrderStatus.update({
-      where: { orderId_vendorId: { orderId, vendorId } },
+    const claim = await db.vendorOrderStatus.updateMany({
+      where: { orderId, vendorId, status: vendorStatus.status }, // ← contested guard
       data: {
         status:  newStatus,
         version: { increment: 1 },
         ...(tsField ? { [tsField]: new Date() } : {}),
       },
+    })
+
+    if (claim.count === 0) {
+      // LOST THE RACE — not vendor error. The order moved on (another device, or the
+      // reconciler). The copy must say THAT: a vendor who taps "Ready" and is told
+      // "invalid transition" reads it as a bug in the app, not as "already handled".
+      const fresh = await db.vendorOrderStatus.findUnique({
+        where: { orderId_vendorId: { orderId, vendorId } },
+        select: { status: true },
+      })
+      return apiError(
+        `This order already moved to ${fresh?.status ?? 'another status'} — refresh to see the latest.`,
+        409,
+        'ORDER_ALREADY_MOVED',
+      )
+    }
+
+    // Re-read the incremented version for the Firebase push. The row provably exists
+    // (updateMany just matched it), so this is a read-back, not a nullable lookup —
+    // but the version must never be FAKED if the read somehow fails: the dashboard
+    // discards lower versions ("higher always wins"), so a fabricated 0 would either
+    // be silently dropped or, worse, mask a real later push. Fall back to the
+    // pre-increment value + 1, which is what the database just wrote.
+    const readBack = await db.vendorOrderStatus.findUnique({
+      where: { orderId_vendorId: { orderId, vendorId } },
       select: { version: true },
     })
+    const updated = { version: readBack?.version ?? vendorStatus.version + 1 }
 
     // Audit log — fire-and-forget, never blocks response
     const auditActionMap: Record<string, string | undefined> = {

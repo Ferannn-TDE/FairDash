@@ -138,6 +138,8 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
       stripeChargeId: true, stripePaymentIntentId: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
       payouts: { select: { vendorId: true, netAmount: true, stripeTransferId: true, reversedAt: true } },
+      // Second CASE-2 signal — see the CASE decision below.
+      vendorEarnings: { select: { vendorId: true, status: true } },
     },
   })
   if (!order) throw new Error(`refundVendorPortion: order ${orderId} not found`)
@@ -215,8 +217,30 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
 
   // ── Decide CASE: did this vendor's payout already fire? ───────────────────
   // A non-reversed Payout row with a transfer id = the vendor was paid → CASE 2.
+  //
+  // ⚠️ THIS NARROWS THE RACE BY NOTHING, AND THAT IS DELIBERATE. Both signals below are
+  // written AFTER the Stripe transfer (process-payout.ts:406 transfer → :420 Payout row →
+  // :445 earning='paid'), so a refund landing in the ~500ms between the transfer and the
+  // Payout row still reads CASE 1: it refunds the customer and leaves the transfer standing.
+  // Customer and vendor both hold the money.
+  //
+  // The earning check is added anyway because it costs nothing and catches the wider tail
+  // (Payout row written, earning lagging, or vice versa). It is NOT the fix.
+  //
+  // WHY NOT CLOSE IT HERE: closing it properly needs the earning RESERVED before the Stripe
+  // call, which means a new 'paying' status — and that vocabulary ripples through
+  // computeLedgerBreakdown (a 'paying' row silently drops out of payable),
+  // classifyVendorSlice, and Patterns C/D/S/T. A row stuck in 'paying' after a crash would
+  // be invisible to every reader, which is worse than the window. The clean fix is a
+  // nullable Payout.stripeTransferId + a pre-transfer pending row; that is a migration and
+  // it is deferred post-fair (CURRENT_STATE §7).
+  //
+  // WHAT ACTUALLY CLOSES IT: reconciler Pattern X, which detects a non-reversed transfer
+  // coexisting with a completed CASE-1 refund and ALERTS a human with both ids and the
+  // dollar amount. Detected reliably beats made-impossible-by-a-rushed-state-machine.
   const paidRow = order.payouts.find(p => p.vendorId === vendorId && p.stripeTransferId && !p.reversedAt)
-  const refundCase: 1 | 2 = paidRow ? 2 : 1
+  const earningPaid = order.vendorEarnings.some(e => e.vendorId === vendorId && e.status === 'paid')
+  const refundCase: 1 | 2 = (paidRow || earningPaid) ? 2 : 1
 
   // ── Open/refresh the Refund row (PENDING) — idempotent ────────────────────
   await db.refund.upsert({
@@ -328,7 +352,10 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
     waivedFeeCents,                                  // > 0 only when waiveFee — deliberate waived revenue
     serviceFeeKept: waiveFee ? `WAIVED ${waivedFeeCents}¢ (deliberate)` : 'kept (10% not refunded)',
     absorbedStripeFeeCents,
-    reversedVendorNetCents: refundCase === 2 ? cents(paidRow!.netAmount) : 0,
+    // paidRow may be ABSENT on a CASE 2 reached via the earning alone (earning='paid' with no
+    // Payout row — the crash-window shape Pattern X hunts). `paidRow!` would throw here, so it
+    // is guarded: no Payout row means we reversed nothing, and Pattern X owns the follow-up.
+    reversedVendorNetCents: refundCase === 2 && paidRow ? cents(paidRow.netAmount) : 0,
     negativeBalanceCents,
   })
 

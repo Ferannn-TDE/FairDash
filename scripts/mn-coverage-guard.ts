@@ -60,10 +60,14 @@ async function main() {
   assert(unordered.length === 0,
     `every capped scan has a deterministic orderBy (unordered at lines: ${unordered.join(', ') || 'none'})`)
 
+  // M, N, O, R scan the whole live-order space; X scans every settled Payout (also unbounded
+  // by any window, and deliberately NOT keyed on completedAt). Five ceiling users, and the
+  // count is asserted EXACTLY so a sixth cannot appear without this line being revisited.
+  const CEILING_USERS = 5
   const ceilingUses = src.filter(l => /take: o\.scanCeiling/.test(l)).length
-  assert(ceilingUses === 4, `the 4 whole-live-space scanners (M,N,O,R) use scanCeiling, not maxPerPattern (found ${ceilingUses})`)
+  assert(ceilingUses === CEILING_USERS, `the ${CEILING_USERS} unbounded scanners (M,N,O,R,X) use scanCeiling, not maxPerPattern (found ${ceilingUses})`)
   const ceilingAlerts = src.filter(l => /SCAN CEILING HIT/.test(l)).length
-  assert(ceilingAlerts === 4, `each of the 4 alerts LOUDLY when the ceiling truncates (found ${ceilingAlerts}) — truncation is never silent`)
+  assert(ceilingAlerts === CEILING_USERS, `each of the ${CEILING_USERS} alerts LOUDLY when the ceiling truncates (found ${ceilingAlerts}) — truncation is never silent`)
 
   // ── seed ─────────────────────────────────────────────────────────────────────
   console.log(`\n  seeding ${SEED} ACTIVE orders into a throwaway event…`)
