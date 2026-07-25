@@ -456,7 +456,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     result.transfers.push({ vendorId: p.vendorId, amountCents: p.transferCents, transferId: transfer.id })
   }
 
-  logger.info('[Payout] order paid out', {
+  logger.money('[Payout] order paid out', {
     orderId,
     stripeFeeCents,
     transfers: result.transfers.length,

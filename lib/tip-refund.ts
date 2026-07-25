@@ -150,7 +150,7 @@ export async function processTipRefund(orderId: string): Promise<TipRefundResult
     data: { tipRefundId: refund.id, tipRefundedAt: new Date() },
   })
 
-  logger.info('[TipRefund] owed-back tip refunded to customer', { orderId, tipCents, refundId: refund.id })
+  logger.money('[TipRefund] owed-back tip refunded to customer', { orderId, tipCents, refundId: refund.id })
   return { orderId, outcome: 'refunded', amountCents: tipCents, refundId: refund.id }
 }
 

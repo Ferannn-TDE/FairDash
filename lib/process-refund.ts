@@ -345,7 +345,7 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
   // which case the waived fee is an explicit, accounted waived-revenue line (not
   // a leak). In CASE 2 the vendor's net was clawed back (any shortfall = the
   // recorded negative-balance debt).
-  logger.info('[Refund] reconciled', {
+  logger.money('[Refund] reconciled', {
     orderId, vendorId, case: refundCase,
     customerRefundedCents: refundAmountCents,
     sliceCents,

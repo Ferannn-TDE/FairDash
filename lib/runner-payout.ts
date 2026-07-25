@@ -194,7 +194,7 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
 
   if (plan.outcome === 'already_paid') {
     // Short-circuit BEFORE Stripe — the first idempotency guard.
-    logger.info('[RunnerPayout] already paid — skip (no Stripe call)', { orderId })
+    logger.money('[RunnerPayout] already paid — skip (no Stripe call)', { orderId })
     return { orderId, outcome: 'already_paid' }
   }
 
@@ -289,7 +289,7 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
     data: { status: 'paid', stripeTransferId: transfer.id, paidAt: new Date() },
   })
 
-  logger.info('[RunnerPayout] paid', { orderId, runnerId: plan.runnerId, amountCents, transferId: transfer.id })
+  logger.money('[RunnerPayout] paid', { orderId, runnerId: plan.runnerId, amountCents, transferId: transfer.id })
   return { orderId, outcome: 'paid', amountCents, transferId: transfer.id }
 }
 
