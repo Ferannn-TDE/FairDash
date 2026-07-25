@@ -4,20 +4,26 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot: `main @ 5300a76`, **deployed `5300a76`**, 2026-07-24 (post-Redis-migration). Every
+> Snapshot: `main @ 4a7d69b`, **deployed: UNVERIFIED THIS SESSION** (see §1), 2026-07-25. Every
 > number below was re-measured this session against the live DB unless marked otherwise; anything
 > taken on report rather than measured here says so inline.
 >
-> **The fair is Aug 5–12. That is 12 days out.**
+> **The fair is Aug 5–12. That is 11 days out.**
 
 ---
 
 ## 1. Git / deploy reality
 
-- **Served fingerprint: `5300a76` — matches local head. Nothing unpushed.** From `GET /api/health`
-  (`commit` field), which is the authority. This shell **cannot fetch** (`git ls-remote` →
-  `Permission denied (publickey)`) and the local `origin/main` ref has been wrong twice; trust the
-  served fingerprint, not the ref.
+- **⚠️ THERE IS UNPUSHED WORK. The previous "nothing unpushed" line was stale and is corrected.**
+  Local head is **`4a7d69b`** (`test: make PROJECT_INVARIANTS.md enforceable`), which is **1 commit
+  ahead of `origin/main`** — plus the current session's uncommitted changes on top. The old claim
+  ("served `5300a76` — matches local head, nothing unpushed") was true when written and drifted.
+- **The served fingerprint was NOT re-measured this session — do not treat any value here as the
+  deployed one.** `GET /api/health` (`commit` field) is the authority and this shell cannot reach
+  it, nor can it fetch (`git ls-remote` → `Permission denied (publickey)`). Per
+  **fingerprint-over-git-ref** (the local ref has been wrong twice), the honest state is *unknown*,
+  not *assumed-equal-to-head*. **Re-measure before believing anything about what is live:**
+  `curl -s https://<prod-host>/api/health | jq .commit`.
 - **The vendor + organizer revenue corrections are LIVE.** They were the 4 unpushed commits in the
   previous snapshot; RANDY'S HOUSE OF BBQ no longer sees the 34%-ghost revenue figure. Vendor
   onboarding links are safe to send on this axis.
@@ -246,7 +252,8 @@ Re-measured 2026-07-24 (`stripeVerified: true AND stripeAccountId NOT NULL` for 
 - **Ghost-filter sweep** — `lib/order-scope.ts` (`IN_MODEL_ORDERS`) + a **scanner** guard covering
   ~40 aggregates across the order log, organizer and vendor surfaces.
 
-**Suite count: 64** (re-measured from `scripts/verify-all.ts`). Full gate green at last run.
+**Suite count: 72** (re-measured from `scripts/verify-all.ts`, 2026-07-25 — the stale figure here
+was 64). Full gate green at last run: exit 0, zero `FLAKY`.
 
 ### Proven in production data this session
 
@@ -291,13 +298,18 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 
 **Redis migration is DONE and drops off this list.** Reordered 2026-07-24.
 
-1. 🔐 **Rotate the Railway Redis credential — BEFORE 2026-08-05.** The current password was
-   **exposed in a chat transcript**. Railway has **no in-place rotation**: the fix is delete the
-   Redis service and reprovision, then update `REDIS_URL` in Vercel *and* the Railway worker. Do it
-   in the §2 order (worker to zero first) — a half-updated pair is exactly the producer/consumer
-   split that caused the prefix bug.
-2. **Stripe onboarding: 17 vendors, 4 runners, 3 organizers unconnected.** Longest lead, not code,
-   cannot be compressed by working harder. §3.
+1. 🔐 **Rotate the Railway Redis credential — STILL OPEN, HARD-DATED BEFORE 2026-08-05.**
+   *(Re-confirmed open 2026-07-25.)* The current password was **exposed in a chat transcript**.
+   Railway has **no in-place rotation**: the fix is delete the Redis service and reprovision, then
+   update `REDIS_URL` in Vercel *and* the Railway worker. **Not a config edit — a
+   delete-and-reprovision**, so it has downtime and cannot be done in five minutes on the day.
+   Follow the §2 ordering exactly (worker to zero FIRST, producer next, consumer last) — a
+   half-updated pair is precisely the producer/consumer split that caused the prefix bug and cost
+   an entire investigation.
+2. **Stripe onboarding: 17 vendors, 4 runners, and 1 REAL organizer (+2 test rows) unconnected.**
+   Longest lead, not code, cannot be compressed by working harder. §3.
+   *(Corrected 2026-07-25: this read "3 organizers", which sends whoever picks it up chasing two
+   test accounts during onboarding. The real outstanding organizer is one.)*
 3. **Pre-fair data reset — DELIBERATELY NOT DOING THE TEST-ORDER CLEANUP.** The prod test orders
    accrued, and the live worker then **paid** them: payable went $287 → $344 → back to **$287.00**
    as $53.98 settled to RANDY'S HOUSE OF BBQ. That is test-mode money in a test-mode Stripe
@@ -345,13 +357,13 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
      3 open `dispute_clawback` debts total **$101.96** today (§6 item 8). See the report.
 6. 🔬 **Profile the sweep — which pattern owns the 14s?** Unprofiled. At fair scale a sweep over 60s
    means overlapping sweeps on the same rows (§2).
-6. **Remove the preview-bypass scaffold — AFTER 2026-08-05.** Full removal list in §7.
+7. **Remove the preview-bypass scaffold — AFTER 2026-08-05.** Full removal list in §7.
    ⚠️ **`ALLOW_PREVIEW_BYPASS` is currently `true` in prod** (`/api/health.flags.previewBypass:
    true`, re-measured), and it gates **`POST /api/orders`**, not just UI — `app/api/orders/route.ts:190`
    is what lets an admin past `FAIR_NOT_OPEN`. Leaving it on past Aug 5 is inert (the fair is live,
    the gate passes anyway), but it is live money-path config and should come out.
-7. **Live-mode Stripe verification** (webhooks, real transfers). Not started. Local is `sk_test_*`.
-8. **The books** (re-measured 2026-07-24): `refund_reversal` **46 events / $975.40** open,
+8. **Live-mode Stripe verification** (webhooks, real transfers). Not started. Local is `sk_test_*`.
+9. **The books** (re-measured 2026-07-24): `refund_reversal` **46 events / $975.40** open,
    unclassified; `dispute_clawback` **3 / $101.96** open (Pattern K alerts; chase, no auto-deduct);
    legacy never-paid obligation **~$135.78** *(prior session, not re-measured)*.
    **`payoutStatus=FAILED` is `0`, and it is STILL a vacuous zero.** The reason has changed and is
@@ -359,10 +371,10 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
    failed handler**, because nobody is connected to pay (§3). The marking machinery still has never
    run in prod (`docs/reports/failed-marker-taxonomy.md` §1.3) and has three gaps to fix before the
    worker is trusted. A `0` from a path that has not executed is not evidence.
-9. **`ENFORCE_VENDOR_READINESS` divergence** — `true` locally, `false` in prod, so the public site
+10. **`ENFORCE_VENDOR_READINESS` divergence** — `true` locally, `false` in prod, so the public site
    lists 17 vendors when **3** are transactable *(re-measured; was 2)*. Which number a customer
    should see: the connected count. Flipping it is a business decision; visible in `/api/health.flags`.
-10. **Rename `RECONCILER_BACKSTOP_ENABLED`** — it gates Pattern N, not the payout backstops.
+11. **Rename `RECONCILER_BACKSTOP_ENABLED`** — it gates Pattern N, not the payout backstops.
 
 ## 7. Known partials and open questions
 
@@ -448,29 +460,65 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
      sweep involved, so this has been live since long before the worker started. The worker
      *widened* the window; it did not create it. Findings #3 and #4 *are* genuinely worker-induced.
 
-- **🔴 THE LIVE WORKER MAKES THE TEST GATE UNRELIABLE. Interim discipline, until isolation exists:
-  SCALE THE RAILWAY WORKER TO ZERO BEFORE ANY FULL GATE, AND BACK UP AFTER.**
-  Suites seed into the shared prod DB; the 60s sweep mutates their rows mid-run. `verify-all`
-  retries and exits **0** while printing `⚠️ FLAKY (passed only on retry)` — so a money suite can
-  fail and the gate still reads green. **Judge a gate run by exit code AND zero FLAKY lines.**
-  Measured: `c1-admin-money-control` failed **1 run in 8** with the worker live; with the worker
-  at zero, **4 consecutive clean runs** (65/65 gate + 3 isolated, 94 assertions each).
-  This is a workaround, not a fix — the cause is the absence of a test database (§ top open item).
+- **✅ CLOSED 2026-07-25 — THE LIVE WORKER NO LONGER THREATENS THE TEST GATE. The
+  scale-the-worker-to-zero discipline is RETIRED. Do not keep doing it.**
 
-  **The nine suites at risk — named set, not an estimate:**
+  *The section is kept, not deleted: it is why the isolation work happened, and a reader who
+  finds no trace of it will re-derive the whole thing from scratch.*
 
-  *(A) Seeds AND drives the reconciler — races the live worker head-on:*
+  **What it used to say.** Suites seeded into the shared **prod** DB and the 60s sweep mutated
+  their rows mid-run, so a money suite could fail and the gate still read green. The interim
+  workaround was to scale the Railway worker to zero before any full gate.
+
+  **Why it is closed — by CONSTRUCTION, not by a run of clean gates.** There is no longer a
+  shared database for the two to race over. Measured inside a real gate run:
+
+  ```
+  DATABASE_URL      → localhost:55432 / fairsynq_test
+  DIRECT_URL        → localhost
+  TEST_DATABASE_URL → localhost
+  lib/db redirect   → localhost:55432        ← the load-bearing one
+  ```
+
+  That last line is the one that matters and the one worth re-checking if this is ever doubted:
+  suites seed through `testPrisma()`, but the **code under test** writes through `lib/db`. Had
+  `lib/db` resolved to prod, the structural argument would have been false no matter how many
+  clean gates ran. It doesn't. Two independent refusals enforce it — `scripts/with-test-db.sh`
+  pins all three variables from one value and refuses a non-local host, and `lib/test-db.ts`
+  refuses independently with no fallback to `DATABASE_URL`. The worker operates on prod Supabase
+  and cannot see the test container.
+
+  **Deliberately NOT the evidence for closing this:** "N consecutive clean gate runs." Against a
+  1-in-8 flake, three clean runs happen by luck ~65% of the time. Counting runs could never have
+  distinguished *closed* from *lucky*; resolving the connection string settles it in one command.
+
+  **STILL IN FORCE — judge a gate run by exit code AND zero `FLAKY` lines.** This was never
+  really about the worker. `verify-all` retries and exits **0** while printing
+  `⚠️ FLAKY (passed only on retry)`, so a pass-on-retry can still hide a real failure from any
+  other cause. Keep reading both.
+
+  **HISTORY, so the original finding is not lost:** on 2026-07-24, with the worker live and
+  suites on the shared prod DB, `c1-admin-money-control` failed **1 run in 8**; with the worker
+  at zero, **4 consecutive clean runs** (65/65 gate + 3 isolated, 94 assertions each). Accurate
+  when measured. No longer live — the mechanism it measured is gone.
+
+  **The nine suites — no longer at risk from the worker, but two carry a latent weakness.**
+  Group (A) is fully resolved: the race needed a shared DB.
+
+  *(A) Seeds AND drives the reconciler — RESOLVED, no shared DB to race over:*
   `c1-admin-money-control-test.ts` (4 × `runReconciliationSweep`) · `reverser-pattern-t-guard.ts` (1)
   · `test-phase6-backstop.ts` (1) · `b2-runner-payout-test.ts` · `b3-organizer-payout-test.ts` ·
   `b4-tip-refund-test.ts` (the last three call `reconcileRunnerPayouts` / `reconcileOrganizerPayouts`
   / `reconcileTipRefunds` directly)
 
-  *(B) Seeds AND asserts on an unscoped aggregate:*
+  *(B) ⚠️ Seeds AND asserts on an UNSCOPED aggregate — demoted from 🔴, not deleted:*
   `organizer-bootstrap-test.ts` (`orgMember.count`) · `runner-onboarding-proof.ts`
-  (`runner.count` before/after)
-
-  Only `c1-admin-money-control-test.ts` has been hardened (scoped to `actorType: 'admin'`,
-  `:392`). **The other eight are unfixed** — they simply have not been unlucky yet.
+  (`runner.count` before/after). **This fragility is independent of the worker.** A global
+  count before/after is broken by *any* concurrent writer — a second suite, a parallel gate, a
+  developer with a REPL open on the test DB. Isolation removed the writer that was actually
+  hitting them; it did not make the assertions correct. Scope them to their own fixtures when
+  either is next touched. `c1-admin-money-control-test.ts` was already hardened this way
+  (scoped to `actorType: 'admin'`, `:392`) and is the pattern to copy.
 - **Two enqueue-observability asymmetries (found in the swallowed-error audit, §2). Neither is
   silent; both are thinner than their vendor twin.** The vendor payout checks the return and logs a
   CRITICAL line naming the order (`lib/reconcile-order-status.ts:505-509`), plus
