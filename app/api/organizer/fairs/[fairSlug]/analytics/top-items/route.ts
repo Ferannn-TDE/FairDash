@@ -5,6 +5,7 @@ import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // GET /api/organizer/fairs/[fairSlug]/analytics/top-items?take=10
 // Top-selling items across all vendors in the fair by revenue.
@@ -27,6 +28,10 @@ export async function GET(
           by: ['itemName'],
           where: {
             order: {
+              // IN_MODEL_ORDERS — a voided order KEEPS its status, so without this a struck
+              // test order's items still count toward top-item quantity and revenue. Found by
+              // the ghost-guard walk; this surface was never on the old fixed file list.
+              ...IN_MODEL_ORDERS,
               eventId: event.id,
               status: { in: ['COMPLETED', 'DELIVERED'] },
             },
