@@ -17,7 +17,7 @@
  */
 
 import { readFileSync, readdirSync } from 'fs'
-import { resolveTestDatabaseUrl, TestDatabaseMisconfigured } from '../lib/test-db'
+import { resolveTestDatabaseUrl, resolveToolingDatabaseUrl, TestDatabaseMisconfigured } from '../lib/test-db'
 import { resolveAppDatabaseUrl } from '../lib/db'
 
 let passed = 0, failed = 0
@@ -43,8 +43,13 @@ assert(refuses({ TEST_DATABASE_URL: PROD }),
   'TEST_DATABASE_URL pointing at a Supabase host → THROWS')
 assert(refuses({ TEST_DATABASE_URL: PROD, DATABASE_URL: PROD }),
   'TEST_DATABASE_URL identical to DATABASE_URL → THROWS')
-assert(refuses({ TEST_DATABASE_URL: TEST, DIRECT_URL: TEST }),
-  'TEST_DATABASE_URL identical to DIRECT_URL → THROWS')
+// Equality with a NON-LOCAL value is the failure; equality with a local one is the CORRECT
+// state under scripts/with-test-db.sh, which sets all three from a single source precisely
+// because Prisma's CLI reads directUrl and a partial env falls through to .env.local.
+assert(refuses({ TEST_DATABASE_URL: 'postgresql://u:p@db.example.net:5432/x', DIRECT_URL: 'postgresql://u:p@db.example.net:5432/x' }),
+  'TEST_DATABASE_URL identical to DIRECT_URL on a NON-LOCAL host → THROWS')
+assert(resolveTestDatabaseUrl({ TEST_DATABASE_URL: TEST, DATABASE_URL: TEST, DIRECT_URL: TEST }) === TEST,
+  'all three identical AND local → ACCEPTED (this is exactly what the wrapper does)')
 assert(resolveTestDatabaseUrl({ TEST_DATABASE_URL: TEST, DATABASE_URL: PROD }) === TEST,
   'a genuine local test URL is ACCEPTED (the probe is not just refusing everything)')
 
@@ -111,6 +116,46 @@ assert(resolveAppDatabaseUrl({ NODE_ENV: 'development', TEST_DATABASE_URL: TEST 
   'dev + explicit TEST_DATABASE_URL → redirects (proves the control is not just returning null)')
 assert(resolveAppDatabaseUrl({ NODE_ENV: 'test', TEST_DATABASE_URL: TEST }) === TEST,
   'NODE_ENV=test + explicit opt-in → redirects')
+
+// ── [5] THE PRISMA CLI PATH — the gap that let a resolve reach production ────
+// §[2] scans SUITE files. It did NOT scan the shared helpers those suites import, and it
+// knows nothing about the Prisma CLI, which connects through schema.prisma's `directUrl`
+// rather than `url`. Both gaps were live: guardedPrisma resolved `DIRECT_URL ?? DATABASE_URL`
+// to PRODUCTION on every isolated gate run, and `DATABASE_URL=<local> prisma migrate resolve`
+// silently used the production directUrl. Closed here.
+console.log('\n[5] the PRISMA CLI path and shared helpers cannot resolve to production')
+
+const schemaSrc = readFileSync('prisma/schema.prisma', 'utf8')
+assert(/directUrl\s*=\s*env\("DIRECT_URL"\)/.test(schemaSrc),
+  'schema.prisma still declares directUrl — so DIRECT_URL must be set for EVERY prisma CLI call')
+
+// Every npm script that invokes the prisma CLI must go through the one wrapper, which sets all
+// three variables from a single value. A script setting only DATABASE_URL is the incident shape.
+const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }
+const cliScripts = Object.entries(pkg.scripts).filter(([, v]) => /prisma\s+(migrate|db)\b/.test(v))
+const unwrapped = cliScripts.filter(([, v]) => !v.includes('with-test-db.sh'))
+assert(cliScripts.length > 0, `[0] POSITIVE CONTROL: found ${cliScripts.length} prisma-CLI npm script(s) to check (not vacuous)`)
+assert(unwrapped.length === 0,
+  `every prisma-CLI npm script goes through scripts/with-test-db.sh (unwrapped: ${unwrapped.map(([k]) => k).join(', ') || 'none'})`)
+
+// The wrapper must set all three, from one value — omitting DIRECT_URL is the exact bug.
+const wrapper = readFileSync('scripts/with-test-db.sh', 'utf8')
+for (const v of ['DATABASE_URL', 'DIRECT_URL', 'TEST_DATABASE_URL']) {
+  assert(new RegExp(`${v}="\\$TEST_DB"`).test(wrapper), `the wrapper sets ${v} from the single source`)
+}
+assert(/REFUSING/.test(wrapper) && /localhost\|127\.0\.0\.1/.test(wrapper),
+  'the wrapper REFUSES a non-local host rather than trusting the caller')
+
+// Shared helpers that gate suites construct clients through must honour TEST_DATABASE_URL.
+const guardSrc = stripComments(readFileSync('lib/prod-write-guard.ts', 'utf8'))
+assert(/resolveToolingDatabaseUrl\(process\.env\)/.test(guardSrc),
+  'guardedPrisma resolves through resolveToolingDatabaseUrl (was DIRECT_URL ?? DATABASE_URL → production)')
+assert(!/DIRECT_URL\s*\?\?\s*process\.env\.DATABASE_URL/.test(guardSrc),
+  'guardedPrisma no longer contains the raw DIRECT_URL ?? DATABASE_URL fallback')
+assert(resolveToolingDatabaseUrl({ TEST_DATABASE_URL: TEST, DIRECT_URL: PROD, DATABASE_URL: PROD }) === TEST,
+  'TEST_DATABASE_URL WINS over DIRECT_URL/DATABASE_URL in the tooling resolver')
+assert(resolveToolingDatabaseUrl({ DIRECT_URL: PROD }) === PROD,
+  '[0] POSITIVE CONTROL: without TEST_DATABASE_URL it still reaches prod — prod ops keep working')
 
 console.log('\n────────────────────────────────────')
 console.log(failed === 0 ? `  ✅ ${passed} passed, 0 failed` : `  ❌ ${passed} passed, ${failed} failed`)

@@ -14,9 +14,10 @@
     "test:c1": "tsx scripts/test-c1.ts",
     "test:db:up": "docker compose -f docker-compose.test.yml up -d --wait && npm run test:db:migrate",
     "test:db:down": "docker compose -f docker-compose.test.yml down -v",
-    "test:db:migrate": "TEST_DATABASE_URL=$npm_package_config_testdb DATABASE_URL=$npm_package_config_testdb DIRECT_URL=$npm_package_config_testdb npx prisma db push --skip-generate --accept-data-loss",
-    "gate": "npm run test:db:up && TEST_DATABASE_URL=$npm_package_config_testdb npx tsx scripts/verify-all.ts",
-    "gate:fast": "npm run test:db:up && TEST_DATABASE_URL=$npm_package_config_testdb npx tsx scripts/verify-all.ts --fast"
+    "test:db:migrate": "./scripts/with-test-db.sh npx prisma db push --skip-generate --accept-data-loss",
+    "gate": "npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/verify-all.ts",
+    "gate:fast": "npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/verify-all.ts --fast",
+    "test:db:deploy": "./scripts/with-test-db.sh npx prisma migrate deploy"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",
