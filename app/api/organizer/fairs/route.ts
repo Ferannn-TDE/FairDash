@@ -5,6 +5,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
@@ -52,9 +53,12 @@ async function fetchOrganizerFairs(organizerId: string) {
       where: { eventId: { in: eventIds }, ...ACTIVE_VENDOR_WHERE },
       _count: { id: true },
     }),
+    // IN_MODEL_ORDERS — this feeds orderCount / revenue / pending on the organizer's FAIR LIST,
+    // the first numbers they see on login. Without it, voided test orders inflate all three by
+    // exactly the ~30% class this guard exists for. Found by the ghost-guard walk.
     db.order.groupBy({
       by: ['eventId', 'status'],
-      where: { eventId: { in: eventIds }, status: { notIn: ['PENDING_PAYMENT'] } },
+      where: { ...IN_MODEL_ORDERS, eventId: { in: eventIds }, status: { notIn: ['PENDING_PAYMENT'] } },
       _count: { id: true },
       _sum: { subtotal: true },
     }),

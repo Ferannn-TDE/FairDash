@@ -12,6 +12,7 @@ import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { logger } from '@/lib/logger'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
+import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
 // Valid per-vendor status transitions
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -270,19 +271,27 @@ export async function PATCH(
         const startOfToday = new Date()
         startOfToday.setHours(0, 0, 0, 0)
 
+        // IN_MODEL_ORDERS on BOTH — these two numbers are pushed to Firebase as one tile
+        // (todayOrders + todayRevenue) on the vendor's live dashboard. A voided order keeps its
+        // status, so without the filter struck test orders inflate the vendor's own headline
+        // takings. Filtering revenue but not the count would leave the tile internally
+        // inconsistent — worse than either alone. Found by the ghost-guard walk.
         const [orderCount, revenueAgg] = await Promise.all([
           db.vendorOrderStatus.count({
             where: {
               vendorId,
               status: { in: ['COMPLETED', 'DELIVERED'] },
-              order: { placedAt: { gte: startOfToday } },
+              order: { ...IN_MODEL_ORDERS, placedAt: { gte: startOfToday } },
             },
           }),
           db.orderItem.aggregate({
             where: {
               vendorId,
               createdAt: { gte: startOfToday },
-              order: { vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } } },
+              order: {
+                ...IN_MODEL_ORDERS,
+                vendorOrderStatuses: { some: { vendorId, status: { in: ['COMPLETED', 'DELIVERED'] } } },
+              },
             },
             _sum: { totalPrice: true },
           }),
