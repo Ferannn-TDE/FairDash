@@ -1,25 +1,18 @@
 import { NextRequest, NextResponse, after } from 'next/server'
-import { revalidateTag } from 'next/cache'
 import { OrderStatus, FulfillmentType, RunnerStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { stripe } from '@/lib/stripe'
 import { placePaidOrder } from '@/lib/place-order'
 import { reconcileMasterStatus } from '@/lib/reconcile-order-status'
-import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
-import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { enforceRateLimit } from '@/lib/ratelimit'
-import {
-  getOrderQueue,
-  JOB_UNCOLLECTED,
-  JOB_UNDELIVERABLE,
-} from '@/lib/queues'
-import { enqueueOrderPayout } from '@/lib/order-side-effects'
-import { refundVendorPortion } from '@/lib/process-refund'
-import { enqueueJobSafely } from '@/lib/queue-safe'
-import { CURBSIDE_WAIT_TIMEOUT_MS, ORDER_CANCELLATION_FEE_USD, HOME_DELIVERY_GPS_RADIUS_M, REFUND_WINDOW_MS } from '@/lib/constants'
+// ⚠️ HOME_DELIVERY_GPS_RADIUS_M + haversineMetres below are ORPHANED — PRE-EXISTING, not
+// introduced here. The 100m delivery-GPS check this route's header claims (and schema.prisma
+// documents on runnerConfirmedLat/Lng) is implemented NOWHERE in the repo. Kept deliberately
+// as the marker of a missing control; deleting them would erase the only trace. See CURRENT_STATE §7.
+import { HOME_DELIVERY_GPS_RADIUS_M } from '@/lib/constants'
 import { logger } from '@/lib/logger'
 import { resolveOrder } from '@/lib/resolve-order'
 
@@ -48,13 +41,6 @@ import { resolveOrder } from '@/lib/resolve-order'
 // Customer-initiated: payment confirmation (client-side fallback for when webhook is delayed)
 const CUSTOMER_TRANSITIONS: Partial<Record<OrderStatus, OrderStatus[]>> = {
   [OrderStatus.PENDING_PAYMENT]: [OrderStatus.PLACED],
-}
-
-const VENDOR_TRANSITIONS: Partial<Record<OrderStatus, OrderStatus[]>> = {
-  [OrderStatus.PLACED]:    [OrderStatus.ACCEPTED, OrderStatus.CANCELLED],
-  [OrderStatus.ACCEPTED]:  [OrderStatus.PREPARING, OrderStatus.CANCELLED],
-  [OrderStatus.PREPARING]: [OrderStatus.READY, OrderStatus.CANCELLED],
-  [OrderStatus.READY]:     [OrderStatus.COMPLETED, OrderStatus.CANCELLED],
 }
 
 // Runner-only transitions
@@ -287,174 +273,39 @@ export async function PATCH(
       }
       return success({ orderId: order.id, status: rec.to })
     } else {
-      // Vendor-initiated transition
-      const isMember = await getVendorAuth(dbUser.id, order.vendorId, req)
-      if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
-
-      const allowed = VENDOR_TRANSITIONS[order.status]
-      if (!allowed) {
-        throw new ApiError(
-          `Order in ${order.status} state cannot be advanced`,
-          409,
-          'INVALID_TRANSITION'
-        )
-      }
-
-      if (!allowed.includes(newStatus)) {
-        throw new ApiError(
-          `Cannot transition from ${order.status} to ${newStatus}`,
-          409,
-          'INVALID_TRANSITION'
-        )
-      }
-    }
-
-    // ── 4. Build timestamp + data patch ───────────────────────────────────
-    const timestampPatch: Record<string, Date | null> = {}
-    if (newStatus === OrderStatus.ACCEPTED)         timestampPatch.acceptedAt  = new Date()
-    if (newStatus === OrderStatus.READY)            timestampPatch.readyAt     = new Date()
-    if (newStatus === OrderStatus.COMPLETED)        timestampPatch.completedAt = new Date()
-    if (newStatus === OrderStatus.CANCELLED)        timestampPatch.cancelledAt = new Date()
-
-    // NOTE: runner transitions (RUNNER_COLLECTED/DELIVERED) returned above, routed
-    // through the aggregator. This monolithic update handles the remaining
-    // (legacy/vendor + customer-confirm) transitions only.
-
-    // ── 5. Apply DB update (status + timestamps) ──────────────────────────
-    const updatedOrder = await db.order.update({
-      where: { id: order.id },
-      data: {
-        status: newStatus,
-        ...(newStatus === OrderStatus.ACCEPTED && {
-          startedAt: new Date(),
-          cancellationFee: ORDER_CANCELLATION_FEE_USD,
-        }),
-        ...(newStatus === OrderStatus.CANCELLED && {
-          cancelledBy: 'vendor',
-          cancellationReason: reason ?? null,
-        }),
-        ...timestampPatch,
-      },
-    })
-
-    // ── 6. Side-effects per transition ─────────────────────────────────────
-
-    // 6a. READY → schedule delayed BullMQ job ──────────────────────────────
-    if (newStatus === OrderStatus.READY) {
-      const queue = getOrderQueue()
-      if (queue) {
-        const jobData = { orderId: order.id, vendorId: order.vendorId, eventId: order.eventId }
-        const isDelivery = order.fulfillmentType === FulfillmentType.HOME_DELIVERY
-        const jobName = isDelivery ? JOB_UNDELIVERABLE : JOB_UNCOLLECTED
-
-        const result = await enqueueJobSafely({
-          queue,
-          name:    jobName,
-          data:    jobData,
-          jobId:   `${jobName}-${order.id}`,
-          delay:   CURBSIDE_WAIT_TIMEOUT_MS,
-          priority: 'normal',
-        })
-
-        if (result === 'dropped') {
-          logger.error('[CRITICAL] Timeout job dropped', { jobName, orderId: order.id })
-        }
-      }
-    }
-
-    // 6b. COMPLETED → delayed payout enqueue + analytics cache bust. (DELIVERED is
-    // handled by the aggregator via the runner path above — incl. its earnings
-    // accrual, which moved into reconcileMasterStatus in Phase 4.)
-    if (newStatus === OrderStatus.COMPLETED) {
-      try {
-        await handleCompleted(order)
-      } catch (e) {
-        logger.warn('[Status] handleCompleted side-effect failed: ' + String(e))
-      }
-      revalidateTag(`analytics-${order.vendorId}`, 'default')
-      revalidateTag(`stats-${order.vendorId}`, 'default')
-      revalidateTag(`revenue-${order.vendorId}`, 'default')
-    }
-
-    // 6c. CANCELLED -> Stripe refund + Cancellation record
-    if (newStatus === OrderStatus.CANCELLED) {
-      try {
-        await handleCancelled(order, reason)
-      } catch (e) {
-        logger.warn('[Status] handleCancelled side-effect failed: ' + String(e))
-      }
-    }
-
-    // ── 7. Firebase RTDB writes (best-effort, kept alive by after()) ──────
-    const patch = { status: newStatus, updatedAt: Date.now() }
-    after(() => {
-      fireAndForgetFirebaseUpdate(
-        `fairs/${order.eventId}/orders/${order.vendorId}/${order.id}`,
-        patch,
-        { orderId: order.id }
+      // ── VENDOR BRANCH REMOVED ────────────────────────────────────────────────
+      // This branch wrote Order.status directly, guarded by a VENDOR_TRANSITIONS table
+      // read in a SEPARATE query — a read-then-write race on master status, and a THIRD
+      // copy of a derivation MASTER_RANK/canAdvance already owns.
+      //
+      // Nothing called it. The vendor dashboard advances the PER-VENDOR row via
+      // PATCH /api/orders/:id/vendor-status (app/vendor/[fairSlug]/dashboard/page.tsx:79);
+      // master status is then DERIVED from those rows by reconcileMasterStatus. A vendor
+      // was never supposed to write master status directly — that inverts the derivation.
+      //
+      // A dead path carrying a known race is worse than no path: it stays reachable by any
+      // authenticated vendor member and silently bypasses the aggregator's monotonic guard.
+      // Removed rather than made status-conditional, because "correct but nothing should
+      // ever call it" is not a state worth maintaining.
+      return apiError(
+        'Vendors advance their own portion via /api/orders/:id/vendor-status, not the master order status',
+        409,
+        'USE_VENDOR_STATUS_ROUTE',
       )
-      fireAndForgetFirebaseUpdate(
-        `fairs/${order.eventId}/customerOrders/${order.customerId}/${order.id}`,
-        patch,
-        { orderId: order.id }
-      )
-    })
+    }
 
-    return success({ orderId: order.id, status: newStatus })
+
+    // NOTE: every branch above RETURNS. Customer confirm returns at the placePaidOrder
+    // call, runner transitions return through reconcileMasterStatus, and the vendor branch
+    // now returns USE_VENDOR_STATUS_ROUTE. The old monolithic tail here — timestamp patch,
+    // unconditional db.order.update, and the READY/COMPLETED/CANCELLED side-effects — was
+    // reachable ONLY from the deleted vendor branch, so it is gone with it. Those
+    // side-effects still run, from their real owners: the READY timeout arm and the payout
+    // enqueue live in reconcileMasterStatus (lib/reconcile-order-status.ts:441, :502), and
+    // the per-vendor refund on decline lives in the vendor-status route.
   } catch (err) {
     return handleApiError(err)
   }
 }
 
-// ─── COMPLETED side-effect ────────────────────────────────────────────────────
 
-async function handleCompleted(
-  order: { id: string; eventId: string },
-) {
-  // Per-vendor payout: the worker reads the settled Stripe fee and splits it
-  // proportionally across ALL vendors on the cart, sending one transfer each.
-  // Connection/verification is checked per-vendor inside the worker (unconnected
-  // vendors are held, not skipped silently). Idempotent — safe if this fires
-  // more than once (e.g. multi-vendor completion).
-  // DELAYED behind the refund window (decision C2) — same as the vendor-status
-  // completion path. Without the delay this route would pay out immediately and
-  // defeat the window. The reconciler (Pattern C) backstops it post-window.
-  const enqueued = await enqueueOrderPayout({
-    orderId: order.id,
-    eventId: order.eventId,
-    delayMs: REFUND_WINDOW_MS,
-  })
-
-  if (enqueued) logger.info('[Status] delayed payout job enqueued', { orderId: order.id })
-}
-
-// ─── CANCELLED side-effect ────────────────────────────────────────────────────
-
-async function handleCancelled(
-  order: { id: string; vendorId: string; eventId: string; stripePaymentIntentId: string | null; stripeChargeId: string | null },
-  reason?: string
-) {
-  // Write the cancellation audit record (money-truth lives in Refund rows).
-  await db.cancellation.upsert({
-    where: { orderId: order.id },
-    create: { orderId: order.id, vendorId: order.vendorId, reason: reason ?? null },
-    update: { reason: reason ?? null },
-  })
-
-  if (!order.stripePaymentIntentId) return // no payment taken — nothing to refund
-
-  // Per-vendor refund through the SINGLE engine (fee kept, reconciled, idempotent),
-  // NOT a whole-order/fee-inclusive Stripe refund. A whole-order cancel = refund
-  // every vendor's slice; loop them. Idempotent — already-refunded vendors no-op.
-  const items = await db.orderItem.findMany({ where: { orderId: order.id }, select: { vendorId: true } })
-  const vendorIds = [...new Set(items.map(i => i.vendorId))]
-  for (const vendorId of vendorIds) {
-    try {
-      await refundVendorPortion({ orderId: order.id, vendorId, reason: reason ?? 'vendor_cancelled', actor: 'system' })
-    } catch (err) {
-      logger.error('[Status] per-vendor cancel refund failed — reconciler will retry', { orderId: order.id, vendorId, error: String(err) })
-    }
-  }
-
-  logger.info('[Status] per-vendor refunds issued for cancelled order', { orderId: order.id, vendors: vendorIds.length })
-}

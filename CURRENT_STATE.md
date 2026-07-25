@@ -321,7 +321,29 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
    queue, consumer and Stripe are now all verified on the vendor path.
    **Still unexecuted: the runner and organizer legs**, blocked on payee onboarding (§3), not on
    code. Watch each execute once before trusting it unattended.
-5. 🔬 **Profile the sweep — which pattern owns the 14s?** Unprofiled. At fair scale a sweep over 60s
+5. 🔴 **The 100m delivery-GPS check DOES NOT EXIST — a documented control that was never built,
+   on the chargeback-evidence path.** *(Found 2026-07-25. Decide before Aug 5.)*
+   - `haversineMetres` (`app/api/orders/[id]/status/route.ts:61`) and `HOME_DELIVERY_GPS_RADIUS_M`
+     (`lib/constants.ts:96`) are **orphaned — no call site anywhere in the repo.** Verified
+     against `git show HEAD:` — pre-existing, not introduced by recent work. Both symbols are
+     kept deliberately as the marker; deleting them would erase the only trace.
+   - Meanwhile the route header claims *"requires proofPath + GPS for HOME_DELIVERY"* and
+     `schema.prisma` documents `runnerConfirmedLat/Lng` as *"must be within 100m of address"*.
+     Nothing enforces either. The route stores whatever coordinates it is handed, unvalidated.
+   - **MEASURED: `runnerConfirmedLat` is set on ZERO orders, ever** (all 381). The one non-voided
+     HOME_DELIVERY delivered order has a proof photo and no coordinates. The client *does* try —
+     `app/runner/[fairSlug]/delivery/[orderId]/page.tsx:223-227` requests GPS best-effort with a
+     5s timeout and sends `null` on denial — so capture is silently failing or being declined.
+   - **Cost to implement: bigger than it looks, because the destination coordinates are not
+     stored.** `Order` has `deliveryStreet/City/State/Zip` but **no destination lat/lng**, so
+     there is nothing to measure 100m *from*. The data is one field away though:
+     `app/_components/AddressAutocomplete.tsx:23` already requests `'geometry'` from Places and
+     discards it. Full cost = migration (`deliveryLat`/`deliveryLng`) + persist the geometry at
+     checkout + ~5 lines using the existing helper + make GPS non-optional or record why it
+     failed. **This is a build, not a wiring-up.**
+   - **Open question for the decision: is the proof photo alone sufficient dispute evidence?**
+     3 open `dispute_clawback` debts total **$101.96** today (§6 item 8). See the report.
+6. 🔬 **Profile the sweep — which pattern owns the 14s?** Unprofiled. At fair scale a sweep over 60s
    means overlapping sweeps on the same rows (§2).
 6. **Remove the preview-bypass scaffold — AFTER 2026-08-05.** Full removal list in §7.
    ⚠️ **`ALLOW_PREVIEW_BYPASS` is currently `true` in prod** (`/api/health.flags.previewBypass:
@@ -388,6 +410,44 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 - **Stale-order cleanup: recommended, NOT executed.** 225 of 377 orders are already voided; the
   honest path is voiding the remaining stale ones rather than deleting. Should follow the ghost
   filters (now shipped), not precede them.
+- **Option B — collapse the per-vendor transition table into the aggregator. POST-FAIR, still owed.**
+  Commit A closed the *reachable race* (contested-guard writes); it did **not** remove the
+  *duplicate derivation*. Different jobs. The inventory as it stands:
+
+  | table | file:line | governs |
+  |---|---|---|
+  | `CUSTOMER_TRANSITIONS` | `app/api/orders/[id]/status/route.ts:49` | `Order.status` (checkout confirm) |
+  | `RUNNER_TRANSITIONS` | `app/api/orders/[id]/status/route.ts:54` | `Order.status` (runner) |
+  | **`ALLOWED_TRANSITIONS`** | **`app/api/orders/[id]/vendor-status/route.ts:17`** | **`VendorOrderStatus.status` — the live vendor path** |
+  | `MASTER_RANK` / `canAdvance` / `WRITE_GUARD` | `lib/reconcile-order-status.ts:52,194,306` | `Order.status` (the aggregator) |
+
+  *(`VENDOR_TRANSITIONS` was a fifth; deleted in Commit A along with its dead route branch.)*
+  **B = promote `ALLOWED_TRANSITIONS` into a `VENDOR_RANK`/`canAdvanceVendor` pair mirroring
+  `MASTER_RANK`/`canAdvance`.** Deferred because it touches `DECLINED`, which is refund-eligibility
+  (`payableVendorIds`, `lib/process-payout.ts:129`) — a larger change to the money path, unreviewed,
+  days before the event, is the trade not to take. `scripts/status-write-guard.ts` [3] pins the
+  inventory meanwhile, so a *new* table cannot appear quietly.
+
+- **Fix 3's race is NARROWED BY NOTHING — closure is Pattern X, deliberately. POST-FAIR proper fix.**
+  `lib/process-refund.ts:241` now reads `paidRow || earning.status === 'paid'`, but **both signals
+  are written AFTER the Stripe transfer** (`process-payout.ts:406` transfer → `:420` Payout row →
+  `:445` earning), so a refund landing in the ~500ms window still decides CASE 1 and leaves the
+  transfer standing. **The proper fix is a nullable `Payout.stripeTransferId` + a pre-transfer
+  pending row** (migration). It was NOT done now because the alternative — reserving the earning
+  pre-transfer via a new `'paying'` status — ripples a new vocabulary through
+  `computeLedgerBreakdown` (a `'paying'` row silently drops out of payable), `classifyVendorSlice`,
+  and Patterns C/D/S/T, and a row stuck in `'paying'` after a crash would be invisible to every
+  reader. **Detected-reliably beat made-impossible-by-a-rushed-state-machine.**
+
+- **Audit corrections — the second-pass audit was wrong in two ways that must not be re-inherited.**
+  1. Its cited line for the TOCTOU (`app/api/orders/[id]/status/route.ts:324`) was a **DEAD PATH** —
+     no caller in the repo; the vendor dashboard uses `/vendor-status`
+     (`app/vendor/[fairSlug]/dashboard/page.tsx:79`). The reachable instance was **one route over**,
+     on `VendorOrderStatus`, not `Order`.
+  2. It framed the class as **worker-induced. It is not.** Two vendor taps race each other with no
+     sweep involved, so this has been live since long before the worker started. The worker
+     *widened* the window; it did not create it. Findings #3 and #4 *are* genuinely worker-induced.
+
 - **🔴 THE LIVE WORKER MAKES THE TEST GATE UNRELIABLE. Interim discipline, until isolation exists:
   SCALE THE RAILWAY WORKER TO ZERO BEFORE ANY FULL GATE, AND BACK UP AFTER.**
   Suites seed into the shared prod DB; the 60s sweep mutates their rows mid-run. `verify-all`

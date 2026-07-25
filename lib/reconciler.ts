@@ -135,10 +135,10 @@ export interface SweepSummary {
     unresolvedHolds: number
   }
   /** Counts of orders/holds actually repaired (or, in dryRun, that WOULD be). */
-  repaired: { A: number; B: number; C: number; D: number; E: number; F: number; G: number; H: number; I: number; J: number; K: number; L: number; M: number; N: number; O: number; P: number; Q: number; R: number; S: number; T: number }
+  repaired: { A: number; B: number; C: number; D: number; E: number; F: number; G: number; H: number; I: number; J: number; K: number; L: number; M: number; N: number; O: number; P: number; Q: number; R: number; S: number; T: number; X: number }
   /** Order/PI ids touched per pattern (for the human-readable log). */
   details: {
-    A: string[]; B: string[]; C: string[]; D: string[]; E: string[]; F: string[]; G: string[]; H: string[]; I: string[]; J: string[]; K: string[]; L: string[]; M: string[]; N: string[]; O: string[]; P: string[]; Q: string[]; R: string[]; S: string[]; T: string[]
+    A: string[]; B: string[]; C: string[]; D: string[]; E: string[]; F: string[]; G: string[]; H: string[]; I: string[]; J: string[]; K: string[]; L: string[]; M: string[]; N: string[]; O: string[]; P: string[]; Q: string[]; R: string[]; S: string[]; T: string[]; X: string[]
   }
   /** Unrepairable-by-design — needs a human. Money is safe; we just can't auto-fix. */
   alerted: string[]
@@ -188,8 +188,8 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     patternEEnabled,
     backstopEnabled,
     scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
-    repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0, T: 0 },
-    details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [], T: [] },
+    repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0, T: 0, X: 0 },
+    details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [], T: [], X: [] },
     alerted: [],
     ambiguousSkipped: 0,
     backstopWarnings: [],
@@ -228,6 +228,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternU(sum, { maxPerPattern })
     await patternV(sum, { maxPerPattern })
     await patternW(sum, { maxPerPattern, dryRun })
+    await patternX(sum, { scanCeiling, maxPerPattern, dryRun })
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -1486,6 +1487,114 @@ export async function patternV(sum: SweepSummary, o: { maxPerPattern: number }) 
  * runner's event ends). The enforcer behind the schema's retention promise, so the label has a
  * reader. Thin wrapper over lib/runner-profile-log; respects dryRun; silent when nothing expired.
  */
+// ─── PATTERN X — SETTLED TRANSFER vs LEDGER (the crash window + the refund race) ───
+//
+// WHY THIS EXISTS. Two distinct holes, both created by the same ordering in
+// process-payout.ts: the Stripe transfer fires at :406, the Payout row lands at :420, and the
+// durable earning flag only at :445. Anything happening in between sees an inconsistent world.
+//
+//   X1 — DOUBLE-HOLD (customer AND vendor have the money). A refund landing in that window
+//        reads no Payout row, decides CASE 1, refunds the customer and does NOT reverse the
+//        transfer (process-refund.ts:241). Result: a non-reversed transfer coexisting with a
+//        COMPLETED refund that has no reversal id. This is REAL LOST MONEY and it is NEVER
+//        auto-repaired — reversing a transfer under a human's feet is its own hazard. ALERT
+//        with both ids and the dollar amount; a human decides.
+//
+//   X2 — LEDGER LAG (money moved, books say otherwise). Crash between :406 and :445 leaves a
+//        settled transfer with an earning still 'accrued'. The vendor HAS been paid, the
+//        admin's payable overstates, and a human may pay again by hand. Safe to heal — the
+//        transfer is the fact, the flag is the lag — but ONLY when the amounts agree.
+//
+// WHY NOT PATTERN C: C is windowed on completedAt (>= windowStart, 24h). An order whose crash
+// coincides with it ageing out of that lookback is retried by NOTHING — that gap is precisely
+// why this hole was unreachable. X is UNWINDOWED and keys on the Payout row, never completedAt.
+export async function patternX(
+  sum: SweepSummary,
+  o: { scanCeiling: number; maxPerPattern: number; dryRun: boolean },
+) {
+  const settled = await db.payout.findMany({
+    where: { reversedAt: null, orderId: { not: null } },
+    select: {
+      id: true, orderId: true, vendorId: true, eventId: true,
+      netAmount: true, stripeTransferId: true,
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: o.scanCeiling,
+  })
+  if (settled.length >= o.scanCeiling) sum.alerted.push(
+    `Pattern X: SCAN CEILING HIT — ${settled.length} settled payouts at the ${o.scanCeiling} limit. Rows beyond it were NOT examined this sweep.`,
+  )
+  if (settled.length === 0) return
+
+  const orderIds = [...new Set(settled.map(p => p.orderId!))]
+  const [earnings, refunds] = await Promise.all([
+    db.vendorEarning.findMany({
+      where: { orderId: { in: orderIds } },
+      select: { orderId: true, vendorId: true, status: true, netCents: true },
+    }),
+    db.refund.findMany({
+      where: { orderId: { in: orderIds }, status: 'COMPLETED' },
+      select: { orderId: true, vendorId: true, amountCents: true, stripeRefundId: true, stripeReversalId: true },
+    }),
+  ])
+  const eKey = (oid: string, vid: string) => `${oid}::${vid}`
+  const earningBy = new Map(earnings.map(e => [eKey(e.orderId, e.vendorId), e]))
+  const refundBy  = new Map(refunds.map(r => [eKey(r.orderId, r.vendorId), r]))
+
+  for (const p of settled) {
+    const key = eKey(p.orderId!, p.vendorId)
+    const earning = earningBy.get(key)
+    const refund  = refundBy.get(key)
+    const netCents = Math.round(p.netAmount * 100)
+
+    // ── X1: transfer stands AND the customer was refunded, with no reversal ──
+    if (refund && !refund.stripeReversalId) {
+      sum.alerted.push(
+        `Pattern X1 🔴 DOUBLE-HOLD: order ${p.orderId} vendor ${p.vendorId} — transfer ${p.stripeTransferId} ` +
+        `($${(netCents / 100).toFixed(2)}) is NOT reversed, but refund ${refund.stripeRefundId ?? '(no stripe id)'} ` +
+        `($${(refund.amountCents / 100).toFixed(2)}) COMPLETED with no reversal. Customer AND vendor hold the money. ` +
+        `MANUAL REVIEW — not auto-repaired.`,
+      )
+      continue // never heal a row that needs a human
+    }
+
+    if (earning?.status === 'paid') continue // the healthy case
+
+    // ── X2: money moved, ledger lags ─────────────────────────────────────────
+    if (!earning) {
+      sum.alerted.push(
+        `Pattern X2: order ${p.orderId} vendor ${p.vendorId} — settled transfer ${p.stripeTransferId} ` +
+        `($${(netCents / 100).toFixed(2)}) with NO VendorEarning row at all. Pattern S restores the row; not healed here.`,
+      )
+      continue
+    }
+    if (earning.netCents != null && earning.netCents !== netCents) {
+      sum.alerted.push(
+        `Pattern X2 ⚠️ AMOUNTS DISAGREE: order ${p.orderId} vendor ${p.vendorId} — transfer ${p.stripeTransferId} ` +
+        `paid $${(netCents / 100).toFixed(2)} but earning records $${(earning.netCents / 100).toFixed(2)}. ` +
+        `NOT healed — a human decides which is true.`,
+      )
+      continue
+    }
+
+    if (o.dryRun) { sum.repaired.X++; sum.details.X.push(p.orderId!); continue }
+
+    // Conditional on still-not-paid, so a concurrent executor cannot be overwritten.
+    const healed = await db.vendorEarning.updateMany({
+      where: { orderId: p.orderId!, vendorId: p.vendorId, status: { not: 'paid' } },
+      data: { status: 'paid', netCents, stripeTransferId: p.stripeTransferId, paidAt: new Date() },
+    })
+    if (healed.count > 0) {
+      sum.repaired.X++
+      sum.details.X.push(p.orderId!)
+      sum.alerted.push(
+        `Pattern X2: HEALED order ${p.orderId} vendor ${p.vendorId} — earning was '${earning.status}' while transfer ` +
+        `${p.stripeTransferId} ($${(netCents / 100).toFixed(2)}) had already settled. A real-time path crashed mid-payout.`,
+      )
+    }
+  }
+}
+
 export async function patternW(sum: SweepSummary, o: { maxPerPattern: number; dryRun: boolean }) {
   const { purgeExpiredProfileChanges, PROFILE_CHANGE_RETENTION_DAYS } = await import('./runner-profile-log')
   const r = await purgeExpiredProfileChanges({ dryRun: o.dryRun, maxPerPattern: o.maxPerPattern })

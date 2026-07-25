@@ -103,8 +103,17 @@ Each is a rule that, if violated, silently loses money or leaks data.
 - **Accrual is VOS-independent.** Runner/organizer earnings accrue on the ORDER reaching DELIVERED
   with `runnerId` and a fee/tip — `lib/reconcile-order-status.ts:557` (the condition), `:575`
   (`runnerEarning.upsert`), `:581` (`organizerEarning.upsert`) — not on any VendorOrderStatus row.
-  The comment at `:528` states it: "accrual is VOS-independent." **Protects:** earnings being
-  dropped because a vendor's VOS row is missing or lagging.
+  **Protects:** runner/organizer earnings being dropped because a vendor's VOS row is missing.
+
+  ⚠️ **VENDOR accrual is NOT VOS-independent — it is VOS-consulting but FAIL-OPEN.** *(Corrected
+  2026-07-25; this bullet previously claimed all three legs ignored VOS, which would mislead
+  anyone reasoning about a refunded portion.)* `accrueVendorEarnings` selects
+  `vendorOrderStatuses` (`lib/process-payout.ts:147`) and filters through `payableVendorIds`
+  (`:152`), so a `DECLINED`/`REFUNDED`/`CANCELLED` portion **deliberately accrues nothing** — the
+  customer is getting that slice back, so no claim is owed. The exclusion is the point.
+  What makes it safe is the *direction*: `payableVendorIds` (`:131-139`) builds an EXCLUSION set
+  from the VOS rows that exist, so a **missing or lagging** row leaves the vendor **payable**.
+  Absence never suppresses a claim; only an explicit non-payable status does.
 
 - **Grandfather rule for status-gate migrations.** When a new approval gate ships, pre-existing rows
   are promoted so the gate applies only going forward:
