@@ -15,10 +15,17 @@ A multi-sided event-commerce marketplace: **organizers** run fairs, **vendors** 
 **runners** deliver/curbside orders, **customers** buy. One codebase serves four portals plus an
 admin console. Stack (verified in `package.json`): **Next.js `^16.2.6`** (App Router) + React `^18`,
 **Prisma `^5.22` / PostgreSQL** on Supabase, **Stripe `^22` Connect** (per-org connected accounts) for
-all money movement, **BullMQ `^5` + ioredis `^5`** (Upstash Redis) for delayed jobs and the reconcile
-sweep, **Firebase RTDB `^12`** for live order-status push, **Clerk** auth (`@clerk/nextjs ^7.3.3`
+all money movement, **BullMQ `^5` + ioredis `^5` on RAILWAY Redis** for delayed jobs and the
+reconcile sweep, **Firebase RTDB `^12`** for live order-status push, **Clerk** auth (`@clerk/nextjs ^7.3.3`
 server, `@clerk/clerk-react ^5.60` SPA — two different context instances, kept separate). The web app
 deploys to **Vercel**; the **worker** (`npm run worker` → `workers/index.ts`) deploys to **Railway**.
+
+> ⚠️ **Upstash is NOT the queue.** It was, and the line above said so until 2026-07-25 — it is
+> abandoned and quota-dead (`500000/500000`), where a bare `PING` answers while real commands fail,
+> so it looks alive. It survives in exactly one place: `lib/ratelimit.ts:2,55` opens a **separate
+> `@upstash/redis` REST connection** over `UPSTASH_REDIS_REST_URL`/`_TOKEN` — never `REDIS_URL`.
+> Rate limiting and the queue have never shared a client. Named here because this is precisely the
+> kind of stack line a reviewer repeats as fact without checking.
 
 ---
 
@@ -298,7 +305,10 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
 
 ## The test / guard system
 
-- **`scripts/verify-all.ts` is the gate.** ~53 suites judged by EXIT CODE, never by grepping output.
+- **`scripts/verify-all.ts` is the gate.** The registry there is the count; this doc deliberately
+  does not carry one (it said "~53" while the gate ran 72 — counts rot by design, and
+  **named-sets-over-counts** applies to this file as much as to any guard). Judged by EXIT CODE,
+  never by grepping output.
   Tiered: no args = full batch gate; `--for <area>` = the touched-area unit gate
   (`AREA_SUITES`, `:100`); `--group <g>` = one group.
 - **A typecheck suite runs `tsc --noEmit` inside the gate** (`scripts/typecheck-gate.ts`, registered
