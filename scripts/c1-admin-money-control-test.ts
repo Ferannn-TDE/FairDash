@@ -18,14 +18,12 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.REDIS_URL = '' // side-effect enqueues become inert no-ops
 
-import { PrismaClient } from '@prisma/client'
 
-const prisma = new PrismaClient({
-  datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
-})
+const prisma = testPrisma()
 
 const SLUG = 'c1seed-'
 const MAIL = '@c1seed.local'

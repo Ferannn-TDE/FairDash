@@ -21,9 +21,27 @@ import { PrismaClient } from '@prisma/client'
  */
 
 // Real, protected events. A write here from a script is the incident class.
+//
+// SPLIT INTO CONSTANT + MUTABLE SET so the mechanism can be tested against a SEEDED fixture on
+// the isolated test database, while a separate constant-only assertion proves the LIVE event is
+// actually in the list. Testing the mechanism alone would stop proving membership — the vacuity
+// class this repo keeps re-learning. Two properties, two tests, neither vacuous.
+export const LIVE_PROTECTED_EVENT_ID = 'cmni6x63n000011znjwlln5k2' // Italian Fest 2026
+export const LIVE_PROTECTED_EVENT_SLUG = 'springfield-state-fair-2026' // its urlSlug
+
 export const PROTECTED_EVENT_IDS = new Set<string>([
-  'cmni6x63n000011znjwlln5k2', // Italian Fest 2026 — the live event
+  LIVE_PROTECTED_EVENT_ID,
 ])
+
+/**
+ * TEST SEAM — register an extra protected id for the duration of a test, so the MECHANISM can be
+ * exercised against a throwaway event instead of the live one. Returns an undo. Deliberately not
+ * a setter: the live id can never be removed, only added to.
+ */
+export function __protectEventForTest(eventId: string): () => void {
+  PROTECTED_EVENT_IDS.add(eventId)
+  return () => { if (eventId !== LIVE_PROTECTED_EVENT_ID) PROTECTED_EVENT_IDS.delete(eventId) }
+}
 
 // The same events by slug — a script that resolves the event dynamically often does so by
 // urlSlug (event.findFirst({ where: { urlSlug } })) and never mentions the id, so the CI
@@ -32,7 +50,7 @@ export const PROTECTED_EVENT_IDS = new Set<string>([
 // test DB. The RUNTIME guard remains sound there: it value-checks the resolved eventId at
 // write time, so any guarded script is caught however it obtained the id.)
 export const PROTECTED_EVENT_SLUGS = new Set<string>([
-  'springfield-state-fair-2026', // Italian Fest 2026's urlSlug
+  LIVE_PROTECTED_EVENT_SLUG,
 ])
 
 export class ProdWriteBlockedError extends Error {

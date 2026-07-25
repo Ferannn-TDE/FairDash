@@ -18,12 +18,12 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.REDIS_URL = ''
 
-import { PrismaClient } from '@prisma/client'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 
 const SLUG = 'p1arch-'
 const MAIL = '@p1arch.local'

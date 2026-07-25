@@ -28,6 +28,7 @@
  * Run: npx tsx scripts/runner-license-proof.ts   (self-cleaning, prefix rlic-)
  */
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 process.env.REDIS_URL = ''
 delete process.env.RATE_LIMIT_TEST
@@ -35,13 +36,10 @@ delete process.env.RATE_LIMIT_TEST
 import { register } from 'node:module'
 register('./_clerk-loader.mjs', import.meta.url)
 
-import { PrismaClient } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { validateApplication } from '../lib/runner-application-validation'
 
-const prisma = new PrismaClient({
-  datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
-})
+const prisma = testPrisma()
 
 const PFX = 'rlic-'
 const MAIL = '@rlic.local'

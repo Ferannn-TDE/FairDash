@@ -11,7 +11,12 @@
     "server": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' server.ts",
     "worker": "tsx workers/index.ts",
     "migrate": "tsx scripts/safe-migrate.ts",
-    "test:c1": "tsx scripts/test-c1.ts"
+    "test:c1": "tsx scripts/test-c1.ts",
+    "test:db:up": "docker compose -f docker-compose.test.yml up -d --wait && npm run test:db:migrate",
+    "test:db:down": "docker compose -f docker-compose.test.yml down -v",
+    "test:db:migrate": "TEST_DATABASE_URL=$npm_package_config_testdb DATABASE_URL=$npm_package_config_testdb DIRECT_URL=$npm_package_config_testdb npx prisma db push --skip-generate --accept-data-loss",
+    "gate": "npm run test:db:up && TEST_DATABASE_URL=$npm_package_config_testdb npx tsx scripts/verify-all.ts",
+    "gate:fast": "npm run test:db:up && TEST_DATABASE_URL=$npm_package_config_testdb npx tsx scripts/verify-all.ts --fast"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",
@@ -62,5 +67,8 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.22.3",
     "typescript": "5.9.3"
+  },
+  "config": {
+    "testdb": "postgresql://fairsynq:fairsynq@localhost:55432/fairsynq_test"
   }
 }

@@ -11,7 +11,42 @@ const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefi
  * We inject connection_limit=1 at runtime rather than baking it into .env.local
  * so the fix applies automatically regardless of which env file is used.
  */
+/**
+ * PURE — the redirect decision, extracted so BOTH directions are provable without a process,
+ * a container, or a database.
+ *
+ * The isolation guard tests the direction you expect (a suite must not reach production). The
+ * DANGEROUS direction is the inverse: if this condition ever inverts, or the prod-inert check
+ * is dropped, PRODUCTION starts writing into a test database — silently, and with real orders.
+ * That failure is worse than the one this whole change was built to prevent, so it gets its own
+ * positive control (scripts/test-isolation-guard.ts §[4]) rather than a comment promising it.
+ *
+ * Returns the TEST url only when BOTH hold: not production, and an explicit opt-in.
+ */
+export function resolveAppDatabaseUrl(env: Record<string, string | undefined>): string | null {
+  if (env.NODE_ENV === 'production') return null   // prod-inert, unconditionally
+  if (!env.TEST_DATABASE_URL) return null          // opt-in only
+  return env.TEST_DATABASE_URL
+}
+
 function buildDatabaseUrl(): string {
+  // ── TEST-DATABASE REDIRECT ──────────────────────────────────────────────────
+  // Suites do not only write through their own client — they exercise APP CODE
+  // (placePaidOrder, reconcileMasterStatus, refundVendorPortion, the reconciler), and all of
+  // that imports THIS singleton. Without this branch a suite would seed the test database
+  // while the code under test wrote to production: worse than no isolation, because it would
+  // look isolated.
+  //
+  // NARROW BY CONSTRUCTION, in three ways at once:
+  //   1. Ignored entirely when NODE_ENV === 'production'. A stray TEST_DATABASE_URL in Vercel
+  //      cannot redirect the live app — the branch is not reachable there.
+  //   2. Opt-IN: absent TEST_DATABASE_URL, behaviour is exactly as before. Nothing changes for
+  //      ordinary `npm run dev`.
+  //   3. No fallback in the other direction either — see lib/test-db.ts, which refuses to run
+  //      a suite at all when the variable is missing rather than quietly using DATABASE_URL.
+  const redirected = resolveAppDatabaseUrl(process.env)
+  if (redirected) return redirected
+
   const raw = process.env.DATABASE_URL
   if (!raw) {
     throw new Error(

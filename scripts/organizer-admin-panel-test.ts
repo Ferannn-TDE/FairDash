@@ -29,15 +29,15 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 import { register } from 'node:module'
 register('./_clerk-loader.mjs', import.meta.url) // substitute Clerk BEFORE any handler import
 
-import { PrismaClient } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { organizerRowView } from '../lib/organizer-admin-view'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
 const PFX = 'oaptest-'
 const MAIL = '@oaptest.local'
 const rand = () => Math.random().toString(36).slice(2, 10)

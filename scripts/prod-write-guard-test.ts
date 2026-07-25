@@ -90,6 +90,7 @@ async function main() {
       'pattern-t-dryrun-report.ts',  // read-only dry-run
       'pattern-t-cleanup.ts',        // (if present) receipt
       'prod-write-guard-test.ts',    // this file
+      'protected-events-membership-guard.ts', // constant-only membership assertion — no DB client at all
     ])
     const dir = join(process.cwd(), 'scripts')
     const offenders: string[] = []

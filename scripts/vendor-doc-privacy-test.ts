@@ -19,8 +19,8 @@
  */
 
 import { config } from 'dotenv'
+import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
-import { PrismaClient } from '@prisma/client'
 import {
   VENDOR_DOC_BUCKET,
   SIGNED_URL_TTL_SECONDS,
@@ -30,7 +30,19 @@ import {
   pathFromLegacyPublicUrl,
 } from '../lib/vendor-document-storage'
 
-const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
+const prisma = testPrisma()
+
+/** Self-contained fixture namespace — seeded and torn down by THIS suite, never ambient. */
+const SEED_TAG = 'vdpseed'
+
+async function cleanup() {
+  const evs = await prisma.event.findMany({ where: { urlSlug: { startsWith: SEED_TAG } }, select: { id: true } })
+  if (evs.length) {
+    const ids = evs.map(e => e.id)
+    await prisma.vendor.deleteMany({ where: { eventId: { in: ids } } })
+    await prisma.event.deleteMany({ where: { id: { in: ids } } })
+  }
+}
 const SUPA = process.env.SUPABASE_URL!
 const KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const rand = () => Math.random().toString(36).slice(2, 10)
@@ -44,6 +56,7 @@ function assert(cond: boolean, label: string) {
 const uploadedPaths: string[] = []
 
 async function main() {
+  await cleanup()
   try {
     // ── [1] The bucket is genuinely private ────────────────────────────────────
     console.log('\n[1] the vendor-documents bucket is PRIVATE (and the guard agrees)')
@@ -57,8 +70,23 @@ async function main() {
 
     // ── [2] ⛔ THE ACCEPTANCE TEST: upload → public URL is REFUSED ─────────────
     console.log('\n[2] ⛔ upload a document → the public URL is REFUSED anonymously (THE test)')
-    const vendor = await prisma.vendor.findFirst({ select: { id: true, name: true } })
-    if (!vendor) throw new Error('no vendor to test with')
+    // SELF-CONTAINED FIXTURE. This used to grab whatever vendor happened to exist, which meant
+    // the suite depended on ambient production data — the property the test-database move
+    // removed. Any vendor serves the purpose (the claim under test is about BUCKET privacy, not
+    // about a particular vendor), so it seeds its own and tears it down.
+    const fxEvent = await prisma.event.create({
+      data: {
+        name: `${SEED_TAG} fair`, urlSlug: `${SEED_TAG}-${Date.now()}`,
+        status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 86_400_000),
+      },
+    })
+    const vendor = await prisma.vendor.create({
+      data: {
+        eventId: fxEvent.id, name: `${SEED_TAG} vendor`, slug: `${SEED_TAG}-v-${Date.now()}`,
+        cuisineType: 'Test', status: 'ACTIVE',
+      },
+      select: { id: true, name: true },
+    })
 
     const body = Buffer.from(`%PDF-1.4 fake insurance certificate ${rand()}`)
     const blob = new Blob([body], { type: 'application/pdf' })
@@ -88,8 +116,16 @@ async function main() {
     assert(signed.includes('token='), 'the signed URL carries a token (it is not just the public link)')
     assert(SIGNED_URL_TTL_SECONDS <= 300, `signed URLs are short-lived (TTL ${SIGNED_URL_TTL_SECONDS}s — long enough to render, not to share)`)
 
-    // ── [4] The 4 previously-EXPOSED documents: migrated, and now refused ──────
-    console.log('\n[4] the 4 previously-exposed documents: migrated to paths, no longer publicly reachable')
+    // ── [4] Stored document values are PATHS, never public URLs ────────────────
+    console.log('\n[4] every stored document value is a PATH, and is not publicly reachable')
+    // Fixture: attach the object this suite uploaded in [2] to the seeded vendor, so the
+    // path-not-URL invariant is exercised against a real row rather than ambient data.
+    if (uploadedPaths.length) {
+      await prisma.vendor.update({
+        where: { id: vendor.id },
+        data: { foodHandlerPermitPath: uploadedPaths[0] },
+      })
+    }
     const withDocs = await prisma.vendor.findMany({
       where: { OR: [{ foodHandlerPermitPath: { not: null } }, { insurancePath: { not: null } }, { businessLicensePath: { not: null } }] },
       select: { name: true, foodHandlerPermitPath: true, insurancePath: true, businessLicensePath: true },
@@ -114,7 +150,18 @@ async function main() {
         } catch { /* counted below */ }
       }
     }
-    assert(migrated >= 4, `${migrated} documents carry a PATH (the ≥4 migrated rows)`)
+    // REFRAMED for the isolated test database. This used to assert `migrated >= 4` — the count
+    // of PRODUCTION rows a one-off backfill had converted from public URLs to object paths. That
+    // is a HISTORICAL FACT about prod data, not an ongoing invariant of the code, and on a clean
+    // database it is 0. Asserting it here would either fail forever or force the suite back onto
+    // ambient production state.
+    //
+    // What IS an ongoing invariant, and is what this section actually protects: any stored
+    // document value must be a PATH, never a URL — the loop above fails on `http`/`/object/`
+    // for every row it finds. That check is preserved and now runs against the seeded fixture.
+    // The one-time "were the 4 legacy rows migrated?" question belongs in a prod-data audit,
+    // not the gate; it is recorded in CURRENT_STATE §7 rather than silently dropped.
+    assert(migrated >= 1, `${migrated} document(s) carry a PATH — every stored value is a path, not a URL`)
     assert(stillOpen === 0, `⛔ ZERO of them are anonymously reachable (was 4 before this change)`)
     assert(signable === migrated, `all ${migrated} still resolve via a signed URL — the migration orphaned nothing`)
 
@@ -139,6 +186,7 @@ async function main() {
 
     console.log(`\n${'─'.repeat(62)}\n  ${pass} passed, ${fail} failed\n${'─'.repeat(62)}\n`)
   } finally {
+    await cleanup()
     // Remove only the objects THIS test uploaded.
     for (const p of uploadedPaths) {
       await fetch(`${SUPA}/storage/v1/object/${VENDOR_DOC_BUCKET}/${p}`, {
