@@ -47,6 +47,7 @@ import { refundVendorPortion } from '../lib/process-refund'
 import { reconcileMasterStatus } from '../lib/reconcile-order-status'
 import { writeMoneyAudit } from '../lib/admin-money'
 import { payoutFailureFinality } from '../lib/payout-failure-finality'
+import { WORKER_COMMIT } from '../lib/health'
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -932,6 +933,17 @@ export function startOrderWorker() {
     })
     .then(() => console.log('[Worker] Reconciliation sweep scheduled (every 60s)'))
     .catch(e => console.error('[Worker] Failed to schedule reconciliation sweep:', e))
+
+  // ── THE BOOT SEAM ────────────────────────────────────────────────────────────────────────
+  // console.WARN, not log: Railway runs NODE_ENV=production, where the Next compiler strips
+  // console.log/info call sites and logger.info is a hard no-op. Every line above this one is
+  // console.log, which is why the last push could not be confirmed from the logs — a redeploy
+  // restarts the process, but there was no surviving line to look for, so continuous sweeps
+  // with no visible gap were indistinguishable from "never deployed".
+  //
+  // This is the seam. One line, at boot, carrying the SHA — so "did the worker pick up that
+  // push?" is answerable by scrolling, and by `curl /api/health | jq .checks.worker.commit`.
+  console.warn('[Worker] boot', { commit: WORKER_COMMIT, queue: ORDER_QUEUE_NAME, pid: process.pid })
 
   console.log(`[Worker] Listening on queue: ${ORDER_QUEUE_NAME}`)
   console.log(`[Worker] Handlers: ${[

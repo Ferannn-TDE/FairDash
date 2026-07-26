@@ -72,6 +72,51 @@ function main() {
   assert(/flags:\s*\{/.test(route) && /enforceVendorReadiness:\s*isVendorReadinessEnforced\(\)/.test(route),
     'health exposes the effective enforceVendorReadiness — a curl on each env shows whether they agree')
 
+  // ── [10] THE WORKER'S OWN FINGERPRINT — two deployments, two SHAs ──────────────────────
+  // `commit` above is baked at Vercel BUILD time: it is the WEB APP's SHA. The worker is a
+  // separate Railway deployment, and its block reported liveness only — so "did the worker pick
+  // up that push?" was unanswerable outside Railway's UI, and a green health check with a fresh
+  // commit was true in a narrow sense and misleading in a wider one.
+  console.log('\n[10] the worker reports its OWN commit — a matching web SHA says nothing about it')
+  const withCommit = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), workerCommit: 'abc1234', nowMs: NOW })
+  assert(withCommit.worker.commit === 'abc1234', 'worker.commit surfaces the value the worker itself wrote')
+  assert(withCommit.status === 'ok', 'and reporting a commit does not disturb the verdict')
+
+  // The honest-unknown case: a worker deployed BEFORE this feature writes no commit key.
+  const preFingerprint = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), nowMs: NOW })
+  assert(preFingerprint.worker.commit === null,
+    'a worker that predates the fingerprint reports null — honestly unknown, never guessed')
+  assert(preFingerprint.worker.status === 'ok',
+    'and is still reported ALIVE — the fingerprint is additive, it cannot break liveness')
+
+  // A stale worker's last-known SHA is exactly what you want when diagnosing why it went stale.
+  const staleWithCommit = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(9999), workerCommit: 'dead999', nowMs: NOW })
+  assert(staleWithCommit.worker.status === 'stale' && staleWithCommit.worker.commit === 'dead999',
+    'a STALE worker still reports its commit (did the deploy that killed it ever land?)')
+
+  const healthSrc = readFileSync(new URL('../lib/health.ts', import.meta.url), 'utf8')
+  assert(/RAILWAY_GIT_COMMIT_SHA/.test(healthSrc) && /\|\| 'unknown'/.test(healthSrc),
+    "WORKER_COMMIT reads RAILWAY_GIT_COMMIT_SHA with an 'unknown' fallback (never a fabricated SHA)")
+  assert(/WORKER_COMMIT_KEY\s*=\s*'fairsynq:heartbeat:reconcile-sweep:commit'/.test(healthSrc),
+    'the fingerprint lives on its OWN key, not folded into the heartbeat value')
+  // THE TRANSITION-SAFETY PROPERTY, and the reason this is a second key. Web and worker deploy
+  // independently, in either order. If the heartbeat VALUE became JSON, an old reader would do
+  // new Date('{"…"}') → Invalid → ageSec null → worker 'unknown', silently blinding the one
+  // check that stands between us and "a dead worker looks like a calm day".
+  assert(/r\.set\(HEARTBEAT_KEY, new Date\(\)\.toISOString\(\)\)/.test(healthSrc),
+    '⛔ the heartbeat value is STILL a bare ISO string — changing its shape would blind old readers mid-deploy')
+  assert(healthSrc.indexOf('r.set(HEARTBEAT_KEY') < healthSrc.indexOf('r.set(WORKER_COMMIT_KEY'),
+    'liveness is written FIRST — if the fingerprint write fails, liveness still lands')
+  assert(/mget\(HEARTBEAT_KEY, WORKER_COMMIT_KEY\)/.test(healthSrc), 'both keys are read in one round trip')
+
+  assert(/worker:\s*health\.worker/.test(route), 'the route passes the whole worker block through, so commit reaches the JSON')
+
+  const workerSrc = readFileSync(new URL('../workers/order-worker.ts', import.meta.url), 'utf8')
+  assert(/console\.warn\('\[Worker\] boot'/.test(workerSrc),
+    'the worker logs a boot line at console.WARN — console.log is stripped under NODE_ENV=production on Railway')
+  assert(/\[Worker\] boot'[\s\S]{0,60}commit: WORKER_COMMIT/.test(workerSrc),
+    'and the boot line carries the SHA — the seam a redeploy leaves in the logs')
+
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} health-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
 }
