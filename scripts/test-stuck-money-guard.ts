@@ -36,7 +36,7 @@ function emptySummary(): SweepSummary {
     startedAt: '', finishedAt: '', durationMs: 0, dryRun: false, patternEEnabled: false, backstopEnabled: false,
     scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
     repaired: { ...zero }, details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [], T: [], X: [] },
-    alerted: [], ambiguousSkipped: 0, backstopWarnings: [],
+    alerted: [], suppressed: [], ambiguousSkipped: 0, backstopWarnings: [],
   }
 }
 

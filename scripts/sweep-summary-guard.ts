@@ -24,7 +24,7 @@ function mkSum(repaired: Partial<SweepSummary['repaired']>, extra: Partial<Sweep
     startedAt: '', finishedAt: '', durationMs: 42, dryRun: false, patternEEnabled: false, backstopEnabled: false,
     scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
     repaired: { ...zero, ...repaired }, details: {} as SweepSummary['details'],
-    alerted: [], ambiguousSkipped: 0, backstopWarnings: [], ...extra,
+    alerted: [], suppressed: [], ambiguousSkipped: 0, backstopWarnings: [], ...extra,
   }
 }
 

@@ -404,6 +404,57 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 
 ## 7. Known partials and open questions
 
+- **✅ CLOSED 2026-07-26 — the five permanent Pattern X2 alerts. NOT a books discrepancy.**
+  Read this before reacting to *"settled transfer … with NO VendorEarning row at all"*, which
+  is alarming on its face and was not a leak.
+
+  **The cohort, and why it cannot grow.** Five settled `Payout` rows, **$127.73**, 3 orders,
+  2 vendors (`ALL PRO TEES`, `RANDY'S HOUSE OF BBQ`) on Italian Fest 2026. They **predate the
+  `VendorEarning` model**. Measured:
+
+  ```
+  earliest Payout                        2026-06-04T05:05:24Z
+  earliest VendorEarning                 2026-07-11T19:45:26Z
+  settled payouts BEFORE that boundary            5   ← exactly the X2 set
+  settled payouts AFTER  that boundary           83   ← all have earning rows
+  ```
+
+  A perfect partition. **There was never a row to lose** — the model did not exist when the
+  money moved. Anything new arriving in X2 is therefore a genuine defect, not more of this.
+
+  **It is TEST-MODE money in a test-mode Stripe account** — same cohort, same disposition as
+  §6 item 3. Nothing to reconcile. Written down explicitly because the alert text reads like a
+  books emergency to anyone who finds it later without the key-mode context, and because that
+  is exactly the wrong thing to be re-deriving under pressure during the fair.
+
+  **What was actually wrong was the alert, not the money.** X2 said *"Pattern S restores the
+  row"*. That is false for the entire observable population, **by construction**: `patternS`
+  runs at `reconciler.ts:207`, `patternX` at `:231` — same sweep, S first. An in-window order
+  has already been re-accrued by the time X runs, so it cannot still be an orphan there. Every
+  row X2 reports is one S already declined. The alert told a human to wait for a healer that
+  had already walked past. Fixed: each line now states its own reason (out of S's 24h window,
+  with the age; or voided). Guarded by `scripts/x2-referral-ack-guard.ts`.
+
+- **`cmq0c60gf00012icnrmby6a15` — a DISPOSITION, not a repair. The void-after-payout shape,
+  with a concrete instance.** $19.90 transferred **2026-06-05**; the order was **voided
+  2026-06-20** (status now `PLACED`). `patternS` filters `voidedAt: null` **correctly** — you
+  never re-accrue a struck order — so **no window width heals this one**, and widening S would
+  not have helped. It is money that moved *before* the order was declared out-of-model. Test
+  money here, so it costs nothing; the point of recording it is that §6 item 3 warns about this
+  shape in the abstract and this is what it looks like in the data, **before it happens with
+  real money.** No fix is owed. A decision is.
+
+- **Pattern S was deliberately NOT widened** (recorded, do not re-open). Widening a
+  money-*writing* pattern's reach across 53 days of history to repair a closed cohort of four
+  rows that provably cannot grow is not a trade worth taking pre-fair. Asserted by
+  `x2-referral-ack-guard [5]`, which fails if S's window or its `voidedAt: null` filter changes.
+
+- **General lesson, worth applying beyond X2: a pattern that refers the reader to another
+  pattern must say whether that pattern runs BEFORE or AFTER it in the same sweep.** X2's
+  referral was not wrong about *what* Pattern S does — it was wrong about *when*, and that made
+  a true sentence into a false instruction. The sweep's pattern order is load-bearing
+  (`reconciler.ts:201` already says so for S-before-C/D) and cross-references have to respect it.
+
 - **The cancel 409 is still unexplained — and is NOT the checkout 409.** Keep these apart:
   - ✅ **`FAIR_NOT_OPEN` 409 on `POST /api/orders` — EXPLAINED, working as designed.**
     `app/api/orders/route.ts:184-201`: `deriveEventLiveState` (`lib/event-date.ts:82-90`) returns
