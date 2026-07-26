@@ -45,8 +45,15 @@ const WORKER_COMMIT_KEY = 'fairsynq:heartbeat:reconcile-sweep:commit'
  * 'unknown' is the honest answer, never a fabricated or stale value — and it is MEANINGFUL: it
  * says the worker is running a build with no git provenance (a local run, a detached deploy, or
  * an injection that did not happen), which is itself worth seeing in /api/health.
+ *
+ * FORMAT — FULL 40-char SHA, matching `.commit`, deliberately NOT the 7-char short form it
+ * shipped as. The two fields are meant to be compared, and the obvious comparison is
+ * `.commit === .checks.worker.commit` — which a full-vs-short pair fails while the deployments
+ * actually agree. A drift check that cries wolf gets muted, and this one exists to be trusted at
+ * 8pm on a fair day. Changed the NEWER field: `.commit` predates this and may be read by an
+ * external monitor; `worker.commit` is hours old and consumed by nothing.
  */
-export const WORKER_COMMIT: string = (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7) || 'unknown'
+export const WORKER_COMMIT: string = process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown'
 
 export type ServiceCheck = 'ok' | 'error' | 'unreachable' | 'not_configured'
 export interface HealthReport {

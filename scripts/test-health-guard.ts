@@ -97,6 +97,11 @@ function main() {
   const healthSrc = readFileSync(new URL('../lib/health.ts', import.meta.url), 'utf8')
   assert(/RAILWAY_GIT_COMMIT_SHA/.test(healthSrc) && /\|\| 'unknown'/.test(healthSrc),
     "WORKER_COMMIT reads RAILWAY_GIT_COMMIT_SHA with an 'unknown' fallback (never a fabricated SHA)")
+  // FORMAT PARITY — the two fingerprints exist to be compared, and the comparison someone will
+  // actually write is `.commit === .checks.worker.commit`. A full-vs-short pair fails that while
+  // the deployments agree; a drift check that cries wolf gets muted.
+  assert(!/RAILWAY_GIT_COMMIT_SHA[^\n]*slice\(/.test(healthSrc),
+    'worker.commit is NOT truncated — same 40-char form as .commit, so a naive equality check is correct')
   assert(/WORKER_COMMIT_KEY\s*=\s*'fairsynq:heartbeat:reconcile-sweep:commit'/.test(healthSrc),
     'the fingerprint lives on its OWN key, not folded into the heartbeat value')
   // THE TRANSITION-SAFETY PROPERTY, and the reason this is a second key. Web and worker deploy

@@ -132,8 +132,14 @@ but nothing bounds it today. **Which pattern dominates the 14s is unknown and un
 an open item (§6), not something done.
 
 ### 🔴 Patterns C, D, P, Q, R, S are UNGATED — and now they actually run
-- **`flags`: `enforceVendorReadiness: false`, `previewBypass: false`** (prod). Local `.env.local`
+- **`flags`: `enforceVendorReadiness: false`, `previewBypass: `true`** (prod). Local `.env.local`
   sets `ENFORCE_VENDOR_READINESS=true` — a **known, deliberate divergence** (§6).
+  *(Corrected 2026-07-26: this line read `previewBypass: false`, contradicting four other places in
+  this file (`:100`, `:106`, `:426`, `:549`) and both live measurements. `true` is the measured
+  value. The contradiction mattered: `previewBypass` gates **`POST /api/orders`** past
+  `FAIR_NOT_OPEN` — `app/api/orders/route.ts:190` — not just UI, so a reader who landed on the
+  wrong line would conclude the order-placement gate is closed when it is open. Inert until Aug 5
+  (the fair is live and the gate passes anyway); it is §6's remove-after-the-fair item.)*
 
 `lib/reconciler.ts:183-184` calls `patternC`/`patternD` with only `{ windowStart, maxPerPattern,
 dryRun }`. No enable flag. **The 60s sweep is now running, so these act every minute.** The only
