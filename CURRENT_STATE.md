@@ -392,11 +392,32 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 9. **The books** (re-measured 2026-07-24): `refund_reversal` **46 events / $975.40** open,
    unclassified; `dispute_clawback` **3 / $101.96** open (Pattern K alerts; chase, no auto-deduct);
    legacy never-paid obligation **~$135.78** *(prior session, not re-measured)*.
-   **`payoutStatus=FAILED` is `0`, and it is STILL a vacuous zero.** The reason has changed and is
-   now narrower: the worker is live and the producer works, but **no payout job has yet reached the
-   failed handler**, because nobody is connected to pay (§3). The marking machinery still has never
-   run in prod (`docs/reports/failed-marker-taxonomy.md` §1.3) and has three gaps to fix before the
-   worker is trusted. A `0` from a path that has not executed is not evidence.
+   **`payoutStatus=FAILED` is `0`, and as of 2026-07-26 it is a DOUBLY vacuous zero.** Two
+   independent reasons, and the second was not known when this note was written:
+   1. **Nothing has executed.** The worker is live and the producer works, but no payout job has
+      reached the failed handler, because nobody is connected to pay (§3). A `0` from a path that
+      has not run is not evidence.
+   2. **🔴 The marker path was INVERTED — so even once it runs, a `0` would not have meant what
+      it says.** `order-worker.ts` gated the marker on `attemptsMade >= attempts`, and BullMQ
+      5.76.8 fails an `UnrecoverableError` job WITHOUT exhausting attempts (`job.js:483` returns
+      `[false, 0]` without touching `attemptsMade`; `:549` increments once). So a
+      `PayoutReconciliationError` arrived with `attemptsMade = 1` against `attempts = 3` and
+      **both** the `payoutStatus='FAILED'` write and the `PAYOUT_FAILED` audit were skipped.
+      Transient blips that burned all 3 retries got durable markers; **ledger drift — the most
+      serious failure this system raises — got a log line and nothing persisted.** Pattern U
+      reads that audit for its failed-since timestamp, so the stuck-money reader was blind to it
+      too. **FIXED 2026-07-26** — the gate now keys on finality
+      (`lib/payout-failure-finality.ts`), guarded by `scripts/payout-failure-gate-guard.ts`,
+      which keeps the OLD gate executable so the defect is demonstrated rather than asserted.
+
+   **What this means for reading the number going forward:** a future non-zero `FAILED` count is
+   now trustworthy, but a `0` still is not — reason 1 stands until payouts actually execute. The
+   remaining four taxonomy items are unfixed (`docs/reports/failed-marker-taxonomy.md`), and two
+   of them (fast-fail on unrecoverable Stripe errors; flipping `stripeVerified` on a dead
+   destination) **share a prerequisite that does not exist yet: any Stripe error classification
+   at all.** Grep for `resource_missing` / `StripeInvalidRequestError` / `rawType` across
+   `lib/ workers/ app/api/stripe/` returns one unrelated hit. Written separately they would be
+   one decision derived twice — the through-line class.
 10. **`ENFORCE_VENDOR_READINESS` divergence** — `true` locally, `false` in prod, so the public site
    lists 17 vendors when **3** are transactable *(re-measured; was 2)*. Which number a customer
    should see: the connected count. Flipping it is a business decision; visible in `/api/health.flags`.
