@@ -596,6 +596,23 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   hitting them; it did not make the assertions correct. Scope them to their own fixtures when
   either is next touched. `c1-admin-money-control-test.ts` was already hardened this way
   (scoped to `actorType: 'admin'`, `:392`) and is the pattern to copy.
+
+  **🔴 OBSERVED 2026-07-26 — this stopped being theoretical.** The new
+  `x2-referral-ack-guard` went **FLAKY on a gate run** with exactly this shape: it asserted
+  `supp.length === 1`, a **global** count, while `patternX` scans *every* `Payout` row in the
+  database — and several suites (`test-refunds`, `verify-chargeback`, `verify-case2-branches`,
+  `verify-refund-matrix`, `admin-reports-test`) legitimately leave settled payouts with no
+  earning behind them. Whether it passed depended on **which suites had run first**. It could
+  not be reproduced in 8 subsequent runs (3 gates + 5 isolated), so the fix was NOT "run it
+  again until clean" — counting clean runs cannot distinguish *fixed* from *lucky* (same
+  argument as the isolation closure above). The assertion was rescoped to the suite's own
+  seeded rows, removing the class of dependency rather than the symptom.
+
+  **What this proves about (B):** isolation removed the *worker* as a concurrent writer, but
+  **the rest of the gate is also a writer**, and these two suites still count globally against
+  a DB that 70+ other suites seed. The failure mode is no longer predicted — it has now been
+  watched. `organizer-bootstrap-test` (`orgMember.count`) and `runner-onboarding-proof`
+  (`runner.count` before/after) carry the identical defect and are still unfixed.
 - **Two enqueue-observability asymmetries (found in the swallowed-error audit, §2). Neither is
   silent; both are thinner than their vendor twin.** The vendor payout checks the return and logs a
   CRITICAL line naming the order (`lib/reconcile-order-status.ts:505-509`), plus
@@ -627,8 +644,24 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 
 ## 8. Promotion queue for `PROJECT_INVARIANTS.md`
 
-**EMPTY — flushed 2026-07-24.** Everything queued here was promoted in this commit, plus two new
-disciplines earned this session (*newest-needs-null-handling*, *constructed-is-not-used*). See
-`PROJECT_INVARIANTS.md` → *How we work* and the through-line table.
+Flushed 2026-07-24; re-filling below as new disciplines are earned. Promote them rather than
+deferring across sessions again.
 
-Re-fill as new disciplines are earned; promote them rather than deferring across sessions again.
+- **`a-control-that-crashes-proves-less-than-one-that-fails`** *(earned 2026-07-26)*. The
+  existing rule — a negative test needs a positive twin, or the negatives pass vacuously —
+  is necessary but not sufficient. **A twin that ABORTS tells you nothing about the assertions
+  downstream of it.** Observed: running `x2-referral-ack-guard`'s positive control (delete an
+  entry from `ACKNOWLEDGED_X2`) threw a `TypeError` on `supp[0].includes(...)` against an empty
+  array, killing the process before `[2]`–`[5]` ever reported. The run *looked* like evidence
+  and was not — you learn only that something broke, not which assertions still hold. Fixed to
+  degrade cleanly (`(mine[0] ?? '')`), after which the same control reported a legible
+  `12 passed, 7 failed` naming exactly which properties depend on the entry.
+
+  **Same family as the vacuous zero:** an output shaped like a result that carries no
+  information. Rule: a positive control must leave every other assertion in the suite still
+  running and still reporting.
+
+- **`scope-assertions-to-your-own-fixtures`** *(re-earned 2026-07-26, now with an observed
+  instance — see §7 group (B))*. A global count in a suite is broken by any other writer, and
+  in a 73-suite gate the other writers are the other suites. Assert over rows you seeded, never
+  over a whole table.
