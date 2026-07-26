@@ -59,10 +59,27 @@
   be confirmed from the logs: continuous sweeps with no visible gap look identical to "never
   deployed."
 
-- **⚠️ STILL OPEN until the next worker deploy: whether the worker ever picked up `836259e`.**
-  The fingerprint above answers this *from the deploy after it lands*, not retroactively. Until
-  then the worker-side `logger.money` lines are unconfirmed, and that is where most money logs
-  fire.
+- **✅ MEASURED 2026-07-26T20:57Z — the fingerprint works, and it closed the `836259e` question
+  on its first use.**
+
+  ```
+  web    .commit                8266510
+  worker .checks.worker.commit  8266510   ← the worker's OWN SHA, self-reported
+  local  HEAD                   8266510
+  ```
+
+  Three things this settles, none of which was answerable yesterday:
+  1. **Railway does inject `RAILWAY_GIT_COMMIT_SHA`.** That was implemented as an *unverified*
+     assumption (corroborated only by `next.config.mjs:11`), with `'unknown'` as the honest
+     fallback. It returned a real SHA, so the assumption held — confirmed by use, not by faith.
+  2. **The worker redeployed and is current.** Both deployments are on the same commit.
+  3. **The worker IS running `836259e`.** `8266510` is a descendant, so the worker-side
+     `logger.money` lines — the majority of them, and the whole point of that fix — are live.
+     This had been open since the push and was previously answerable only from Railway's UI.
+
+  Note the two fingerprints agreeing is now *evidence*, where before it was an assumption with
+  nothing behind it. They can legitimately diverge (one deployment failing, or a worker-only
+  rollback), and that divergence is the thing worth watching.
 
 - **The vendor + organizer revenue corrections are LIVE** — both the earlier round and the three
   surfaces from `1a56a8d` (organizer fair list, organizer top-items, vendor Firebase tile). These
