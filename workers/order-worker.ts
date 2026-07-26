@@ -46,6 +46,7 @@ import { processEventOrganizerPayout } from '../lib/organizer-payout'
 import { refundVendorPortion } from '../lib/process-refund'
 import { reconcileMasterStatus } from '../lib/reconcile-order-status'
 import { writeMoneyAudit } from '../lib/admin-money'
+import { payoutFailureFinality } from '../lib/payout-failure-finality'
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -665,9 +666,12 @@ async function handleRefund(job: Job<JobData>) {
  *     timestamp Pattern U reads for its 15-min threshold (the earning rows have no updatedAt).
  * Best-effort: bookkeeping never throws out of the failed handler or masks the real failure.
  */
-async function recordPayoutFailure(job: Job<JobData>) {
+async function recordPayoutFailure(job: Job<JobData>, finality?: string) {
   const actor = { id: `worker:${job.name}:${job.id}`, type: 'system' as const }
-  const attempts = `${job.attemptsMade} attempt(s)`
+  // Supplied by the caller, which alone knows WHY this failure is final: retries exhausted,
+  // or an unrecoverable halt that never exhausted them. Defaults to the attempt count for any
+  // caller that does not say.
+  const attempts = finality ?? `${job.attemptsMade} attempt(s)`
   try {
     if (job.name === JOB_RUNNER_PAYOUT && job.data.orderId) {
       const earning = await prisma.runnerEarning.findUnique({ where: { orderId: job.data.orderId } })
@@ -678,7 +682,7 @@ async function recordPayoutFailure(job: Job<JobData>) {
         await writeMoneyAudit(actor, earning.eventId, {
           action: 'PAYOUT_FAILED', payeeType: 'runner', payeeId: earning.runnerId,
           orderId: earning.orderId, earningId: earning.id, amountCents: earning.amountCents,
-          reason: `runner payout job exhausted after ${attempts}`,
+          reason: `runner payout job ${attempts}`,
         })
       }
       console.error(`[Worker] Runner payout permanently FAILED for order ${job.data.orderId} — marked + audited, manual intervention required`)
@@ -694,7 +698,7 @@ async function recordPayoutFailure(job: Job<JobData>) {
       await writeMoneyAudit(actor, job.data.eventId, {
         action: 'PAYOUT_FAILED', payeeType: 'organizer', payeeId: batch?.organizerId ?? job.data.eventId,
         orderId: null, earningId: batch?.id ?? null, amountCents: batch?.totalCents ?? null,
-        reason: `organizer payout job exhausted after ${attempts}`,
+        reason: `organizer payout job ${attempts}`,
       })
       console.error(`[Worker] Organizer payout permanently FAILED for event ${job.data.eventId} — marked + audited, manual intervention required`)
     } else if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
@@ -708,7 +712,7 @@ async function recordPayoutFailure(job: Job<JobData>) {
         await writeMoneyAudit(actor, order.eventId, {
           action: 'PAYOUT_FAILED', payeeType: 'vendor', payeeId: order.vendorId ?? job.data.orderId,
           orderId: job.data.orderId, earningId: null, amountCents: unpaidCents,
-          reason: `vendor payout job exhausted after ${attempts}`,
+          reason: `vendor payout job ${attempts}`,
         })
       }
     }
@@ -866,10 +870,36 @@ export function startOrderWorker() {
     console.error(`[Worker] ✗ ${job?.name} (${job?.id}) failed after ${job?.attemptsMade} attempt(s):`, err.message)
     if (!job) return
 
-    const exhausted = job.attemptsMade >= (job.opts.attempts ?? 3)
+    // ── GATE ON FINALITY, NOT ON THE ATTEMPT COUNT ───────────────────────────────────────
+    // An attempt-count gate silently skipped the MOST serious failure class. BullMQ 5.76.8
+    // fails an UnrecoverableError job WITHOUT exhausting attempts: `shouldRetryJob`
+    // (job.js:483) returns [false, 0] the moment it sees one, never touching attemptsMade,
+    // and job.js:549 then increments it exactly once. So a PayoutReconciliationError on the
+    // first try arrives here with attemptsMade = 1 against opts.attempts = 3 — `1 >= 3` is
+    // false, and BOTH the payoutStatus='FAILED' write below AND recordPayoutFailure were
+    // skipped. The marker path was INVERTED: a transient network blip that burned all three
+    // retries got a durable marker, while a ledger drift — a money-identity break, the
+    // loudest thing this system can produce — got a log line that scrolls off Railway and
+    // nothing else. It also skipped the PAYOUT_FAILED audit, which is the failed-since
+    // timestamp Pattern U reads, so the stuck-money reader was blind to it too.
+    //
+    // Never fired in prod only because the runner/organizer legs had never executed. The
+    // worker is live now, so it is reachable for the first time.
+    //
+    // `err.name` is checked ALONGSIDE instanceof deliberately — it mirrors BullMQ's own test
+    // (job.js:486) and survives a duplicated bullmq module instance, where instanceof across
+    // two copies of the class silently returns false and would restore the exact bug.
+    // ONE definition, in lib/payout-failure-finality.ts, so this decision is provable without
+    // booting a worker (this module constructs Prisma/Stripe/Firebase/Redis at import).
+    // `finality` is honest text for the audit reason: an unrecoverable halt did NOT exhaust
+    // anything, and "exhausted after 1 attempt(s)" in a money audit would be false on its face.
+    const { final, finality } = payoutFailureFinality(err, {
+      attemptsMade: job.attemptsMade,
+      maxAttempts: job.opts.attempts,
+    })
     const isPayout =
       job.name === JOB_VENDOR_PAYOUT || job.name === JOB_RUNNER_PAYOUT || job.name === JOB_ORGANIZER_PAYOUT
-    if (!exhausted || !isPayout) return
+    if (!final || !isPayout) return
 
     // Vendor's order-level durable marker (unchanged). Runner/organizer markers + the
     // honest-actor PAYOUT_FAILED audit for ALL THREE live in recordPayoutFailure, so every
@@ -881,7 +911,7 @@ export function startOrderWorker() {
       }).catch(e => console.error('[Worker] Failed to set payoutStatus=FAILED:', e))
       console.error(`[Worker] Payout permanently FAILED for order ${job.data.orderId} — manual intervention required`)
     }
-    await recordPayoutFailure(job)
+    await recordPayoutFailure(job, finality)
   })
 
   worker.on('error', err => {
