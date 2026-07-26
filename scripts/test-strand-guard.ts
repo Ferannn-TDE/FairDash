@@ -41,7 +41,7 @@ function emptySummary(): SweepSummary {
     startedAt: '', finishedAt: '', durationMs: 0, dryRun: false, patternEEnabled: false, backstopEnabled: false,
     scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
     repaired: { ...zero }, details: { ...empty } as SweepSummary['details'],
-    alerted: [], ambiguousSkipped: 0, backstopWarnings: [],
+    alerted: [], suppressed: [], ambiguousSkipped: 0, backstopWarnings: [],
   }
 }
 

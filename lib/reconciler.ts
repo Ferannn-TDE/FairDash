@@ -142,6 +142,13 @@ export interface SweepSummary {
   }
   /** Unrepairable-by-design — needs a human. Money is safe; we just can't auto-fix. */
   alerted: string[]
+  /**
+   * KNOWN and DELIBERATELY NOT ALERTED — a declared cohort whose disposition is already
+   * decided (see ACKNOWLEDGED_X2). Kept OUT of `alerted` so the triage list stays things a
+   * human must act on, but never dropped: the count rides the summary line and one flat
+   * line names the total, so suppressed never means invisible.
+   */
+  suppressed: string[]
   /** Money repairs we refused because we couldn't be certain it wasn't already paid. */
   ambiguousSkipped: number
   /** Non-zero repairs ⇒ a real-time path is leaking. Surfaced, never hidden. */
@@ -191,6 +198,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0, T: 0, X: 0 },
     details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [], T: [], X: [] },
     alerted: [],
+    suppressed: [],
     ambiguousSkipped: 0,
     backstopWarnings: [],
   }
@@ -228,7 +236,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternU(sum, { maxPerPattern })
     await patternV(sum, { maxPerPattern })
     await patternW(sum, { maxPerPattern, dryRun })
-    await patternX(sum, { scanCeiling, maxPerPattern, dryRun })
+    await patternX(sum, { scanCeiling, maxPerPattern, dryRun, windowStart })
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -267,6 +275,11 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     alerted: sum.alerted.length, ambiguousSkipped: sum.ambiguousSkipped, durationMs: sum.durationMs,
   })
   if (sum.alerted.length) logger.warn('[Reconciler] ALERTS (human review)', { alerted: sum.alerted })
+  // ONE flat line, never one-per-row — the whole point is that a settled cohort stops
+  // costing five lines a sweep. Deliberately NOT in ALERTS: nothing here needs a human.
+  if (sum.suppressed.length) logger.warn(
+    `[Reconciler] SUPPRESSED — ${sum.suppressed.length} known row(s), NO ACTION (declared in ACKNOWLEDGED_X2)`,
+  )
   if (sum.backstopWarnings.length) logger.warn('[Reconciler] BACKSTOP WARNINGS', { backstopWarnings: sum.backstopWarnings })
 
   // Worker liveness heartbeat (best-effort — never breaks the sweep). Reaching here means the
@@ -335,7 +348,8 @@ export function formatSweepSummary(sum: SweepSummary, ledger: LedgerBreakdown): 
       + (ledger.byEvent.length > 10 ? ` +${ledger.byEvent.length - 10} more` : '')
     : ''
   return `[Reconciler] SUMMARY repaired=${total}${nonZero ? ` [${nonZero}]` : ''} ${ledgerStr}${perEvent} ` +
-    `alerts=${sum.alerted.length} ambiguousSkipped=${sum.ambiguousSkipped} dryRun=${sum.dryRun} ${sum.durationMs}ms`
+    `alerts=${sum.alerted.length} suppressed=${sum.suppressed.length} ` +
+    `ambiguousSkipped=${sum.ambiguousSkipped} dryRun=${sum.dryRun} ${sum.durationMs}ms`
 }
 
 // ─── PATTERN A — Paid in Stripe, not fully placed (boundary 1) ───────────────
@@ -1508,9 +1522,51 @@ export async function patternV(sum: SweepSummary, o: { maxPerPattern: number }) 
 // WHY NOT PATTERN C: C is windowed on completedAt (>= windowStart, 24h). An order whose crash
 // coincides with it ageing out of that lookback is retried by NOTHING — that gap is precisely
 // why this hole was unreachable. X is UNWINDOWED and keys on the Payout row, never completedAt.
+/**
+ * ⚠️ TEMPORARY — DELETE WHEN THE `OperationalAlert` TABLE EXISTS. That table is the real home
+ * for "known, decided, stop telling me"; this const is a hardcoded stand-in so a settled cohort
+ * stops costing five alert lines every 60 seconds. Do NOT grow this into a general
+ * acknowledgment mechanism — build that once, properly, in the DB.
+ *
+ * THE COHORT, and why it is closed rather than merely quiet:
+ * these five settled Payout rows PREDATE the VendorEarning model. Measured 2026-07-26 —
+ * earliest Payout `2026-06-04T05:05:24Z`, earliest VendorEarning `2026-07-11T19:45:26Z`;
+ * **5 settled payouts fall before that boundary and 83 after, and all 83 have earning rows.**
+ * A perfect partition. There was never a row to lose: the model did not exist when the money
+ * moved. The set therefore CANNOT grow — anything new arriving here is a genuine defect.
+ *
+ * IT IS TEST-MODE MONEY. Stripe was in test mode; these are test-mode transfers in a test-mode
+ * account on Italian Fest 2026 — the same cohort and the same disposition as
+ * `CURRENT_STATE.md` §6 item 3. There is nothing to reconcile. Recorded explicitly because
+ * "settled transfer with no ledger row" reads as a books emergency to anyone who finds it
+ * later without the key-mode context.
+ *
+ * Matching is EXACT on all three of order + vendor + amount. Loosening it to order+vendor
+ * would let a genuinely new discrepancy on the same pair inherit this suppression silently.
+ */
+const ACKNOWLEDGED_X2: { orderId: string; vendorId: string; amountCents: number; why: string }[] = [
+  { orderId: 'cmpyb72m800217rj2mw1zro00', vendorId: 'cmni6x68q000211znxtpw0076', amountCents: 3856,
+    why: 'pre-VendorEarning-model (paid 2026-06-04); test-mode; ALL PRO TEES' },
+  { orderId: 'cmpyb72m800217rj2mw1zro00', vendorId: 'cmni6x6gz000611znpe5c5hhp', amountCents: 3665,
+    why: "pre-VendorEarning-model (paid 2026-06-04); test-mode; RANDY'S HOUSE OF BBQ" },
+  { orderId: 'cmpy7km7y00167rj2588ob5ye', vendorId: 'cmni6x68q000211znxtpw0076', amountCents: 1918,
+    why: 'pre-VendorEarning-model (paid 2026-06-04); test-mode; ALL PRO TEES' },
+  { orderId: 'cmpy7km7y00167rj2588ob5ye', vendorId: 'cmni6x6gz000611znpe5c5hhp', amountCents: 1344,
+    why: "pre-VendorEarning-model (paid 2026-06-04); test-mode; RANDY'S HOUSE OF BBQ" },
+  // The odd one out, and the one worth reading twice. NOT a ledger lag: $19.90 was transferred
+  // 2026-06-05, then the order was VOIDED 2026-06-20 (status now PLACED). patternS filters
+  // `voidedAt: null` CORRECTLY — you do not re-accrue a struck order — so no window width heals
+  // this. It is the void-after-payout shape, here with test money. See CURRENT_STATE §7.
+  { orderId: 'cmq0c60gf00012icnrmby6a15', vendorId: 'cmni6x6gz000611znpe5c5hhp', amountCents: 1990,
+    why: 'VOID-AFTER-PAYOUT: paid 2026-06-05, order voided 2026-06-20; unhealable by design, not by window' },
+]
+
+const ackKey = (o: string, v: string, c: number) => `${o}::${v}::${c}`
+const ACK_X2 = new Set(ACKNOWLEDGED_X2.map(a => ackKey(a.orderId, a.vendorId, a.amountCents)))
+
 export async function patternX(
   sum: SweepSummary,
-  o: { scanCeiling: number; maxPerPattern: number; dryRun: boolean },
+  o: { scanCeiling: number; maxPerPattern: number; dryRun: boolean; windowStart: Date },
 ) {
   const settled = await db.payout.findMany({
     where: { reversedAt: null, orderId: { not: null } },
@@ -1527,7 +1583,7 @@ export async function patternX(
   if (settled.length === 0) return
 
   const orderIds = [...new Set(settled.map(p => p.orderId!))]
-  const [earnings, refunds] = await Promise.all([
+  const [earnings, refunds, orders] = await Promise.all([
     db.vendorEarning.findMany({
       where: { orderId: { in: orderIds } },
       select: { orderId: true, vendorId: true, status: true, netCents: true },
@@ -1536,10 +1592,39 @@ export async function patternX(
       where: { orderId: { in: orderIds }, status: 'COMPLETED' },
       select: { orderId: true, vendorId: true, amountCents: true, stripeRefundId: true, stripeReversalId: true },
     }),
+    // Needed ONLY to say WHY a row is unhealable. X2 used to defer to Pattern S without
+    // knowing whether S could even see the row; that is the bug being fixed here.
+    db.order.findMany({
+      where: { id: { in: orderIds } },
+      select: { id: true, status: true, completedAt: true, voidedAt: true },
+    }),
   ])
   const eKey = (oid: string, vid: string) => `${oid}::${vid}`
   const earningBy = new Map(earnings.map(e => [eKey(e.orderId, e.vendorId), e]))
   const refundBy  = new Map(refunds.map(r => [eKey(r.orderId, r.vendorId), r]))
+  const orderBy   = new Map(orders.map(ord => [ord.id, ord]))
+
+  /**
+   * Why Pattern S will not restore this row — stated from the ORDER, not assumed.
+   *
+   * patternS runs at the S call site EARLIER IN THIS SAME SWEEP and is windowed on
+   * `completedAt >= windowStart` (24h) with `voidedAt: null`. So by the time X runs, an
+   * in-window order has already been re-accrued and cannot still be an orphan here. Every
+   * row X2 actually reports is one S already declined — which is exactly why the old
+   * "Pattern S restores the row" referral was false for the entire observable population.
+   */
+  const whyUnhealable = (orderId: string): string => {
+    const ord = orderBy.get(orderId)
+    if (!ord) return 'order row not found'
+    const reasons: string[] = []
+    if (ord.voidedAt) reasons.push(
+      `order VOIDED ${ord.voidedAt.toISOString().slice(0, 10)} — Pattern S filters voidedAt:null CORRECTLY, so no window width heals this`)
+    if (!COMPLETE_STATES.includes(ord.status)) reasons.push(`status ${ord.status} is not COMPLETED/DELIVERED`)
+    if (ord.completedAt == null) reasons.push('completedAt is NULL — never matches S\'s gte')
+    else if (ord.completedAt < o.windowStart) reasons.push(
+      `completed ${((Date.now() - ord.completedAt.getTime()) / 86_400_000).toFixed(0)}d ago — outside Pattern S's 24h window`)
+    return reasons.length ? reasons.join('; ') : 'in S\'s window and payable — S ran earlier this sweep and did NOT restore it; re-accrual likely THREW (see the Pattern S alert)'
+  }
 
   for (const p of settled) {
     const key = eKey(p.orderId!, p.vendorId)
@@ -1562,10 +1647,13 @@ export async function patternX(
 
     // ── X2: money moved, ledger lags ─────────────────────────────────────────
     if (!earning) {
-      sum.alerted.push(
+      const line =
         `Pattern X2: order ${p.orderId} vendor ${p.vendorId} — settled transfer ${p.stripeTransferId} ` +
-        `($${(netCents / 100).toFixed(2)}) with NO VendorEarning row at all. Pattern S restores the row; not healed here.`,
-      )
+        `($${(netCents / 100).toFixed(2)}) with NO VendorEarning row at all. NOT auto-healed: ${whyUnhealable(p.orderId!)}.`
+      // Declared cohort → suppressed, never dropped. Anything NOT declared is still loud:
+      // the set cannot grow (see ACKNOWLEDGED_X2), so a sixth orphan is a genuine defect.
+      if (ACK_X2.has(ackKey(p.orderId!, p.vendorId, netCents))) sum.suppressed.push(line)
+      else sum.alerted.push(line)
       continue
     }
     if (earning.netCents != null && earning.netCents !== netCents) {
