@@ -51,7 +51,26 @@ add a guard that fails if a second copy reappears.** Confirmed instances, each n
 | "which orders are in-model" (ghost/void filter) | `lib/order-scope.ts` | `scripts/organizer-ghost-guard.ts` |
 | delivery address validation + formatting | `lib/delivery-address.ts` | `scripts/delivery-address-guard.ts` |
 | fair CALENDAR dates + live/upcoming/ended state | `lib/event-date.ts:82` (`deriveEventLiveState`) | `scripts/fair-open-gate-guard.ts` |
+| the six money-move sites (the set itself) | `scripts/money-move-sites-guard.ts` (`MONEY_MOVE_SITES`) | `scripts/money-move-sites-guard.ts` |
+| comment-stripping before a guard scans | `_strip-comments.ts` (`stripComments`) | <!-- guard: none — the one definition exists and new guards import it, but FIVE legacy copies remain by design until the conversion job runs. A no-second-implementation assertion would fail today, so declaring this guarded would itself be the optimistic-doc drift this file exists to prevent. See the note below the table. --> **unguarded — declared, see below** |
 | BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | <!-- guard: none — the single source is real, but its INPUT is an env var spanning two deployments (Vercel producer, Railway consumer). A repo scanner cannot see config divergence. Operational check only: scripts/step-b-inspect.ts. --> **unguarded — declared, see below** |
+
+**⚠️ `stripComments` is single-sourced in INTENT, not yet in FACT — declared unguarded above,
+because the assertion is not landable today.** The idiom had drifted to **six copies in two
+semantic variants**: `scripts/status-write-guard.ts`, `scripts/test-isolation-guard.ts` (regex form),
+`scripts/live-badge-guard.ts`, `scripts/preview-bypass-guard.ts`, `scripts/fair-open-gate-guard.ts`
+(line-filter form), plus an unnamed inline copy in `scripts/organizer-ghost-guard.ts`. That is this
+codebase's central bug class occurring **inside the guards that exist to catch it** — and the two
+variants are not equivalent: the line-filter form DELETES comment lines, shifting every offset and
+line number after them, so a guard reporting `@ char N` would print coordinates that do not exist
+in the real file. The regex form blanks the comment and preserves position, which is why it won.
+
+`scripts/_strip-comments.ts` is now that one definition, and new guards import it
+(`organizer-ghost-guard`, `sweep-summary-guard`, `money-move-sites-guard`, `x2-referral-ack-guard`).
+**Five copies still exist by design** until the conversion job runs, so a
+`no-second-implementation` assertion would fail today and **must not be added yet** — declaring it
+guarded now would be exactly the drift-by-optimistic-doc this file exists to prevent. The entry is
+listed as partial rather than omitted so the debt is visible and countable.
 
 **The one derivation whose "single source" spans a boundary a guard cannot reach.**
 `getQueuePrefix()` (`lib/queues.ts:58`) is genuinely single-sourced — all three construction sites
@@ -170,7 +189,16 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
   the double-pay fix was that the vendor slow-recovery path was relying on Stripe's idempotency key,
   which EXPIRES, so a late retry could double-pay; the fix moved the guard to the durable earning
   status (`classifyVendorSlice`, `process-payout.ts:52` documents this exact reasoning).
-  <!-- guard: none — nothing enumerates the six sites as a named set; a seventh could be added silently. Needs a MONEY_MOVE_SITES constant + a scanner before it is guardable. -->
+  The set is enumerated TWICE, independently, because neither enumeration is sufficient alone:
+  by `stripe.transfers.create` (exactly three — the payout legs; blind to refunds, which move
+  money without one) and by `logger.money` (catches a site of any shape; blind to a site that
+  moves money and logs nothing, which [1] fails from the other side). The two are asserted to
+  relate as `TRANSFER ⊂ MONEY_MOVE`, **not** as equals — and `|logger.money| ≥ |sites|`, since a
+  REFUSAL to move money is also a money outcome (`runner-payout`'s `already_paid` logs before
+  Stripe is called). Reversals (`lib/clawback.ts`) are a **parallel** named set, not a seventh
+  site: clawback is a mechanism two of the six share, so counting it would double-count one
+  movement of money.
+  <!-- guard: scripts/money-move-sites-guard.ts -->
 - **The reconciler is the backstop, never the primary.** `lib/reconciler.ts` runs lettered patterns
   each sweep; any repair means a real-time path leaked. Key money ones: Pattern C/D (unpaid-payout
   backstop, `:490`/`:537`), Pattern L (accrual-mismatch _alert_, `:836-846`), Pattern T
