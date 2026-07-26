@@ -4,42 +4,49 @@
 > first and reconcile. Do NOT copy anything from this file into `PROJECT_INVARIANTS.md`. This file
 > is throwaway: paste it into a working session, never into persistent project knowledge.
 >
-> Snapshot: `main @ ad59773`, **deployed `ee233ec`** (measured — 4 commits behind, see §1), 2026-07-25. Every
+> Snapshot: `main @ ae50b7a`, **deployed `ae50b7a`** (measured, in sync — see §1), 2026-07-26. Every
 > number below was re-measured this session against the live DB unless marked otherwise; anything
 > taken on report rather than measured here says so inline.
 >
-> **The fair is Aug 5–12. That is 11 days out.**
+> **The fair is Aug 5–12. That is 10 days out.**
 
 ---
 
 ## 1. Git / deploy reality
 
-- **⚠️ THERE IS UNPUSHED WORK — 4 commits. MEASURED, not inferred.**
+- **PUSHED AND DEPLOYED — nothing outstanding. MEASURED, not inferred, 2026-07-26T14:47:04Z.**
 
   ```
-  served (GET /api/health .commit)  ee233ec   ← what is actually running
-  origin/main                       ee233ec   ← agrees, this time
-  local main                        ad59773   ← 4 ahead
+  served (GET /api/health .commit)  ae50b7a   ← what is actually running
+  local main                        ae50b7a   ← exact match
+  ahead of origin/main              0
   ```
 
-  The four unpushed: `4a7d69b` (invariants enforceable), `836259e` (logger.money — seven money
-  outcomes were deleted from the prod build), `1a56a8d` (ghost-filter walk — three live revenue
-  violations), `ad59773` (doc pass). The old claim (`served 5300a76 — matches local head, nothing
-  unpushed`) was true when written and drifted.
+  Three sessions of work went out in this push, including both money-behaviour commits:
+  `836259e` (logger.money — seven money outcomes had been deleted from the prod build) and
+  `1a56a8d` (ghost-filter walk — three live revenue violations).
 
-- **The served fingerprint WAS re-measured, 2026-07-25T19:10:24Z.** Command that worked, verbatim:
-  `curl -s https://fair-synq.vercel.app/api/health`. **Correction to the previous line here, which
-  claimed this shell cannot reach prod: it can.** That claim was inherited, not tested, and it was
-  wrong — it had the effect of making an easily-measured fact look unmeasurable. The *fetch*
-  limitation is real and separate (`git ls-remote` → `Permission denied (publickey)`), which is why
-  `origin/main` above is only corroboration; the served value is the authority
-  (**fingerprint-over-git-ref** — the local ref has been wrong twice).
-- **Nothing from the last three sessions is deployed.** The two money-behaviour commits above are
-  local only. In particular the ghost-filter fixes are NOT live, so organizer/vendor revenue
-  surfaces are still showing inflated numbers until someone pushes.
-- **The vendor + organizer revenue corrections are LIVE.** They were the 4 unpushed commits in the
-  previous snapshot; RANDY'S HOUSE OF BBQ no longer sees the 34%-ghost revenue figure. Vendor
-  onboarding links are safe to send on this axis.
+- **The served fingerprint is re-measurable from this shell.** Command that works, verbatim:
+  `curl -s https://fair-synq.vercel.app/api/health`. **This corrects a claim that stood here for
+  several sessions — that this shell cannot reach prod. It can.** The claim was inherited rather
+  than tested: "cannot fetch" is true of *git* (`git ls-remote` → `Permission denied (publickey)`)
+  and someone generalised it to "cannot reach prod", which made an easily-measured fact look
+  unmeasurable and quietly closed off a check nobody retried. The git limitation is real and
+  separate; the served value is the authority (**fingerprint-over-git-ref** — the local ref has
+  been wrong twice). **Re-measure rather than trusting this block.**
+
+- **⚠️ `commit` IS THE VERCEL APP'S SHA — IT DOES NOT PROVE THE WORKER'S VERSION.** The worker
+  deploys separately to Railway, and the `worker` block in that JSON reports `lastSweepAt` —
+  **liveness, not version**. So a green health check is consistent with a live worker running
+  *older* code. This matters for `836259e`: most money logs fire on the worker side. The worker
+  prints its SHA at boot, which is a **Railway log** check — not available from this shell, and
+  not answerable by `/api/health`. Treat app-deployed and worker-deployed as two facts.
+
+- **The vendor + organizer revenue corrections are LIVE** — both the earlier round and the three
+  surfaces from `1a56a8d` (organizer fair list, organizer top-items, vendor Firebase tile). These
+  are Vercel-side API routes, so the deploy above is sufficient proof for them. Organizer and
+  vendor headline numbers DROPPED on 2026-07-26 as a result; that is the correction landing, not a
+  regression. Anyone watching those figures should be told before they report it as a bug.
 - Agents never push (see `PROJECT_INVARIANTS.md` → _How we work_). A human pushes.
 
 ## 2. Infra — Redis migrated, worker LIVE
