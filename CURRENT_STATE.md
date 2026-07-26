@@ -35,12 +35,34 @@
   separate; the served value is the authority (**fingerprint-over-git-ref** — the local ref has
   been wrong twice). **Re-measure rather than trusting this block.**
 
-- **⚠️ `commit` IS THE VERCEL APP'S SHA — IT DOES NOT PROVE THE WORKER'S VERSION.** The worker
-  deploys separately to Railway, and the `worker` block in that JSON reports `lastSweepAt` —
-  **liveness, not version**. So a green health check is consistent with a live worker running
-  *older* code. This matters for `836259e`: most money logs fire on the worker side. The worker
-  prints its SHA at boot, which is a **Railway log** check — not available from this shell, and
-  not answerable by `/api/health`. Treat app-deployed and worker-deployed as two facts.
+- **THERE ARE TWO FINGERPRINTS. A matching web SHA says NOTHING about the worker.**
+
+  | Field | Deployment | Source |
+  |---|---|---|
+  | `.commit` | web app (Vercel) | baked at build time, `next.config.mjs` |
+  | `.checks.worker.commit` | worker (Railway) | written by the worker into Redis each sweep |
+
+  `commit` was the *only* fingerprint, and it belongs to the deployment that was never in
+  question — so a green health check with a fresh SHA was true in a narrow sense and misleading
+  in a wider one, the same shape as `logger.info`, the ten-file guard list, and "this shell
+  cannot fetch". **`fingerprint-over-git-ref` has to cover both deployments or it covers
+  neither.** Added 2026-07-26; guarded by `test-health-guard [10]`.
+
+  Read them as two facts:
+  ```
+  curl -s https://fair-synq.vercel.app/api/health | jq '{web: .commit, worker: .checks.worker}'
+  ```
+  `worker.commit: null` means a worker predating this feature (honestly unknown — never
+  guessed, never the web SHA); `"unknown"` means it is running a build with no git provenance.
+  The worker also now logs `[Worker] boot { commit }` at **console.warn** — there was previously
+  no boot line at all under `NODE_ENV=production`, which is half of why the last push could not
+  be confirmed from the logs: continuous sweeps with no visible gap look identical to "never
+  deployed."
+
+- **⚠️ STILL OPEN until the next worker deploy: whether the worker ever picked up `836259e`.**
+  The fingerprint above answers this *from the deploy after it lands*, not retroactively. Until
+  then the worker-side `logger.money` lines are unconfirmed, and that is where most money logs
+  fire.
 
 - **The vendor + organizer revenue corrections are LIVE** — both the earlier round and the three
   surfaces from `1a56a8d` (organizer fair list, organizer top-items, vendor Firebase tile). These
