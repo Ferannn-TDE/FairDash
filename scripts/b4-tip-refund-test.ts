@@ -30,10 +30,21 @@ function assert(cond: boolean, label: string) {
 interface FakeRefund { id: string; amount: number; key?: string }
 const created: FakeRefund[] = []
 const byKey = new Map<string, FakeRefund>()
+/** Orders the spy must FAIL for — lets the failure-marker control force a deterministic throw. */
+const throwForOrders = new Set<string>()
+
 async function installStripeSpy() {
   const { stripe } = await import('../lib/stripe')
   void stripe.refunds
   ;(stripe.refunds as unknown as Record<string, unknown>).create = async (params: any, opts: any) => {
+    // Shaped like a real Stripe failure (type/code), not a bare Error — the marker path should
+    // be exercised by something that looks like what production would actually throw.
+    if (params?.metadata?.orderId && throwForOrders.has(params.metadata.orderId)) {
+      throw Object.assign(new Error('No such charge: ch_dead'), {
+        type: 'StripeInvalidRequestError', rawType: 'invalid_request_error',
+        code: 'resource_missing', statusCode: 400, param: 'charge',
+      })
+    }
     const key = opts?.idempotencyKey as string | undefined
     if (key && byKey.has(key)) return byKey.get(key)!
     const r: FakeRefund = { id: `re_${rand()}`, amount: params.amount, key }
@@ -47,6 +58,7 @@ async function cleanup() {
   const events = await prisma.event.findMany({ where: { urlSlug: { startsWith: SLUG } }, select: { id: true } })
   const ids = events.map(e => e.id)
   if (ids.length) {
+    await prisma.adminMoneyAction.deleteMany({ where: { eventId: { in: ids } } })
     await prisma.order.deleteMany({ where: { eventId: { in: ids } } })
     await prisma.event.deleteMany({ where: { id: { in: ids } } })
   }
@@ -157,6 +169,43 @@ async function main() {
     assert(!!owed2row.tipRefundId, 'reconciler refunded the new owed-back tip')
     assert(runnerRow.tipRefundId === null, 'reconciler left the runner-earned tip untouched (never refunded)')
     assert(created.length >= beforeRec + 1, `reconciler created the owed-back refund (refunded=${recSummary.refunded})`)
+
+    // ── [marker] a FAILED tip refund leaves a durable row — the write half ───────
+    // Before this, a failure wrote NOTHING: tipRefundId stayed null, the order stayed in the
+    // candidate set, and "never attempted" was indistinguishable from "failed 400 times".
+    // Everything below is scoped to THIS order — never a table-wide count, which is how the
+    // X2 suite went flaky.
+    console.log('\n[marker] a failed tip refund writes a durable TIP_REFUND_FAILED audit row')
+    const doomed = await seedCancelledTipped(ev.id, ven.id, 400)
+    throwForOrders.add(doomed.id)
+    const beforeFail = created.length
+    const failSummary = await reconcileTipRefunds()
+    throwForOrders.delete(doomed.id)
+
+    const marker = await prisma.adminMoneyAction.findFirst({
+      where: { orderId: doomed.id, action: 'TIP_REFUND_FAILED' },
+      select: { payeeType: true, payeeId: true, amountCents: true, actorType: true, actorId: true, reason: true, eventId: true },
+    })
+    assert(created.length === beforeFail, 'no refund was created for the doomed order (the throw really happened)')
+    assert(failSummary.alerts.some(a => a.includes(doomed.id)), 'the existing alert string is KEPT — this is additive')
+    assert(marker != null, 'a durable audit row exists for the failed tip refund')
+    assert(marker?.payeeType === 'customer', `payeeType is 'customer' (got ${marker?.payeeType}) — the tip goes back to the payer`)
+    assert(marker?.amountCents === 400, `the row carries the owed amount (got ${marker?.amountCents})`)
+    assert(marker?.actorType === 'reconciler' && marker?.actorId === 'reconciler:tip-refund', 'honest actor — the reconciler, not an admin')
+    assert(marker?.eventId === ev.id, 'scoped to the right fair')
+    assert(/resource_missing|No such charge/.test(marker?.reason ?? ''), 'the reason carries the underlying Stripe failure')
+
+    // tipRefundId MUST stay null: it is the SUCCESS record, and a sentinel there would drop the
+    // order out of the candidate query — a failed refund would silently stop being retried.
+    const doomedRow = await prisma.order.findUniqueOrThrow({ where: { id: doomed.id }, select: { tipRefundId: true } })
+    assert(doomedRow.tipRefundId === null, 'tipRefundId is STILL null — not repurposed, so the order stays retryable')
+
+    // NEGATIVE HALF: a SUCCESSFUL refund must write no marker. Without this, a writer that
+    // marked unconditionally would pass every assertion above.
+    const successMarker = await prisma.adminMoneyAction.count({
+      where: { orderId: owed2.id, action: 'TIP_REFUND_FAILED' },
+    })
+    assert(successMarker === 0, 'the SUCCESSFUL tip refund wrote NO failure marker (the row means failure, not activity)')
   } finally {
     await cleanup()
   }

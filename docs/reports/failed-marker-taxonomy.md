@@ -125,10 +125,26 @@ rather than on attempt-count alone, which silently assumes every terminal failur
   - **Organizer payout** — yes (`OrganizerPayout.status='failed'`, C).
   - **Refund** — yes, but a *different* state (`Refund.status='FAILED'`, `RefundRequest.status=
     'FAILED'`, D/E), on the refund models, not the payout enum.
-  - **Tip-refund** — **NO durable failure marker found.** `lib/tip-refund.ts` has no `status:
-    'failed'` write; a tip-refund transfer failure surfaces only via the reconciler alert path.
-  - **Chargeback** — **NO durable failure marker**; failure is a reconciler **alert** only
-    (Pattern I retry, `reconciler.ts:750`), never a persisted failed state.
+  - **Tip-refund** — **NO durable failure marker.** Confirmed 2026-07-27 and now **FIXED**:
+    `reconcileTipRefunds`'s catch writes a `TIP_REFUND_FAILED` audit row
+    (`payeeType: 'customer'`). ⚠️ **Write half only** — nothing reads it; see the comment at the
+    write site in `lib/tip-refund.ts`.
+  - **Chargeback** — ~~NO durable failure marker~~ **❌ THIS WAS WRONG. Corrected 2026-07-27.**
+    `Chargeback.clawbackStatus` (`schema.prisma:938` — `pending | done | partial`) **is** a
+    durable marker, written on failure at `process-chargeback.ts:118-121` and again on the retry
+    path (`:178`), and it **is read**: Pattern I (`reconciler.ts:783`) scans
+    `clawbackStatus in ('pending','partial')` and retries every sweep. The alert is *in addition
+    to* the marker, not instead of it. The loop is closed.
+
+    **WHY THE ERROR IS WORTH NAMING, because the reading pattern will recur.** The original
+    claim was written from what was *visible* — the `logger.error` line in the catch — and not
+    from the code three lines below it, where `db.chargeback.update({ clawbackStatus: anyFailed
+    ? 'partial' : 'done' })` sits *outside* the loop. An audit that stops at the catch block
+    sees an alert and concludes "alert-only". The cost was nearly real: acting on this item as
+    written would have built a second, redundant marker alongside a better one that was already
+    read by a live retry pattern — introducing exactly the two-sources-of-one-truth class the
+    audit exists to find. **Read to the end of the enclosing function, not to the end of the
+    catch.**
 - **Also note:** the vendor marker is on `Order.payoutStatus`, the runner/organizer markers are on
   the earning/batch `status`. There is **no `VendorEarning` failed state**, so a per-vendor-slice
   failure on a multi-vendor order is recorded only at order granularity.
@@ -200,7 +216,26 @@ empty denominator, the vacuous-gate class. Lower operational stakes than the adm
    `exhausted >= 3` gate at `order-worker.ts:869` skips the marker AND the `PAYOUT_FAILED` audit
    Pattern U reads. The worst failure class is the one that goes unrecorded. Reachable for the
    first time now that the worker is live. **Highest-priority item in this list.**
-3. **Tip-refund and chargeback have no durable failure marker** (§1.3) — alert-only.
+3. ~~**Tip-refund and chargeback have no durable failure marker** — alert-only.~~
+   **SPLIT AND PARTLY WRONG. Resolved 2026-07-27.**
+   - **Tip-refund — ✅ DONE.** Was genuinely markerless: a failure wrote nothing, `tipRefundId`
+     stayed null, so the order stayed in the candidate set and "never attempted" was
+     indistinguishable from "failed 400 times over three days". Now writes a
+     `TIP_REFUND_FAILED` audit row (`payeeType: 'customer'`, its own action string so it cannot
+     contend with Pattern U's `take: 2000` window). No schema change. **Closes the WRITE half
+     only** — nothing reads it, and that limit is stated at the write site.
+   - **Chargeback — ❌ NOT A GAP.** `Chargeback.clawbackStatus` already exists and is already
+     read by Pattern I every sweep (§1.3). Nothing to build.
+   - **↪ POST-FAIR: chargeback clawback granularity.** The real, narrower gap:
+     `clawbackStatus` is **per-chargeback**, so on a multi-vendor order `'partial'` cannot say
+     *which* vendor's clawback failed — a human has to diff `Payout.reversedAt` by hand. Fixing
+     it needs schema (a per-vendor clawback row, or a column on `Payout`), so it is deferred
+     past Aug 12 per the migration-drift reasoning: the fresh-DB rebuild path is currently
+     proven against 49 migrations and every new one is a chance to un-prove it.
+   - **↪ KNOWN, NOT BUILT: the `no_charge` outcome.** A tip refund with no resolvable charge
+     *returns* an outcome rather than throwing, so it never reaches the catch and gets no
+     marker. It alerts every sweep, forever. Lower stakes (nothing was attempted, so nothing is
+     half-done) but it is the same "indistinguishable states" shape and is deliberately left.
 4. **No site flips `stripeVerified` to false on a dead destination** (§1.4) — a stale `true`
    re-fails every sweep; the executors read the flag the invariant says never to trust.
 

@@ -20,6 +20,7 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { logger } from './logger'
+import { writeMoneyAudit } from './admin-money'
 
 export type TipRefundOutcome =
   | 'refund'                  // owed back: cancelled, tipped, NO runner earned it
@@ -179,7 +180,8 @@ export async function reconcileTipRefunds(opts?: { maxPerRun?: number }): Promis
       tipRefundId: null,
       voidedAt: null,
     },
-    select: { id: true },
+    // eventId + tip are carried for the failure audit below — same query, no extra round trip.
+    select: { id: true, eventId: true, tip: true },
     take: max,
   })
 
@@ -191,7 +193,50 @@ export async function reconcileTipRefunds(opts?: { maxPerRun?: number }): Promis
       else if (r.outcome === 'excluded_runner_earned') summary.excluded++
       else if (r.outcome === 'no_charge') summary.alerts.push(`tip refund for ${o.id}: no resolvable charge — manual review`)
     } catch (err) {
+      // The alert is KEPT — this is additive. It stays the fast, human-readable signal.
       summary.alerts.push(`tip refund failed for ${o.id}: ${err instanceof Error ? err.message : String(err)}`)
+
+      // ── DURABLE FAILURE MARKER ────────────────────────────────────────────────────────
+      // Before this, a failed tip refund wrote NOTHING. `tipRefundId` stays null, so the order
+      // stays in the candidate set above and is retried every sweep forever — which means the
+      // OBLIGATION was durable but the FAILURE was not: "never attempted" and "failed 400 times
+      // over three days" were indistinguishable in the DB. That is the same state the runner and
+      // organizer legs were in before their markers landed.
+      //
+      // ⚠️ THIS CLOSES THE **WRITE** HALF ONLY — do not assume otherwise from finding this row.
+      // NOTHING reads TIP_REFUND_FAILED. Pattern R re-scans the obligation, so retries continue,
+      // but no failure STATE is read by anything: a permanently-failing tip refund still retries
+      // silently every 60s and only this row accumulates. Closing the read half means giving
+      // Pattern U a customer emitter — and there is no marker TABLE for it to scan, so it would
+      // have to treat these audit rows as the marker. That inverts Pattern U's stated design
+      // (reconciler.ts:1325 — "the MARKER rows are the source of truth for currently stuck; the
+      // audit only dates the failure"). A design change, deliberately not folded in here.
+      //
+      // NEVER Order.tipRefundId: it is the SUCCESS record, @unique, and a sentinel there would
+      // drop the order out of the `tipRefundId: null` query above — a failed refund would stop
+      // being retried entirely. The cure would be worse than the gap.
+      try {
+        await writeMoneyAudit(
+          { id: 'reconciler:tip-refund', type: 'reconciler' },
+          o.eventId,
+          {
+            action: 'TIP_REFUND_FAILED',
+            payeeType: 'customer', // the tip goes BACK to the payer; see AuditPayeeType
+            payeeId: o.id,         // no customer ledger row exists — the order is the anchor
+            orderId: o.id,
+            amountCents: Math.round((o.tip ?? 0) * 100),
+            reason: `owed-back tip refund failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        )
+      } catch (auditErr) {
+        // BOOKKEEPING MUST NEVER CHANGE THE OUTCOME. We are already on the failure path; if the
+        // marker write also fails, the refund's result is unaffected and the loop continues to
+        // the next order. Swallowed to a log rather than rethrown, because throwing here would
+        // abandon every remaining owed tip in this sweep over a bookkeeping error.
+        logger.error('[TipRefund] failure-marker write failed (refund outcome unaffected)', {
+          orderId: o.id, error: String(auditErr),
+        })
+      }
     }
   }
   return summary
