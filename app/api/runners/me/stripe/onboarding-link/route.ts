@@ -3,6 +3,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireRunnerAuth } from '@/lib/auth'
 import { assertStripeConfigured, createOnboardingLink } from '@/lib/stripe-connect'
+import { requireAppBaseUrl } from '@/lib/app-url'
 
 // POST /api/runners/me/stripe/onboarding-link
 //
@@ -27,10 +28,10 @@ export async function POST() {
       return apiError('No Stripe account — set up payouts first', 409, 'NO_STRIPE_ACCOUNT')
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL
-    if (!appUrl) {
-      throw new Error('NEXT_PUBLIC_APP_URL is not configured — cannot build onboarding return URLs.')
-    }
+    // ONE validated source. Presence was never the question — a var set to localhost
+    // passed the old `if (!appUrl)` check and produced a dead link. requireAppBaseUrl
+    // rejects a loopback origin in production instead of returning something plausible.
+    const appUrl = requireAppBaseUrl()
 
     const fairSlug = runner.event.urlSlug
     const base = `${appUrl}/runner/${fairSlug}/settings`
