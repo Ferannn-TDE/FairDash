@@ -203,5 +203,22 @@ empty denominator, the vacuous-gate class. Lower operational stakes than the adm
 3. **Tip-refund and chargeback have no durable failure marker** (§1.3) — alert-only.
 4. **No site flips `stripeVerified` to false on a dead destination** (§1.4) — a stale `true`
    re-fails every sweep; the executors read the flag the invariant says never to trust.
+
+   **⛔ HARD CONSTRAINT, decided 2026-07-27 — do not discover this while building.**
+   `lib/stripe-error-class.ts` will say **terminal** for a dead destination, but *terminal alone
+   must NOT trigger the flip.* `resource_missing` is **not account-specific**: Stripe returns the
+   same code for a missing charge and a missing transfer. Flipping `stripeVerified` on any
+   terminal error would disconnect payees for failures that have nothing to do with them —
+   during onboarding week, against the one blocker that cannot be compressed (§3).
+
+   The verdict carries **`param`**, which names the field at fault (`'destination'` on the real
+   SDK fixture, asserted in `stripe-error-class-guard [1]`). The flip must require
+   `class === 'terminal'` **AND** `param` identifying the destination account. Terminal is
+   *necessary, not sufficient.*
+
+   Also still true and separate: only the **throw** case is the gap. When `accounts.retrieve`
+   SUCCEEDS and reports a lapsed capability, the status routes already write `false` today.
+   And the flip is self-healing — the status route and the connect webhook both rewrite the flag
+   from a live read, so a false positive does not strand a payee.
 5. **Runner-facing completion rate is unfloored** (§1.5) — empty runner shows 100%; `?? 1`
    fallback uncovered by the flicker guard.
