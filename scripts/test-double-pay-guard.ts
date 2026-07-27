@@ -19,6 +19,7 @@
 
 import { readFileSync } from 'node:fs'
 import { classifyVendorSlice } from '../lib/process-payout'
+import { stripComments } from './_strip-comments'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -60,7 +61,12 @@ function main() {
   // The classifier being right is necessary but not sufficient: the loop must skip on it
   // before the Stripe call, or the decision is cosmetic. Assert the ordering in source.
   console.log('\n[3] static: the transfer loop skips already_paid BEFORE stripe.transfers.create')
-  const src = readFileSync('lib/process-payout.ts', 'utf8')
+  // COMMENT-STRIPPED — guards-scan-code-not-prose. This read RAW source and broke the moment
+  // a doc comment ABOVE the loop mentioned stripe.transfers.create (the transferOrTerminal
+  // wrapper's own explanation): indexOf found the prose, not the call, and the ordering check
+  // silently compared the wrong positions. The pressure that creates is to delete the
+  // explanation to get the guard green, which is the guard destroying what it protects.
+  const src = stripComments(readFileSync('lib/process-payout.ts', 'utf8'))
   const skipAt = src.indexOf("p.outcome === 'already_paid'")
   const xferAt = src.indexOf('stripe.transfers.create')
   assert(skipAt !== -1, "the loop has an `p.outcome === 'already_paid'` branch")

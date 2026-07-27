@@ -26,7 +26,7 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { splitRunnerFee } from './payout-split'
-import { PayoutNotSettledError, PayoutReconciliationError } from './process-payout'
+import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal } from './process-payout'
 import { REFUND_WINDOW_MS } from './constants'
 import { logger } from './logger'
 
@@ -270,16 +270,18 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
   }
 
   // Pay the ledger VERBATIM. Exactly-once via the idempotency key.
-  const transfer = await stripe.transfers.create(
-    {
-      amount: amountCents,
-      currency: 'usd',
-      destination: runner.stripeAccountId,
-      source_transaction: chargeId,
-      transfer_group: `order_${orderId}`,
-      metadata: { orderId, runnerId: plan.runnerId as string, kind: 'runner_payout' },
-    },
-    { idempotencyKey: `runner_payout_${orderId}` },
+  const transfer = await transferOrTerminal(`runner payout order ${orderId} runner ${plan.runnerId}`, () =>
+    stripe.transfers.create(
+      {
+        amount: amountCents,
+        currency: 'usd',
+        destination: runner.stripeAccountId!,
+        source_transaction: chargeId,
+        transfer_group: `order_${orderId}`,
+        metadata: { orderId, runnerId: plan.runnerId as string, kind: 'runner_payout' },
+      },
+      { idempotencyKey: `runner_payout_${orderId}` },
+    ),
   )
 
   // The ledger row IS the payout record: mark paid + stamp the transfer id.

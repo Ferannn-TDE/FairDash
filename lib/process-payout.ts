@@ -37,6 +37,7 @@ import { db } from './db'
 import { stripe } from './stripe'
 import { splitStripeFee } from './payout-split'
 import { logger } from './logger'
+import { classifyStripeError, type StripeFailureVerdict } from './stripe-error-class'
 
 /** Why the admin gate refused to pay a slice. Never gets a PayoutHold row. */
 export type PayoutBlockReason = 'admin_hold' | 'admin_cancelled' | 'payouts_frozen'
@@ -87,6 +88,58 @@ export class PayoutNotSettledError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'PayoutNotSettledError'
+  }
+}
+
+/**
+ * Thrown when Stripe says this transfer can NEVER succeed as issued — a deleted destination,
+ * a deauthorized connection, bad credentials. Distinct from PayoutReconciliationError, which
+ * means OUR books disagree; this means STRIPE has refused permanently.
+ *
+ * Both halt, and both must halt, but conflating them would put a false statement in the audit
+ * reason: "the money identity doesn't hold" is not what happened when an account was deleted.
+ */
+export class PayoutTerminalError extends Error {
+  readonly verdict: StripeFailureVerdict
+  constructor(message: string, verdict: StripeFailureVerdict) {
+    super(message)
+    this.name = 'PayoutTerminalError'
+    this.verdict = verdict
+  }
+}
+
+/**
+ * THE FAST-FAIL WRAPPER — the single consumer of the Stripe classifier, shared by all three
+ * payout legs so the retry decision is made in ONE place.
+ *
+ * WHAT IT REPLACES: nothing inspected the error. All three legs called `stripe.transfers.create`
+ * bare, the error propagated, and BullMQ's blanket `attempts: 3` retried blind. A dangling
+ * account and a network blip were indistinguishable, so a destination that will NEVER resolve
+ * cost 3 attempts plus exponential backoff before being marked.
+ *
+ * ⚠️ THE ONLY BEHAVIOUR CHANGE IS `terminal`. `transient` and `unknown` both rethrow the
+ * ORIGINAL error object — same instance, same type identity, same message — so BullMQ's
+ * handling and the finality gate at order-worker.ts:869 behave exactly as they do today. That
+ * asymmetry is deliberate: misclassifying toward terminal abandons money that would have moved,
+ * so anything not positively recognised as hopeless keeps every retry it has today.
+ *
+ * WHY IT THROWS A DOMAIN ERROR AND NOT UnrecoverableError: BullMQ is the worker's vocabulary,
+ * not lib/'s. The worker already translates PayoutReconciliationError → UnrecoverableError at
+ * the handler boundary; this rides that same seam rather than opening a second one, so the
+ * durable marker and PAYOUT_FAILED audit come from the EXISTING finality gate.
+ */
+export async function transferOrTerminal<T>(context: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    const verdict = classifyStripeError(err)
+    // transient | unknown → propagate UNCHANGED. Not `throw new Error(...)`: rethrowing the
+    // original preserves instanceof checks upstream (PayoutNotSettledError et al).
+    if (verdict.class !== 'terminal') throw err
+    logger.money('[Payout] TERMINAL Stripe failure — fast-failing, no further retries', {
+      context, reason: verdict.reason, code: verdict.code, param: verdict.param, statusCode: verdict.statusCode,
+    })
+    throw new PayoutTerminalError(`${context}: ${verdict.reason}`, verdict)
   }
 }
 
@@ -403,16 +456,18 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       continue
     }
 
-    const transfer = await stripe.transfers.create(
-      {
-        amount: p.transferCents,
-        currency: 'usd',
-        destination: p.stripeAccountId!,
-        source_transaction: chargeId,
-        transfer_group: transferGroup,
-        metadata: { orderId, vendorId: p.vendorId },
-      },
-      { idempotencyKey: `payout_${orderId}_${p.vendorId}` },
+    const transfer = await transferOrTerminal(`vendor payout order ${orderId} vendor ${p.vendorId}`, () =>
+      stripe.transfers.create(
+        {
+          amount: p.transferCents,
+          currency: 'usd',
+          destination: p.stripeAccountId!,
+          source_transaction: chargeId,
+          transfer_group: transferGroup,
+          metadata: { orderId, vendorId: p.vendorId },
+        },
+        { idempotencyKey: `payout_${orderId}_${p.vendorId}` },
+      ),
     )
 
     // Record/refresh the payout row, keyed by the (idempotent) transfer id.
