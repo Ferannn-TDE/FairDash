@@ -40,7 +40,7 @@ import { runReconciliationSweep } from '../lib/reconciler'
 import {
   VENDOR_OFFLINE_HEARTBEAT_MS,
 } from '../lib/constants'
-import { processOrderPayout, PayoutReconciliationError } from '../lib/process-payout'
+import { processOrderPayout, PayoutReconciliationError, PayoutTerminalError } from '../lib/process-payout'
 import { processRunnerPayout } from '../lib/runner-payout'
 import { processEventOrganizerPayout } from '../lib/organizer-payout'
 import { refundVendorPortion } from '../lib/process-refund'
@@ -551,6 +551,15 @@ async function handleVendorPayout(job: Job<JobData>) {
       console.error(`[Worker] RECONCILIATION HALT for order ${orderId}: ${err.message}`)
       throw new UnrecoverableError(err.message)
     }
+    // TERMINAL Stripe refusal (deleted destination, revoked connection, bad credentials).
+    // Rides the SAME seam as the reconciliation halt rather than opening a second path to
+    // the durable marker: UnrecoverableError reaches the finality gate below, which writes
+    // the marker + PAYOUT_FAILED audit exactly as an exhausted retry would — just sooner,
+    // without burning 3 attempts on a destination that will never resolve.
+    if (err instanceof PayoutTerminalError) {
+      console.error(`[Worker] TERMINAL STRIPE FAILURE (vendor payout): ${err.message}`)
+      throw new UnrecoverableError(err.message)
+    }
     // Transient (e.g. balance txn not settled, no charge yet) → let BullMQ retry.
     throw err
   }
@@ -583,6 +592,15 @@ async function handleRunnerPayout(job: Job<JobData>) {
       console.error(`[Worker] RUNNER RECONCILIATION HALT for order ${orderId}: ${err.message}`)
       throw new UnrecoverableError(err.message)
     }
+    // TERMINAL Stripe refusal (deleted destination, revoked connection, bad credentials).
+    // Rides the SAME seam as the reconciliation halt rather than opening a second path to
+    // the durable marker: UnrecoverableError reaches the finality gate below, which writes
+    // the marker + PAYOUT_FAILED audit exactly as an exhausted retry would — just sooner,
+    // without burning 3 attempts on a destination that will never resolve.
+    if (err instanceof PayoutTerminalError) {
+      console.error(`[Worker] TERMINAL STRIPE FAILURE (runner payout): ${err.message}`)
+      throw new UnrecoverableError(err.message)
+    }
     // Transient (e.g. no charge yet) → let BullMQ retry.
     throw err
   }
@@ -613,6 +631,15 @@ async function handleOrganizerPayout(job: Job<JobData>) {
   } catch (err) {
     if (err instanceof PayoutReconciliationError) {
       console.error(`[Worker] ORGANIZER RECONCILIATION HALT for event ${eventId}: ${err.message}`)
+      throw new UnrecoverableError(err.message)
+    }
+    // TERMINAL Stripe refusal (deleted destination, revoked connection, bad credentials).
+    // Rides the SAME seam as the reconciliation halt rather than opening a second path to
+    // the durable marker: UnrecoverableError reaches the finality gate below, which writes
+    // the marker + PAYOUT_FAILED audit exactly as an exhausted retry would — just sooner,
+    // without burning 3 attempts on a destination that will never resolve.
+    if (err instanceof PayoutTerminalError) {
+      console.error(`[Worker] TERMINAL STRIPE FAILURE (organizer payout): ${err.message}`)
       throw new UnrecoverableError(err.message)
     }
     throw err

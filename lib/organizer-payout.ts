@@ -25,7 +25,7 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { REFUND_WINDOW_MS } from './constants'
-import { PayoutNotSettledError, PayoutReconciliationError } from './process-payout'
+import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal } from './process-payout'
 import { logger } from './logger'
 
 export type OrganizerPayoutOutcome = 'pay' | 'hold' | 'nothing'
@@ -235,15 +235,17 @@ export async function processEventOrganizerPayout(eventId: string): Promise<Orga
 
   // (3) Plain transfer from the platform balance — NO source_transaction (the
   // batch spans multiple charges). Exactly-once via idempotencyKey = batch id.
-  const transfer = await stripe.transfers.create(
-    {
-      amount: batch.totalCents,
-      currency: 'usd',
-      destination: destination as string,
-      transfer_group: `event_${eventId}`,
-      metadata: { eventId, batchId: batch.id, kind: 'organizer_payout' },
-    },
-    { idempotencyKey: `organizer_payout_${batch.id}` },
+  const transfer = await transferOrTerminal(`organizer payout event ${eventId} batch ${batch.id}`, () =>
+    stripe.transfers.create(
+      {
+        amount: batch.totalCents,
+        currency: 'usd',
+        destination: destination as string,
+        transfer_group: `event_${eventId}`,
+        metadata: { eventId, batchId: batch.id, kind: 'organizer_payout' },
+      },
+      { idempotencyKey: `organizer_payout_${batch.id}` },
+    ),
   )
 
   // (4) Finalize — batch paid + transfer id; covered earnings paid + paidAt.

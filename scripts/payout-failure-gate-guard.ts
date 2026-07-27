@@ -95,8 +95,17 @@ for (const { leg, handler } of THROW_SITES) {
   assert(/PayoutReconciliationError/.test(body) && /throw new UnrecoverableError/.test(body),
     `${leg}: ${handler} maps PayoutReconciliationError → UnrecoverableError (reaches the fixed gate)`)
 }
-assert((worker.match(/throw new UnrecoverableError/g) ?? []).length === 3,
-  'exactly 3 UnrecoverableError throw sites — a 4th is a decision, not drift')
+// SIX, in TWO families of three — one per payout leg, per cause. Counted by family rather than
+// in total, so "someone added a leg" and "someone added a new halt CAUSE" fail differently:
+//   PayoutReconciliationError → our books disagree (ledger drift)
+//   PayoutTerminalError       → Stripe has refused permanently (dead destination, revoked conn.)
+// Both must halt, and conflating them would put a false cause in the audit reason.
+assert((worker.match(/throw new UnrecoverableError/g) ?? []).length === 6,
+  'exactly 6 UnrecoverableError throw sites — 3 legs × 2 halt causes; a 7th is a decision, not drift')
+assert((worker.match(/err instanceof PayoutReconciliationError/g) ?? []).length === 3,
+  'reconciliation halts: one per leg (vendor, runner, organizer)')
+assert((worker.match(/err instanceof PayoutTerminalError/g) ?? []).length === 3,
+  'terminal-Stripe halts: one per leg — no leg left retrying blind against a dead destination')
 // The two OTHER routes into BullMQ's unrecoverable handling, checked as ABSENT rather than
 // assumed absent: worker.js:615 getUnrecoverableErrorMessage fires on job.deferredFailure or
 // opts.maxStartedAttempts (BullMQ constructs the error itself — our gate catches it by name),
