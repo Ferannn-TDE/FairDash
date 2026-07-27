@@ -37,13 +37,48 @@ import { db } from './db'
 import { ApiError } from './api-error'
 import { logger } from './logger'
 
+/**
+ * WHO AN ADMIN MONEY ACTION CAN TARGET. Deliberately does NOT include 'customer' — see
+ * AuditPayeeType. Three call sites branch exhaustively on this (`:140`, `:349`, `:366`) and
+ * take it as a typed parameter, so widening THIS union would silently give each of them a
+ * fall-through case on a value they have no handling for.
+ */
 export type PayeeType = 'vendor' | 'runner' | 'organizer'
+
+/**
+ * WHO A MONEY RECORD CAN BE ABOUT. Strictly wider than PayeeType, and the split is the point.
+ *
+ * A tip refund's payee is the CUSTOMER — money going back to the person who paid it, because no
+ * runner earned it. That is a real payee for the AUDIT (the row records what happened) but not a
+ * valid target for HOLD/RELEASE/CANCEL/FREEZE, which act on ledger rows a customer does not have.
+ *
+ * Keeping them separate is what lets 'customer' exist without handing the three PayeeType
+ * switches an unhandled fourth case. Declared here rather than appearing as an undeclared string
+ * in a call site: `AdminMoneyAction.payeeType` is a free String column, so an undeclared value
+ * would have been accepted silently and only discovered by whoever next read the table.
+ *
+ * Readers of the STORED value: `reconciler.ts:1335` uses it as a map-key fragment (no switch, no
+ * fall-through). Nothing else branches on a payeeType read back from the DB.
+ */
+export type AuditPayeeType = PayeeType | 'customer'
+
 // HOLD|RELEASE|CANCEL|FREEZE|UNFREEZE|REFUND are admin/organizer/reconciler money moves.
 // PAYOUT_FAILED is a SYSTEM record: a payout job exhausted its retries. It is written by the
 // worker's failed handler and doubles as the durable failed-since timestamp Pattern U reads
 // (the earning rows carry no updatedAt), giving the honest-actor audit that system money-ops
 // otherwise lacked. Column is a free String — extending this union needs no migration.
-export type MoneyActionType = 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND' | 'PAYOUT_FAILED'
+//
+// TIP_REFUND_FAILED is its OWN string, never PAYOUT_FAILED, for two independent reasons:
+//   1. A tip refund is not a payout. Reusing the term would put a false statement in a money
+//      audit — the same class as the X2 referral and the hardcoded "exhausted after N attempts".
+//   2. Pattern U reads `action: 'PAYOUT_FAILED'` with `take: 2000` (reconciler.ts:1328). Sharing
+//      the string would put tip-refund rows in contention for that window and push older
+//      vendor/runner/organizer audits out of it, degrading the failed-since age those three
+//      lanes report. A separate namespace cannot contend.
+export type MoneyActionType =
+  | 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND'
+  | 'PAYOUT_FAILED'
+  | 'TIP_REFUND_FAILED'
 
 export interface AdminMoneyContext {
   /** From requireAdminFairContext — proves platform admin + resolves the fair. */
@@ -69,7 +104,8 @@ export type MoneyActor = { id: string; type: 'admin' | 'organizer' | 'system' | 
 
 interface AuditFields {
   action: MoneyActionType
-  payeeType: PayeeType
+  /** WIDER than PayeeType on purpose — an audit row may be ABOUT a customer. See AuditPayeeType. */
+  payeeType: AuditPayeeType
   payeeId: string
   orderId?: string | null
   earningId?: string | null
