@@ -33,6 +33,7 @@
 
 import { db } from './db'
 import { stripe } from './stripe'
+import { POLLUTED_TRANSFER_IDS, POLLUTION_COHORT_REASON } from './pollution-cohort'
 
 export interface TransferCheckRow {
   leg: 'vendor' | 'runner' | 'organizer'
@@ -78,30 +79,13 @@ export interface TransferCheckResult {
  * Keyed by transfer id (globally unique) rather than by row id, so it cannot silently widen.
  */
 export const ACKNOWLEDGED_MISSING_TRANSFERS = {
-  reason:
-    'test-suite pollution of prod, found 2026-07-28. Real orders, fabricated Payout rows written ' +
-    'by a Stripe spy running against production. Cleanup decision pending — see CURRENT_STATE §7.',
+  reason: POLLUTION_COHORT_REASON,
   /**
-   * EXPLICIT IDS, NOT A DATE WINDOW. A window was the obvious shape and it is UNSAFE: measured,
-   * 34 LEGITIMATE payouts fall inside the same 2026-07-12→17 range as the polluted ones, so a
-   * date rule would have silently suppressed real rows from the check. Transfer ids are globally
-   * unique and this list cannot widen to cover a row nobody has looked at.
+   * The ids live in lib/pollution-cohort.ts — ONE declared set, shared with the vendor display
+   * filter rather than copied. Two consumers of one list; a second copy is how the two would
+   * drift and how a vendor would end up seeing money that was never sent.
    */
-  ids: new Set<string>([
-  'tr_06l41d6w', 'tr_12qie51w', 'tr_1cfdbjdz', 'tr_1ymi1vsc', 'tr_1z8lo7wn', 'tr_32p0x7rx',
-  'tr_3b34xe3p', 'tr_3udd5q06', 'tr_3xec1k6r', 'tr_50wqgxoe', 'tr_530cjvmd', 'tr_5r4pijzz',
-  'tr_5y4sg5bd', 'tr_6xq9y2ow', 'tr_7556kbou', 'tr_7fo0sfi7', 'tr_7lxqhe5y', 'tr_7wq4szef',
-  'tr_85ds68ug', 'tr_933ve86r', 'tr_974o90jg', 'tr_9ju0p4w1', 'tr_9kujcnd1', 'tr_a89ipt0s',
-  'tr_acwngt9g', 'tr_arolc79d', 'tr_awjyreet', 'tr_bbayok0f', 'tr_bud1m4er', 'tr_by1ha1bb',
-  'tr_c24o2xio', 'tr_c7o7bgz2', 'tr_c8wypk5w', 'tr_cirx6wk3', 'tr_drfkmpo7', 'tr_dz69nbyr',
-  'tr_eom2vgvo', 'tr_f3mlv34n', 'tr_fa55ruvd', 'tr_fb4ila92', 'tr_frka1ir6', 'tr_g2wt1n9q',
-  'tr_g34twkkh', 'tr_geptnzh8', 'tr_hciei2c3', 'tr_iuda8abb', 'tr_jkyj1hbp', 'tr_jx4n2ms5',
-  'tr_k1tratdv', 'tr_kd5ge2k0', 'tr_kiarrjiw', 'tr_llzha5op', 'tr_lvd5fir0', 'tr_m56hmao2',
-  'tr_mghqejid', 'tr_q6o4szng', 'tr_qacm1zj2', 'tr_qhe69cti', 'tr_r53dgypg', 'tr_r8jyfqy6',
-  'tr_s8cjnwfx', 'tr_slcv3pan', 'tr_tnj5y7ef', 'tr_u8dp2b8z', 'tr_uidkclps', 'tr_um71pz2v',
-  'tr_vqsh7k0r', 'tr_wndlh6u0', 'tr_x03b6pse', 'tr_xaiath6c', 'tr_xakrjqpk', 'tr_yei60cgz',
-  'tr_z2q0x5vw', 'tr_zgx2mohu', 'tr_zvfhfqlg', 'tr_zwxa2ene',
-  ]),
+  ids: POLLUTED_TRANSFER_IDS,
 }
 
 const shortShaped = (id: string) => id.replace(/^tr_/, '').length < 20

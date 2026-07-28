@@ -52,8 +52,21 @@ add a guard that fails if a second copy reappears.** Confirmed instances, each n
 | delivery address validation + formatting | `lib/delivery-address.ts` | `scripts/delivery-address-guard.ts` |
 | fair CALENDAR dates + live/upcoming/ended state | `lib/event-date.ts:82` (`deriveEventLiveState`) | `scripts/fair-open-gate-guard.ts` |
 | the six money-move sites (the set itself) | `scripts/money-move-sites-guard.ts` (`MONEY_MOVE_SITES`) | `scripts/money-move-sites-guard.ts` |
+| the 2026-07-16/17 pollution cohort | `lib/pollution-cohort.ts` (`POLLUTED_TRANSFER_IDS`) | `scripts/pollution-cohort-guard.ts` |
 | comment-stripping before a guard scans | `_strip-comments.ts` (`stripComments`) | <!-- guard: none — the one definition exists and new guards import it, but FIVE legacy copies remain by design until the conversion job runs. A no-second-implementation assertion would fail today, so declaring this guarded would itself be the optimistic-doc drift this file exists to prevent. See the note below the table. --> **unguarded — declared, see below** |
 | BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | <!-- guard: none — the single source is real, but its INPUT is an env var spanning two deployments (Vercel producer, Railway consumer). A repo scanner cannot see config divergence. Operational check only: scripts/step-b-inspect.ts. --> **unguarded — declared, see below** |
+
+**⛔ `POLLUTED_TRANSFER_IDS` IS LOAD-BEARING IN TWO PLACES — DO NOT PRUNE IT AS STALE CLEANUP.**
+76 transfer ids that exist in our ledger and have never existed in Stripe (test-suite pollution of
+prod, 2026-07-16/17 — the fourth incident of that class). The set is consumed by:
+1. **`lib/transfer-existence.ts`** — suppresses them from the transfer-existence audit, so a FIFTH
+   incident still fails loudly instead of hiding among them.
+2. **`lib/vendor-earnings.ts`** — makes the written-off slice render as NOTHING on every
+   vendor-facing surface. Deleting the set would silently show vendors money that was never sent.
+
+It looks like finished cleanup and is not. Membership is by **transfer id, never by date**: 34
+LEGITIMATE payouts fall inside the same 2026-07-12→17 range, so a date rule would sweep up real
+money rows — measured, not hypothesised. `pollution-cohort-guard [2]` fails if a date creeps in.
 
 **⚠️ `stripComments` is single-sourced in INTENT, not yet in FACT — declared unguarded above,
 because the assertion is not landable today.** The idiom had drifted to **six copies in two

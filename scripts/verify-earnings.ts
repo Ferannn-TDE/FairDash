@@ -25,7 +25,7 @@ async function main() {
   })
 
   // Bucket by the state we can detect, pick one example of each.
-  const pick = { settled: null as any, estimated: null as any, refunded: null as any, reversed: null as any, declined: null as any }
+  const pick: Record<string, any> = { settled: null, estimated: null, refunded: null, reversed: null, declined: null, excluded: null }
   for (const o of orders) {
     for (const vos of o.vendorOrderStatuses) {
       const e = computeVendorOrderEarnings(o as any, vos.vendorId)

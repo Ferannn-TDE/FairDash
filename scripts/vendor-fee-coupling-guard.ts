@@ -83,7 +83,7 @@ for (const total of [500, 1_000, 2_599, 5_000, 12_345, 100_000]) {
 const order = (payoutNet?: number): OrderForEarnings => ({
   total: 50,
   orderItems: [{ vendorId: 'v1', subtotal: 50 }],
-  payouts: payoutNet == null ? [] : [{ vendorId: 'v1', netAmount: payoutNet, reversedAt: null }],
+  payouts: payoutNet == null ? [] : [{ vendorId: 'v1', netAmount: payoutNet, reversedAt: null, stripeTransferId: 'tr_realLookingId_000000001' }],
   refunds: [], vendorOrderStatuses: [{ vendorId: 'v1', status: 'COMPLETED' }],
 })
 const estimated = computeVendorOrderEarnings(order(), 'v1')

@@ -65,8 +65,15 @@ console.log('\n[3] ⛔ no date or heuristic membership rule may creep back in')
 assert(!/windowStart|windowEnd/.test(lib),
   'no date-window fields remain — a window would have suppressed 34 REAL payouts from a money check')
 assert(!/createdAt >= A\.|createdAt < A\./.test(lib), 'and nothing compares a row date against the acknowledged set')
-assert(/EXPLICIT IDS, NOT A DATE WINDOW/.test(readFileSync('lib/transfer-existence.ts', 'utf8')),
+// The ids and their reasoning live in the shared cohort module now — assert it there, which is
+// where someone reaching for a date rule would actually be editing.
+const cohort = readFileSync('lib/pollution-cohort.ts', 'utf8')
+assert(/WHY IDS AND NOT A DATE WINDOW/.test(cohort),
   'the reason a window is unsafe is recorded where the next person would reach for one')
+assert(/LOAD-BEARING IN TWO PLACES/.test(cohort),
+  'and the set records BOTH consumers, so it cannot be pruned as stale cleanup')
+assert(!/^import /m.test(cohort),
+  'the cohort module imports NOTHING — the vendor display path must not pull in Stripe or the DB to read it')
 
 console.log('\n[4] it is NOT wired into the 60s sweep')
 const reconciler = stripComments(readFileSync('lib/reconciler.ts', 'utf8'))

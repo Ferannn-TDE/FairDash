@@ -138,7 +138,7 @@ export async function fetchVendorOrderHistory(q: HistoryQuery) {
       deliveryState: true,
       deliveryZip: true,
       vendorOrderStatuses: { where: { vendorId }, select: { vendorId: true, status: true } },
-      payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true } },
+      payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
       refunds: { where: { vendorId }, select: { vendorId: true, status: true, amountCents: true } },
       // ALL items (every vendor) — the earnings helper needs the full per-vendor split to
       // compute this vendor's proportional Stripe-fee share.

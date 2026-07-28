@@ -42,7 +42,7 @@ export interface VendorActiveOrderRow {
   // lane until a confirmed return nulls this — the vendor's work on it is done.
   collectedAt: Date | string | null
   vendorOrderStatuses: { vendorId: string; status: string; version: number }[]
-  payouts: { vendorId: string; netAmount: number; reversedAt: Date | null }[]
+  payouts: { vendorId: string; netAmount: number; reversedAt: Date | null; stripeTransferId: string }[]
   refunds: { vendorId: string; status: string; amountCents: number }[]
   orderItems: { id: string; quantity: number; unitPrice: number; subtotal: number; itemName: string; vendorId: string }[]
 }

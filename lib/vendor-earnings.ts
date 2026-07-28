@@ -22,8 +22,14 @@
  */
 
 import { splitStripeFee } from './payout-split'
+import { isPollutedTransfer } from './pollution-cohort'
 
-export type EarningsStatus = 'settled' | 'estimated' | 'refunded' | 'reversed' | 'declined'
+/**
+ * `excluded` — the slice is NOT REAL and must render as NOTHING. Not zero, not a "cancelled"
+ * label: a written-off slice showing "$0" invites a question whose only honest answer is "a
+ * testing accident". See lib/pollution-cohort.ts.
+ */
+export type EarningsStatus = 'settled' | 'estimated' | 'refunded' | 'reversed' | 'declined' | 'excluded'
 
 export interface VendorOrderEarnings {
   cents: number
@@ -34,7 +40,14 @@ export interface VendorOrderEarnings {
 export interface OrderForEarnings {
   total: number
   orderItems: { vendorId: string; subtotal: number }[]
-  payouts: { vendorId: string; netAmount: number; reversedAt: Date | null }[]
+  /**
+   * `stripeTransferId` is REQUIRED — without it this helper cannot tell a real payout from a
+   * fabricated one, and would show a vendor money that was never sent. Widening this shape also
+   * closed a latent fragility: `payouts.find(p => p.vendorId === …)` was deterministic only
+   * because no (order, vendor) pair had two payout rows. It is now deterministic BY
+   * CONSTRUCTION, because the polluted row is removed before the lookup.
+   */
+  payouts: { vendorId: string; netAmount: number; reversedAt: Date | null; stripeTransferId: string }[]
   refunds: { vendorId: string; status: string; amountCents: number }[]
   vendorOrderStatuses: { vendorId: string; status: string }[]
 }
@@ -88,7 +101,19 @@ export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: st
   if (sliceCents <= 0) return { cents: 0, status: 'declined' }
 
   const vos = order.vendorOrderStatuses.find(s => s.vendorId === vendorId)?.status
-  const payout = order.payouts.find(p => p.vendorId === vendorId)
+
+  // ── FABRICATED PAYOUTS ARE REMOVED BEFORE ANYTHING READS THEM ─────────────────────────
+  // A polluted row is not "a payout with a bad id" — it is not a payout. Filtering here rather
+  // than at each call site means every vendor surface inherits it from the one helper they all
+  // already use, and the `.find` below can no longer pick a fabricated row over a real one.
+  const realPayouts = order.payouts.filter(p => !isPollutedTransfer(p.stripeTransferId))
+  const hadPollutedForThisVendor = order.payouts.some(p => p.vendorId === vendorId && isPollutedTransfer(p.stripeTransferId))
+  const payout = realPayouts.find(p => p.vendorId === vendorId)
+
+  // THE SLICE DOES NOT APPEAR. Falling through to the `estimated` branch would show "~$X
+  // pending" for money written off — honest that nothing was sent, wrong that anything is owed.
+  // Zero cents + a status callers skip is how it renders as nothing at all.
+  if (hadPollutedForThisVendor && !payout) return { cents: 0, status: 'excluded' }
   const refund = order.refunds.find(r => r.vendorId === vendorId && r.status === 'COMPLETED')
 
   // ── Base take-home: settled (money-truth) or conservative estimate ────────
@@ -139,7 +164,8 @@ export function sumVendorEarnings(orders: OrderForEarnings[], vendorId: string):
     if (e.status === 'settled') { out.settledCents += e.cents; out.settledOrders++ }
     else if (e.status === 'estimated') { out.estimatedCents += e.cents; out.pendingOrders++ }
     else if (e.status === 'refunded') { out.refundedCents += e.cents } // remaining after refund
-    // declined / reversed contribute $0
+    // declined / reversed / EXCLUDED contribute $0 and increment no count — a written-off
+    // slice must not appear in a total or a tally any more than it appears on screen.
   }
   return out
 }

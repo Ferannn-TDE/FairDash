@@ -75,7 +75,7 @@ export async function GET(
           where: { vendorId },
           select: { vendorId: true, status: true, version: true },
         },
-        payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true } },
+        payouts: { where: { vendorId }, select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
         refunds: { where: { vendorId }, select: { vendorId: true, status: true, amountCents: true } },
         // ALL items — earnings helper needs the full split for the fee estimate.
         orderItems: {

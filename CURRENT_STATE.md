@@ -701,7 +701,10 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   - **38 of the 76 orders ALSO have a genuine payout**, so these are duplicate rows layered on
     real ones, not a phantom order set.
 
-  **The headline is 95.4% fabricated.** Every paid `VendorEarning`, by what its own
+  **⚠️ `paid=$3,163.13` IS NOT EVIDENCE THE VENDOR LEG WORKS — it is 95.4% fabricated.** That
+  figure was quoted as proof in BOTH directions during this session: as evidence the leg was
+  settling money, and later as the baseline a correction would move. Neither reading was sound.
+  The real settled figure is **$144.79**. Every paid `VendorEarning`, by what its own
   `stripeTransferId` resolves to:
 
   ```
@@ -721,14 +724,40 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   total, 00:33→01:19). The pollution is 2026-07-12→17 and does not touch it. **"All three legs
   proven" is unaffected.**
 
-  **↪ OPEN DECISION — two candidate end states, neither taken:**
-  1. *Cancel the earnings + delete the fabricated payouts* — if the money never should have been
-     considered settled.
-  2. *Return the earnings to `accrued`* — they are real orders, so the accrual may be legitimate
-     and only the SETTLEMENT is false.
-  A delete is not a delete: removing a `Payout` while leaving its `VendorEarning` at `paid`
-  creates the X2 condition in reverse. Any cleanup must also consider `RunnerEarning`,
-  `OrganizerEarning`, refunds and chargebacks on those orders.
+  **↪ RESOLVED IN CODE, NOT YET IN THE LEDGER — the remediation is written and UNEXECUTED.**
+  `scripts/retire-pollution-cohort.ts` cancels the 76 earnings. It is **dry-run by default**,
+  refuses `--apply` without `ALLOW_PROD_WRITES=true`, is **idempotent** (only `paid` rows are
+  touched, so a re-run after a partial failure is a no-op on the done ones), and prints a
+  **receipt** — rows touched, before/after status, timestamp, actor, and the measured `paid=`
+  after. That receipt is the durable record of the fourth incident's resolution.
+
+  ⚠️ **UNTIL IT RUNS, THE LEDGER IS STILL WRONG.** `paid=` still reads $3,163.13 on the admin
+  money page and the sweep summary. **The vendor-facing half IS already corrected** — the
+  display filter ships with the code — so the vendor-facing lie is closed and the admin-facing
+  one remains, visible only to someone who knows why. That asymmetry is deliberate and is the
+  safer ordering; it resolves the moment the script runs.
+
+  ```
+  ALLOW_PROD_WRITES=true npx tsx scripts/retire-pollution-cohort.ts --apply
+  ```
+
+  **Why not `lib/reverse-accrual.ts`:** it REFUSES `paid` rows by design — *"'paid' → the money
+  already transferred; reversing a sent transfer is the chargeback/clawback domain, NOT this."*
+  That premise is true for every row in the system EXCEPT these 76, which is exactly what makes
+  them special. Loosening the shared reverser would permanently weaken a guard protecting every
+  legitimate paid row to serve a one-time event. The script borrows its SHAPE (one
+  `$transaction`, honest actor, `previousStatus`/`newStatus`) and not its code.
+
+  **Why `cancelled` and not `accrued`:** `accrued` would make the system try to PAY them —
+  connected vendors, valid amounts, window closed. `cancelled` is an existing state with an
+  existing reader (admin `cancelledCents`) and cannot re-enter the payable set: excluded at
+  `patternC:52` AND again by `processOrderPayout`'s own gate. Two independent guards, both
+  asserted in `pollution-cohort-guard [4]` by re-running the real candidate query.
+
+  **The `Payout` rows are FILTERED, not deleted.** Deleting would destroy the artifact the
+  transfer-existence guard names. `lib/vendor-earnings.ts` skips them via the shared declared
+  set, so a written-off slice renders as **nothing** — not settled, not "~pending", not a $0
+  line. A "cancelled: $0" row would invite a question whose only answer is "a testing accident".
 
   **§6 item 3's precedent does NOT transfer.** It declined to clean up test orders because
   *voiding does not reverse settled transfers* — the money had genuinely moved. **Here nothing
