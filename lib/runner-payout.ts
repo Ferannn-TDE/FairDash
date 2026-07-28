@@ -29,6 +29,7 @@ import { splitRunnerFee } from './payout-split'
 import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal, transferLinkage } from './process-payout'
 import { REFUND_WINDOW_MS } from './constants'
 import { logger } from './logger'
+import { recordPayoutFailure, describeFailureCause } from './payout-failure-marker'
 
 /**
  * AN IDEMPOTENCY KEY IS A PROMISE ABOUT THE PARAMETERS, NOT JUST THE OPERATION.
@@ -384,7 +385,32 @@ export async function reconcileRunnerPayouts(opts?: { maxPerRun?: number }): Pro
       else if (r.outcome === 'blocked') summary.blocked++
       else if (r.outcome === 'already_paid') summary.alreadyPaid++
     } catch (err) {
+      // The alert is KEPT — fast, human-readable, unchanged.
       summary.alerts.push(`runner payout failed for ${e.orderId}: ${err instanceof Error ? err.message : String(err)}`)
+
+      // ── TERMINAL ⇒ MARK AND STOP. Transient/unknown ⇒ keep retrying, exactly as before ──
+      // Before this, EVERY failure here wrote nothing durable: the row stayed 'tracked' and
+      // was retried every 60s forever, with only this alert string as evidence. Two terminal
+      // Stripe errors did precisely that for eight days and were found by reading a log.
+      //
+      // Marking sets status='failed', which REMOVES the row from the candidate query above
+      // (`status: 'tracked'`) — so retries genuinely stop. That is correct for a hopeless
+      // request and wrong for a recoverable one, which is why this gates on the classifier
+      // and why `unknown` deliberately keeps its retries: misclassifying toward terminal
+      // strands money that would have moved.
+      //
+      // A stopped row is NOT stranded — the admin money page lists it with its cause and a
+      // Retry action that returns it to this candidate set.
+      const cause = describeFailureCause(err)
+      if (cause.verdict === 'terminal') {
+        await recordPayoutFailure({
+          leg: 'runner', orderId: e.orderId,
+          actor: { id: 'reconciler:pattern-P', type: 'reconciler' },
+          finality: 'halted — terminal Stripe failure, no further retries',
+          cause,
+        })
+        summary.blocked++
+      }
     }
   }
 

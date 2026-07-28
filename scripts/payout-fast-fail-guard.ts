@@ -146,8 +146,8 @@ async function main() {
   const failedHandler = worker.slice(worker.indexOf("worker.on('failed'"))
   assert(/payoutFailureFinality\(/.test(failedHandler) && /if \(!final \|\| !isPayout\) return/.test(failedHandler),
     'the failed handler gates on FINALITY, which payout-failure-gate-guard proves an UnrecoverableError satisfies')
-  assert(/recordPayoutFailure\(job, finality\)/.test(failedHandler),
-    'and recordPayoutFailure runs behind that gate — so a terminal halt gets the marker + PAYOUT_FAILED audit')
+  assert(/recordPayoutFailure\(job, finality, err\)/.test(failedHandler),
+    'and recordPayoutFailure runs behind that gate, now THREADING THE ERROR so the cause is captured too')
   assert(!/recordPayoutFailure/.test(block), 'the terminal branch does NOT write its own marker — no second path')
 
   console.log(`\n${'─'.repeat(52)}`)

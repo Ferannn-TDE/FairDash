@@ -81,6 +81,24 @@ const MONEY_MOVE_SITES: { file: string; moves: string; mechanism: string }[] = [
 /** The three payout legs — the subset that moves money OUT via a transfer. */
 const TRANSFER_LEGS = ['lib/process-payout.ts', 'lib/runner-payout.ts', 'lib/organizer-payout.ts']
 
+/**
+ * PARALLEL SET #2 — files that legitimately emit a money OUTCOME without being an entry point.
+ *
+ * logger.money's contract is "a money move happened, or was deliberately refused" — which is
+ * WIDER than "is one of the six engines". This guard's original `logger.money ⊆ MONEY_MOVE_SITES`
+ * assertion conflated the two, and it only held because the six were the only users at the time.
+ *
+ * Recording that a payout has permanently FAILED, and returning a failed row to the candidate
+ * set, are both money outcomes a human must see in the money log — and neither moves money.
+ * Declaring them keeps "exactly six" true for the ENGINES while letting the log stay honest.
+ */
+const MONEY_OUTCOME_SITES: { file: string; why: string }[] = [
+  { file: 'lib/payout-failure-marker.ts',
+    why: 'records a payout that will NOT happen — a refusal, which is squarely a money outcome; moves nothing' },
+  { file: 'app/api/admin/events/[id]/money/retry-payout/route.ts',
+    why: 'returns a failed row to the reconciler candidate set; the SWEEP moves the money, never this route' },
+]
+
 /** PARALLEL SET — see the header. Reverses an existing transfer; never an entry point. */
 const REVERSAL_SITES: { file: string; why: string }[] = [
   { file: 'lib/clawback.ts',
@@ -150,13 +168,21 @@ assert(foundTransfers.every(f => MONEY_MOVE_SITES.some(s => s.file === f)),
 console.log('\n[3] enumeration B — no logger.money outside the declared set')
 const foundMoneyLogs = files.filter(f => has(f, MONEY_LOG_RE)).sort()
 const declared = new Set(MONEY_MOVE_SITES.map(s => s.file))
-const undeclared = foundMoneyLogs.filter(f => !declared.has(f))
+const outcomeOnly = new Set(MONEY_OUTCOME_SITES.map(s => s.file))
+const undeclared = foundMoneyLogs.filter(f => !declared.has(f) && !outcomeOnly.has(f))
 undeclared.forEach(f => console.log(`     ✗ UNDECLARED money-logging site: ${f}`))
 assert(undeclared.length === 0,
   `no file logs a money outcome without being declared (${foundMoneyLogs.length} logging file(s) scanned)`)
 // The other direction is [1]: every declared site logs. Together they pin the set both ways.
-assert(foundMoneyLogs.length === MONEY_MOVE_SITES.length,
-  `all ${MONEY_MOVE_SITES.length} declared sites log, and nothing else does (found ${foundMoneyLogs.length})`)
+assert(foundMoneyLogs.length === MONEY_MOVE_SITES.length + MONEY_OUTCOME_SITES.length,
+  `all ${MONEY_MOVE_SITES.length} engines + ${MONEY_OUTCOME_SITES.length} declared outcome-loggers log, and nothing else does (found ${foundMoneyLogs.length})`)
+// The outcome-loggers are NOT money-move sites, and that separation is the whole point.
+assert(MONEY_OUTCOME_SITES.every(o => !declared.has(o.file)),
+  'an outcome-logger is never counted among the six engines')
+assert(MONEY_OUTCOME_SITES.every(o => existsSync(o.file) && has(o.file, MONEY_LOG_RE)),
+  'each declared outcome-logger exists and actually logs (no dead entry)')
+assert(MONEY_OUTCOME_SITES.every(o => !has(o.file, TRANSFER_RE)),
+  'and none of them calls transfers.create — if one ever does, it IS an engine and belongs in the six')
 
 console.log('\n[4] the two enumerations relate as documented — subset, NOT equality')
 assert(TRANSFER_LEGS.every(f => declared.has(f)), 'TRANSFER ⊂ MONEY_MOVE')

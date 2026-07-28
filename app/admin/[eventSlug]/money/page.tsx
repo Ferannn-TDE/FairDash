@@ -68,6 +68,17 @@ interface MoneyView {
   organizer: { totals: Totals; payee: { id: string; name: string; payoutsFrozenAt: string | null } | null }
   passiveHolds: { orderId: string; vendorId: string; amountCents: number; reason: string }[]
   recentAdminActions: AdminAction[]
+  /** Reconciler-side payout failures for THIS fair. cause.stripeMessage is Stripe-authored. */
+  failedPayouts: FailedPayout[]
+}
+interface FailedPayout {
+  leg: 'vendor' | 'runner' | 'organizer'
+  id: string
+  eventId: string
+  payeeId: string | null
+  amountCents: number | null
+  failedAt: string | null
+  cause: { verdict: string; stripeMessage: string; stripeType?: string; stripeCode?: string } | null
 }
 
 const money = (cents: number | null | undefined) =>
@@ -333,6 +344,7 @@ function ReasonPrompt({ title, confirmLabel, onConfirm, onCancel, danger }: {
 type PendingAction =
   | { kind: 'payout'; payeeType: 'vendor' | 'runner' | 'organizer'; action: 'HOLD' | 'RELEASE' | 'CANCEL'; orderId?: string; vendorId?: string; title: string; danger?: boolean }
   | { kind: 'freeze'; payeeType: 'vendor' | 'runner' | 'organizer'; payeeId: string; frozen: boolean; title: string; danger?: boolean }
+  | { kind: 'retry-payout'; leg: 'runner' | 'organizer'; id: string; title: string; danger?: boolean }
 
 export default function AdminMoneyPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
   const params = use(paramsPromise)
@@ -345,7 +357,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
   // Section nav — the page was one long scroll, so reaching Runners meant passing every vendor
   // row and reaching the audit meant passing both. Purely which SECTION is shown; no data,
   // derivation, or control behavior changes with it.
-  const [section, setSection] = useState<'vendors' | 'runners' | 'organizer' | 'audit'>('vendors')
+  const [section, setSection] = useState<'vendors' | 'runners' | 'organizer' | 'failed' | 'audit'>('vendors')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -370,6 +382,8 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
       const url = `/api/admin/events/${params.eventSlug}/money/${pending.kind}`
       const body = pending.kind === 'payout'
         ? { payeeType: pending.payeeType, action: pending.action, orderId: pending.orderId, vendorId: pending.vendorId, reason }
+        : pending.kind === 'retry-payout'
+        ? { leg: pending.leg, id: pending.id, reason }
         : { payeeType: pending.payeeType, payeeId: pending.payeeId, frozen: pending.frozen, reason }
       const res = await fetch(url, {
         method: 'POST',
@@ -395,6 +409,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
   // which reads the paginated endpoint. The /money response still returns the field (untouched)
   // so nothing else that consumes it changes.
   const { vendors, runners, organizer, platformBalance, passiveHolds } = data
+  const failedPayouts = data.failedPayouts ?? []
 
   return (
     <div className="p-6 md:p-4 space-y-6 max-w-[80rem]">
@@ -449,6 +464,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
           { key: 'vendors',   label: 'Vendors' },
           { key: 'runners',   label: 'Runners' },
           { key: 'organizer', label: 'Organizer' },
+          { key: 'failed',    label: failedPayouts.length ? `Failed (${failedPayouts.length})` : 'Failed' },
           { key: 'audit',     label: 'Audit' },
         ] as const).map(t => (
           <button
@@ -661,6 +677,89 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── FAILED PAYOUTS — cause, not just state ──────────────────────────────────────
+          A failed row does NOT retry on its own: marking sets status='failed', which removes
+          it from the reconciler's candidate query. Without this screen and its Retry, that
+          stop is a one-way door — the transfer_group bug failed identically for eight days,
+          and under the new marking the fix would have deployed to rows that no longer
+          qualified. Retry makes the row eligible again; the SWEEP does the money. */}
+      {section === 'failed' && (
+        <div className="bg-bg-card border border-white/10 rounded-2xl p-6">
+          <div className="flex items-baseline justify-between mb-1">
+            <h2 className="text-white font-bebas text-xl tracking-wide">Failed payouts</h2>
+            <span className="text-[0.6rem] uppercase tracking-wider text-text-gray font-semibold">this fair only</span>
+          </div>
+          <p className="text-text-gray text-xs mb-5">
+            Terminal Stripe failures. These have stopped retrying on purpose — a hopeless request
+            should not burn attempts forever. <span className="text-white">Retry</span> returns the
+            row to the reconciler; the next sweep (~60s) attempts the payout. Nothing is paid by
+            pressing Retry itself.
+          </p>
+
+          {failedPayouts.length === 0 ? (
+            <p className="text-text-gray text-sm">No failed payouts. Runner and organizer payouts are settling normally.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {failedPayouts.map(f => (
+                <div key={`${f.leg}:${f.id}`} className="bg-bg-dark border border-red-500/25 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[0.625rem] uppercase tracking-wider font-semibold">
+                          {f.leg}
+                        </span>
+                        <span className="text-white font-semibold text-sm">{money(f.amountCents)}</span>
+                        <span className="text-text-gray text-xs font-mono truncate">{f.id}</span>
+                      </div>
+                      <p className="text-text-gray text-[0.6875rem] mt-1">
+                        {f.failedAt ? `Failed ${formatAuditTimestamp(f.failedAt)}` : 'Failed — time not recorded'}
+                        {f.payeeId ? ` · payee ${f.payeeId}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setPending({
+                        kind: 'retry-payout', leg: f.leg as 'runner' | 'organizer', id: f.id,
+                        title: `Retry ${f.leg} payout ${money(f.amountCents)}? This returns it to the reconciler — the next sweep attempts the payout.`,
+                      })}
+                      className="px-3.5 py-1.5 rounded-xl bg-neon-pink hover:bg-[#e0006b] text-white text-xs font-semibold cursor-pointer shrink-0"
+                    >
+                      Retry
+                    </button>
+                  </div>
+
+                  {/* THE CAUSE. Both eight-day failures read "halted unrecoverably" with
+                      unrelated causes — state alone sends the reader back to the log scroll.
+                      Rendered as TEXT: stripeMessage is Stripe-authored, never markup. */}
+                  {f.cause ? (
+                    <div className="mt-3 pt-3 border-t border-white/10">
+                      <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                        <span className="text-[0.625rem] uppercase tracking-wider text-text-gray font-semibold">Cause</span>
+                        <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-white text-[0.625rem] font-semibold">
+                          {f.cause.verdict}
+                        </span>
+                        {f.cause.stripeType && (
+                          <span className="text-text-gray text-[0.625rem] font-mono">{f.cause.stripeType}</span>
+                        )}
+                        {f.cause.stripeCode && (
+                          <span className="text-amber-300/80 text-[0.625rem] font-mono">{f.cause.stripeCode}</span>
+                        )}
+                      </div>
+                      <p className="text-white/80 text-xs leading-relaxed break-words whitespace-pre-wrap">
+                        {f.cause.stripeMessage}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 pt-3 border-t border-white/10 text-text-gray text-xs">
+                      Cause not recorded — this marker predates cause capture. Check the worker log for this id.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

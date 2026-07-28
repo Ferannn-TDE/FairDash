@@ -44,6 +44,7 @@ import { getOrderQueue, JOB_UNACCEPTED } from './queues'
 import { enqueueJobSafely } from './queue-safe'
 import { VENDOR_ACCEPT_TIMEOUT_MS, REFUND_WINDOW_MS, CURBSIDE_WAIT_TIMEOUT_MS } from './constants'
 import { logger } from './logger'
+import { findStuckPayouts } from './stuck-payouts'
 import { deriveMasterStatus, canAdvance, reconcileMasterStatus, type MasterStatus, type FulfillmentType } from './reconcile-order-status'
 import { reverseAccrualForRefundedPortion } from './reverse-accrual'
 
@@ -1321,24 +1322,8 @@ type StuckRow = { id: string; cents: number | null; sinceMs: number | null }
 export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) {
   const now = Date.now()
 
-  // Failed-since ages: latest PAYOUT_FAILED audit per (payeeType, orderId|eventId). The
-  // MARKER rows are the source of truth for "currently stuck" (a healed payout is no longer
-  // 'failed'); the audit only dates the failure. desc order ⇒ first seen per key = latest.
-  const audits = await db.adminMoneyAction.findMany({
-    where: { action: 'PAYOUT_FAILED' },
-    orderBy: { createdAt: 'desc' },
-    select: { createdAt: true, payeeType: true, orderId: true, eventId: true },
-    take: 2000,
-  })
-  const failedSince = new Map<string, Date>()
-  for (const a of audits) {
-    const k = `${a.payeeType}:${a.orderId ?? a.eventId}`
-    if (!failedSince.has(k)) failedSince.set(k, a.createdAt)
-  }
-  const sinceMs = (payeeType: string, id: string): number | null => {
-    const d = failedSince.get(`${payeeType}:${id}`)
-    return d ? now - d.getTime() : null
-  }
+  // Failed-since ages now come from findStuckPayouts (it reads the PAYOUT_FAILED audits,
+  // which carry both the timestamp AND — since cause-capture — why it failed).
   const fmt = (cents: number | null) => (cents == null ? '$?' : `$${(cents / 100).toFixed(2)}`)
 
   // One emitter, parameterised by threshold — this is where per-condition urgency lives.
@@ -1359,32 +1344,20 @@ export async function patternU(sum: SweepSummary, o: { maxPerPattern: number }) 
     )
   }
 
-  // ── vendor: Order.payoutStatus='FAILED' ──
-  const vFailed = await db.order.findMany({
-    orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
-    where: { payoutStatus: 'FAILED' }, select: { id: true, vendorPayout: true }, take: o.maxPerPattern,
-  })
-  emit('vendor', vFailed.map(r => ({
-    id: r.id, cents: Math.round((r.vendorPayout ?? 0) * 100), sinceMs: sinceMs('vendor', r.id),
-  })), STUCK_FAILED_MIN)
+  // ── THE STUCK SET — one derivation, shared with the admin money page ────────────────
+  // These three queries used to live inline here. They are now lib/stuck-payouts.ts, called
+  // by BOTH this pattern and app/api/admin/events/[id]/money — because deriving "which
+  // payouts are stuck" once for an alert and again for a screen is the two-sources class.
+  // Pattern U keeps its own policy: platform-wide (no eventId) and age-thresholded below.
+  const stuckRows = await findStuckPayouts({ limit: o.maxPerPattern, legs: ['vendor', 'runner', 'organizer'] })
+  const byLeg = (leg: string) => stuckRows.filter(r => r.leg === leg).map(r => ({
+    id: r.id, cents: r.amountCents,
+    sinceMs: r.failedAt ? now - r.failedAt.getTime() : null,
+  }))
 
-  // ── runner: RunnerEarning.status='failed' ──
-  const rFailed = await db.runnerEarning.findMany({
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    where: { status: 'failed' }, select: { orderId: true, amountCents: true }, take: o.maxPerPattern,
-  })
-  emit('runner', rFailed.map(r => ({
-    id: r.orderId, cents: r.amountCents, sinceMs: sinceMs('runner', r.orderId),
-  })), STUCK_FAILED_MIN)
-
-  // ── organizer: OrganizerPayout.status='failed' ── (aged by eventId — batch-level failure)
-  const oFailed = await db.organizerPayout.findMany({
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    where: { status: 'failed' }, select: { id: true, eventId: true, totalCents: true }, take: o.maxPerPattern,
-  })
-  emit('organizer', oFailed.map(r => ({
-    id: r.id, cents: r.totalCents, sinceMs: sinceMs('organizer', r.eventId),
-  })), STUCK_FAILED_MIN)
+  emit('vendor', byLeg('vendor'), STUCK_FAILED_MIN)
+  emit('runner', byLeg('runner'), STUCK_FAILED_MIN)
+  emit('organizer', byLeg('organizer'), STUCK_FAILED_MIN)
 
   // ── orphaned intent (2m) — dormant until recordMoneyMove writes intent records. ──
   // When the chokepoint lands, an INTENT money-audit with no CONFIRMED sibling older than
