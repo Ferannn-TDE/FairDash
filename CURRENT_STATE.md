@@ -418,18 +418,37 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
    window-closed rows for that event), the **reconciliation guard** (batch total === live covered
    sum) and **Pattern Q** — all previously structural-only.
 
-   **🔴 RUNNER LEG — STILL UNEXECUTED, and it was NOT an onboarding problem.** The runner has been
-   connected since `2026-07-27T19:18:37Z` and passes every gate. Two real Stripe bugs sat behind it,
-   both found by reading the worker log rather than by any guard:
-   1. `transfer_group` conflict — the runner invented a group Stripe already owned (fixed `a5cfaeb`).
-   2. Fixing (1) changed the request body under a **stable idempotency key**, so Stripe then refused
-      every retry: *"Keys for idempotent requests can only be used with the same parameters…"*.
-      Key versioned to `_v2`; safe because `transfers.list` on the destination returned **0
-      transfers** — verified against Stripe, not assumed.
+   **✅ RUNNER LEG PROVEN IN PRODUCTION — 2026-07-28. ALL THREE LEGS ARE NOW PROVEN. This item's
+   headline question, open since the doc was written, is CLOSED.**
 
-   Both fixes are committed and **unpushed as of this line**. Nothing changes in production until
-   they deploy; the error fires every 60s until then. Expected on deploy: two
-   `[MONEY] [RunnerPayout] paid` lines, 1150¢ each, within ~73s.
+   ```
+   tr_3Tvl9NHk5f3uB8J900UakK3u  1150¢  order cmrv5vvly…  created 02:42:07Z
+   tr_3Tw97XHk5f3uB8J91KiFYHNG  1150¢  order cmrwoqsms…  created 02:42:10Z
+   sweep: repaired=2 [P2]   Pattern P alerts: gone   worker boot seam: ce33957
+   ```
+
+   **MONEY LANDED, not merely accepted — the two claims are different and both were checked.**
+   The log proves Stripe accepted the call; the connected account proves it arrived:
+   `acct_1TxtzrHk5fvDxyij` → **available 1150¢ + pending 1150¢**, two `payment` balance
+   transactions with `net === amount` (no fee — correct: the vendor payout already absorbed the
+   Stripe fee). Both transfers show `reversed=false`.
+
+   Each transfer's `transfer_group` reads `order_grp_<uuid>` — **inherited from the charge**,
+   which confirms the fix worked by its intended mechanism rather than merely stopping the error.
+
+   **It was NOT an onboarding problem** — the runner had been connected since
+   `2026-07-27T19:18:37Z` and passed every gate. Two real Stripe bugs sat behind it, and **neither
+   was reachable structurally**:
+   1. `transfer_group` conflict — the runner invented a group Stripe already owned (`a5cfaeb`).
+      **No test could have found this**: it needs a charge that has *already been through a vendor
+      payout*, so the group exists to collide with.
+   2. Fixing (1) changed the request body under a **stable idempotency key**, so Stripe refused
+      every retry (`ce33957`). **This bug was created by fixing the first one.** Key versioned to
+      `_v2`; safe because `transfers.list` returned **0 transfers** — verified, not assumed.
+
+   **This is the case for proving the legs on a test fair.** Both bugs were found only because the
+   leg finally ran, and the second did not exist until the first was fixed. Discovering either on
+   Aug 5 would have meant runners going unpaid during a live event.
 
    **Stripe is in TEST mode** (`sk_test_*`, confirmed 2026-07-28 from the live key) — so every
    transfer above is test-mode money, as §6 item 3 records for the vendor cohort.
@@ -549,6 +568,26 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   referral was not wrong about *what* Pattern S does — it was wrong about *when*, and that made
   a true sentence into a false instruction. The sweep's pattern order is load-bearing
   (`reconciler.ts:201` already says so for S-before-C/D) and cross-references have to respect it.
+
+- **⚠️ `[Reconciler] BACKSTOP WARNINGS` cried wolf on the runner payout — a FALSE ALARM, and it
+  fired on the most important successful sweep this project has had.** Found 2026-07-28 by reading
+  the block rather than assuming it was noise.
+
+  `reconciler.ts:244` states *"any repair means a primary path leaked"* and applies it to **every**
+  pattern unconditionally, so `repaired=2 [P2]` emitted *"Pattern P repaired 2 — a real-time path
+  is leaking; investigate, don't rely on the sweep."*
+
+  That is **not true of Patterns P and Q**. Both are documented as *legitimate primary mechanisms*
+  for the connect-later case — `reconciler.ts:1063` and `runner-payout.ts:358`: *"AND the
+  pay-when-a-held-runner-connects mechanism"*; Pattern Q likewise for organizers. A payee
+  onboarding and being paid on the next sweep is the **designed** path, not a leak. The organizer
+  batch triggered the same false warning at `00:08`.
+
+  **Why it matters rather than being cosmetic:** this is the alert-fatigue class the X2 job was
+  about. A warning that fires on correct behaviour trains the reader to skip the block — and this
+  block is where a genuine leak (Pattern C/D repairing a dropped enqueue) would appear during the
+  fair. **Fix: exclude P and Q from the backstop-warning rule, or split "repaired as backstop" from
+  "repaired as designed."** Not yet done.
 
 - **The cancel 409 is still unexplained — and is NOT the checkout 409.** Keep these apart:
   - ✅ **`FAIR_NOT_OPEN` 409 on `POST /api/orders` — EXPLAINED, working as designed.**
