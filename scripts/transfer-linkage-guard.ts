@@ -31,6 +31,7 @@
 
 import { readFileSync } from 'node:fs'
 import { transferLinkage } from '../lib/process-payout'
+import { runnerPayoutIdempotencyKey } from '../lib/runner-payout'
 import { stripComments } from './_strip-comments'
 
 let pass = 0, fail = 0
@@ -107,6 +108,25 @@ assert(/transfer_group: transferGroup/.test(vendor),
 const doc = readFileSync('lib/process-payout.ts', 'utf8')
 assert(/WHY THE VENDOR LEG IS NOT ROUTED THROUGH THIS/.test(doc),
   'the exception is documented WITH its reason at the rule itself, where the next reader will look')
+
+console.log('\n[5] the idempotency key was VERSIONED with the param change')
+// THE SECOND HALF OF THE SAME BUG. Stripe binds a key to the exact body it first saw, so the
+// transfer_group fix made the old key unusable: every retry presented `runner_payout_<id>`
+// with new parameters and Stripe refused — "Keys for idempotent requests can only be used with
+// the same parameters they were first used with." Changing the params REQUIRES changing the key.
+const k1 = runnerPayoutIdempotencyKey('order_abc')
+assert(k1.startsWith('runner_payout_order_abc'), 'the key is still derived from the orderId')
+assert(/_v\d+$/.test(k1), '⛔ and carries a VERSION suffix — a param change must not reuse a burned key')
+assert(runnerPayoutIdempotencyKey('a') !== runnerPayoutIdempotencyKey('b'), 'distinct orders still get distinct keys')
+assert(runnerPayoutIdempotencyKey('a') === runnerPayoutIdempotencyKey('a'),
+  'and it is STABLE for one order — still exactly-once, not a new key per attempt')
+assert(!/`runner_payout_\$\{orderId\}`/.test(runner),
+  'the unversioned literal is gone from the call site (one derivation, not two)')
+const keyDoc = readFileSync('lib/runner-payout.ts', 'utf8')
+assert(/transfers\.list/.test(keyDoc) && /0 transfers/.test(keyDoc),
+  'the safety of bumping is recorded as EVIDENCE (transfers.list returned 0), not as an assumption')
+assert(/prove the old key created nothing/.test(keyDoc),
+  'and the rule for the next param change is stated where the version lives')
 
 console.log(`\n${'─'.repeat(52)}`)
 console.log(fail === 0 ? `✅ transfer-linkage-guard: ${pass} passed, 0 failed` : `❌ transfer-linkage-guard: ${pass} passed, ${fail} failed`)
