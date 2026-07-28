@@ -95,6 +95,8 @@ const MUST_NOT_FILTER: { file: string; why: string }[] = [
   // ── Added by the walk (were invisible to the fixed list) ──
   { file: 'app/api/organizer/fairs/[fairSlug]/chargebacks/[chargebackId]/route.ts',
     why: 'settlement: the at-fault-vendor check must find items on an order voided after the dispute' },
+  { file: 'lib/stuck-payouts.ts',
+    why: 'the stuck-payout READER — a failed payout on a later-voided order is still money that did not move; hiding it would erase the very rows an admin must resolve (same stance as the money/audit paths above)' },
   { file: 'app/account/orders/[orderId]/page.tsx',
     why: "a customer's OWN order detail — a voided order must still render for its buyer, not 404 (same stance as resolve-order)" },
 ]

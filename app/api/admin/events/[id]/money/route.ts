@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { computeVendorOrderEarnings } from '@/lib/vendor-earnings'
 import { ACTIVE_STATUSES, COMPLETED_STATUSES } from '@/lib/order-status'
 import { logger } from '@/lib/logger'
+import { findStuckPayouts } from '@/lib/stuck-payouts'
 
 // GET /api/admin/events/[id]/money
 //
@@ -195,6 +196,19 @@ export async function GET(
       passiveHolds: holds,
 
       recentAdminActions: recentActions,
+
+      // ── FAILED PAYOUTS — the reconciler-side failures that used to leave no trace ────────
+      // Scoped to THIS fair by construction (findStuckPayouts takes the eventId resolved by
+      // requireAdminFairContext), so it cannot show another fair's money. That is not a
+      // convenience choice: the chokepoint guarantees exactly one unscoped fair resolve exists
+      // in this codebase, and a platform-wide list here would need a second one.
+      //
+      // Each row carries its CAUSE, not just its state. Both of the eight-day failures were
+      // "halted unrecoverably" with unrelated causes, so state alone sends the reader back to
+      // the log scroll — which is the problem this exists to remove.
+      //
+      // ⚠️ cause.stripeMessage is STRIPE-AUTHORED TEXT. The client MUST render it as text.
+      failedPayouts: await findStuckPayouts({ eventId: event.id, legs: ['runner', 'organizer'] }),
     })
   } catch (err) {
     return handleApiError(err)

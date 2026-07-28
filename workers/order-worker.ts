@@ -45,7 +45,7 @@ import { processRunnerPayout } from '../lib/runner-payout'
 import { processEventOrganizerPayout } from '../lib/organizer-payout'
 import { refundVendorPortion } from '../lib/process-refund'
 import { reconcileMasterStatus } from '../lib/reconcile-order-status'
-import { writeMoneyAudit } from '../lib/admin-money'
+import { recordPayoutFailure as recordPayoutFailureShared, describeFailureCause } from '../lib/payout-failure-marker'
 import { payoutFailureFinality } from '../lib/payout-failure-finality'
 import { WORKER_COMMIT } from '../lib/health'
 
@@ -682,70 +682,26 @@ async function handleRefund(job: Job<JobData>) {
 }
 
 /**
- * On a PERMANENTLY failed payout (BullMQ attempts exhausted), record the failure durably AND
- * with an honest actor — because a marker with no reader is operationally invisible and a log
- * line with no marker is gone the moment it scrolls off Railway. Two writes:
- *   • durable marker — vendor: order.payoutStatus='FAILED' (set by the caller); runner:
- *     RunnerEarning.status='failed'; organizer: OrganizerPayout.status='failed'. This is what
- *     distinguishes "tried and failed" from "not yet processed" — for runner/organizer those
- *     two states were previously identical in the DB.
- *   • honest-actor PAYOUT_FAILED audit — a SYSTEM money-op attributed to THIS job run (the
- *     attribution system payouts never carried), which also supplies the failed-since
- *     timestamp Pattern U reads for its 15-min threshold (the earning rows have no updatedAt).
- * Best-effort: bookkeeping never throws out of the failed handler or masks the real failure.
+ * Worker-path adapter over lib/payout-failure-marker. The MARKER LOGIC lives there so the
+ * reconciler's Pattern P/Q loops can write the same marker — they could not before, because
+ * this function took a BullMQ Job and was not exported, which is exactly why eight days of
+ * reconciler-side failures left nothing durable behind.
+ *
+ * `err` is threaded through so the CAUSE (classified verdict + Stripe type/code/message) is
+ * captured, not just the mechanism. "halted unrecoverably" described both eight-day failures
+ * and distinguished neither.
  */
-async function recordPayoutFailure(job: Job<JobData>, finality?: string) {
+async function recordPayoutFailure(job: Job<JobData>, finality?: string, err?: unknown) {
   const actor = { id: `worker:${job.name}:${job.id}`, type: 'system' as const }
-  // Supplied by the caller, which alone knows WHY this failure is final: retries exhausted,
-  // or an unrecoverable halt that never exhausted them. Defaults to the attempt count for any
-  // caller that does not say.
   const attempts = finality ?? `${job.attemptsMade} attempt(s)`
-  try {
-    if (job.name === JOB_RUNNER_PAYOUT && job.data.orderId) {
-      const earning = await prisma.runnerEarning.findUnique({ where: { orderId: job.data.orderId } })
-      if (earning && earning.status !== 'paid') {
-        if (earning.status !== 'failed') {
-          await prisma.runnerEarning.update({ where: { orderId: job.data.orderId }, data: { status: 'failed' } })
-        }
-        await writeMoneyAudit(actor, earning.eventId, {
-          action: 'PAYOUT_FAILED', payeeType: 'runner', payeeId: earning.runnerId,
-          orderId: earning.orderId, earningId: earning.id, amountCents: earning.amountCents,
-          reason: `runner payout job ${attempts}`,
-        })
-      }
-      console.error(`[Worker] Runner payout permanently FAILED for order ${job.data.orderId} — marked + audited, manual intervention required`)
-    } else if (job.name === JOB_ORGANIZER_PAYOUT && job.data.eventId) {
-      // Mark the batch that was mid-flight (latest non-paid for the event), if one formed.
-      const batch = await prisma.organizerPayout.findFirst({
-        where: { eventId: job.data.eventId, status: { not: 'paid' } },
-        orderBy: { createdAt: 'desc' },
-      })
-      if (batch && batch.status !== 'failed') {
-        await prisma.organizerPayout.update({ where: { id: batch.id }, data: { status: 'failed' } })
-      }
-      await writeMoneyAudit(actor, job.data.eventId, {
-        action: 'PAYOUT_FAILED', payeeType: 'organizer', payeeId: batch?.organizerId ?? job.data.eventId,
-        orderId: null, earningId: batch?.id ?? null, amountCents: batch?.totalCents ?? null,
-        reason: `organizer payout job ${attempts}`,
-      })
-      console.error(`[Worker] Organizer payout permanently FAILED for event ${job.data.eventId} — marked + audited, manual intervention required`)
-    } else if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
-      // The caller already set order.payoutStatus='FAILED'; add the honest-actor audit +
-      // failed-since timestamp (the enum column carries neither).
-      const order = await prisma.order.findUnique({ where: { id: job.data.orderId }, select: { eventId: true, vendorId: true } })
-      const unpaidCents = (await prisma.vendorEarning.aggregate({
-        _sum: { subtotalCents: true }, where: { orderId: job.data.orderId, status: { notIn: ['paid', 'cancelled'] } },
-      }))._sum.subtotalCents ?? null
-      if (order) {
-        await writeMoneyAudit(actor, order.eventId, {
-          action: 'PAYOUT_FAILED', payeeType: 'vendor', payeeId: order.vendorId ?? job.data.orderId,
-          orderId: job.data.orderId, earningId: null, amountCents: unpaidCents,
-          reason: `vendor payout job ${attempts}`,
-        })
-      }
-    }
-  } catch (err) {
-    console.error(`[Worker] recordPayoutFailure bookkeeping failed for job ${job.id} (original failure still stands):`, err)
+  const cause = err === undefined ? undefined : describeFailureCause(err)
+
+  if (job.name === JOB_RUNNER_PAYOUT && job.data.orderId) {
+    await recordPayoutFailureShared({ leg: 'runner', orderId: job.data.orderId, actor, finality: attempts, cause })
+  } else if (job.name === JOB_ORGANIZER_PAYOUT && job.data.eventId) {
+    await recordPayoutFailureShared({ leg: 'organizer', eventId: job.data.eventId, actor, finality: attempts, cause })
+  } else if (job.name === JOB_VENDOR_PAYOUT && job.data.orderId) {
+    await recordPayoutFailureShared({ leg: 'vendor', orderId: job.data.orderId, actor, finality: attempts, cause })
   }
 }
 
@@ -939,7 +895,7 @@ export function startOrderWorker() {
       }).catch(e => console.error('[Worker] Failed to set payoutStatus=FAILED:', e))
       console.error(`[Worker] Payout permanently FAILED for order ${job.data.orderId} — manual intervention required`)
     }
-    await recordPayoutFailure(job, finality)
+    await recordPayoutFailure(job, finality, err)
   })
 
   worker.on('error', err => {

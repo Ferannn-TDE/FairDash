@@ -516,6 +516,9 @@ async function main() {
       'app/api/admin/events/[id]/money/freeze/route.ts',
       'app/api/admin/events/[id]/money/payout/route.ts',
       'app/api/admin/events/[id]/money/refund/route.ts',
+      // Returns a FAILED payout to the reconciler's candidate set. It moves no money — the
+      // sweep does — but it mutates a money row, so it rides the same chokepoint as the rest.
+      'app/api/admin/events/[id]/money/retry-payout/route.ts',
     ]
     const unexpected = routeFiles.filter(f => !EXPECTED_MONEY_ROUTES.includes(f))
     const missing = EXPECTED_MONEY_ROUTES.filter(f => !routeFiles.includes(f))

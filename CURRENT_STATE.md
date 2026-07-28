@@ -613,6 +613,48 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   also removed the second of two gross-revenue copies (the surviving one,
   `stats/route.ts:152`, IS consumed).
 
+- **✅ CLOSED 2026-07-28 — reconciler-side payout failures now leave a durable trace, with a
+  cause and a way back.** Pattern P/Q caught every failure into an alert STRING; two terminal
+  Stripe errors did that for EIGHT DAYS and were found by a human reading a log scroll.
+
+  **The new-action-string design was REJECTED — do not re-derive it from the old note.** An
+  earlier scoping proposed `RUNNER_PAYOUT_FAILED` / `ORGANIZER_PAYOUT_FAILED` by analogy with
+  `TIP_REFUND_FAILED`. That analogy does not hold: tip-refund had **no marker at all**, whereas
+  runner and organizer already have markers that **Pattern U already reads**
+  (`reconciler.ts:1374`, `:1383`). Inventing new strings would have created a second vocabulary
+  for an existing state, and Pattern U would not have read it. The markers were never missing —
+  they were unreachable, because `recordPayoutFailure` lived in the worker, took a BullMQ `Job`,
+  and was not exported. Extracted to `lib/payout-failure-marker.ts`; both paths now write it.
+
+  **Pattern U surfaces reconciler-side failures for the first time.** Its three inline queries
+  became `lib/stuck-payouts.ts`, called by BOTH the pattern and the admin money route — Pattern U
+  applies its own age threshold and passes no `eventId`; the route passes one.
+
+  **CAUSE, not just state.** The audit `reason` describes the MECHANISM ("halted unrecoverably")
+  and both eight-day failures said exactly that with unrelated causes. The classified verdict,
+  Stripe `type`/`code` and the raw message now ride in the audit's `metadata` (Json — no schema
+  change). ⚠️ `stripeMessage` is Stripe-authored text: render escaped, never as markup.
+
+  **Terminal ONLY.** `terminal` → mark + stop; `transient`/`unknown` → keep retrying, unchanged.
+  `unknown` deliberately keeps its retries — misclassifying toward terminal strands money that
+  would have moved.
+
+  **The retry is what makes the marking safe, not a nicety.** Marking sets `status='failed'`,
+  which removes the row from the candidate query. Under the marking alone, both eight-day rows
+  would have been marked on the first attempt, the fix would have deployed, and **nothing would
+  have happened** — they no longer qualified, and a hand-edit would have been needed to get paid.
+  `POST /api/admin/events/[id]/money/retry-payout` returns the row to the candidate set
+  (runner → `tracked`, organizer batch → `pending`) and **executes no payout**: the sweep does the
+  money, so there is no second code path to it. Fair-scoped by `requireAdminFairContext`, every
+  lookup keyed by `event.id`, and it writes a `RELEASE` audit attributed to the admin.
+
+  **Scope decision, recorded:** the failed-payout list is **per-fair**, not platform-wide. The
+  admin money page runs through the chokepoint, and `p6-admin-fair-chokepoint-proof` asserts
+  exactly ONE unscoped fair resolve exists in the codebase — a platform-wide list there would
+  need a second. `findStuckPayouts` takes an OPTIONAL `eventId` so a future super-admin view
+  costs nothing new. Known cost: a failure on a fair you are not viewing is not on that page (it
+  is still in the sweep alerts). Acceptable with one live fair; revisit for concurrent fairs.
+
 - **⚠️ `[Reconciler] BACKSTOP WARNINGS` cried wolf on the runner payout — a FALSE ALARM, and it
   fired on the most important successful sweep this project has had.** Found 2026-07-28 by reading
   the block rather than assuming it was noise.

@@ -27,6 +27,7 @@ import { stripe } from './stripe'
 import { REFUND_WINDOW_MS } from './constants'
 import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal, transferLinkage } from './process-payout'
 import { logger } from './logger'
+import { recordPayoutFailure, describeFailureCause } from './payout-failure-marker'
 
 export type OrganizerPayoutOutcome = 'pay' | 'hold' | 'nothing'
 
@@ -319,7 +320,23 @@ export async function reconcileOrganizerPayouts(opts?: { maxPerRun?: number }): 
       else if (r.outcome === 'blocked') summary.blocked++
       else summary.nothing++
     } catch (err) {
+      // The alert is KEPT — unchanged.
       summary.alerts.push(`organizer payout failed for event ${eventId}: ${err instanceof Error ? err.message : String(err)}`)
+
+      // TERMINAL ⇒ mark the batch failed and stop; transient/unknown ⇒ keep retrying. Same rule
+      // and the same shared writer as the runner leg — one marker, one vocabulary, and Pattern U
+      // already reads OrganizerPayout.status='failed'. A marked batch is surfaced with its cause
+      // on the admin money page, with a Retry that returns it to 'pending'.
+      const cause = describeFailureCause(err)
+      if (cause.verdict === 'terminal') {
+        await recordPayoutFailure({
+          leg: 'organizer', eventId,
+          actor: { id: 'reconciler:pattern-Q', type: 'reconciler' },
+          finality: 'halted — terminal Stripe failure, no further retries',
+          cause,
+        })
+        summary.blocked++
+      }
     }
   }
 

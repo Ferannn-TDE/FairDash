@@ -127,12 +127,16 @@ assert(returnIdx > 0 && recordIdx > returnIdx,
   'recordPayoutFailure is AFTER the gate — so widening the gate widens the audit too (half a fix writes payoutStatus and no audit)')
 assert(handlerBody.indexOf("payoutStatus: 'FAILED'") > returnIdx,
   "the vendor payoutStatus='FAILED' write is also behind the same gate")
-const rec = worker.slice(worker.indexOf('async function recordPayoutFailure'))
+// The marker WRITER moved to lib/payout-failure-marker.ts so the reconciler's Pattern P/Q loops
+// could reach it too — the worker now adapts onto it. Assert the audit in its new home.
+const marker = stripComments(readFileSync('lib/payout-failure-marker.ts', 'utf8'))
 for (const leg of ['runner', 'organizer', 'vendor']) {
-  assert(new RegExp(`payeeType: '${leg}'`).test(rec.slice(0, 3000)), `recordPayoutFailure writes a PAYOUT_FAILED audit for the ${leg} leg`)
+  assert(new RegExp(`payeeType: '${leg}'`).test(marker), `the shared marker writes a PAYOUT_FAILED audit for the ${leg} leg`)
 }
-assert((rec.slice(0, 3000).match(/action: 'PAYOUT_FAILED'/g) ?? []).length === 3,
+assert((marker.match(/action: 'PAYOUT_FAILED'/g) ?? []).length === 3,
   'all three legs audit — the asymmetry that hid runner/organizer failures is closed')
+assert(!/Job<JobData>|job\.name/.test(marker),
+  'and it takes NO BullMQ Job — that coupling is what made it unreachable from the reconciler')
 
 console.log('\n[5] the BullMQ premise still holds in the INSTALLED version')
 const ver = JSON.parse(readFileSync('node_modules/bullmq/package.json', 'utf8')).version as string
@@ -148,8 +152,11 @@ assert(/no further attempts will run/.test(fixedVerdict.finality) && !/exhausted
   `an unrecoverable halt does NOT claim exhaustion (got: "${fixedVerdict.finality}")`)
 assert(/exhausted after 3 attempt\(s\)/.test(payoutFailureFinality(TRANSIENT, ALL_BURNED).finality),
   'a genuinely exhausted job still says exhausted, with the count')
-assert(/reason: `runner payout job \$\{attempts\}`/.test(worker) || /payout job \$\{attempts\}/.test(worker),
+// The reason templates moved to the shared marker along with the writer — assert them there.
+assert(/reason: `runner payout \$\{finality\}`/.test(marker) && /reason: `organizer payout \$\{finality\}`/.test(marker),
   'the audit reason interpolates the finality text rather than hardcoding "exhausted after"')
+assert(/verdict|stripeMessage/.test(marker),
+  'and the CAUSE rides in metadata — "halted unrecoverably" described BOTH eight-day failures and distinguished neither')
 
 console.log(`\n${'─'.repeat(52)}`)
 console.log(fail === 0 ? `✅ payout-failure-gate-guard: ${pass} passed, 0 failed` : `❌ payout-failure-gate-guard: ${pass} passed, ${fail} failed`)
