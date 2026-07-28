@@ -80,7 +80,7 @@ export async function computeFairReport(eventId: string): Promise<FairReport> {
       select: {
         id: true, total: true, fairSynqFee: true, status: true,
         orderItems: { select: { vendorId: true, subtotal: true } },
-        payouts: { select: { vendorId: true, netAmount: true, reversedAt: true } },
+        payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
         refunds: { select: { vendorId: true, status: true, amountCents: true } },
         vendorOrderStatuses: { select: { vendorId: true, status: true, acceptedAt: true, readyAt: true } },
       },

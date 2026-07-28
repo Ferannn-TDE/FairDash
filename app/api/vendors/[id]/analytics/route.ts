@@ -210,7 +210,7 @@ export async function GET(
       select: {
         total: true,
         vendorOrderStatuses: { where: { vendorId: id }, select: { vendorId: true, status: true } },
-        payouts: { where: { vendorId: id }, select: { vendorId: true, netAmount: true, reversedAt: true } },
+        payouts: { where: { vendorId: id }, select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
         refunds: { where: { vendorId: id }, select: { vendorId: true, status: true, amountCents: true } },
         orderItems: { select: { vendorId: true, subtotal: true } },
       },
