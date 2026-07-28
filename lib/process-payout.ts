@@ -109,6 +109,51 @@ export class PayoutTerminalError extends Error {
 }
 
 /**
+ * HOW A TRANSFER IS LINKED TO ITS MONEY — one rule, because getting it wrong is invisible
+ * until Stripe refuses, and it refused in production.
+ *
+ * ── THE BUG THIS ENCODES AGAINST ────────────────────────────────────────────────────────────
+ * Every runner payout failed at Stripe with:
+ *   "You cannot use `transfer_group` if the `source_transaction` already has one set."
+ *
+ * The charge ALWAYS carries a group: the PaymentIntent is created with
+ * `transfer_group: order_grp_<uuid>` (app/api/orders/route.ts:436) and the charge inherits it.
+ * Three legs then derived that value three different ways:
+ *
+ *   vendor    process-payout.ts:290   READS charge.transfer_group  → matches → accepted
+ *   runner    runner-payout.ts:280    hardcoded `order_${orderId}` → DIFFERS → REJECTED
+ *   organizer organizer-payout.ts:244 hardcoded `event_${eventId}` → no source_transaction,
+ *                                      so no conflict — and it paid successfully in prod
+ *
+ * One value, three derivations, and the two that never ran in production were the wrong ones.
+ * That is the through-line class arriving as a Stripe 400.
+ *
+ * ── THE RULE ────────────────────────────────────────────────────────────────────────────────
+ * When `source_transaction` is set, DO NOT set `transfer_group`. The transfer inherits the
+ * charge's group automatically, which is also the only way to be certain it MATCHES — a
+ * locally-constructed group can only ever be a guess at a value Stripe already owns.
+ * When there is no source_transaction (the organizer batch draws on the platform balance and
+ * spans several charges), the transfer has no group to inherit, so it must carry its own.
+ *
+ * ── WHY THE VENDOR LEG IS NOT ROUTED THROUGH THIS (deliberate, named) ───────────────────────
+ * It reads the charge's own value, so it passes a MATCHING group and Stripe accepts it —
+ * proven in production on the very charge the runner leg fails on (order cmrv5vvly…, vendor
+ * transfer tr_3Tvl9NHk… succeeded 2026-07-22; the runner transfer on that same charge is what
+ * throws). Adopting the rule there would drop a redundant parameter for no behavioural gain,
+ * on the ONLY money path proven end-to-end in production, nine days before the fair. Left
+ * alone on purpose. Collapsing it is a post-fair follow-up, not a pre-fair edit.
+ */
+export function transferLinkage(opts: {
+  /** The charge funding this transfer, when it is funded by one specific charge. */
+  sourceTransaction?: string | null
+  /** Group to use ONLY when there is no source transaction to inherit one from. */
+  groupWhenUnsourced?: string
+}): { source_transaction?: string; transfer_group?: string } {
+  if (opts.sourceTransaction) return { source_transaction: opts.sourceTransaction }
+  return opts.groupWhenUnsourced ? { transfer_group: opts.groupWhenUnsourced } : {}
+}
+
+/**
  * THE FAST-FAIL WRAPPER — the single consumer of the Stripe classifier, shared by all three
  * payout legs so the retry decision is made in ONE place.
  *
