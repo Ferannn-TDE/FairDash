@@ -686,6 +686,69 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   Guarded by `scripts/backstop-warning-guard.ts` — whose load-bearing half is that every genuine
   backstop STILL warns, since a fix that silenced everything would pass a naive test.
 
+- **🔴 FOURTH TEST-POLLUTION INCIDENT — 76 fabricated `Payout` rows, found 2026-07-28 by the new
+  transfer-existence check on its first run. NOT CLEANED UP; the decision is open.**
+
+  **⚠️ NO REAL MONEY IS IMPLICATED.** Stripe has always been in TEST mode. What is at stake is
+  **ledger correctness going into the real fair — not a debt.** Nobody is owed anything.
+
+  **What they are, measured — not inferred from dates or amounts:**
+  - The **ORDERS ARE REAL**: all 76 carry a `stripePaymentIntentId` AND a `stripeChargeId`, and
+    every sampled PaymentIntent resolves in Stripe. They are the operator's own manual test
+    orders through the real checkout (`customerName: 'Refund Test'`, one Clerk user).
+  - The **PAYOUT ROWS ARE FABRICATED** — `tr_` + 8 random chars, written by a test suite's Stripe
+    spy running against production.
+  - **38 of the 76 orders ALSO have a genuine payout**, so these are duplicate rows layered on
+    real ones, not a phantom order set.
+
+  **The headline is 95.4% fabricated.** Every paid `VendorEarning`, by what its own
+  `stripeTransferId` resolves to:
+
+  ```
+  backed by a LIVE transfer :  7 rows,  14,479¢   ($144.79)   ← actually settled
+  backed by a DEAD id       : 76 rows, 301,834¢ ($3,018.34)   ← fabricated
+  TOTAL paid                : 83 rows, 316,313¢ ($3,163.13)
+  ```
+
+  So `paid=$3,163.13` — quoted repeatedly as evidence the vendor leg was working — is really
+  **$144.79**. Every surface reading `VendorEarning.status='paid'` inherits this: the admin money
+  page, the sweep summary `paid=`, and `admin-fair-reports`. The vendor-facing display does NOT
+  (it reads `Payout.netAmount`/estimates — see the five-derivations entry above), which is its own
+  divergence.
+
+  **✅ THE JUL 25 VENDOR-LEG PROOF STANDS — verified explicitly.** All four payouts from that day
+  resolve in Stripe (`tr_3Tw9RpHk…`, `tr_3TwpqWHk…`, `tr_3TwqT1Hk…`, `tr_3TwqUkHk…`, $53.98
+  total, 00:33→01:19). The pollution is 2026-07-12→17 and does not touch it. **"All three legs
+  proven" is unaffected.**
+
+  **↪ OPEN DECISION — two candidate end states, neither taken:**
+  1. *Cancel the earnings + delete the fabricated payouts* — if the money never should have been
+     considered settled.
+  2. *Return the earnings to `accrued`* — they are real orders, so the accrual may be legitimate
+     and only the SETTLEMENT is false.
+  A delete is not a delete: removing a `Payout` while leaving its `VendorEarning` at `paid`
+  creates the X2 condition in reverse. Any cleanup must also consider `RunnerEarning`,
+  `OrganizerEarning`, refunds and chargebacks on those orders.
+
+  **§6 item 3's precedent does NOT transfer.** It declined to clean up test orders because
+  *voiding does not reverse settled transfers* — the money had genuinely moved. **Here nothing
+  settled**: there is no transfer to reverse, which removes the reason that decision existed.
+  Different case; the conclusion is genuinely open rather than inherited.
+
+- **✅ THE DURABLE HALF IS LANDED — `lib/transfer-existence.ts` + `scripts/transfer-existence-audit.ts`.**
+  Asserts every stored transfer id resolves in Stripe. This is the inverse of Pattern X2 and it
+  would have caught all four pollution incidents on the day each happened.
+  - Bulk `transfers.list` (69 transfers, one 792ms call) — ~11× cheaper than per-row `retrieve`.
+  - **NOT a reconciler pattern**, deliberately: it needs the network and the 60s sweep has no
+    network dependency, so a Stripe outage must not read as a sweep failure. Hand-runnable plus
+    admin-triggered.
+  - **Membership is ABSENCE FROM STRIPE, never id shape.** Shape is corroboration only; the two
+    partitions agree on all 143 rows today and a disagreement is reported as a finding.
+  - ⚠️ **A DATE WINDOW WOULD HAVE BEEN UNSAFE and was nearly shipped.** 34 LEGITIMATE payouts
+    fall inside the polluted rows' 2026-07-12→17 range, so a window would have silently
+    suppressed real rows from a money check. The acknowledged set is 76 EXPLICIT transfer ids;
+    `transfer-existence-guard [3]` fails if a date rule creeps back.
+
 - **The cancel 409 is still unexplained — and is NOT the checkout 409.** Keep these apart:
   - ✅ **`FAIR_NOT_OPEN` 409 on `POST /api/orders` — EXPLAINED, working as designed.**
     `app/api/orders/route.ts:184-201`: `deriveEventLiveState` (`lib/event-date.ts:82-90`) returns
@@ -891,6 +954,15 @@ deferring across sessions again.
   **Same family as the vacuous zero:** an output shaped like a result that carries no
   information. Rule: a positive control must leave every other assertion in the suite still
   running and still reporting.
+
+- **`prisma-not-undefined-is-a-no-op`** *(earned 2026-07-28)*. `where: { x: { not: undefined } }`
+  does not filter — Prisma drops it and the query matches EVERY row. It silently turned a
+  "rows with a transfer id" query into "all 140 rows", and produced a *correct* answer for the
+  wrong reason, so nothing looked wrong. Use `{ not: null }` on nullable columns.
+
+  Same family as the NULLS FIRST finding: **a query shape that returns something true-looking
+  about rows you did not mean to ask about.** The tell is that the count is plausible, so it
+  passes review. Adjacent to the vacuous zero — the output has the shape of an answer.
 
 - **`scope-assertions-to-your-own-fixtures`** *(re-earned 2026-07-26, now with an observed
   instance — see §7 group (B))*. A global count in a suite is broken by any other writer, and

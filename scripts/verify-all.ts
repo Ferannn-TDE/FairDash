@@ -121,6 +121,7 @@ const SUITES: Suite[] = [
   { group: 'money',       name: 'vendor-fee-coupling',    file: 'scripts/vendor-fee-coupling-guard.ts' },
   { group: 'money',       name: 'payout-failure-marker',  file: 'scripts/payout-failure-marker-test.ts' },
   { group: 'correctness', name: 'backstop-warning',       file: 'scripts/backstop-warning-guard.ts' },
+  { group: 'money',       name: 'transfer-existence',     file: 'scripts/transfer-existence-guard.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
 ]
@@ -137,7 +138,7 @@ const AREA_SUITES: Record<string, string[]> = {
   // Delivery custody / runner escape path (Commit 2). Touched-area guards + the cross-cutting
   // runner boundary + one reconcile guard (the smoke set that catches breakage they didn't mean).
   delivery: ['collect-guard', 'release-guard', 'return-guard', 'strand-guard', 'ghost-guard', 'escalation-guard', 'runner-boundary', 'reverser-pattern-t'],
-  money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t', 'x2-referral-ack', 'payout-failure-gate', 'money-move-sites', 'stripe-error-class', 'payout-fast-fail', 'connect-url', 'transfer-linkage', 'vendor-fee-coupling', 'payout-failure-marker'],
+  money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t', 'x2-referral-ack', 'payout-failure-gate', 'money-move-sites', 'stripe-error-class', 'payout-fast-fail', 'connect-url', 'transfer-linkage', 'vendor-fee-coupling', 'payout-failure-marker', 'transfer-existence'],
   reconcile:['backstop-warning', 'reverser-pattern-t', 'sweep-summary', 'stuck-money-reader', 'health-guard', 'incoming-divergence', 'x2-referral-ack'],
   vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence'],
   // Runner stats surfaces (runner-facing earnings + admin roster): the custody-for-counts /
