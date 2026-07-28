@@ -25,7 +25,7 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { REFUND_WINDOW_MS } from './constants'
-import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal } from './process-payout'
+import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal, transferLinkage } from './process-payout'
 import { logger } from './logger'
 
 export type OrganizerPayoutOutcome = 'pay' | 'hold' | 'nothing'
@@ -241,7 +241,12 @@ export async function processEventOrganizerPayout(eventId: string): Promise<Orga
         amount: batch.totalCents,
         currency: 'usd',
         destination: destination as string,
-        transfer_group: `event_${eventId}`,
+        // NO source_transaction — the batch spans several charges and draws on the platform
+        // balance, so there is no charge whose group could be inherited and this transfer must
+        // carry its own. Routed through the SAME rule as the runner leg so the distinction is
+        // expressed once rather than being a coincidence of two hand-written call sites; this
+        // is why the organizer leg never hit the transfer_group conflict that broke the runner.
+        ...transferLinkage({ groupWhenUnsourced: `event_${eventId}` }),
         metadata: { eventId, batchId: batch.id, kind: 'organizer_payout' },
       },
       { idempotencyKey: `organizer_payout_${batch.id}` },

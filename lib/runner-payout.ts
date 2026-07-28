@@ -26,7 +26,7 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { splitRunnerFee } from './payout-split'
-import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal } from './process-payout'
+import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal, transferLinkage } from './process-payout'
 import { REFUND_WINDOW_MS } from './constants'
 import { logger } from './logger'
 
@@ -276,8 +276,14 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
         amount: amountCents,
         currency: 'usd',
         destination: runner.stripeAccountId!,
-        source_transaction: chargeId,
-        transfer_group: `order_${orderId}`,
+        // THE FIX. This used to pass `source_transaction` AND a hardcoded
+        // `transfer_group: order_${orderId}`. The charge already carries
+        // `order_grp_<uuid>` (set on the PaymentIntent), so the two disagreed and Stripe
+        // refused EVERY runner payout: "You cannot use `transfer_group` if the
+        // `source_transaction` already has one set." Terminal — it failed identically on
+        // every sweep, forever. transferLinkage omits the group so the charge's own is
+        // inherited, which is also the only way to be sure it matches.
+        ...transferLinkage({ sourceTransaction: chargeId }),
         metadata: { orderId, runnerId: plan.runnerId as string, kind: 'runner_payout' },
       },
       { idempotencyKey: `runner_payout_${orderId}` },
