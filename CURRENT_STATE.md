@@ -402,8 +402,37 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
    $3,163.13** (+$53.98), four payouts between **00:33 and 01:19**. One of them is
    `cmrzeiyty000lqu5l59lz051a` — the order placed to prove the producer enqueues. Producer,
    queue, consumer and Stripe are now all verified on the vendor path.
-   **Still unexecuted: the runner and organizer legs**, blocked on payee onboarding (§3), not on
-   code. Watch each execute once before trusting it unattended.
+   **✅ ORGANIZER LEG PROVEN IN PRODUCTION — 2026-07-28.** The second leg, first execution ever:
+
+   ```
+   batch      cms3wdih00001yox74myfz0kl
+   event      Italian Fest 2026        organizer  Feran Events (acct_1TxyVbHk5f8bm1bt)
+   total      1298¢  (two OrganizerEarning rows, 649¢ each — batched per EVENT, as designed)
+   transfer   tr_1TxyZ7Hk5f3uB8J9QR7oJ3zc
+   created    2026-07-28T00:08:12Z  →  paid 2026-07-28T00:08:14Z   (2 seconds)
+   ```
+
+   Organizer connected at `00:07:27`; the batch formed and paid on the **next sweep**, inside the
+   predicted ≤73s. Both `OrganizerEarning` rows → `paid` with `batchId` set. This empirically
+   verifies, for the first time, the **batch machinery**, **set-membership** (exactly the unpaid
+   window-closed rows for that event), the **reconciliation guard** (batch total === live covered
+   sum) and **Pattern Q** — all previously structural-only.
+
+   **🔴 RUNNER LEG — STILL UNEXECUTED, and it was NOT an onboarding problem.** The runner has been
+   connected since `2026-07-27T19:18:37Z` and passes every gate. Two real Stripe bugs sat behind it,
+   both found by reading the worker log rather than by any guard:
+   1. `transfer_group` conflict — the runner invented a group Stripe already owned (fixed `a5cfaeb`).
+   2. Fixing (1) changed the request body under a **stable idempotency key**, so Stripe then refused
+      every retry: *"Keys for idempotent requests can only be used with the same parameters…"*.
+      Key versioned to `_v2`; safe because `transfers.list` on the destination returned **0
+      transfers** — verified against Stripe, not assumed.
+
+   Both fixes are committed and **unpushed as of this line**. Nothing changes in production until
+   they deploy; the error fires every 60s until then. Expected on deploy: two
+   `[MONEY] [RunnerPayout] paid` lines, 1150¢ each, within ~73s.
+
+   **Stripe is in TEST mode** (`sk_test_*`, confirmed 2026-07-28 from the live key) — so every
+   transfer above is test-mode money, as §6 item 3 records for the vendor cohort.
 5. 🔴 **The 100m delivery-GPS check DOES NOT EXIST — a documented control that was never built,
    on the chargeback-evidence path.** *(Found 2026-07-25. Decide before Aug 5.)*
    - `haversineMetres` (`app/api/orders/[id]/status/route.ts:61`) and `HOME_DELIVERY_GPS_RADIUS_M`

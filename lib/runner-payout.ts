@@ -30,6 +30,45 @@ import { PayoutNotSettledError, PayoutReconciliationError, transferOrTerminal, t
 import { REFUND_WINDOW_MS } from './constants'
 import { logger } from './logger'
 
+/**
+ * AN IDEMPOTENCY KEY IS A PROMISE ABOUT THE PARAMETERS, NOT JUST THE OPERATION.
+ *
+ * Stripe binds a key to the EXACT request body it first saw. Re-send the same key with
+ * different parameters and it refuses — it does not quietly use the new ones:
+ *
+ *   "Keys for idempotent requests can only be used with the same parameters they were first
+ *    used with. Try using a key other than 'runner_payout_<orderId>'…"
+ *
+ * That is what happened here. The key was a fixed function of orderId, so when the
+ * transfer_group fix changed the request body (a5cfaeb — see transferLinkage), every retry
+ * kept presenting the OLD key with NEW parameters and Stripe refused all of them. The first
+ * bug made the transfer impossible; fixing it made the key unusable. Bumping the version is
+ * the second half of that fix, not a separate issue.
+ *
+ * ── WHY BUMPING IS SAFE HERE, AND WHAT WOULD MAKE IT UNSAFE ─────────────────────────────────
+ * A new key means Stripe's duplicate protection starts over. That is only acceptable when the
+ * OLD key provably created nothing — otherwise a new key sends a SECOND transfer for money
+ * already paid, which is the double-pay class.
+ *
+ * VERIFIED against Stripe rather than reasoned about: `transfers.list` for the destination
+ * account `acct_1TxtzrHk5fvDxyij` returned **0 transfers**, and both RunnerEarning rows are
+ * still `tracked` with no stripeTransferId. Every failure was a 400 (parameter validation,
+ * then key conflict) — Stripe rejects those before creating anything.
+ *
+ * Two durable guards remain regardless of the key: `planRunnerPayout` short-circuits on
+ * `earning.status === 'paid'` BEFORE any Stripe call, and reconciler Pattern X detects a
+ * settled transfer with no matching ledger row. The Stripe key is the outermost layer, not
+ * the only one.
+ *
+ * ⛔ RULE FOR THE NEXT PERSON: if you change the transfer PARAMETERS, you must bump this
+ * version — and before you do, prove the old key created nothing. "It has always failed" is
+ * an assumption; `transfers.list` is evidence.
+ */
+const RUNNER_PAYOUT_KEY_VERSION = 'v2' // v1 burned 2026-07-28 by the transfer_group fix (a5cfaeb)
+
+export const runnerPayoutIdempotencyKey = (orderId: string) =>
+  `runner_payout_${orderId}_${RUNNER_PAYOUT_KEY_VERSION}`
+
 export type RunnerPayoutOutcome = 'pay' | 'hold' | 'blocked' | 'already_paid' | 'no_earning'
 export type RunnerHoldReason = 'unconnected' | 'non_positive'
 /**
@@ -177,7 +216,8 @@ export interface RunnerPayoutResult {
  *   - pay          → one idempotent transfer of amountCents VERBATIM, then mark
  *                    the ledger row paid + stamp the transfer id (the record)
  *
- * EXACTLY-ONCE: idempotencyKey `runner_payout_${orderId}`. Even if the status
+ * EXACTLY-ONCE: idempotencyKey runnerPayoutIdempotencyKey(orderId) (versioned — see the
+ * constant, and bump it if the transfer params ever change). Even if the status
  * write is lost after a successful transfer, a re-run sends the SAME key — Stripe
  * returns the original transfer, never a second one. A double-paid runner is real
  * money lost; this is the guard.
@@ -286,7 +326,7 @@ export async function processRunnerPayout(orderId: string): Promise<RunnerPayout
         ...transferLinkage({ sourceTransaction: chargeId }),
         metadata: { orderId, runnerId: plan.runnerId as string, kind: 'runner_payout' },
       },
-      { idempotencyKey: `runner_payout_${orderId}` },
+      { idempotencyKey: runnerPayoutIdempotencyKey(orderId) },
     ),
   )
 

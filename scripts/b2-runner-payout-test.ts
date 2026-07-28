@@ -106,7 +106,7 @@ async function main() {
   await installStripeSpy()
 
   try {
-    const { processRunnerPayout, reconcileRunnerPayouts } = await import('../lib/runner-payout')
+    const { processRunnerPayout, reconcileRunnerPayouts, runnerPayoutIdempotencyKey } = await import('../lib/runner-payout')
 
     const evA = await mkEvent(50)
     const evB = await mkEvent(0)
@@ -127,7 +127,10 @@ async function main() {
     assert(created[created.length - 1].amount === 800, `transfer amount = 800¢ (got ${created[created.length - 1].amount})`)
     assert(l1?.status === 'paid', 'RunnerEarning.status = paid')
     assert(!!l1?.stripeTransferId, 'RunnerEarning.stripeTransferId stamped (the payout record)')
-    assert(byKey.has(`runner_payout_${o1}`), `idempotencyKey runner_payout_${o1} used`)
+    // Uses the SHARED key builder, not a hand-written copy. The literal here was a second
+    // derivation of the same value, and it broke the moment the key was versioned — which is
+    // the test reproducing, in miniature, the exact bug it is testing.
+    assert(byKey.has(runnerPayoutIdempotencyKey(o1)), `idempotencyKey ${runnerPayoutIdempotencyKey(o1)} used`)
 
     // ── Assertion 6 — amount transferred === ledger to the cent ─────────────────
     console.log('\n[6] amount transferred === ledger amountCents to the cent')
@@ -145,7 +148,9 @@ async function main() {
     const beforeB = created.length
     const r2b = await processRunnerPayout(o1)
     assert(created.length === beforeB, '(b) status-lost re-run → idempotency key returns original, NO 2nd transfer')
-    assert(r2b.outcome === 'paid' && r2b.transferId === byKey.get(`runner_payout_${o1}`)!.id, '(b) returns the SAME transfer id')
+    // `?.id` not `!.id` — with a versioned key this lookup can miss, and a crash here kills
+    // the run before assertions 3-8 report. A control that aborts proves less than one that fails.
+    assert(r2b.outcome === 'paid' && r2b.transferId === byKey.get(runnerPayoutIdempotencyKey(o1))?.id, '(b) returns the SAME transfer id')
     const l1b = await ledgerOf(o1)
     assert(l1b?.status === 'paid', '(b) row re-marked paid')
 
