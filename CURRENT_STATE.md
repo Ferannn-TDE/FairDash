@@ -655,25 +655,36 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   costs nothing new. Known cost: a failure on a fair you are not viewing is not on that page (it
   is still in the sweep alerts). Acceptable with one live fair; revisit for concurrent fairs.
 
-- **⚠️ `[Reconciler] BACKSTOP WARNINGS` cried wolf on the runner payout — a FALSE ALARM, and it
-  fired on the most important successful sweep this project has had.** Found 2026-07-28 by reading
-  the block rather than assuming it was noise.
+- **✅ CLOSED 2026-07-28 — `[Reconciler] BACKSTOP WARNINGS` no longer cries wolf on the designed
+  path.** `reconciler.ts` asserted *"any repair means a primary path leaked"* of EVERY pattern
+  unconditionally, so `repaired=2 [P2]` produced *"Pattern P repaired 2 — a real-time path is
+  leaking; investigate."*
 
-  `reconciler.ts:244` states *"any repair means a primary path leaked"* and applies it to **every**
-  pattern unconditionally, so `repaired=2 [P2]` emitted *"Pattern P repaired 2 — a real-time path
-  is leaking; investigate, don't rely on the sweep."*
+  **It fired on BOTH proving runs and neither of us noticed** — the organizer batch at 00:08 and
+  the runner payouts at 02:42, the two most important successful sweeps this project has had.
+  That is the evidence for why precision matters here rather than an argument about it: this is
+  the block where a genuine Pattern C/D leak would surface *during* the fair, and a warning that
+  cries wolf on the designed path trains the reader to skip it.
 
-  That is **not true of Patterns P and Q**. Both are documented as *legitimate primary mechanisms*
-  for the connect-later case — `reconciler.ts:1063` and `runner-payout.ts:358`: *"AND the
-  pay-when-a-held-runner-connects mechanism"*; Pattern Q likewise for organizers. A payee
-  onboarding and being paid on the next sweep is the **designed** path, not a leak. The organizer
-  batch triggered the same false warning at `00:08`.
+  **Fix: every pattern declares its kind** (`PATTERN_KIND`), rather than an exception list — a
+  new pattern must now choose instead of inheriting the wrong default.
+  - `backstop` (12: A B C E F G H I N S T X) — repairing means a real-time path leaked. Warns.
+  - `designed` (2: **D**, **R**) — repairing IS the primary path. D drains a hold that exists
+    *because* the vendor was unconnected; R executes tip refunds, which have no per-order
+    enqueue at all. A warning here would be a false statement.
+  - `mixed` (2: **P**, **Q**) — genuinely both, by their own docs, and **not distinguishable from
+    stored state**. They stay LOUD with honest either/or wording, because silencing them could
+    hide a dropped enqueue. The bias is deliberate: mislabelling a backstop as designed silences a
+    real leak; the reverse is only noise.
 
-  **Why it matters rather than being cosmetic:** this is the alert-fatigue class the X2 job was
-  about. A warning that fires on correct behaviour trains the reader to skip the block — and this
-  block is where a genuine leak (Pattern C/D repairing a dropped enqueue) would appear during the
-  fair. **Fix: exclude P and Q from the backstop-warning rule, or split "repaired as backstop" from
-  "repaired as designed."** Not yet done.
+  **↪ Follow-up, not built:** P/Q *could* be resolved exactly, using `stripeConnectedAt` — if the
+  payee connected AFTER the earning's refund window closed, the sweep paying it is definitionally
+  pay-on-connect, not a dropped enqueue. Cheap and available, but it needs the reconcile summaries
+  to report a per-row reason, which is a wider change than this one. The warning text names the
+  check so a human can run it by hand today.
+
+  Guarded by `scripts/backstop-warning-guard.ts` — whose load-bearing half is that every genuine
+  backstop STILL warns, since a fix that silenced everything would pass a naive test.
 
 - **The cancel 409 is still unexplained — and is NOT the checkout 409.** Keep these apart:
   - ✅ **`FAIR_NOT_OPEN` 409 on `POST /api/orders` — EXPLAINED, working as designed.**

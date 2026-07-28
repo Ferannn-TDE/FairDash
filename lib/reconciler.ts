@@ -168,6 +168,39 @@ const ACTIVE_STATES: OrderStatus[] = [
 // Terminal-complete states a payout is owed against (Pattern C).
 const COMPLETE_STATES: OrderStatus[] = [OrderStatus.COMPLETED, OrderStatus.DELIVERED]
 
+/**
+ * WHAT A REPAIR MEANS, PER PATTERN — read by the backstop-warning block in runReconciliationSweep.
+ *
+ *   backstop — repairing means a REAL-TIME PATH LEAKED. Warn: something upstream should have
+ *              done this and didn't.
+ *   designed — repairing IS the primary path. There is no real-time path to have leaked, so a
+ *              warning would be a false statement.
+ *   mixed    — genuinely BOTH, and not distinguishable from what is stored today. Stays loud,
+ *              with honest either/or wording, because silencing it could hide a real leak.
+ *
+ * ONLY patterns that increment `sum.repaired` can reach the warning; alert-only patterns
+ * (J, K, L, M, O, U, V, W) never do and are deliberately absent rather than listed as no-ops.
+ */
+const PATTERN_KIND: Record<string, { kind: 'backstop' | 'designed' | 'mixed'; why: string }> = {
+  A: { kind: 'backstop', why: 'paid in Stripe but not fully placed — placement leaked' },
+  B: { kind: 'backstop', why: 'active order with 0 vendor rows — the placement side-effect leaked' },
+  C: { kind: 'backstop', why: 'COMPLETED without payout — the payout enqueue leaked' },
+  D: { kind: 'designed', why: 'PAY-WHEN-A-HELD-VENDOR-CONNECTS. The hold exists BECAUSE the vendor was unconnected; no real-time path could have paid it, so draining the hold on verification is the design, not a leak' },
+  E: { kind: 'backstop', why: 'stuck PLACED past the accept window — the timeout leaked' },
+  F: { kind: 'backstop', why: 'stale PENDING_PAYMENT — the payment-confirm path leaked' },
+  G: { kind: 'backstop', why: 'refund stuck PENDING/FAILED — the refund engine leaked' },
+  H: { kind: 'backstop', why: 'marked REFUNDED with no completed refund — a refund leaked' },
+  I: { kind: 'backstop', why: 'chargeback clawback retry — the first clawback attempt failed' },
+  N: { kind: 'backstop', why: 'master-status drift — a writer bypassed the aggregator (named a backstop in its own header)' },
+  P: { kind: 'mixed',    why: "its OWN doc says BOTH: 'the post-window backstop for a dropped DELIVERED enqueue (like Pattern C) AND the pay-when-a-held-runner-connects mechanism (like Pattern D)'. Nothing stored distinguishes the two, so it stays loud" },
+  Q: { kind: 'mixed',    why: 'same shape as P for organizer batches — backstop AND pay-when-an-organizer-connects, indistinguishable from stored state' },
+  R: { kind: 'designed', why: 'tip-refund EXECUTION. reconcileTipRefunds: "there is no per-order enqueue; an owed-back tip is refunded on the next sweep" — the sweep IS the primary path, so there is nothing that could have leaked' },
+  S: { kind: 'backstop', why: 'missing VendorEarning accrual — the completion-path accrual failed' },
+  T: { kind: 'backstop', why: 'phantom accrual on a refunded portion — the refund-time reverser leaked' },
+  X: { kind: 'backstop', why: 'settled transfer vs ledger — a real-time path crashed mid-payout' },
+}
+
+
 // ─── Sweep ───────────────────────────────────────────────────────────────────
 
 export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<SweepSummary> {
@@ -243,12 +276,34 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // Backstop signal: any repair means a primary path leaked. Surface it.
-  const totalRepaired = Object.values(sum.repaired).reduce((a, b) => a + b, 0)
-  if (!dryRun && totalRepaired > 0) {
+  // ── BACKSTOP SIGNAL — per-pattern, because "any repair means a leak" was FALSE ─────────
+  // This block used to assert that of EVERY pattern unconditionally, so a successful
+  // pay-when-connected produced "Pattern P repaired 2 — a real-time path is leaking". It fired
+  // on the organizer batch (2026-07-28 00:08) and the runner payouts — the two most important
+  // successful sweeps this project has had — and went unnoticed both times.
+  //
+  // That matters more than its size: this is the block where a genuine Pattern C/D leak would
+  // surface during the fair, and a warning that cries wolf on the designed path trains the
+  // reader to skip it. Alert-fatigue, in the worst possible place.
+  //
+  // Each pattern now DECLARES its kind, so a new pattern must choose rather than inherit the
+  // wrong default. Bias is deliberate: mislabelling a backstop as designed SILENCES A REAL
+  // LEAK, while the reverse is only noise — so anything genuinely both stays loud.
+  if (!dryRun) {
     for (const [pat, n] of Object.entries(sum.repaired)) {
-      if (n > 0) sum.backstopWarnings.push(
-        `Pattern ${pat} repaired ${n} — a real-time path is leaking; investigate, don't rely on the sweep.`,
+      if (n <= 0) continue
+      const k = PATTERN_KIND[pat]
+      if (!k) {
+        // Declared passes, silent fails — an unclassified pattern warns rather than hiding.
+        sum.backstopWarnings.push(`Pattern ${pat} repaired ${n} — UNCLASSIFIED pattern (add it to PATTERN_KIND); treating as a leak.`)
+        continue
+      }
+      if (k.kind === 'designed') continue // repairing IS the primary path here — nothing leaked
+      sum.backstopWarnings.push(
+        k.kind === 'mixed'
+          ? `Pattern ${pat} repaired ${n} — EITHER a dropped enqueue (leak) OR a pay-on-connect (designed). ` +
+            `Check whether the payee's stripeConnectedAt is AFTER the refund window closed: if so this is the designed path, if not a real-time path leaked.`
+          : `Pattern ${pat} repaired ${n} — a real-time path is leaking; investigate, don't rely on the sweep.`,
       )
     }
   }
