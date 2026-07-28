@@ -46,9 +46,36 @@ const c = (n: number) => Math.round(n * 100)
  * pricing 2.9% + $0.30. The percentage part is rounded UP (Math.ceil) so the
  * estimate is conservative (estimated fee ≥ real fee ⇒ estimated take-home ≤ real).
  */
+/**
+ * THE RATE MODEL — named, so a change to it is visible instead of buried in an expression.
+ *
+ * ⚠️ THIS IS A PREDICTION, AND NOTHING MECHANICALLY TIES IT TO REALITY. The payout does NOT
+ * use these numbers: it reads the REAL settled fee from Stripe's balance transaction
+ * (`process-payout.ts:334`, `bt.fee`) and splits that. So there is no shared rate constant to
+ * derive this from — the estimator predicts, the payout measures. They are coupled only by
+ * being about the same fee.
+ *
+ * WHAT ACTUALLY KEEPS THEM HONEST, and what would break it:
+ *   1. BOTH route through `splitStripeFee`, so the SPLIT across vendors cannot diverge.
+ *   2. The vendor BEARS the fee — `payout-split.ts` computes
+ *      `transferCents = subtotalCents − feeShareCents`. If the fee ever moved off the vendor
+ *      leg (absorbed by the platform, or charged to the customer), the payout would transfer
+ *      the full slice while every vendor surface kept deducting ~2.9% + 30¢. Vendors would be
+ *      shown LESS than they receive, on every order, and nothing would fail — the silent-drift
+ *      shape exactly.
+ *   3. CONSERVATIVENESS: the percentage part is rounded UP so the estimate is never optimistic.
+ *      `vendor-earnings.ts` states the invariant as "never returns more than the vendor will
+ *      actually receive" — lowering either constant, or removing the ceil, breaks it.
+ *
+ * `scripts/vendor-fee-coupling-guard.ts` asserts 1–3. If you change these values, that guard
+ * is where the reasoning lives; read it before assuming a newer rate is simply "more correct".
+ */
+export const STRIPE_FEE_PCT = 0.029   // US card standard, percentage component
+export const STRIPE_FEE_FIXED_CENTS = 30 // US card standard, per-charge component
+
 export function estimateStripeFeeCents(orderTotalCents: number): number {
   if (orderTotalCents <= 0) return 0
-  return Math.ceil(orderTotalCents * 0.029) + 30
+  return Math.ceil(orderTotalCents * STRIPE_FEE_PCT) + STRIPE_FEE_FIXED_CENTS
 }
 
 export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: string): VendorOrderEarnings {

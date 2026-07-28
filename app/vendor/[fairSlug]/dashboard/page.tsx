@@ -373,7 +373,6 @@ export default function VendorDashboardPage() {
   // vendor-status route enforces, so the ready-lane button matches the server gate.
   const [curbsideMethod,    setCurbsideMethod]    = useState<string | null>(null)
   const [todayOrders,       setTodayOrders]       = useState<number>(0)
-  const [todayRevenue,      setTodayRevenue]      = useState<number>(0)
   const [todayEarned,       setTodayEarned]       = useState<number>(0)
   const [todayPending,      setTodayPending]      = useState<number>(0)
   const [statsLoading,      setStatsLoading]      = useState(false)
@@ -575,7 +574,6 @@ export default function VendorDashboardPage() {
 
         if (analyticsJson.success) {
           setTodayOrders(analyticsJson.data.totalOrders  ?? 0)
-          setTodayRevenue(analyticsJson.data.totalRevenue ?? 0)
           setTodayEarned(analyticsJson.data.earned ?? 0)
           setTodayPending(analyticsJson.data.pending ?? 0)
           setLastVerifiedAt(new Date())
@@ -637,7 +635,6 @@ export default function VendorDashboardPage() {
         .then(json => {
           if (!json.success) return
           setTodayOrders(json.data.totalOrders  ?? 0)
-          setTodayRevenue(json.data.totalRevenue ?? 0)
           setTodayEarned(json.data.earned ?? 0)
           setTodayPending(json.data.pending ?? 0)
           setLastVerifiedAt(new Date())
@@ -652,7 +649,7 @@ export default function VendorDashboardPage() {
     const app = getFirebaseApp()
     if (!app) return
 
-    type StatsPayload = { todayOrders?: number; todayRevenue?: number; updatedAt?: number }
+    type StatsPayload = { todayOrders?: number; updatedAt?: number }
     let cleanupFn: (() => void) | null = null
 
     import('firebase/database').then(({ getDatabase, ref, onValue, off }) => {
@@ -662,7 +659,6 @@ export default function VendorDashboardPage() {
         const data = snapshot.val() as StatsPayload | null
         if (!data) return
         if (data.todayOrders  !== undefined) setTodayOrders(data.todayOrders)
-        if (data.todayRevenue !== undefined) setTodayRevenue(data.todayRevenue)
         setLastVerifiedAt(new Date())
       })
       cleanupFn = () => off(statsRef, 'value', handler)
@@ -804,7 +800,6 @@ export default function VendorDashboardPage() {
       const json = await res.json()
       if (json.success) {
         setTodayOrders(json.data.totalOrders   ?? 0)
-        setTodayRevenue(json.data.totalRevenue ?? 0)
           setTodayEarned(json.data.earned ?? 0)
           setTodayPending(json.data.pending ?? 0)
         setLastVerifiedAt(new Date())

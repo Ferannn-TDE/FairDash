@@ -569,6 +569,50 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   a true sentence into a false instruction. The sweep's pattern order is load-bearing
   (`reconciler.ts:201` already says so for S-before-C/D) and cross-references have to respect it.
 
+- **💰 "What a vendor is owed" has FIVE derivations, and the vendor-facing display never reads
+  `VendorEarning`.** Walked 2026-07-28. Runner and organizer are single-sourced and correct —
+  **do not "fix" them.**
+
+  | Bucket | Sites |
+  |---|---|
+  | **Ledger** (`*Earning` as stored) | admin money `money/route.ts:90-105`; runner earnings `runners/me/earnings/route.ts:26`; fair reports `admin-fair-reports.ts:89-90`; sweep `payable=` |
+  | **Stripe** (a real transfer) | `vendor-earnings.ts:71` — `payout.netAmount` |
+  | **Recomputed at display time** | `vendor-earnings.ts` estimate branch; analytics `totalRevenue:161`; revenue chart `revenue/route.ts:117`; stats `stats/route.ts:152` |
+
+  **Per leg, does the payee SEE the number the executor PAYS?**
+  - **Runner — ✅ yes.** `runners/me/earnings` reads `RunnerEarning.amountCents`;
+    `processRunnerPayout` transfers that value verbatim. One derivation.
+  - **Organizer — ✅ yes.** No organizer-facing money surface exists; admin reads the ledger and
+    the batch pays the ledger sum.
+  - **Vendor — ❌ no.** The vendor sees `Payout.netAmount` or an *estimate*; the admin sees
+    `VendorEarning.subtotalCents/netCents`; the executor computes its own slice. Three
+    derivations, and **the vendor-facing path never touches `VendorEarning` at all.**
+
+  **NOT being collapsed before the fair, deliberately.** `computeVendorOrderEarnings` is proven,
+  and its `estimated`/`settled` split (never blended — `sumVendorEarnings`) is *better* UX than the
+  raw ledger. Collapsing it is its own reviewed change, now that this is a test fair.
+
+  The split math itself (`splitStripeFee`, `splitRunnerFee`) IS single-sourced in
+  `lib/payout-split.ts`. The duplication is in the *display*, not the arithmetic.
+
+- **🔴 THE GENUINE GAP: nothing compares a ledger row to the transfer it points at.** Pattern X2
+  finds a settled transfer with NO earning row. **There is no inverse.** Nothing checks that
+  `VendorEarning.netCents` equals the `Payout.netAmount` it references, or that
+  `RunnerEarning.amountCents` equals its transfer. **A ledger row and its transfer could disagree
+  by any amount and nothing would notice** — every number would remain perfectly consistent with
+  itself and wrong. Deferred deliberately (new sweep work on a path that just got ~30% slower, and
+  all three legs demonstrably pay the ledger today), but this is the check that would make a
+  displayed number *trustworthy* rather than merely self-consistent.
+
+- **✏️ CORRECTION — the vendor "revenue tile" was never rendered.** I told Feran that the
+  ghost-filter fix (`1a56a8d`) would visibly drop the vendor's real-time revenue figure and to warn
+  people. **Only the order COUNT changed.** `todayOrders` is rendered
+  (`vendor/[fairSlug]/dashboard/page.tsx:946`); `todayRevenue` was written from four places and
+  read from none — no JSX, no derived value, no conditional. The Firebase push computed a gross
+  aggregate on every vendor-status change for a number nobody could see. Deleted 2026-07-28, which
+  also removed the second of two gross-revenue copies (the surviving one,
+  `stats/route.ts:152`, IS consumed).
+
 - **⚠️ `[Reconciler] BACKSTOP WARNINGS` cried wolf on the runner payout — a FALSE ALARM, and it
   fired on the most important successful sweep this project has had.** Found 2026-07-28 by reading
   the block rather than assuming it was noise.
