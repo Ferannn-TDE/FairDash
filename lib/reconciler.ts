@@ -30,7 +30,7 @@
 import { OrderStatus, StrandedReason } from '@prisma/client'
 import { db } from './db'
 import { STRAND_THRESHOLDS_MS } from './constants'
-import { recordSweepHeartbeat } from './health'
+import { recordSweepHeartbeat, WORKER_COMMIT } from './health'
 import { stripe } from './stripe'
 import { placePaidOrder } from './place-order'
 import { enqueueOrderPayout } from './order-side-effects'
@@ -352,7 +352,48 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   // sweep RAN; /api/health reads this to tell a live-but-quiet sweep from a dead worker.
   await recordSweepHeartbeat()
 
+  // Durable history (best-effort, same contract as the heartbeat above).
+  await recordSweepRun(sum)
+
   return sum
+}
+
+/**
+ * DURABLE SWEEP HISTORY — one row per completed sweep. See the SweepRun model for why.
+ *
+ * ⛔ BEST-EFFORT BY CONSTRUCTION. The entire body is inside try/catch and the function returns
+ * void, so there is no failure mode in which recording the run can fail the run. That ordering
+ * is deliberate and is the same contract recordSweepHeartbeat already has: this table is a
+ * record OF the work, never a participant IN it. A database hiccup here must cost us the
+ * knowledge that a sweep happened, never the sweep itself.
+ *
+ * It is also called LAST, after the heartbeat, so nothing downstream of the sweep's real work
+ * depends on it — and a row's existence therefore means the sweep reached the end.
+ */
+export async function recordSweepRun(sum: SweepSummary): Promise<void> {
+  try {
+    await db.sweepRun.create({
+      data: {
+        startedAt: new Date(sum.startedAt),
+        finishedAt: new Date(sum.finishedAt || Date.now()),
+        durationMs: sum.durationMs,
+        dryRun: sum.dryRun,
+        commit: WORKER_COMMIT,
+        // FULL map, zeros included — see the model comment: this records which patterns
+        // existed at this commit, not merely which ones fired.
+        repaired: sum.repaired as unknown as object,
+        repairedTotal: Object.values(sum.repaired).reduce((s, n) => s + n, 0),
+        alertedCount: sum.alerted.length,
+        suppressedCount: sum.suppressed.length,
+        ambiguousSkipped: sum.ambiguousSkipped,
+      },
+    })
+  } catch (err) {
+    // Logged, never rethrown. A lost row is a lost observation, not a lost sweep.
+    logger.error('[Reconciler] failed to record SweepRun (sweep itself is unaffected)', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
 }
 
 export interface LedgerTotals { payableCents: number; paidCents: number; cancelledCents: number }

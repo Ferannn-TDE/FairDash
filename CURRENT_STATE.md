@@ -474,8 +474,74 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
      failed. **This is a build, not a wiring-up.**
    - **Open question for the decision: is the proof photo alone sufficient dispute evidence?**
      3 open `dispute_clawback` debts total **$101.96** today (§6 item 8). See the report.
-6. 🔬 **Profile the sweep — which pattern owns the 14s?** Unprofiled. At fair scale a sweep over 60s
-   means overlapping sweeps on the same rows (§2).
+6. ✅ **Profile the sweep — DONE 2026-07-29. It is LATENCY-BOUND, not data-bound.** No pattern
+   "owns" the time; the round trips do.
+
+   Method: an instrumented client injected via `globalThis.prisma` (which `lib/db` reads first),
+   timing every query and **throwing on any write**, running a real `dryRun` sweep against prod
+   data. No write was attempted — so `dryRun` is genuinely read-only, previously unverified.
+   Numbers are prod DATA over a laptop connection; the shape transfers, the absolute wall-clock
+   does not.
+
+   **The measurement that settles it:** `Order WHERE payoutStatus='FAILED'` took **459 ms** over
+   the wire and `EXPLAIN ANALYZE` reports **0.162 ms** — a full seq scan of every order in the
+   database. 32 queries, ~5,800 ms of query time, and essentially none of it is database work.
+   The floor is ~145 ms per query and almost every query sits on it. Prod's 17s ÷ 32 queries
+   ≈ **530 ms per round trip** — same queries, worse network position.
+
+   ⚠️ **This falsifies the data-bloat hypothesis as a TIME explanation.** 381 orders / 225 voided
+   / the retired cohort are real clutter, but trimming them saves ~0 ms at this scale: 19 of 21
+   scan sets already return **zero rows**, and only T (8) and X (88) return any. Earlier filtering
+   becomes worth doing at ~10⁴–10⁵ orders, not now. The lever is the COUNT OF ROUND TRIPS.
+
+   Ranked (local, dry): U 977ms (4 queries) · X 614ms wall (4, three concurrent) · B 406ms ·
+   ledger-summary 286ms · L 283ms · T 251ms · A ~0 Prisma (one Stripe call) · the other 15
+   patterns ~145ms each ≈ 40% of the sweep, all at the floor.
+
+   Free wins identified, **not yet built**: M and N issue an *identical* query; C's scan set is a
+   strict subset of S's; E's is a strict subset of B's; and X fetches **86 order rows to explain
+   5** (`whyUnhealable`, and the cohort skip made 76 of those fetches pointless). Together
+   32 → 27 queries.
+
+   ⚠️ **THE 13s → 17s REGRESSION REMAINS UNEXPLAINED.** The X2 explanatory `findMany` was the
+   named candidate and is **eliminated**: it is real waste (424 ms, the single most expensive
+   query) but only ~8% of the local sweep, nowhere near a 30% jump. No other change accounts for
+   it either. The honest state is that the cause is unknown; attributing it to X2 would be a
+   plausible story rather than a finding. Next step would be the same harness attached inside the
+   worker, where the 530 ms/round-trip figure comes from.
+
+   At fair scale a sweep over 60s still means overlapping sweeps on the same rows (§2) — the
+   scaling concern stands, it just is not row-count-driven today.
+6b. ✅ **"Has this pattern ever fired?" is now a QUERY — `SweepRun` landed 2026-07-29.**
+   Before it, there was no durable record of sweep results at all: `sum.repaired` went to logs
+   with finite retention, and the Redis heartbeat holds one timestamp overwritten every 60s. The
+   only durable proof any pattern had ever repaired anything was **148 `AdminMoneyAction` rows
+   from Pattern T, all inside a 4-minute window on 2026-07-19** — and those came from a
+   supervised one-off, not the routine sweep catching a live leak. **There is still no recorded
+   instance of the 60s sweep repairing anything in production.** That was never evidence the
+   patterns are dead; it was evidence we could not tell.
+
+   One row per COMPLETED sweep (written last, beside the heartbeat, so a row means it finished),
+   ~1,440/day, with **per-pattern** repaired counts as JSONB. Dry runs are recorded and flagged,
+   never skipped. Recording is best-effort by construction — the whole body is in try/catch and
+   returns void, proven by a suite that makes the INSERT throw and asserts the sweep still stands.
+
+   ```sql
+   SELECT key AS pattern, SUM(value::int) AS total, MAX(s."startedAt") AS last_at
+     FROM "SweepRun" s, jsonb_each_text(s."repaired")
+    WHERE s."dryRun" = false AND value::int > 0
+    GROUP BY key ORDER BY total DESC;
+   ```
+
+   ⚠️ **The MIGRATION IS NOT APPLIED TO PROD.** `prisma/migrations/20260729120000_sweep_run/`
+   exists and is additive (CREATE TABLE + 2 indexes); apply with `npm run migrate`. Until then
+   the worker logs a `failed to record SweepRun` error each sweep **and keeps sweeping** — which
+   is the best-effort contract doing its job, but it is noise until the table exists.
+
+   Retention: ~525k rows/year, ~105MB. No pruning built (deleting history loses the answer the
+   table exists to give). If ever wanted, downsample — keep 90 days at full resolution, then one
+   row/hour — rather than delete.
+
 7. **Remove the preview-bypass scaffold — AFTER 2026-08-05.** Full removal list in §7.
    ⚠️ **`ALLOW_PREVIEW_BYPASS` is currently `true` in prod** (`/api/health.flags.previewBypass:
    true`, re-measured), and it gates **`POST /api/orders`**, not just UI — `app/api/orders/route.ts:190`
