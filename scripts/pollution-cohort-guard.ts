@@ -17,6 +17,13 @@
  *   [3] ⛔ COMPOSITION — a polluted slice yields NO figure: not settled, not pending, not zero
  *   [4] `cancelled` cannot re-enter the payable set — re-runs the REAL candidate query
  *   [5] the remediation script is dry-run-by-default, idempotent, and guarded
+ *   [6] ⛔ the RECEIPT reports what the writes RETURNED — a no-op writer must print zero
+ *   [7] ⛔ Pattern X2 cannot re-heal the cohort — the 2026-07-28 incident, reproduced
+ *
+ * ⚠️ [5] IS TEXT, [6] AND [7] ARE BEHAVIOUR. [5] greps the remediation script's source, and a
+ * regex suite of exactly that kind passed on the night the apply run printed "76 rows cancelled"
+ * against a ledger where nothing had stuck. Text checks pin the shape; only [6] and [7] execute
+ * the receipt and the sweep, which is where both defects actually lived.
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/pollution-cohort-guard.ts
  */
@@ -28,6 +35,11 @@ import { readFileSync } from 'node:fs'
 import { computeVendorOrderEarnings, sumVendorEarnings, type OrderForEarnings } from '../lib/vendor-earnings'
 import { POLLUTED_TRANSFER_IDS, isPollutedTransfer } from '../lib/pollution-cohort'
 import { ACKNOWLEDGED_MISSING_TRANSFERS } from '../lib/transfer-existence'
+import {
+  applyCohortRetirement, verifyCohort, formatCohortReceipt, type CohortPlanRow,
+} from '../lib/retire-cohort'
+import { patternX, type SweepSummary } from '../lib/reconciler'
+import { classifyVendorSlice } from '../lib/process-payout'
 import { stripComments } from './_strip-comments'
 
 const prisma = testPrisma()
@@ -164,12 +176,159 @@ async function main() {
     assert(/status === 'paid'/.test(script) && /already done/.test(script),
       'IDEMPOTENT — only `paid` rows are touched, so a re-run after a partial failure is a no-op on the done ones')
     assert(/\$transaction/.test(script), 'status flip + audit in ONE transaction — no un-audited money-state change')
-    assert(/RECEIPT/.test(script) && /measured AFTER/.test(script),
-      'and it prints a receipt with the rows touched and the measured paid= figure after')
+    // The receipt TEXT itself now lives in lib/retire-cohort.ts and is asserted by BEHAVIOUR in
+    // §[6]. What this line still owns is that the script routes through that tested formatter
+    // rather than growing a second, untested one inline — which is how the first version lied.
+    assert(/formatCohortReceipt/.test(script) && /measured AFTER/.test(script),
+      'it prints its receipt through the tested formatter, plus the measured global paid= figure')
     assert(/THE LEDGER IS STILL UNCORRECTED/.test(script),
       'the dry run states plainly that the ledger is uncorrected until it runs')
     assert(!/reverseAccrualForRefundedPortion/.test(script),
       '⛔ it does NOT call the shared reverser — that guard refuses `paid` rows by design and must stay that way')
+
+    // ─────────────────────────────────────────────────────────────────────────────────────
+    console.log('\n[6] ⛔ THE RECEIPT REPORTS WHAT THE WRITES RETURNED, NOT THE PLAN')
+    // THE INCIDENT (2026-07-28): the receipt was built by pushing PLAN rows after each await,
+    // never reading what the write returned. It printed "76 rows cancelled" against a ledger
+    // that had 76 rows still `paid`. Every check here is behavioural — §[5] above is regex over
+    // source text, which is exactly the kind of test that passed while the receipt lied.
+    const planRow = (i: number): CohortPlanRow => ({
+      id: `e${i}`, orderId: `o${i}`, vendorId: 'v1', eventId: 'ev1', netCents: 100 + i, subtotalCents: 200,
+    })
+    const PLAN = [planRow(1), planRow(2), planRow(3)]
+
+    // BASELINE — a writer that really changes rows produces a full receipt. Without this the
+    // zero-assertions below could pass on a receipt that is broken in every direction.
+    const good = await applyCohortRetirement(PLAN, async () => 1)
+    assert(good.cancelled === 3 && good.rows.length === 3,
+      `BASELINE: a writer reporting 1 change/row yields 3 cancelled rows (got ${good.cancelled})`)
+    assert(good.centsCancelled === 101 + 102 + 103,
+      `BASELINE: and their cents are summed (got ${good.centsCancelled})`)
+
+    // ⛔ THE CONTROL THIS SECTION EXISTS FOR. The write is a NO-OP; the receipt must say ZERO.
+    // The pre-incident code would have reported 3 here — it counted loop iterations.
+    const noop = await applyCohortRetirement(PLAN, async () => 0)
+    assert(noop.cancelled === 0, `⛔ a NO-OP writer yields 0 rows cancelled (got ${noop.cancelled})`)
+    assert(noop.centsCancelled === 0, '⛔ …and 0¢, not the plan\'s total')
+    assert(noop.rows.length === 0, '⛔ …and an EMPTY row list, not the 3 rows it intended to change')
+    assert(noop.planned === 3, 'while `planned` still reports 3 — intent and result are both shown, never conflated')
+    assert(noop.noop.length === 3, 'and the 3 zero-change writes are named as no-ops')
+
+    // A run that changes nothing must SAY so — a property of the printed text, not just counts.
+    const noopText = formatCohortReceipt(noop, verifyCohort([{ orderId: 'o1', status: 'paid' }]),
+      { timestamp: 'T', actor: 'A', alreadyCancelled: 0 })
+    assert(/NOTHING CHANGED/.test(noopText), '⛔ and the printed receipt is headed "NOTHING CHANGED"')
+    assert(!/o1 {2}vendor/.test(noopText), '…with no row list, because there is nothing to list')
+
+    // Partial: only CONFIRMED changes count. A silent zero in the middle must not be papered over.
+    const partial = await applyCohortRetirement(PLAN, async (r) => (r.id === 'e2' ? 0 : 1))
+    assert(partial.cancelled === 2 && partial.noop.length === 1,
+      `a mixed run reports exactly the confirmed changes (got ${partial.cancelled} cancelled, ${partial.noop.length} no-op)`)
+    assert(partial.centsCancelled === 101 + 103, 'and only the confirmed rows contribute cents')
+
+    // A throwing writer is RECORDED, not swallowed, and never counts as a cancel.
+    const threw = await applyCohortRetirement(PLAN, async (r) => { if (r.id === 'e2') throw new Error('boom'); return 1 })
+    assert(threw.cancelled === 2 && threw.failed.length === 1, 'a throwing write is recorded as failed, not counted as cancelled')
+    assert(threw.failed[0]?.error === 'boom', 'and its error text is kept for the receipt')
+
+    // FINAL-STATE ASSERTION — the check that actually caught the X2 re-heal.
+    assert(verifyCohort([{ orderId: 'o1', status: 'cancelled' }]).ok === true,
+      'BASELINE: an all-cancelled cohort verifies ok')
+    const stuck = verifyCohort([{ orderId: 'o1', status: 'cancelled' }, { orderId: 'o2', status: 'paid' }])
+    assert(stuck.ok === false && stuck.stillPaid === 1,
+      "⛔ a cohort with ANY row still 'paid' does NOT verify — however good the receipt looked")
+    const stuckText = formatCohortReceipt(good, stuck, { timestamp: 'T', actor: 'A', alreadyCancelled: 0 })
+    assert(/FINAL STATE WRONG/.test(stuckText) && /Pattern X2/.test(stuckText),
+      '…and the receipt says so loudly, naming Pattern X2 as the first suspect')
+    assert(/NOT VERIFIED/.test(formatCohortReceipt(good, null, { timestamp: 'T', actor: 'A', alreadyCancelled: 0 })),
+      'a failed re-read reports UNKNOWN rather than implying success')
+
+    const scriptSrc = stripComments(readFileSync('scripts/retire-pollution-cohort.ts', 'utf8'))
+    assert(/applyCohortRetirement/.test(scriptSrc), 'the script builds its receipt through the tested path…')
+    assert(/updateMany/.test(scriptSrc) && /res\.count/.test(scriptSrc),
+      '…using updateMany().count as the change count, not a hardcoded 1')
+    assert(/status: 'paid'/.test(scriptSrc) && /res\.count === 0/.test(scriptSrc),
+      "…guards on status:'paid' IN THE WHERE and writes NO audit when 0 rows change (no un-backed audit row)")
+    assert(/process\.exit\(1\)/.test(scriptSrc) && /verification\.ok/.test(scriptSrc),
+      '…and exits non-zero when the ledger disagrees with the receipt')
+
+    // ─────────────────────────────────────────────────────────────────────────────────────
+    console.log('\n[7] ⛔ Pattern X2 CANNOT re-heal the cohort (the 2026-07-28 incident, reproduced)')
+    // On the night, X2 read the 76 fabricated Payout rows as "money moved, ledger lags" and
+    // flipped every cancelled row back to `paid` 250ms after the remediation finished. Both
+    // directions are asserted: the cohort is immune, and a NON-cohort row is still healed —
+    // otherwise this passes by having broken Pattern X entirely.
+    const mkHealCase = async (transferId: string) => {
+      const o = await prisma.order.create({ data: {
+        eventId: ev.id, customerId: cust.id, vendorId: ven.id, status: 'COMPLETED', fulfillmentType: 'BOOTH_PICKUP',
+        subtotal: 29.79, fairSynqFee: 3, total: 33.1, vendorPayout: 29.79, customerName: 'C', customerPhone: '+10000000000',
+        placedAt: OLD, completedAt: OLD, stripeChargeId: `ch_${rand()}`,
+        orderItems: { create: [{ vendor: { connect: { id: ven.id } }, menuItem: { connect: { id: mi.id } }, itemName: 'X', quantity: 1, unitPrice: 29.79, totalPrice: 29.79, subtotal: 29.79 }] },
+        vendorOrderStatuses: { create: [{ vendorId: ven.id, status: 'COMPLETED' }] },
+      } })
+      await prisma.payout.create({ data: {
+        eventId: ev.id, orderId: o.id, vendorId: ven.id, grossAmount: 33.1, fairSynqFee: 3,
+        netAmount: 29.79, stripeTransferId: transferId, stripeStatus: 'paid', reversedAt: null,
+      } })
+      const e = await prisma.vendorEarning.create({ data: {
+        eventId: ev.id, orderId: o.id, vendorId: ven.id, subtotalCents: 2979, netCents: 2979, status: 'cancelled',
+      } })
+      return e.id
+    }
+    const cohortEarningId = await mkHealCase(POLLUTED)
+    const realEarningId   = await mkHealCase(`tr_real_${rand()}`)
+
+    const sum: SweepSummary = {
+      startedAt: new Date().toISOString(), finishedAt: '', durationMs: 0,
+      dryRun: false, patternEEnabled: false, backstopEnabled: false,
+      scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
+      repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0, T: 0, X: 0 },
+      details: { A: [], B: [], C: [], D: [], E: [], F: [], G: [], H: [], I: [], J: [], K: [], L: [], M: [], N: [], O: [], P: [], Q: [], R: [], S: [], T: [], X: [] },
+      alerted: [], suppressed: [], ambiguousSkipped: 0, backstopWarnings: [],
+    }
+    await patternX(sum, { scanCeiling: 5000, maxPerPattern: 5000, dryRun: false, windowStart: new Date(Date.now() - 24 * 3600_000) })
+
+    const afterReal   = await prisma.vendorEarning.findUniqueOrThrow({ where: { id: realEarningId }, select: { status: true } })
+    const afterCohort = await prisma.vendorEarning.findUniqueOrThrow({ where: { id: cohortEarningId }, select: { status: true } })
+    assert(afterReal.status === 'paid',
+      `BASELINE: X2 DOES still heal a genuine settled transfer (cancelled → ${afterReal.status}) — the probe is live`)
+    assert(afterCohort.status === 'cancelled',
+      `⛔ a POLLUTED transfer is NOT healed — stays 'cancelled' (got '${afterCohort.status}'). This is the incident.`)
+    assert(sum.suppressed.some(s => s.includes(POLLUTED)),
+      'and the skip is SUPPRESSED, never dropped — the cohort still rides the sweep summary count')
+    assert(!sum.alerted.some(s => s.includes(POLLUTED)),
+      '…without costing an alert line a sweep (nothing here needs a human)')
+
+    // ── X IS THE ONLY PATTERN THAT CAN RESURRECT A COHORT ROW — LOCKED ────────────────────
+    // Audited 2026-07-29 across all 16 repaired-incrementing patterns. X is the only one that
+    // WRITES VendorEarning, and the only UNWINDOWED consumer of Payout (C is windowed on
+    // completedAt and the cohort is 12.6–18.0 days old). If a future pattern grows a
+    // VendorEarning write, the cohort skip stops being sufficient at X's loop and belongs in a
+    // shared helper — this assertion is what forces that conversation instead of a silent
+    // second resurrection.
+    const rec = stripComments(readFileSync('lib/reconciler.ts', 'utf8'))
+    const veWrites = rec.match(/vendorEarning\.(update|updateMany|upsert|create|createMany|delete|deleteMany)/g) ?? []
+    assert(veWrites.length === 1,
+      `⛔ exactly ONE VendorEarning write in the whole reconciler (found ${veWrites.length}: ${veWrites.join(', ')}) — a second one needs its own cohort skip`)
+    const xBody = rec.slice(rec.indexOf('export async function patternX'))
+    assert(xBody.indexOf('isPollutedTransfer') < xBody.indexOf('vendorEarning.updateMany'),
+      '…and the cohort skip sits BEFORE that write in patternX, not after it')
+
+    // The C/D chain reaches a VendorEarning write through processOrderPayout. Its gate is what
+    // stops a cancelled cohort row being re-paid — asserted here as BEHAVIOUR, both directions.
+    const slice = (earningStatus: string | null) => classifyVendorSlice({
+      declined: false, earningStatus, connected: true, payoutsFrozen: false, transferCents: 2979,
+    })
+    assert(slice('cancelled').outcome === 'blocked' && slice('cancelled').blockedReason === 'admin_cancelled',
+      "⛔ the C/D chain: processOrderPayout BLOCKS a 'cancelled' slice, so it never reaches the mark-paid write")
+    assert(slice('accrued').outcome === 'pay',
+      'BASELINE: …while a normal accrued slice still pays — the gate is not blocking everything')
+
+    // The S chain re-accrues through an upsert whose UPDATE branch must never touch status.
+    const accrueSrc = stripComments(readFileSync('lib/process-payout.ts', 'utf8'))
+    const upsert = accrueSrc.slice(accrueSrc.indexOf('vendorEarning.upsert'), accrueSrc.indexOf('vendorEarning.upsert') + 400)
+    assert(/update: \{ subtotalCents \}/.test(upsert),
+      "⛔ the S chain: re-accrual's UPDATE branch is `{ subtotalCents }` only — a cancelled row survives re-accrual")
 
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `✅ pollution-cohort-guard: ${pass} passed, 0 failed` : `❌ pollution-cohort-guard: ${pass} passed, ${fail} failed`)
