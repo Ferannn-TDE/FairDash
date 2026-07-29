@@ -47,6 +47,7 @@ import { logger } from './logger'
 import { findStuckPayouts } from './stuck-payouts'
 import { deriveMasterStatus, canAdvance, reconcileMasterStatus, type MasterStatus, type FulfillmentType } from './reconcile-order-status'
 import { reverseAccrualForRefundedPortion } from './reverse-accrual'
+import { isPollutedTransfer } from './pollution-cohort'
 
 // ─── Tunables (all overridable per-run) ─────────────────────────────────────
 
@@ -334,7 +335,8 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
   // ONE flat line, never one-per-row — the whole point is that a settled cohort stops
   // costing five lines a sweep. Deliberately NOT in ALERTS: nothing here needs a human.
   if (sum.suppressed.length) logger.warn(
-    `[Reconciler] SUPPRESSED — ${sum.suppressed.length} known row(s), NO ACTION (declared in ACKNOWLEDGED_X2)`,
+    `[Reconciler] SUPPRESSED — ${sum.suppressed.length} known row(s), NO ACTION ` +
+    `(declared in ACKNOWLEDGED_X2 or POLLUTED_TRANSFER_IDS)`,
   )
   if (sum.backstopWarnings.length) logger.warn('[Reconciler] BACKSTOP WARNINGS', { backstopWarnings: sum.backstopWarnings })
 
@@ -1655,6 +1657,27 @@ export async function patternX(
   }
 
   for (const p of settled) {
+    // ── ⛔ THE FABRICATED COHORT — X'S PREMISE DOES NOT HOLD HERE ────────────────────────
+    // Every branch below reasons from "the transfer settled, so the money MOVED". For the
+    // declared pollution cohort that sentence is false: those transfer ids have never existed
+    // in Stripe. Their Payout rows are kept deliberately (deleting them destroys the artifact
+    // the transfer-existence audit names), which means X sees them on every single sweep.
+    //
+    // MEASURED, not hypothetical: on 2026-07-28 the remediation cancelled all 76 rows and X2
+    // healed every one back to `paid` within 250ms — re-stamping `paidAt` and the fabricated
+    // `stripeTransferId`, and leaving a receipt that had already printed "success". Without
+    // this skip the cohort can never be retired; the sweep would undo any correction forever.
+    //
+    // Suppressed, never dropped: the count rides the summary line, so the cohort stays visible
+    // without costing 76 alert lines a sweep.
+    if (isPollutedTransfer(p.stripeTransferId)) {
+      sum.suppressed.push(
+        `Pattern X: payout ${p.stripeTransferId} (order ${p.orderId}, vendor ${p.vendorId}) is a DECLARED ` +
+        `fabricated transfer — never existed in Stripe. No money moved, so there is nothing to heal.`,
+      )
+      continue
+    }
+
     const key = eKey(p.orderId!, p.vendorId)
     const earning = earningBy.get(key)
     const refund  = refundBy.get(key)

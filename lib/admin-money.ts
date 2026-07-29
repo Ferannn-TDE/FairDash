@@ -33,6 +33,7 @@
  * a RELEASE row. This table is the record you produce when a payee contests an action.
  */
 
+import type { PrismaClient } from '@prisma/client'
 import { db } from './db'
 import { ApiError } from './api-error'
 import { logger } from './logger'
@@ -119,9 +120,21 @@ interface AuditFields {
  * reverser, the reconciler backstop — records through the same place with an HONEST actor,
  * rather than each inventing its own AdminMoneyAction.create (the two-writers-one-truth trap).
  * Always called inside the state-change transaction.
+ *
+ * `client` exists for INTERACTIVE transactions, where the audit must be CONDITIONAL on what the
+ * state change actually returned — `$transaction([update, audit])` cannot branch, so it writes
+ * the audit even when the update changed nothing. That is how a remediation once left 76 audit
+ * rows describing cancels (see scripts/retire-pollution-cohort.ts). Defaulting to the singleton
+ * keeps every existing array-form caller byte-identical: the returned PrismaPromise is still
+ * lazy, so it enlists in the caller's $transaction exactly as before.
  */
-export function writeMoneyAudit(actor: MoneyActor, eventId: string, fields: AuditFields) {
-  return db.adminMoneyAction.create({
+export function writeMoneyAudit(
+  actor: MoneyActor,
+  eventId: string,
+  fields: AuditFields,
+  client: Pick<PrismaClient, 'adminMoneyAction'> = db,
+) {
+  return client.adminMoneyAction.create({
     data: {
       actorId: actor.id,
       actorType: actor.type,
