@@ -14,7 +14,36 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { guardedPrisma, assertWriteAllowed, ProdWriteBlockedError, PROTECTED_EVENT_IDS, PROTECTED_EVENT_SLUGS } from '../lib/prod-write-guard'
+import {
+  guardedPrisma, assertWriteAllowed, ProdWriteBlockedError, PROTECTED_EVENT_IDS, PROTECTED_EVENT_SLUGS,
+  referencesProtectedEvent, usesGuardedClient,
+} from '../lib/prod-write-guard'
+import { stripComments } from './_strip-comments'
+
+/**
+ * THE SCAN, as a pure function over (name, RAW source) pairs.
+ *
+ * Extracted so the comment-strip is COVERED. Asserting on referencesProtectedEvent /
+ * usesGuardedClient alone proves the predicates and says nothing about whether the loop feeds
+ * them stripped source — and on the real tree that gap is unobservable, because the one script
+ * with prose mentioning guardedPrisma is allowlisted and short-circuits before the check. A
+ * control on the loop must therefore run against SYNTHETIC files. Takes raw source and strips
+ * internally, so "did the caller remember to strip?" is not a question this can get wrong.
+ */
+export function scanScriptsForProtectedRefs(
+  files: readonly { name: string; source: string }[],
+  allowlist: ReadonlySet<string>,
+): string[] {
+  const offenders: string[] = []
+  for (const { name, source } of files) {
+    const code = stripComments(source) // CODE, not prose — in BOTH directions
+    if (!referencesProtectedEvent(code)) continue
+    if (allowlist.has(name)) continue
+    if (usesGuardedClient(code)) continue // constructs the guarded client → fine
+    offenders.push(name)
+  }
+  return offenders
+}
 
 const ITALIAN_FEST = 'cmni6x63n000011znjwlln5k2'
 const prisma = guardedPrisma()
@@ -82,7 +111,7 @@ async function main() {
     // It catches literal references and the common slug-lookup dynamic resolution. It does NOT
     // catch a FULLY-dynamic resolver (iterate all events, no literal) — that residual is closed
     // only by the durable fix (a separate test DB). The runtime guard stays sound there.
-    console.log('\n[3] structural: every script naming a protected event (id OR slug) is guarded/allowlisted')
+    console.log('\n[3] structural: every script naming a protected event (id, slug OR SYMBOL) is guarded/allowlisted')
     // Deliberate-prod-op receipts + read-only diagnostics + the guard's own test.
     const ALLOWLIST = new Set([
       'reverse-phantom-accruals.ts', // remediation receipt (ALLOW_PROD_WRITES intent)
@@ -91,20 +120,73 @@ async function main() {
       'pattern-t-cleanup.ts',        // (if present) receipt
       'prod-write-guard-test.ts',    // this file
       'protected-events-membership-guard.ts', // constant-only membership assertion — no DB client at all
+      // Deliberate, reviewed prod remediation — the 2026-07-16/17 pollution cohort. Same category
+      // as reverse-phantom-accruals / pattern-t-finish: dry-run by default, refuses --apply
+      // without ALLOW_PROD_WRITES, and its receipt is derived from what the writes RETURNED plus
+      // a final-state re-read. It uses the lib/db singleton ON PURPOSE (it must route through the
+      // real app-side money-audit writer) — which is exactly why the old literal-only grep could
+      // not see it. Allowlisted EXPLICITLY, with a reason, rather than passing by accident.
+      'retire-pollution-cohort.ts',
     ])
     const dir = join(process.cwd(), 'scripts')
-    const offenders: string[] = []
-    for (const f of readdirSync(dir).filter(f => f.endsWith('.ts'))) {
-      const src = readFileSync(join(dir, f), 'utf8')
-      const referencesProtected =
-        [...PROTECTED_EVENT_IDS].some(id => src.includes(id)) ||
-        [...PROTECTED_EVENT_SLUGS].some(slug => src.includes(slug))
-      if (!referencesProtected) continue
-      if (ALLOWLIST.has(f)) continue
-      if (src.includes('guardedPrisma')) continue // uses the guard → fine
-      offenders.push(f)
-    }
+    const realFiles = readdirSync(dir).filter(f => f.endsWith('.ts'))
+      .map(f => ({ name: f, source: readFileSync(join(dir, f), 'utf8') }))
+    const offenders = scanScriptsForProtectedRefs(realFiles, ALLOWLIST)
     assert(offenders.length === 0, `every script referencing a protected event is guarded or allowlisted (offenders: ${offenders.join(', ') || 'none'})`)
+
+    // ── [3b] THE PREDICATE — controls that FAIL, not crash ──────────────────────────────
+    // [3] alone is satisfied by a detector that detects NOTHING: zero offenders either way.
+    // These pin both directions on synthetic sources, so the widening is proven rather than
+    // assumed, and a future narrowing fails here BY NAME instead of going quiet.
+    console.log('\n[3b] ⛔ the detector matches the IMPORTED SYMBOL, and prose grants nothing')
+    const S = (s: string) => stripComments(s)
+
+    // The exact shape that walked through the old net: imports the symbol, no literal anywhere.
+    const bySymbol = S(`import { LIVE_PROTECTED_EVENT_ID } from '../lib/prod-write-guard'\nconst x = LIVE_PROTECTED_EVENT_ID\n`)
+    assert(referencesProtectedEvent(bySymbol),
+      '⛔ a script IMPORTING LIVE_PROTECTED_EVENT_ID is detected (the hole retire-pollution-cohort walked through)')
+    assert(!bySymbol.includes(ITALIAN_FEST),
+      '  …detected WITHOUT containing the literal cuid — so this is the SYMBOL path, not the old one')
+    assert(referencesProtectedEvent(S(`const s = LIVE_PROTECTED_EVENT_SLUG\n`)), 'the SLUG symbol is detected too')
+    // BASELINE: the literal paths still work — the widening ADDED, it did not replace.
+    assert(referencesProtectedEvent(S(`const id = '${ITALIAN_FEST}'\n`)), 'BASELINE: the literal cuid is still detected')
+    assert(referencesProtectedEvent(S(`const s = '${[...PROTECTED_EVENT_SLUGS][0]}'\n`)), 'BASELINE: the literal slug is still detected')
+
+    // NEGATIVE — prose must not trip it, or the pressure is to delete the reasoning to stay green.
+    assert(!referencesProtectedEvent(S(`// never touches LIVE_PROTECTED_EVENT_ID\nconst a = 1\n`)),
+      '⛔ a LINE COMMENT naming the constant is NOT a reference (guards scan code, not prose)')
+    assert(!referencesProtectedEvent(S(`/**\n * about LIVE_PROTECTED_EVENT_ID and ${ITALIAN_FEST}\n */\nconst a = 1\n`)),
+      '⛔ nor a BLOCK comment naming the constant AND the literal')
+    assert(!referencesProtectedEvent(S(`const MY_LIVE_PROTECTED_EVENT_IDX = 1\n`)),
+      'and a longer identifier merely containing the name is not a false positive (word-bounded)')
+    assert(!referencesProtectedEvent(S(`const a = 1\n`)), 'an unrelated script is not flagged')
+
+    // ── [3c] THE EXEMPTION — a comment cannot excuse a script ───────────────────────────
+    // The more dangerous direction, and the one the real tree CANNOT exercise: the only script
+    // whose prose mentions guardedPrisma is allowlisted, so it short-circuits before the check.
+    // Run the real scan against SYNTHETIC files so the strip inside it is genuinely covered.
+    console.log('\n[3c] ⛔ the scan strips comments before granting the guardedPrisma exemption')
+    const NONE: ReadonlySet<string> = new Set<string>()
+    const proseExcuse = {
+      name: 'fake-prose-excuse.ts',
+      source: `// NOTE: this does NOT use guardedPrisma — it uses the lib/db singleton.\nimport { LIVE_PROTECTED_EVENT_ID } from '../lib/prod-write-guard'\nawait db.order.updateMany({ where: { eventId: LIVE_PROTECTED_EVENT_ID }, data: {} })\n`,
+    }
+    assert(scanScriptsForProtectedRefs([proseExcuse], NONE).includes('fake-prose-excuse.ts'),
+      '⛔ a script referencing the constant in CODE while mentioning guardedPrisma only in a COMMENT is an OFFENDER')
+    const realExempt = {
+      name: 'fake-guarded.ts',
+      source: `import { guardedPrisma, LIVE_PROTECTED_EVENT_ID } from '../lib/prod-write-guard'\nconst p = guardedPrisma()\nawait p.order.findMany({ where: { eventId: LIVE_PROTECTED_EVENT_ID } })\n`,
+    }
+    assert(scanScriptsForProtectedRefs([realExempt], NONE).length === 0,
+      'BASELINE: …while one that genuinely CONSTRUCTS guardedPrisma is exempt (the exemption still works)')
+    assert(scanScriptsForProtectedRefs([proseExcuse], new Set(['fake-prose-excuse.ts'])).length === 0,
+      'and the allowlist still carries a named, reviewed exception')
+
+    // The composition, on the REAL file: caught by the predicate, not exempt, carried by name.
+    const retireSrc = stripComments(readFileSync(join(dir, 'retire-pollution-cohort.ts'), 'utf8'))
+    assert(referencesProtectedEvent(retireSrc), 'the real remediation script IS now detected…')
+    assert(!usesGuardedClient(retireSrc), '…is NOT exempt (it genuinely constructs no guarded client)…')
+    assert(ALLOWLIST.has('retire-pollution-cohort.ts'), '…so it is carried EXPLICITLY by the allowlist, with a written reason')
 
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)

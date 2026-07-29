@@ -714,32 +714,50 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   ```
 
   So `paid=$3,163.13` — quoted repeatedly as evidence the vendor leg was working — is really
-  **$144.79**. Every surface reading `VendorEarning.status='paid'` inherits this: the admin money
-  page, the sweep summary `paid=`, and `admin-fair-reports`. The vendor-facing display does NOT
+  **$144.79**. Every surface reading `VendorEarning.status='paid'` inherited this: the admin money
+  page, the sweep summary `paid=`, and `admin-fair-reports`. The vendor-facing display did NOT
   (it reads `Payout.netAmount`/estimates — see the five-derivations entry above), which is its own
   divergence.
+
+  ↪ **The table above is the PRE-CLEANUP state, kept as the finding.** Since 2026-07-29 the 76
+  fabricated rows are `cancelled`, so those surfaces now read **$144.79** — see the completion
+  entry below.
 
   **✅ THE JUL 25 VENDOR-LEG PROOF STANDS — verified explicitly.** All four payouts from that day
   resolve in Stripe (`tr_3Tw9RpHk…`, `tr_3TwpqWHk…`, `tr_3TwqT1Hk…`, `tr_3TwqUkHk…`, $53.98
   total, 00:33→01:19). The pollution is 2026-07-12→17 and does not touch it. **"All three legs
   proven" is unaffected.**
 
-  **↪ RESOLVED IN CODE, NOT YET IN THE LEDGER — the remediation is written and UNEXECUTED.**
-  `scripts/retire-pollution-cohort.ts` cancels the 76 earnings. It is **dry-run by default**,
-  refuses `--apply` without `ALLOW_PROD_WRITES=true`, is **idempotent** (only `paid` rows are
-  touched, so a re-run after a partial failure is a no-op on the done ones), and prints a
-  **receipt** — rows touched, before/after status, timestamp, actor, and the measured `paid=`
-  after. That receipt is the durable record of the fourth incident's resolution.
+  **✅ COMPLETE (2026-07-29) — ledger, display and sweep all agree. It took two attempts, and the
+  first one lied.** The sequence matters more than the outcome:
 
-  ⚠️ **UNTIL IT RUNS, THE LEDGER IS STILL WRONG.** `paid=` still reads $3,163.13 on the admin
-  money page and the sweep summary. **The vendor-facing half IS already corrected** — the
-  display filter ships with the code — so the vendor-facing lie is closed and the admin-facing
-  one remains, visible only to someone who knows why. That asymmetry is deliberate and is the
-  safer ordering; it resolves the moment the script runs.
+  1. **First `--apply` (2026-07-28 22:42Z) — REVERTED WITHIN 60 SECONDS.** It printed a full
+     receipt: `rows cancelled: 76 (301834¢)`, `measured AFTER: paid = 14479¢`. Both true at the
+     instant computed. The cancels genuinely committed — 76 `AdminMoneyAction` rows prove it.
+     Then reconciler **Pattern X2** healed all 76 straight back to `paid`, re-stamping `paidAt`
+     and the fabricated `stripeTransferId`. X2 reasons *"the transfer settled, so the money
+     MOVED"*; the cohort's `Payout` rows are kept deliberately, so **76 of the 88 rows in its
+     scan set were the fabricated ones** — permanent fuel. Evidence was the timeline: audits
+     22:42:53→22:43:11, earning `updatedAt` 22:43:11→22:44:12, disjoint by 17.5–61.3s where one
+     `$transaction` puts them milliseconds apart. Two writers, not one.
+  2. **The receipt could not have noticed.** It was built by pushing PLAN rows after each
+     `await`, discarding the transaction result — `receipt.length` meant *"76 transactions did
+     not throw"*. It would have printed 76 either way. See §8.
+  3. **Both fixed.** `patternX` skips the declared cohort (suppressed, never dropped);
+     `lib/retire-cohort.ts` derives the receipt from `updateMany().count` and ends with a
+     final-state re-read that exits non-zero if the ledger disagrees. Audited across all 16
+     `repaired`-incrementing patterns: **X is the only one that writes `VendorEarning`, and the
+     only unwindowed `Payout` consumer** — C is windowed and the cohort is 12.6–18.0d old; C/D
+     hit `classifyVendorSlice`'s `cancelled` block; S counts rows by presence, status-blind.
+  4. **Second `--apply` — verified and HELD across ~10 sweeps.** Ledger, vendor display and
+     sweep summary agree.
 
-  ```
-  ALLOW_PROD_WRITES=true npx tsx scripts/retire-pollution-cohort.ts --apply
-  ```
+  ⚠️ **TWO SETS OF 76 `AdminMoneyAction` ROWS EXIST FOR THIS COHORT — 152 rows, 76 earnings.**
+  One from the reverted attempt, one from the successful one. **Both are accurate about what
+  they did at the time**; neither is a bug and neither should be deleted. A future reader
+  reconciling audits against earnings must not read 152 as "rows touched", and must not treat
+  the duplication as double-cancelling. Distinguish them by `createdAt`: the 22:42–22:43Z block
+  on 2026-07-28 is the reverted attempt.
 
   **Why not `lib/reverse-accrual.ts`:** it REFUSES `paid` rows by design — *"'paid' → the money
   already transferred; reversing a sent transfer is the chargeback/clawback domain, NOT this."*
@@ -997,3 +1015,44 @@ deferring across sessions again.
   instance — see §7 group (B))*. A global count in a suite is broken by any other writer, and
   in a 73-suite gate the other writers are the other suites. Assert over rows you seeded, never
   over a whole table.
+
+- **`a-receipt-computed-from-intent-is-not-a-receipt`** *(earned 2026-07-28, the fourth
+  pollution cleanup)*. A remediation printed `rows cancelled: 76 (301834¢)` against a ledger
+  where nothing had stuck. The loop was:
+
+  ```ts
+  for (const e of toCancel) {              // toCancel = the PLAN, read before any write
+    await db.$transaction([ update…, audit… ])   // ← result discarded, never inspected
+    receipt.push({ orderId: e.orderId, cents: e.netCents ?? 0 })   // ← pushes PLAN data
+  }
+  ```
+
+  `receipt.length` meant *"76 transactions did not throw"*. It would have printed 76 whether or
+  not anything committed, so the one artifact meant to prove the operation happened was the one
+  thing that could not tell you.
+
+  **Same family as the vacuous zero and NULLS FIRST: output shaped like evidence that carries
+  none.** The tell is identical — the number is plausible, so it passes review. What makes this
+  one worse is that a receipt is *specifically* the thing you produce to be believed later.
+
+  Three rules, all now enforced by `pollution-cohort-guard [6]`:
+  1. Derive receipts from what the write RETURNED (`updateMany().count`), never from the plan,
+     and never from "it didn't throw".
+  2. Finish with a **final-state re-read**. Per-row counts describe only the instant each write
+     returned — the X2 re-heal was invisible to honest per-row counts and obvious to a re-read.
+  3. **Control it with a no-op writer.** Anything that only checks the happy path passes on the
+     broken version. A run that changes nothing must SAY nothing changed.
+
+  Corollary worth its own line: **`$transaction([a, b])` cannot branch**, so it writes the audit
+  even when the update matched nothing — a partial write by construction. Use an interactive
+  transaction when the audit must be conditional on the change count.
+
+- **`a-comment-cannot-grant-an-exemption`** *(earned 2026-07-29)*. The prod-write CI net excused
+  any script whose RAW source contained `guardedPrisma` — including a script that mentioned it
+  in a header comment explaining that it does **not** use it. The detection half had the mirror
+  bug (literal-only grep, so an imported `LIVE_PROTECTED_EVENT_ID` walked through). Both halves
+  of a source-scanning guard — what it FLAGS and what it EXCUSES — must read comment-stripped
+  code. The exemption side is the dangerous one: a false positive is noise, a false exemption is
+  an invisible hole. And the strip must be covered by a control that runs the **scan** against
+  synthetic files, not just the predicates — on the real tree the only instance was allowlisted
+  and short-circuited before the check, so a predicate-level control passed vacuously.

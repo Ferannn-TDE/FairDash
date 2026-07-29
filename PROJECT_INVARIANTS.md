@@ -56,13 +56,24 @@ add a guard that fails if a second copy reappears.** Confirmed instances, each n
 | comment-stripping before a guard scans | `_strip-comments.ts` (`stripComments`) | <!-- guard: none — the one definition exists and new guards import it, but FIVE legacy copies remain by design until the conversion job runs. A no-second-implementation assertion would fail today, so declaring this guarded would itself be the optimistic-doc drift this file exists to prevent. See the note below the table. --> **unguarded — declared, see below** |
 | BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | <!-- guard: none — the single source is real, but its INPUT is an env var spanning two deployments (Vercel producer, Railway consumer). A repo scanner cannot see config divergence. Operational check only: scripts/step-b-inspect.ts. --> **unguarded — declared, see below** |
 
-**⛔ `POLLUTED_TRANSFER_IDS` IS LOAD-BEARING IN TWO PLACES — DO NOT PRUNE IT AS STALE CLEANUP.**
+**⛔ `POLLUTED_TRANSFER_IDS` IS PERMANENT AND LOAD-BEARING IN THREE PLACES — DO NOT PRUNE IT AS
+FINISHED CLEANUP.**
 76 transfer ids that exist in our ledger and have never existed in Stripe (test-suite pollution of
-prod, 2026-07-16/17 — the fourth incident of that class). The set is consumed by:
+prod, 2026-07-16/17 — the fourth incident of that class).
+
+**The retirement is COMPLETE (2026-07-29) and that is exactly what makes the set permanent.** The
+earnings are `cancelled`; the fabricated `Payout` rows are **kept deliberately**, because they are
+the artifact the transfer-existence audit names. Every consumer must therefore keep recognising
+them forever. The set is consumed by:
 1. **`lib/transfer-existence.ts`** — suppresses them from the transfer-existence audit, so a FIFTH
    incident still fails loudly instead of hiding among them.
 2. **`lib/vendor-earnings.ts`** — makes the written-off slice render as NOTHING on every
    vendor-facing surface. Deleting the set would silently show vendors money that was never sent.
+3. **`lib/reconciler.ts` (`patternX`)** — Pattern X2 heals a non-`paid` earning back to `paid` from
+   any un-reversed `Payout` row, on the premise "the transfer settled, so the money MOVED". For
+   this cohort it never moved. **Not hypothetical:** on 2026-07-28 the first remediation cancelled
+   all 76 rows and X2 healed every one back within 250ms. **Delete this set and the next sweep
+   resurrects the cohort**, silently, putting the ledger back to over-reporting paid by $3,018.34.
 
 It looks like finished cleanup and is not. Membership is by **transfer id, never by date**: 34
 LEGITIMATE payouts fall inside the same 2026-07-12→17 range, so a date rule would sweep up real

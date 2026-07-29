@@ -21,14 +21,28 @@
  * money check. Transfer ids are globally unique; this list cannot widen to cover a row nobody
  * has looked at.
  *
- * ── ⛔ LOAD-BEARING IN TWO PLACES — DO NOT PRUNE AS STALE CLEANUP ────────────────────────────
+ * ── ⛔ PERMANENT, AND LOAD-BEARING IN THREE PLACES — DO NOT PRUNE AS FINISHED CLEANUP ────────
+ *
+ * The retirement is COMPLETE (2026-07-29): the 76 VendorEarning rows are `cancelled`. That does
+ * NOT make this set finished work — it is what makes it permanent. The fabricated `Payout` rows
+ * are KEPT DELIBERATELY (deleting them destroys the artifact the transfer-existence audit
+ * names), so every consumer below has to keep recognising them forever.
+ *
  *   1. `lib/transfer-existence.ts` — suppresses these from the transfer-existence audit, so a
  *      FIFTH pollution incident still fails loudly instead of hiding among them.
  *   2. `lib/vendor-earnings.ts` — makes the written-off slice render as NOTHING on every
  *      vendor-facing surface. Deleting this set would silently show vendors money that was
  *      never sent.
- * Removing an entry re-breaks both. This file deliberately imports NOTHING, so the display path
- * never pulls in Stripe or the DB to read it.
+ *   3. `lib/reconciler.ts` (patternX) — the sweep's Pattern X2 heals a non-`paid` earning back
+ *      to `paid` from any un-reversed Payout row, reasoning "the transfer settled, so the money
+ *      MOVED". For these it never moved. ⚠️ THIS IS NOT HYPOTHETICAL: on 2026-07-28 the first
+ *      remediation cancelled all 76 rows and X2 healed every one back within 250ms, re-stamping
+ *      `paidAt` and the fabricated `stripeTransferId`. DELETE THIS SET AND THE NEXT SWEEP
+ *      RESURRECTS THE COHORT — silently, and the ledger goes back to over-reporting paid by
+ *      $3,018.34.
+ *
+ * Removing an entry re-breaks all three. This file deliberately imports NOTHING, so the display
+ * path never pulls in Stripe or the DB to read it.
  */
 
 /** Transfer ids that exist in our ledger and have never existed in Stripe. */

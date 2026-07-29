@@ -70,8 +70,16 @@ assert(!/createdAt >= A\.|createdAt < A\./.test(lib), 'and nothing compares a ro
 const cohort = readFileSync('lib/pollution-cohort.ts', 'utf8')
 assert(/WHY IDS AND NOT A DATE WINDOW/.test(cohort),
   'the reason a window is unsafe is recorded where the next person would reach for one')
-assert(/LOAD-BEARING IN TWO PLACES/.test(cohort),
-  'and the set records BOTH consumers, so it cannot be pruned as stale cleanup')
+// Assert the DEPENDENTS BY NAME, not a "TWO PLACES" phrase — the count changed (a third
+// consumer, patternX, was added after Pattern X2 resurrected the whole cohort), and a guard
+// pinned to a magic phrase makes the doc harder to correct than to leave wrong.
+assert(/PERMANENT/.test(cohort) && /DO NOT PRUNE/.test(cohort),
+  'the set is marked PERMANENT — the retirement is what makes it load-bearing, not what ends it')
+for (const dependent of ['lib/transfer-existence.ts', 'lib/vendor-earnings.ts', 'lib/reconciler.ts']) {
+  assert(cohort.includes(dependent), `  ↳ names its dependent ${dependent}, so pruning it has a visible cost`)
+}
+assert(/patternX|Pattern X2/.test(cohort),
+  '  ↳ and names Pattern X2 specifically — the consumer that silently resurrects the cohort if this set is deleted')
 assert(!/^import /m.test(cohort),
   'the cohort module imports NOTHING — the vendor display path must not pull in Stripe or the DB to read it')
 
