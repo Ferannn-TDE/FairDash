@@ -54,6 +54,38 @@ export const PROTECTED_EVENT_SLUGS = new Set<string>([
   LIVE_PROTECTED_EVENT_SLUG,
 ])
 
+/**
+ * ── THE CI DETECTOR'S PREDICATE — what counts as "this script names a protected event" ──────
+ *
+ * Lives here, beside the constants, because it is the same truth: the ways a script can reach a
+ * protected event are the literal id, the literal slug, and the EXPORTED SYMBOLS above.
+ *
+ * ⚠️ THE HOLE THIS CLOSES (found 2026-07-29, during the fourth pollution cleanup). The detector
+ * used to grep raw source for the literal cuid only. `scripts/retire-pollution-cohort.ts` imports
+ * `LIVE_PROTECTED_EVENT_ID` as a SYMBOL and never contains the literal — so the script that wrote
+ * to all 76 rows of a protected event walked through the net invisibly. It was found by auditing
+ * the script, not by the guard that exists to find exactly this.
+ *
+ * BOTH inputs are comment-stripped by the caller. That matters in both directions:
+ *   • detection — a comment DISCUSSING the cohort must not be flagged as a reference, or the
+ *     pressure is to delete the reasoning to keep the suite green (guards-scan-code-not-prose).
+ *   • EXEMPTION — the more dangerous one. `usesGuardedClient` was `src.includes('guardedPrisma')`
+ *     over RAW source, so a script that merely MENTIONS guardedPrisma in its header excused
+ *     itself from the check. retire-pollution-cohort.ts did precisely that, in prose written to
+ *     explain that it does NOT use guardedPrisma. A comment cannot grant an exemption.
+ */
+export function referencesProtectedEvent(strippedSource: string): boolean {
+  for (const id of PROTECTED_EVENT_IDS) if (strippedSource.includes(id)) return true
+  for (const slug of PROTECTED_EVENT_SLUGS) if (strippedSource.includes(slug)) return true
+  // Word-bounded so a longer identifier that merely contains the name is not a false positive.
+  return /\bLIVE_PROTECTED_EVENT_(ID|SLUG)\b/.test(strippedSource)
+}
+
+/** True when the script actually CONSTRUCTS a guarded client — in code, never in prose. */
+export function usesGuardedClient(strippedSource: string): boolean {
+  return /\bguardedPrisma\b/.test(strippedSource)
+}
+
 export class ProdWriteBlockedError extends Error {
   constructor(model: string, eventId: string) {
     super(

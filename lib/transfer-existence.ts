@@ -60,7 +60,13 @@ export interface TransferCheckResult {
 }
 
 /**
- * ⚠️ TEMPORARY — pending the cleanup decision on the 2026-07-16/17 pollution.
+ * ⛔ PERMANENT — NOT a temporary marker awaiting cleanup. The cleanup is DONE (2026-07-29).
+ *
+ * This said "TEMPORARY — pending the cleanup decision". The decision was made and executed: the
+ * VendorEarning rows are retired to `cancelled`, and the fabricated `Payout` rows STAY, on
+ * purpose — they are the artifact this very check names. So the set does not expire; retiring
+ * the earnings is precisely what makes it permanent. See lib/pollution-cohort.ts for the three
+ * dependents and what breaks if it is pruned.
  *
  * 76 `Payout` rows on Italian Fest 2026 carry transfer ids Stripe has never had. They are
  * DECLARED here so the check is usable today: anything OUTSIDE this set fails loudly.
