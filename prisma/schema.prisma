@@ -42,14 +42,14 @@ model Event {
   timezone    String  @default("America/Chicago")
 
   // Venue + fair details captured by the organizer create-fair wizard.
-  venueAddress String?
-  venueCity    String?
-  venueState   String?
-  venueZip     String?
-  openTime     String?   // fair daily open  "HH:MM"
-  closeTime    String?   // fair daily close "HH:MM"
-  maxVendors   Int?      // cap on vendors at this fair (distinct from maxVendorsPerOrder cart cap)
-  admissionFree Boolean  @default(true)
+  venueAddress  String?
+  venueCity     String?
+  venueState    String?
+  venueZip      String?
+  openTime      String? // fair daily open  "HH:MM"
+  closeTime     String? // fair daily close "HH:MM"
+  maxVendors    Int? // cap on vendors at this fair (distinct from maxVendorsPerOrder cart cap)
+  admissionFree Boolean @default(true)
 
   // Platform controls
   isPaused Boolean @default(false) // one-button platform pause — blocks new orders
@@ -57,21 +57,21 @@ model Event {
   // Operational timing
   orderAcceptanceWindowSec Int @default(120) // how long vendor has to accept before auto-cancel
   vendorOfflineHideSec     Int @default(300) // hide vendor from menu after this many seconds offline
-  maxVendorsPerOrder       Int @default(5)   // cart cap
+  maxVendorsPerOrder       Int @default(5) // cart cap
 
   // Customer-facing content
   welcomeMessage      String? // shown on fair home page, max 120 chars
   showVendorWaitTimes Boolean @default(true)
-  allowGuestBrowse    Boolean @default(true)  // browse menu without logging in
+  allowGuestBrowse    Boolean @default(true) // browse menu without logging in
 
   // Featured vendors section
-  featuredVendorIds String[]  @default([])
-  featuredLabel     String?   // e.g. "Featured Today", "Staff Picks"
-  featuredEnabled   Boolean   @default(true)
+  featuredVendorIds String[] @default([])
+  featuredLabel     String? // e.g. "Featured Today", "Staff Picks"
+  featuredEnabled   Boolean  @default(true)
 
   // Operator service charge (goes 100% to operator, not FairSynq)
   serviceChargeEnabled    Boolean @default(false)
-  serviceChargeAmount     Float?  // e.g., 1.50 per order
+  serviceChargeAmount     Float? // e.g., 1.50 per order
   operatorStripeAccountId String? // destination for service charge + delivery fee transfers
 
   // Organizer
@@ -103,7 +103,7 @@ model Event {
 }
 
 enum EventStatus {
-  ACTIVE   // Event is live and accepting orders
+  ACTIVE // Event is live and accepting orders
   UPCOMING // Event is scheduled but not yet open
   INACTIVE // Event has ended or been deactivated
 }
@@ -128,21 +128,21 @@ model FulfillmentConfig {
   curbsideZoneLng         Float?
   curbsideZoneDescription String? // e.g. "North parking lot, Row A"
   curbsideMethod          CurbsideMethod?
-  curbsideFee             Float   @default(0) // Flat fee for curbside (default $0, optional). Same runner/organizer split as delivery.
+  curbsideFee             Float           @default(0) // Flat fee for curbside (default $0, optional). Same runner/organizer split as delivery.
 
   // ── Home delivery config ───────────────────────────────────────────────────
-  homeDeliveryFee            Float? // Flat fee charged to customer
+  homeDeliveryFee Float? // Flat fee charged to customer
 
   // ── Fee split ──────────────────────────────────────────────────────────────
   // What % of the applicable runner-fulfilled fee (delivery or curbside) goes to
   // the RUNNER (0–100). The leftover (100 − this) is the ORGANIZER's earning.
-  runnerFeePercent Int @default(0)
+  runnerFeePercent           Int     @default(0)
   // Activation acknowledgment: enabling a runner-fulfilled mode (home delivery, or
   // runner-delivers curbside) with runnerFeePercent = 0 means runners earn TIPS ONLY —
   // a legitimate but unusual choice (volunteer/church-fair runners). The admin must set
   // this true to confirm 0-by-intent; the config write refuses 0-by-absence otherwise.
   // See lib/runner-fee-gate.ts.
-  runnerTipsOnlyAck Boolean @default(false)
+  runnerTipsOnlyAck          Boolean @default(false)
   homeDeliveryRadiusKm       Float? // Max delivery radius from event coords
   runnerTransportDescription String? // e.g. "Delivered by golf cart"
 
@@ -154,7 +154,7 @@ model FulfillmentConfig {
 
 enum CurbsideMethod {
   RUNNER_DELIVERS // Runner brings the order to the customer's vehicle
-  CUSTOMER_WALKS  // Customer walks to a designated handoff zone
+  CUSTOMER_WALKS // Customer walks to a designated handoff zone
 }
 
 // ============================================================================
@@ -185,23 +185,23 @@ model User {
   notifMenuRequests  Boolean @default(true)
   notifDailySummary  Boolean @default(false)
 
-  role         String   @default("customer") // customer | vendor | organizer | runner
+  role         String    @default("customer") // customer | vendor | organizer | runner
   avatarUrl    String?
-  isActive     Boolean  @default(true)
+  isActive     Boolean   @default(true)
   lastSignInAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  orders        Order[]
-  vendorMembers VendorMember[]
-  adminUsers    AdminUser[]
-  runner        Runner?
+  orders             Order[]
+  vendorMembers      VendorMember[]
+  adminUsers         AdminUser[]
+  runner             Runner?
   runnerApplications RunnerApplication[]
-  orgMembers    OrgMember[]
-  favoriteItems FavoriteItem[]
-  vendorAuditLogs VendorAuditLog[]
+  orgMembers         OrgMember[]
+  favoriteItems      FavoriteItem[]
+  vendorAuditLogs    VendorAuditLog[]
 
   @@index([clerkId])
   @@index([email])
@@ -229,10 +229,10 @@ model Vendor {
   vendorType VendorType @default(OPTION_A)
 
   // Status
-  status    VendorStatus @default(PENDING)
-  isBusy    Boolean      @default(false)
-  busyUntil DateTime? // Auto-clears after 15 min
-  isOffline Boolean      @default(false) // Vendor entirely offline
+  status          VendorStatus @default(PENDING)
+  isBusy          Boolean      @default(false)
+  busyUntil       DateTime? // Auto-clears after 15 min
+  isOffline       Boolean      @default(false) // Vendor entirely offline
   lastHeartbeatAt DateTime? // Updated every 30s by vendor dashboard; stale > 5 min → auto-hide
 
   // ── Onboarding documents (SENSITIVE — insurance certificate, business licence) ──
@@ -303,25 +303,25 @@ model Vendor {
   updatedAt DateTime @updatedAt
 
   // Relations
-  menuItems     MenuItem[]
-  orders             Order[]
-  orderItems         OrderItem[]
+  menuItems           MenuItem[]
+  orders              Order[]
+  orderItems          OrderItem[]
   vendorOrderStatuses VendorOrderStatus[]
-  vendorMembers      VendorMember[]
-  cancellations      Cancellation[]
-  payouts            Payout[]
-  notifications      VendorNotification[]
-  disputes           Dispute[]
-  menuRequests       MenuRequest[]
-  auditLogs          VendorAuditLog[]
-  payoutHolds        PayoutHold[]
-  refunds            Refund[]
-  refundRequests     RefundRequest[]
-  vendorEarnings     VendorEarning[]
+  vendorMembers       VendorMember[]
+  cancellations       Cancellation[]
+  payouts             Payout[]
+  notifications       VendorNotification[]
+  disputes            Dispute[]
+  menuRequests        MenuRequest[]
+  auditLogs           VendorAuditLog[]
+  payoutHolds         PayoutHold[]
+  refunds             Refund[]
+  refundRequests      RefundRequest[]
+  vendorEarnings      VendorEarning[]
 
   @@unique([eventId, slug], map: "uq_vendor_event_slug")
-  @@index([eventId, status],   map: "idx_vendor_event_status")
-  @@index([eventId, isOffline],map: "idx_vendor_event_active")
+  @@index([eventId, status], map: "idx_vendor_event_status")
+  @@index([eventId, isOffline], map: "idx_vendor_event_active")
   @@index([status])
   @@index([stripeVerified])
   @@index([isOffline])
@@ -333,11 +333,11 @@ enum VendorType {
 }
 
 enum VendorStatus {
-  PENDING   // Application submitted, awaiting approval
-  ACTIVE    // Approved and live
-  PAUSED    // Temporarily paused by operator
+  PENDING // Application submitted, awaiting approval
+  ACTIVE // Approved and live
+  PAUSED // Temporarily paused by operator
   SUSPENDED // Suspended by admin
-  REJECTED  // Application declined
+  REJECTED // Application declined
 }
 
 model VendorMember {
@@ -394,13 +394,13 @@ model MenuItem {
 // ============================================================================
 
 model MenuRequest {
-  id          String            @id @default(cuid())
+  id          String @id @default(cuid())
   vendorId    String
-  vendor      Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  requestedBy String            // userId
+  vendor      Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  requestedBy String // userId
 
-  type        MenuRequestType
-  status      MenuRequestStatus @default(PENDING)
+  type   MenuRequestType
+  status MenuRequestStatus @default(PENDING)
 
   // Proposed item fields (used for ADD and EDIT)
   name        String?
@@ -411,16 +411,16 @@ model MenuRequest {
   imageUrl    String?
 
   // For EDIT and DELETE — the existing item being modified
-  menuItemId  String?
-  menuItem    MenuItem?         @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  menuItemId String?
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
 
   // Review
-  reviewedBy  String?
-  reviewedAt  DateTime?
-  reviewNote  String?
+  reviewedBy String?
+  reviewedAt DateTime?
+  reviewNote String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([vendorId])
   @@index([status])
@@ -460,12 +460,12 @@ model Order {
   fulfillmentType FulfillmentType @default(BOOTH_PICKUP)
 
   // Pricing (all in USD)
-  subtotal     Float  // Sum of item prices × quantities
+  subtotal     Float // Sum of item prices × quantities
   deliveryFee  Float? // The applicable runner-fulfilled fee (home delivery OR curbside); split runner/organizer. Null/0 for booth pickup.
   tip          Float? // Customer tip on runner-fulfilled orders only. 100% the runner's; NO service fee, NO split. Null/0 otherwise.
-  total        Float  // subtotal + serviceFee(10%×subtotal) + deliveryFee + serviceCharge + tip
-  fairSynqFee  Float  // FairSynq revenue = 10% service fee charged to the customer on top (on subtotal only)
-  vendorPayout Float  // = subtotal in full — vendor keeps everything, no commission deducted
+  total        Float // subtotal + serviceFee(10%×subtotal) + deliveryFee + serviceCharge + tip
+  fairSynqFee  Float // FairSynq revenue = 10% service fee charged to the customer on top (on subtotal only)
+  vendorPayout Float // = subtotal in full — vendor keeps everything, no commission deducted
 
   // Customer info
   customerName   String
@@ -569,7 +569,7 @@ model Order {
   uncollectedAt DateTime?
 
   // Async payout status (set by process-vendor-payout worker)
-  payoutStatus  PayoutStatus?
+  payoutStatus PayoutStatus?
 
   // Part B B4 — tip-refund record (1:1 with the order, so the order row carries it,
   // ledger-as-record like the runner case). Set when a CANCELLED runner-fulfilled
@@ -605,11 +605,11 @@ model Order {
   organizerEarning    OrganizerEarning?
   vendorEarnings      VendorEarning[] // N per order (one per payable vendor)
 
-  @@unique([placedAt, id],                   map: "uq_order_placed_id")
+  @@unique([placedAt, id], map: "uq_order_placed_id")
   @@index([customerId, placedAt(sort: Desc)], map: "idx_order_customer_placed")
-  @@index([eventId, status],                 map: "idx_order_event_status")
-  @@index([eventId, placedAt(sort: Desc)],   map: "idx_order_event_placed")
-  @@index([vendorId, placedAt(sort: Desc)],  map: "idx_order_vendor_placed")
+  @@index([eventId, status], map: "idx_order_event_status")
+  @@index([eventId, placedAt(sort: Desc)], map: "idx_order_event_placed")
+  @@index([vendorId, placedAt(sort: Desc)], map: "idx_order_vendor_placed")
   @@index([vendorId, status, placedAt(sort: Desc)], map: "idx_order_vendor_status_placed")
   @@index([status])
   @@index([fulfillmentType])
@@ -618,29 +618,29 @@ model Order {
 }
 
 enum OrderStatus {
-  PENDING_PAYMENT  // Order created, awaiting Stripe payment confirmation
-  PLACED           // Payment confirmed — awaiting vendor acceptance
-  ACCEPTED         // Vendor accepted (starts $5 cancellation fee window)
-  PREPARING        // Vendor is preparing the order
-  READY            // Ready for pickup / runner dispatched
+  PENDING_PAYMENT // Order created, awaiting Stripe payment confirmation
+  PLACED // Payment confirmed — awaiting vendor acceptance
+  ACCEPTED // Vendor accepted (starts $5 cancellation fee window)
+  PREPARING // Vendor is preparing the order
+  READY // Ready for pickup / runner dispatched
   RUNNER_COLLECTED // Runner confirmed pickup from vendor booth
-  COMPLETED        // Collected by customer or delivered by runner
-  DELIVERED        // Runner confirmed home delivery (GPS-verified)
-  CANCELLED        // Cancelled by vendor, customer, or system
-  UNCOLLECTED      // Customer never collected (10-min timeout after READY)
-  UNDELIVERABLE    // Home delivery address unreachable by runner
+  COMPLETED // Collected by customer or delivered by runner
+  DELIVERED // Runner confirmed home delivery (GPS-verified)
+  CANCELLED // Cancelled by vendor, customer, or system
+  UNCOLLECTED // Customer never collected (10-min timeout after READY)
+  UNDELIVERABLE // Home delivery address unreachable by runner
 }
 
 enum FulfillmentType {
-  BOOTH_PICKUP  // Customer collects directly at vendor booth
-  CURBSIDE      // Runner delivers to customer's vehicle in parking zone
+  BOOTH_PICKUP // Customer collects directly at vendor booth
+  CURBSIDE // Runner delivers to customer's vehicle in parking zone
   HOME_DELIVERY // Runner delivers to customer's off-site address
 }
 
 enum PayoutStatus {
-  PENDING    // Job enqueued, transfer not yet attempted
-  COMPLETED  // Stripe transfer succeeded
-  FAILED     // All retry attempts exhausted — requires manual intervention
+  PENDING // Job enqueued, transfer not yet attempted
+  COMPLETED // Stripe transfer succeeded
+  FAILED // All retry attempts exhausted — requires manual intervention
 }
 
 model OrderItem {
@@ -649,7 +649,7 @@ model OrderItem {
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   vendorId String
-  vendor   Vendor   @relation(fields: [vendorId], references: [id])
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
 
   menuItemId String
   menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
@@ -660,16 +660,16 @@ model OrderItem {
 
   quantity            Int
   unitPrice           Float
-  totalPrice          Float  // unitPrice * quantity, stored at creation time
+  totalPrice          Float // unitPrice * quantity, stored at creation time
   subtotal            Float
   specialInstructions String?
 
   createdAt DateTime @default(now())
 
-  @@index([vendorId, orderId],             map: "idx_orderitem_vendor_order")
-  @@index([menuItemId],                    map: "idx_orderitem_menuitem")
+  @@index([vendorId, orderId], map: "idx_orderitem_vendor_order")
+  @@index([menuItemId], map: "idx_orderitem_menuitem")
   @@index([orderId])
-  @@index([vendorId, createdAt],           map: "idx_orderitem_vendor_created")
+  @@index([vendorId, createdAt], map: "idx_orderitem_vendor_created")
   @@index([vendorId, menuItemId, createdAt], map: "idx_orderitem_vendor_menu_created")
 }
 
@@ -701,7 +701,7 @@ model VendorOrderStatus {
   updatedAt DateTime @updatedAt
 
   @@unique([orderId, vendorId])
-  @@index([status],           map: "idx_vos_status")
+  @@index([status], map: "idx_vos_status")
   @@index([vendorId, status], map: "idx_vos_vendor_status")
 }
 
@@ -825,13 +825,13 @@ model Refund {
   vendorId String
   vendor   Vendor @relation(fields: [vendorId], references: [id])
 
-  amountCents      Int     // vendor subtotal slice returned to customer (NEVER the fee)
+  amountCents      Int // vendor subtotal slice returned to customer (NEVER the fee)
   reason           String?
-  status           String  // PENDING | COMPLETED | FAILED
+  status           String // PENDING | COMPLETED | FAILED
   stripeRefundId   String? // the customer refund on the original charge
   stripeReversalId String? // CASE 2 only — transfer reversal clawing back the vendor
 
-  createdBy String?  // actor id (admin/organizer/customer/system)
+  createdBy String? // actor id (admin/organizer/customer/system)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -861,7 +861,7 @@ model RefundRequest {
   vendor   Vendor @relation(fields: [vendorId], references: [id])
 
   reason      String?
-  status      String   @default("PENDING") // PENDING | APPROVED | DENIED
+  status      String    @default("PENDING") // PENDING | APPROVED | DENIED
   requestedBy String
   resolvedBy  String?
   resolvedAt  DateTime?
@@ -891,7 +891,7 @@ model NegativeBalanceEvent {
   orderId  String
   vendorId String
 
-  amountCents Int     // amount FairSynq fronted that the vendor owes back
+  amountCents Int // amount FairSynq fronted that the vendor owes back
   reversalId  String? // the Stripe transfer reversal that went negative
   status      String  @default("open") // open | chased | recovered
   // What created this debt: refund_reversal (CASE 2 refund), dispute_clawback
@@ -928,15 +928,15 @@ model Chargeback {
 
   stripeDisputeId String  @unique // idempotency anchor — dispute events redeliver
   stripeChargeId  String
-  amountCents     Int     // the whole charge the bank pulled
-  feeCents        Int     // Stripe's dispute fee (~$15), FairSynq-absorbed-but-recoverable
+  amountCents     Int // the whole charge the bank pulled
+  feeCents        Int // Stripe's dispute fee (~$15), FairSynq-absorbed-but-recoverable
   reason          String? // Stripe dispute reason
 
   // Mirrors Stripe dispute.status: needs_response | under_review | won | lost | ...
   status          String
   atFaultVendorId String? // admin-set (or inferred); the fee is recoverable from them
   clawbackStatus  String  @default("pending") // pending | done | partial
-  fundsReinstated Boolean @default(false)     // set on funds_reinstated (WON) — admin reconciles
+  fundsReinstated Boolean @default(false) // set on funds_reinstated (WON) — admin reconciles
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -957,7 +957,7 @@ model AdminUser {
 
   role    AdminRole
   eventId String? // null = super_admin (platform-wide), set = event_operator
-  event   Event?  @relation(fields: [eventId], references: [id])
+  event   Event?    @relation(fields: [eventId], references: [id])
 
   createdAt DateTime @default(now())
 
@@ -967,7 +967,7 @@ model AdminUser {
 }
 
 enum AdminRole {
-  SUPER_ADMIN    // Full platform access
+  SUPER_ADMIN // Full platform access
   EVENT_OPERATOR // Scoped to a single event
 }
 
@@ -995,12 +995,12 @@ model VendorNotification {
 // ============================================================================
 
 model FairOrganizer {
-  id               String   @id @default(cuid())
+  id               String  @id @default(cuid())
   name             String
   contactEmail     String
   contactPhone     String?
   website          String?
-  stripeCustomerId String?  // for 2027 licensing billing
+  stripeCustomerId String? // for 2027 licensing billing
 
   // Stripe Connect (Part B payout destination). Deliberately at the ORGANIZER
   // level, NOT per-event: one organizer = one connected account, reused across
@@ -1032,7 +1032,7 @@ model FairOrganizer {
   // the existing organizer-suspend route — NOT the fair-scoped chokepoint.
   approvalStatus  ApprovalStatus @default(PENDING)
   approvedAt      DateTime?
-  approvedBy      String?        // admin Clerk id (or 'system-grandfather')
+  approvedBy      String? // admin Clerk id (or 'system-grandfather')
   rejectionReason String?
 
   // A6 kill-switch — org-wide suspension (D4). When suspendedAt is set, EVERY
@@ -1103,7 +1103,7 @@ model Runner {
   // fields are the shared shape organizer approval (#7) will mirror.
   approvalStatus  ApprovalStatus @default(PENDING)
   approvedAt      DateTime?
-  approvedBy      String?        // admin User.id who approved/rejected
+  approvedBy      String? // admin User.id who approved/rejected
   rejectionReason String?
 
   // ── DEPRECATED, write-dead (2026-07-23) — do NOT wire these back up ─────────
@@ -1121,7 +1121,7 @@ model Runner {
   // Live GPS (written every ~10s during active RUNNER_COLLECTED delivery)
   currentLat        Float?
   currentLng        Float?
-  currentAccuracy   Float?    // GPS accuracy in meters (Phase 3: stale/precision UX)
+  currentAccuracy   Float? // GPS accuracy in meters (Phase 3: stale/precision UX)
   locationUpdatedAt DateTime?
 
   // Stripe Connect (Part B payout destination — net-new for runners; mirrors
@@ -1201,7 +1201,7 @@ model RunnerEarning {
   runnerId String
   runner   Runner @relation(fields: [runnerId], references: [id], onDelete: Cascade)
 
-  amountCents Int      // = runnerShare (runner% × applicable fee) + tip, in cents. RECORDED, not paid (payout deferred to Part B).
+  amountCents Int // = runnerShare (runner% × applicable fee) + tip, in cents. RECORDED, not paid (payout deferred to Part B).
   // tracked | held | cancelled | paid
   //   tracked   — payable once the window closes (the default accrual state)
   //   held      — C1 admin hold: the executor gate refuses to pay. REVERSIBLE
@@ -1212,7 +1212,7 @@ model RunnerEarning {
   //               reconciler sweep (this is what stops a cancelled payout coming back
   //               as an "unpaid straggler" forever).
   //   paid      — the B2 executor transferred it.
-  status      String   @default("tracked")
+  status      String @default("tracked")
 
   // Part B B2 payout record. The ledger row DOUBLES as the payout record (just as
   // the unpaid row IS the hold) — no separate RunnerPayout table. On a successful
@@ -1282,7 +1282,7 @@ model RunnerApplication {
 }
 
 enum RunnerApplicationStatus {
-  PENDING  // Submitted, awaiting review
+  PENDING // Submitted, awaiting review
   APPROVED // Accepted — an admin may now create an event-scoped Runner
   REJECTED // Declined (e.g. failed background check)
 }
@@ -1299,7 +1299,7 @@ model OrganizerEarning {
 
   organizerId String? // resolved from the event's organizer when available
 
-  amountCents Int    // = organizerShare (applicable fee − runnerShare), in cents
+  amountCents Int // = organizerShare (applicable fee − runnerShare), in cents
   source      String // delivery_fee_share | curbside_fee_share
   // accrued | held | cancelled | paid  (C1 adds held/cancelled — see RunnerEarning.status)
   // planOrganizerPayout's batch set filters `status: 'accrued'`, so a held or
@@ -1341,7 +1341,7 @@ model OrganizerPayout {
 
   organizerId String? // the FairOrganizer paid (resolved via the event)
 
-  totalCents       Int     // = Σ amountCents of the covered earnings (the proven set sum)
+  totalCents       Int // = Σ amountCents of the covered earnings (the proven set sum)
   // pending | held | paid | failed
   //   held — C1 admin hold on an ALREADY-FORMED batch. Distinct from holding the
   //          individual earnings: once a batch exists it is the idempotency anchor,
@@ -1473,8 +1473,8 @@ model AdminMoneyAction {
 }
 
 enum RunnerStatus {
-  OFFLINE     // Not active / off shift
-  ACTIVE      // Checked in and available for dispatch
+  OFFLINE // Not active / off shift
+  ACTIVE // Checked in and available for dispatch
   ON_DELIVERY // Currently fulfilling an order
 }
 
@@ -1501,13 +1501,13 @@ model IncidentReport {
   runner   Runner @relation(fields: [runnerId], references: [id])
 
   type          IncidentType
-  affectedItems Json?   // array of orderItemIds; null = entire order
+  affectedItems Json? // array of orderItemIds; null = entire order
   notes         String?
   photoUrl      String?
 
   reportedAt          DateTime  @default(now())
   resolvedAt          DateTime?
-  resolution          String?   // full_refund | partial_refund | replacement | none
+  resolution          String? // full_refund | partial_refund | replacement | none
   autoRefundTriggered Boolean   @default(false)
 
   @@index([orderId])
@@ -1546,8 +1546,8 @@ model Dispute {
 }
 
 enum DisputeStatus {
-  OPEN      // Filed, awaiting admin action
-  RESOLVED  // Admin has resolved
+  OPEN // Filed, awaiting admin action
+  RESOLVED // Admin has resolved
   ESCALATED // 24-hour SLA elapsed without action
 }
 
@@ -1562,10 +1562,10 @@ model OrderEvent {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  eventType String  // placed | accepted | preparing | ready | runner_collected | completed | delivered | cancelled | uncollected | undeliverable
+  eventType String // placed | accepted | preparing | ready | runner_collected | completed | delivered | cancelled | uncollected | undeliverable
   actorId   String? // userId of who triggered this transition
   actorRole String? // customer | vendor | runner | system
-  metadata  Json?   // e.g., { reason: "...", refundAmount: 5.00 }
+  metadata  Json? // e.g., { reason: "...", refundAmount: 5.00 }
 
   timestamp DateTime @default(now())
 
@@ -1578,7 +1578,7 @@ model OrderEvent {
 // one distinct human response), so it's an enum: an unrecognized value FAILS LOUD, matching
 // this neighborhood's derivation stance (VENDOR_PROGRESS throws rather than rank 0).
 enum StrandedReason {
-  CLAIMED_NOT_COLLECTED        // pre-collection stall: food is safe on the counter — find or release the runner
+  CLAIMED_NOT_COLLECTED // pre-collection stall: food is safe on the counter — find or release the runner
   RUNNER_UNREACHABLE_WITH_FOOD // post-collection: the runner has the bag and is unreachable — go find the runner
   AWAITING_VENDOR_CONFIRMATION // return requested, vendor hasn't confirmed — go tap the vendor
 }
@@ -1592,11 +1592,11 @@ model DeliveryCustodyEvent {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  eventType String  // collected | released | return_requested | return_confirmed | stranded | strand_cleared
+  eventType String // collected | released | return_requested | return_confirmed | stranded | strand_cleared
   actorId   String? // who acted (runner/vendor/organizer/admin userId, or null for system/reconciler)
   actorRole String? // runner | vendor | organizer | admin | system
   runnerId  String? // the runner in custody at the time (denormalized; survives Order.runnerId being nulled on release)
-  metadata  Json?   // e.g. { strandedReason, fromStatus, releasedTo: "pool", clearedBy }
+  metadata  Json? // e.g. { strandedReason, fromStatus, releasedTo: "pool", clearedBy }
 
   timestamp DateTime @default(now())
 
@@ -1623,11 +1623,11 @@ model PostEventReport {
   totalRevenue Float
 
   // Breakdown fields (JSON for flexibility)
-  revenueByType     Json  // { BOOTH_PICKUP: x, CURBSIDE: y, HOME_DELIVERY: z }
-  vendorBreakdown   Json  // [{ vendorId, name, revenue, orderCount, avgFulfillmentMins, cancellationRate }]
-  peakWindows       Json  // [{ windowStart, windowEnd, orderCount }] — 30-min buckets
-  runnerPerformance Json  // [{ runnerId, name, delivered, collected, rate, incidents }] — from lib/runner-completion (custody events), NOT the deprecated Runner counter columns; nothing writes this field yet
-  cancellationLog   Json  // [{ orderId, reason, cancelledBy, refundIssued, refundAmount }]
+  revenueByType     Json // { BOOTH_PICKUP: x, CURBSIDE: y, HOME_DELIVERY: z }
+  vendorBreakdown   Json // [{ vendorId, name, revenue, orderCount, avgFulfillmentMins, cancellationRate }]
+  peakWindows       Json // [{ windowStart, windowEnd, orderCount }] — 30-min buckets
+  runnerPerformance Json // [{ runnerId, name, delivered, collected, rate, incidents }] — from lib/runner-completion (custody events), NOT the deprecated Runner counter columns; nothing writes this field yet
+  cancellationLog   Json // [{ orderId, reason, cancelledBy, refundIssued, refundAmount }]
   platformIssues    Json? // any outages, heartbeat drops, Stripe errors
 
   recommendations String? // plain text, written by system or FairSynq staff
@@ -1673,19 +1673,19 @@ model ProcessedWebhookEvent {
 // ============================================================================
 
 model VendorAuditLog {
-  id        String   @id @default(cuid())
-  vendorId  String
-  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Action type — coarse-grained bucket for filtering
   // e.g., ORDER_ACCEPTED | ORDER_DECLINED | MENU_CHANGE_REQUESTED | SETTINGS_UPDATED
-  action    String
+  action String
 
   // Free-form structured data: orderId, menuItemId, before/after values, etc.
   // Stored as JSON — never queried by content, only returned as-is.
-  metadata  Json?
+  metadata Json?
 
   createdAt DateTime @default(now())
 
@@ -1708,7 +1708,7 @@ model RunnerProfileChange {
   runnerId String
   runner   Runner @relation(fields: [runnerId], references: [id], onDelete: Cascade)
 
-  field    String  // 'phone' | 'vehicleMake' | 'vehicleModel' | 'vehicleColor' | 'vehiclePlate'
+  field    String // 'phone' | 'vehicleMake' | 'vehicleModel' | 'vehicleColor' | 'vehiclePlate'
   oldValue String?
   newValue String?
 
@@ -1716,4 +1716,68 @@ model RunnerProfileChange {
 
   @@index([runnerId, changedAt])
   @@index([changedAt]) // Pattern W retention sweep scans by age
+}
+
+// ============================================================================
+// SWEEP RUN — the reconciler's durable history. One row per COMPLETED sweep.
+//
+// WHY THIS EXISTS. Until 2026-07-29 there was no durable record of sweep results at all:
+// `sum.repaired` went to logs with finite retention, and the Redis heartbeat holds one
+// timestamp overwritten every 60s. The consequence, measured: the ONLY durable proof any
+// pattern had ever repaired anything was 148 AdminMoneyAction rows from Pattern T, all inside
+// a 4-minute window on 2026-07-19 — and those came from a supervised one-off, not the routine
+// sweep catching a live leak. Twenty-two patterns were indistinguishable from dead code, and
+// no amount of reading the source resolved it. A quiet backstop and a broken one look the same
+// from outside; this table is what tells them apart.
+//
+// PER-PATTERN COUNTS AS JSON, NOT A CHILD TABLE — decided, not defaulted:
+//   • the map is always read WITH its parent (nobody wants a pattern count without the run),
+//     so the join a child table buys is a join nobody needs;
+//   • a child table costs ~21 rows per sweep = ~30k/day = ~11M/year, versus 1,440/day here;
+//   • the questions this must answer are still one query in JSONB —
+//       SELECT key, sum(value::int) FROM "SweepRun", jsonb_each_text(repaired) GROUP BY key;
+//   • the FULL map is stored (zeros included), not just non-zero entries, so a row also records
+//     WHICH PATTERNS EXISTED at that commit — which is how a pattern being added or removed
+//     stays visible in history rather than silently changing the denominator.
+//
+// WRITTEN AT THE END, next to the heartbeat: a row therefore means the sweep COMPLETED. A row
+// written at the start would claim runs that crashed midway. Best-effort — recordSweepRun
+// swallows its own errors, because losing the record of a sweep must never fail the sweep.
+//
+// DRY RUNS ARE RECORDED AND FLAGGED, never skipped: a dry run that WOULD have repaired
+// something is exactly the signal worth keeping.
+//
+// RETENTION: ~1,440 rows/day, ~525k/year, ~200B of JSON each (~105MB/yr) — comfortable for
+// years. NO automatic pruning is built (deleting history is how you lose the answer this table
+// exists to give). If it is ever wanted, the honest policy is downsampling, not deletion:
+// keep every row for 90 days, then one row per hour. Pattern W is the precedent for a real
+// deleter, deliberately NOT reused here.
+// ============================================================================
+model SweepRun {
+  id String @id @default(cuid())
+
+  startedAt  DateTime
+  finishedAt DateTime
+  durationMs Int
+
+  /// true ⇒ `repaired` counts what the sweep WOULD have done, not what it did.
+  dryRun Boolean
+
+  /// Worker build that produced this run (health.WORKER_COMMIT). Null/'unknown' when the
+  /// deploy did not expose a SHA — recorded honestly rather than defaulted to a lie.
+  commit String?
+
+  /// Per-pattern repaired counts, e.g. {"A":0,"B":0,...,"X":2}. The whole point: a global
+  /// repairedTotal=2 does not say which backstop earned its 60 seconds.
+  repaired Json
+
+  repairedTotal    Int
+  alertedCount     Int
+  suppressedCount  Int
+  ambiguousSkipped Int
+
+  createdAt DateTime @default(now())
+
+  @@index([startedAt])
+  @@index([dryRun, startedAt]) // "real runs, most recent first" is the common read
 }
