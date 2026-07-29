@@ -76,10 +76,16 @@ export type AuditPayeeType = PayeeType | 'customer'
 //      the string would put tip-refund rows in contention for that window and push older
 //      vendor/runner/organizer audits out of it, degrading the failed-since age those three
 //      lanes report. A separate namespace cannot contend.
+// LEDGER_HEAL is its OWN action, not a reuse of RELEASE/CANCEL, for the same namespace reason
+// as the two above: Pattern U windows on `action: 'PAYOUT_FAILED'` with take: 2000, and the
+// admin panel reads the payee-facing actions. A heal is neither — it is the reconciler stating
+// that the LEDGER moved, while no money did. Reusing an existing verb would make an audit row
+// claim an action nobody took.
 export type MoneyActionType =
   | 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND'
   | 'PAYOUT_FAILED'
   | 'TIP_REFUND_FAILED'
+  | 'LEDGER_HEAL'
 
 export interface AdminMoneyContext {
   /** From requireAdminFairContext — proves platform admin + resolves the fair. */

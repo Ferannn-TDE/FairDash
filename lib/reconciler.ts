@@ -48,6 +48,14 @@ import { findStuckPayouts } from './stuck-payouts'
 import { deriveMasterStatus, canAdvance, reconcileMasterStatus, type MasterStatus, type FulfillmentType } from './reconcile-order-status'
 import { reverseAccrualForRefundedPortion } from './reverse-accrual'
 import { isPollutedTransfer } from './pollution-cohort'
+import { writeMoneyAudit, type MoneyActor } from './admin-money'
+
+/**
+ * The sweep's own actor. Same vocabulary Pattern T already writes through the shared reverser
+ * (`{ id: 'reconciler', type: 'reconciler' }` — 148 such rows exist in production), so the two
+ * money-moving patterns are attributable the same way rather than each inventing an identity.
+ */
+const RECONCILER_ACTOR: MoneyActor = { id: 'reconciler', type: 'reconciler' }
 
 // ─── Tunables (all overridable per-run) ─────────────────────────────────────
 
@@ -1616,7 +1624,9 @@ export async function patternX(
   const [earnings, refunds, orders] = await Promise.all([
     db.vendorEarning.findMany({
       where: { orderId: { in: orderIds } },
-      select: { orderId: true, vendorId: true, status: true, netCents: true },
+      // `id` is selected ONLY so the heal's audit row can carry earningId, matching what the
+      // shared reverser records for Pattern T. It changes no filtering and no heal decision.
+      select: { id: true, orderId: true, vendorId: true, status: true, netCents: true },
     }),
     db.refund.findMany({
       where: { orderId: { in: orderIds }, status: 'COMPLETED' },
@@ -1718,10 +1728,52 @@ export async function patternX(
 
     if (o.dryRun) { sum.repaired.X++; sum.details.X.push(p.orderId!); continue }
 
-    // Conditional on still-not-paid, so a concurrent executor cannot be overwritten.
-    const healed = await db.vendorEarning.updateMany({
-      where: { orderId: p.orderId!, vendorId: p.vendorId, status: { not: 'paid' } },
-      data: { status: 'paid', netCents, stripeTransferId: p.stripeTransferId, paidAt: new Date() },
+    // ── THE HEAL, AND ITS RECORD — one transaction ──────────────────────────────────────
+    //
+    // ⚠️ WHY THIS IS AUDITED (2026-07-28). X2 is the ONLY pattern proven to have changed money
+    // rows in production at scale — 76 on that date — and it did so with NO AdminMoneyAction.
+    // The only reason anyone knows it fired is that it was reconstructed forensically from
+    // `paidAt` timestamps and `stripeTransferId` fingerprints, days later, while investigating
+    // why a remediation had silently reverted.
+    //
+    // The gap is ATTRIBUTION, not absence of a trace. X does leave `paidAt` + `stripeTransferId`
+    // behind — but they are indistinguishable from the executor's own write, and that difference
+    // is the whole point: the executor stamps a transfer it JUST CREATED, whereas X copies a
+    // transfer id that already existed and asserts `paid` having moved no money at all. Without
+    // a row saying so, those two writes read identically forever.
+    //
+    // IN THE SAME TRANSACTION, and conditional on count — an audit written outside the
+    // transaction can describe a heal that rolled back, and the array form
+    // `$transaction([update, audit])` cannot branch, so it would write the audit even when the
+    // update matched nothing. Both are the receipt-computed-from-intent class (§8).
+    //
+    // The `status: { not: 'paid' }` guard is UNCHANGED — a concurrent executor still wins.
+    const healed = await db.$transaction(async (tx) => {
+      const res = await tx.vendorEarning.updateMany({
+        where: { orderId: p.orderId!, vendorId: p.vendorId, status: { not: 'paid' } },
+        data: { status: 'paid', netCents, stripeTransferId: p.stripeTransferId, paidAt: new Date() },
+      })
+      if (res.count === 0) return res // lost the race → no heal, and therefore no audit row
+      await writeMoneyAudit(RECONCILER_ACTOR, p.eventId, {
+        action: 'LEDGER_HEAL',
+        payeeType: 'vendor',
+        payeeId: p.vendorId,
+        orderId: p.orderId,
+        earningId: earning.id,
+        amountCents: netCents,
+        reason:
+          `Pattern X2 backstop: transfer ${p.stripeTransferId} had already settled in Stripe while the ` +
+          `earning was still '${earning.status}'. The LEDGER was corrected to match; the reconciler ` +
+          `moved NO money and created no transfer.`,
+        metadata: {
+          pattern: 'X2',
+          previousStatus: earning.status,
+          newStatus: 'paid',
+          netCents,
+          stripeTransferId: p.stripeTransferId,
+        },
+      }, tx)
+      return res
     })
     if (healed.count > 0) {
       sum.repaired.X++

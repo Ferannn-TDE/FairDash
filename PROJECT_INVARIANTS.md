@@ -138,13 +138,39 @@ Each is a rule that, if violated, silently loses money or leaks data.
   exactly one place).
   <!-- guard: scripts/p6-admin-fair-chokepoint-proof.ts -->
 
-- **Money attribution — every admin money action writes an `AdminMoneyAction` in the same
-  transaction, attributed to `adminClerkId`.** `lib/admin-money.ts:31` (audit in the same tx),
-  `:84` (one shared `writeMoneyAudit`, not per-caller), `:108` (`adminAudit` always acts as the
-  `ctx.adminClerkId` actor). **Protects:** untraceable money moves, and the organizer-refund route
-  carrying admin authority — organizer money paths must attribute to the organizer, never borrow
-  admin identity.
+- **Money attribution — every money action writes an `AdminMoneyAction` in the same
+  transaction, attributed to the actor who ACTUALLY acted.** `lib/admin-money.ts:31` (audit in the
+  same tx), `:84` (one shared `writeMoneyAudit`, not per-caller), `:108` (`adminAudit` always acts
+  as the `ctx.adminClerkId` actor). **Protects:** untraceable money moves, and the organizer-refund
+  route carrying admin authority — organizer money paths must attribute to the organizer, never
+  borrow admin identity.
+
+  **⛔ THIS IS NOT AN ADMIN-ONLY RULE. A SYSTEM ACTION THAT MOVES MONEY NEEDS THE SAME TRACE AS A
+  HUMAN ONE.** The name `AdminMoneyAction` and the original wording ("every *admin* money action")
+  read as if automated actors were out of scope. They are not, and reading it that way cost real
+  visibility: **reconciler Pattern X2 changed 76 money rows in production on 2026-07-28 and wrote
+  nothing.** It was reconstructed forensically from `paidAt` timestamps and `stripeTransferId`
+  fingerprints, days later, while investigating why a remediation had silently reverted. The
+  schema always allowed for this — `actorType` is documented as `admin | organizer | system |
+  reconciler` — so the gap was the invariant's phrasing, not its design. `actorType='reconciler'`
+  is established vocabulary: 148 Pattern-T rows and, since 2026-07-29, Pattern X2's `LEDGER_HEAL`.
+
+  **Same transaction is the load-bearing half**, not a detail: an audit written *beside* the write
+  can describe a change that rolled back. `pollution-cohort-guard [8]` proves it by blocking the
+  audit INSERT with a trigger and asserting the heal rolls back with it — move the audit outside
+  the transaction and that one assertion fails alone while all the field checks still pass.
+
+  ⚠️ **Known and deliberately NOT covered: the three SUCCESS payout executors**
+  (`process-payout.ts:545`, `runner-payout.ts:336`, `organizer-payout.ts:259`) write no
+  `AdminMoneyAction`. They are attributable by a different artifact — each creates a `Payout` row
+  carrying a real Stripe transfer id, and Stripe is the system of record for money that actually
+  moved. Pattern X2 was categorically different: it asserted `paid` while moving no money, reusing
+  a transfer id it did not create, which is exactly what made its writes indistinguishable from the
+  executor's. Whether the executors should also audit is an open design call (volume: one row per
+  transfer per order), recorded here so the omission is a decision and not an oversight.
   <!-- guard: scripts/c1-admin-money-control-test.ts -->
+  *(the system/reconciler half is covered by `scripts/pollution-cohort-guard.ts` §[8] — one
+  marker per claim is the format, so it is named here in prose rather than a second ref.)*
 
 - **Reconcile is a monotonic fixed-point.** `lib/reconcile-order-status.ts:46` (`MASTER_RANK`
   drives monotonicity — the aggregator only ADVANCES, rank must strictly increase); `:170` (a vendor

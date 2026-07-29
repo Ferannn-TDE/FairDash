@@ -752,6 +752,21 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   4. **Second `--apply` — verified and HELD across ~10 sweeps.** Ledger, vendor display and
      sweep summary agree.
 
+  **↪ AND THE PATTERN THAT DID IT NOW LEAVES A RECORD (2026-07-29).** X2 was the only pattern
+  ever proven to change money rows in production at scale, and it wrote **no `AdminMoneyAction`
+  at all** — the 76 re-heals were reconstructible only because `paidAt` and `stripeTransferId`
+  happened to be stamped, and only by someone already looking. The gap was ATTRIBUTION rather
+  than absence of a trace: X's write is byte-indistinguishable from the executor's, and the
+  difference matters enormously — the executor stamps a transfer it **just created**, while X
+  copies an id that already existed and asserts `paid` having moved no money whatsoever.
+
+  It now writes a `LEDGER_HEAL` audit as `reconciler/reconciler` (the vocabulary Pattern T
+  already used), in the SAME transaction as the heal, carrying previousStatus → newStatus,
+  netCents, stripeTransferId and earningId. **X's behaviour is unchanged** — same
+  `status: { not: 'paid' }` guard, same cohort skip; this commit records what X does, it does
+  not alter it. `pollution-cohort-guard [8]` proves the atomicity with a trigger that blocks the
+  audit INSERT and asserts the heal rolls back with it.
+
   ⚠️ **TWO SETS OF 76 `AdminMoneyAction` ROWS EXIST FOR THIS COHORT — 152 rows, 76 earnings.**
   One from the reverted attempt, one from the successful one. **Both are accurate about what
   they did at the time**; neither is a bug and neither should be deleted. A future reader

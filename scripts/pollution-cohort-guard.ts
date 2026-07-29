@@ -19,11 +19,16 @@
  *   [5] the remediation script is dry-run-by-default, idempotent, and guarded
  *   [6] ⛔ the RECEIPT reports what the writes RETURNED — a no-op writer must print zero
  *   [7] ⛔ Pattern X2 cannot re-heal the cohort — the 2026-07-28 incident, reproduced
+ *   [8] ⛔ Pattern X2's heal is AUDITED, in the same transaction (atomicity proven by rollback)
  *
- * ⚠️ [5] IS TEXT, [6] AND [7] ARE BEHAVIOUR. [5] greps the remediation script's source, and a
+ * ⚠️ [5] IS TEXT, [6]–[8] ARE BEHAVIOUR. [5] greps the remediation script's source, and a
  * regex suite of exactly that kind passed on the night the apply run printed "76 rows cancelled"
  * against a ledger where nothing had stuck. Text checks pin the shape; only [6] and [7] execute
  * the receipt and the sweep, which is where both defects actually lived.
+ *
+ * [8] exists because X2 changed 76 money rows in prod with no AdminMoneyAction, and was found
+ * only by forensics. Its load-bearing assertion is the ROLLBACK one: move the audit outside the
+ * transaction and every field check still passes while that single assertion fails.
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/pollution-cohort-guard.ts
  */
@@ -273,10 +278,11 @@ async function main() {
       const e = await prisma.vendorEarning.create({ data: {
         eventId: ev.id, orderId: o.id, vendorId: ven.id, subtotalCents: 2979, netCents: 2979, status: 'cancelled',
       } })
-      return e.id
+      return { earningId: e.id, orderId: o.id, transferId }
     }
-    const cohortEarningId = await mkHealCase(POLLUTED)
-    const realEarningId   = await mkHealCase(`tr_real_${rand()}`)
+    const cohortCase = await mkHealCase(POLLUTED)
+    const real       = await mkHealCase(`tr_real_${rand()}`)
+    const cohortEarningId = cohortCase.earningId, realEarningId = real.earningId
 
     const sum: SweepSummary = {
       startedAt: new Date().toISOString(), finishedAt: '', durationMs: 0,
@@ -329,6 +335,67 @@ async function main() {
     const upsert = accrueSrc.slice(accrueSrc.indexOf('vendorEarning.upsert'), accrueSrc.indexOf('vendorEarning.upsert') + 400)
     assert(/update: \{ subtotalCents \}/.test(upsert),
       "⛔ the S chain: re-accrual's UPDATE branch is `{ subtotalCents }` only — a cancelled row survives re-accrual")
+
+    // ─────────────────────────────────────────────────────────────────────────────────────
+    console.log('\n[8] ⛔ Pattern X2 LEAVES A RECORD — the heal is audited, in the same transaction')
+    // On 2026-07-28 X2 changed 76 money rows in production and wrote NO AdminMoneyAction. It was
+    // reconstructed forensically from paidAt + stripeTransferId, days later. Every assertion here
+    // is scoped to the rows seeded above — never a table-wide count.
+    const healAudits = await prisma.adminMoneyAction.findMany({
+      where: { orderId: real.orderId }, // ← MY fixture only
+      select: { actorId: true, actorType: true, action: true, payeeType: true, payeeId: true,
+        earningId: true, amountCents: true, reason: true, metadata: true, eventId: true },
+    })
+    assert(healAudits.length === 1, `⛔ the heal wrote exactly ONE audit row for my order (got ${healAudits.length})`)
+    const a = healAudits[0]
+    assert(a?.actorType === 'reconciler' && a?.actorId === 'reconciler',
+      `actor is reconciler/reconciler — the vocabulary Pattern T already uses (got ${a?.actorType}/${a?.actorId})`)
+    assert(a?.action === 'LEDGER_HEAL', `action is LEDGER_HEAL, not a reused payee verb (got ${a?.action})`)
+    assert(a?.payeeType === 'vendor' && a?.payeeId === ven.id, 'payee is the vendor whose earning moved')
+    assert(a?.earningId === realEarningId, 'it names the exact earning row it changed')
+    assert(a?.amountCents === 2979, `and the amount (got ${a?.amountCents})`)
+    assert(a?.eventId === ev.id, 'scoped to the event, like every other money audit')
+    const md = (a?.metadata ?? {}) as Record<string, unknown>
+    assert(md.previousStatus === 'cancelled' && md.newStatus === 'paid',
+      `⛔ it records the TRANSITION (${md.previousStatus} → ${md.newStatus}) — the thing forensics had to infer`)
+    assert(md.stripeTransferId === real.transferId,
+      'and the transfer id it acted on, so a reader need not join back to Payout')
+    assert(md.pattern === 'X2', 'and names the pattern')
+    assert(/moved NO money/.test(a?.reason ?? ''),
+      '⛔ the reason states the reconciler moved no money — a heal is a LEDGER correction, not a payment')
+
+    // The cohort row: no heal, and therefore no audit either. Silence must be complete.
+    const cohortAudits = await prisma.adminMoneyAction.count({ where: { orderId: cohortCase.orderId } })
+    assert(cohortAudits === 0,
+      `⛔ the SKIPPED cohort row wrote no audit at all (got ${cohortAudits}) — a skip is not an action`)
+
+    // ── THE ATOMICITY PROOF ──────────────────────────────────────────────────────────────
+    // This is what separates an audit from a log line. A trigger makes the audit INSERT fail;
+    // if the write is genuinely in the same transaction, the heal must roll back with it and
+    // the earning must survive as 'cancelled'. Test DB only, dropped in `finally`.
+    const blocked = await mkHealCase(`tr_real_${rand()}`)
+    try {
+      await prisma.$executeRawUnsafe(
+        `CREATE OR REPLACE FUNCTION __block_heal() RETURNS trigger AS $$ BEGIN
+           RAISE EXCEPTION 'audit blocked for atomicity test'; END; $$ LANGUAGE plpgsql;`)
+      await prisma.$executeRawUnsafe(
+        `CREATE TRIGGER __block_heal_trg BEFORE INSERT ON "AdminMoneyAction"
+           FOR EACH ROW WHEN (NEW.action = 'LEDGER_HEAL') EXECUTE FUNCTION __block_heal();`)
+      let threw = false
+      try {
+        await patternX(sum, { scanCeiling: 5000, maxPerPattern: 5000, dryRun: false, windowStart: new Date(Date.now() - 24 * 3600_000) })
+      } catch { threw = true }
+      assert(threw, 'BASELINE: with the audit insert blocked, the heal transaction THROWS (the probe is live)')
+      const after = await prisma.vendorEarning.findUniqueOrThrow({ where: { id: blocked.earningId }, select: { status: true } })
+      assert(after.status === 'cancelled',
+        `⛔ THE ATOMICITY ASSERTION: a heal whose audit fails ROLLS BACK — earning stayed 'cancelled' (got '${after.status}'). ` +
+        `If this reads 'paid', the audit is a log line beside the write, not a record of it.`)
+      const orphan = await prisma.adminMoneyAction.count({ where: { orderId: blocked.orderId } })
+      assert(orphan === 0, '…and no audit row survives either — neither half committed')
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS __block_heal_trg ON "AdminMoneyAction";`)
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS __block_heal();`)
+    }
 
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `✅ pollution-cohort-guard: ${pass} passed, 0 failed` : `❌ pollution-cohort-guard: ${pass} passed, ${fail} failed`)
