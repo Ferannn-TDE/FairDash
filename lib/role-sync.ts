@@ -30,12 +30,11 @@ function getClerk() {
 //
 // EXCEPTION — admin family ('admin' | 'super_admin' | 'event_operator'): these
 // have NO DB membership model; they're granted by invite directly in Clerk
-// metadata. Sync PRESERVES any admin-family role already present and never
-// derives or drops it. (The admin gate reads roles[] via lib/roles.ts hasRole();
-// the legacy singular publicMetadata.role was migrated by
-// scripts/migrate-admin-to-roles.ts.)
-
-const ADMIN_FAMILY = ['admin', 'super_admin', 'event_operator']
+// metadata. (The admin gate reads roles[] via lib/roles.ts hasRole(); the legacy
+// singular publicMetadata.role was migrated by scripts/migrate-admin-to-roles.ts.)
+// They used to need an explicit carve-out here; under the union below they are
+// preserved for the same reason every other existing role is, so the special case
+// is gone rather than merely satisfied.
 
 /** Roles derived purely from a user's DB membership rows (the authority). */
 export async function computeRolesFromDb(userId: string): Promise<string[]> {
@@ -73,9 +72,23 @@ export async function syncUserRoleMetadata(
     ? (clerkUser.publicMetadata.roles as string[])
     : []
 
-  // Keep admin-family grants (metadata-only); recompute everything else from DB.
-  const preservedAdmin = existing.filter((r) => ADMIN_FAMILY.includes(r))
-  const roles = Array.from(new Set([...dbRoles, ...preservedAdmin]))
+  // UNION, not replace. This used to be `[...dbRoles, ...existing.filter(isAdminFamily)]`,
+  // which DISCARDED every non-admin role that had no DB row behind it — and that was reachable,
+  // because roles[] was also written optimistically at signup before any membership existed.
+  // Proven live on 2026-08-01: oodedai@siue.edu signed up as a vendor (roles ['vendor'], no
+  // VendorMember yet), then acquired organizer; the bootstrap's sync recomputed ['organizer']
+  // and silently dropped 'vendor'. Acquiring one role revoked another.
+  //
+  // The companion half of the fix removes the optimistic write (app/onboarding/page.tsx), so
+  // every entry here is now DB-backed by construction. Union is what makes that safe in BOTH
+  // directions: metadata can never contradict the rows, and a role can never vanish because a
+  // sync happened to run at a moment when its row hadn't been created yet.
+  //
+  // ⚠️ CONSEQUENCE — THIS FUNCTION CAN NO LONGER REMOVE A ROLE. That is safe only while nothing
+  // deletes a VendorMember / OrgMember / Runner row, which is a grep result, not an invariant.
+  // scripts/membership-delete-guard.ts is what turns it into one. If revocation is ever wanted,
+  // it must become an EXPLICIT call — never a side effect of a membership write.
+  const roles = Array.from(new Set([...existing, ...dbRoles]))
 
   await clerk.users.updateUserMetadata(user.clerkId, {
     publicMetadata: { ...clerkUser.publicMetadata, roles },

@@ -64,37 +64,37 @@ export default async function OnboardingPage({
     dbUserId = dbUser.id
   }
 
-  const existingRoles = Array.isArray(user.publicMetadata?.roles)
-    ? (user.publicMetadata.roles as string[])
-    : []
-
-  // We write BOTH singular `role` and `roles[]` here, deliberately:
-  //   • roles[]  — the GATING source of truth (lib/roles.ts, RoleContext, every
-  //                portal guard read this). Written directly here so it's present
-  //                from signup, before any membership row exists (vendor/runner/
-  //                customer have no membership at signup).
-  //   • role     — legacy singular field. Now UNREAD as a signal (the organizer
-  //                bootstrap below decides off `role` from searchParams, not off this
-  //                metadata field), but still written for continuity; full retirement
-  //                is a separate logged cleanup.
+  // ⛔ THIS PAGE NO LONGER WRITES roles[]. ⛔
   //
-  // SKIPPED WHEN IT WOULD BE A NO-OP. This page is now also on the SIGN-IN path for the
-  // operator roles (RoleAuthCard), which is what makes acquiring a second role possible at
-  // all — but it turns what was a once-per-signup Clerk write into a once-per-sign-in one.
-  // When roles[] already grants this role and the singular field already matches, the
-  // updateUser produces byte-identical metadata, so skipping it leaves the SAME end state
-  // and keeps the common sign-in free of a Clerk round-trip. The write still happens the
-  // moment anything would actually change — i.e. the first time a role is acquired.
-  const nextRoles = Array.from(new Set([...existingRoles, role]))
-  const metadataUnchanged =
-    user.publicMetadata?.role === role &&
-    nextRoles.length === existingRoles.length &&
-    nextRoles.every(r => existingRoles.includes(r))
-
-  if (!metadataUnchanged) {
+  // It used to: `roles: [...existingRoles, role]`, granted at SIGNUP, deliberately "before any
+  // membership row exists". That single line was the source of a whole bug class, because
+  // roles[] is what renders the PORTAL DOORS (MarketplaceNavbar, MarketplaceLanding) while the
+  // GATES read membership rows (VendorMember / OrgMember / Runner). Granting here made the two
+  // disagree by construction, in both directions:
+  //
+  //   • the door appeared for someone with no row — they clicked "Vendor Dashboard", hit the
+  //     gate, and were told they were unauthorized in their own account;
+  //   • and lib/role-sync.ts, recomputing roles[] from the rows, correctly found no row and
+  //     DROPPED the grant — so acquiring a second role silently revoked the first.
+  //
+  // Both symptoms, one cause: a claim written before the fact it claims. Roles are now written
+  // exactly where the fact becomes true — the membership-creation sites, which already call
+  // syncUserRoleMetadata (app/api/vendors/route.ts, lib/organizer-bootstrap.ts, and now
+  // app/api/drivers/route.ts). Every entry in roles[] is therefore DB-backed by construction,
+  // and the door appears iff the gate would open.
+  //
+  // WHAT THIS PAGE STILL DOES, and why routing sign-in through it (RoleAuthCard) still matters:
+  // it is the ROUTER INTO role acquisition, not the writer of it. REDIRECT_MAP sends vendor to
+  // /become-vendor and runner to /become-driver, and the organizer branch below provisions the
+  // OrgMember synchronously. That is how an existing account picks up a second role.
+  //
+  // The legacy singular `role` is still mirrored for continuity (nothing reads it — see the DB
+  // column note in schema.prisma), and skipped when it would be a no-op so the sign-in hop does
+  // not spend a Clerk round-trip on a field no one consults.
+  if (user.publicMetadata?.role !== role) {
     const client = await clerkClient()
     await client.users.updateUser(user.id, {
-      publicMetadata: { ...user.publicMetadata, role, roles: nextRoles },
+      publicMetadata: { ...user.publicMetadata, role },
     })
   }
 
