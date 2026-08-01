@@ -52,6 +52,18 @@ export function handleApiError(err: unknown) {
     )
   }
 
+  // Unique-constraint violation (Prisma P2002). Named, with the colliding column, because the
+  // anonymous version cost a live debugging session: /onboarding died on a P2002 for `email`
+  // and surfaced as an opaque 500 + digest, with the one fact that identified the bug — WHICH
+  // column collided — visible only in the platform logs. 409 is the honest status: the request
+  // was well-formed and conflicted with existing state.
+  if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002') {
+    const target = (err as { meta?: { target?: unknown } }).meta?.target
+    const fields = Array.isArray(target) ? (target as string[]).join(', ') : String(target ?? 'unknown')
+    console.error('[API Error] Unique constraint violation (P2002) on:', fields)
+    return apiError(`Already exists — conflicting field(s): ${fields}`, 409, 'UNIQUE_CONSTRAINT')
+  }
+
   if (err instanceof Error) {
     console.error('[API Error]', err.message, err.stack)
   } else {
