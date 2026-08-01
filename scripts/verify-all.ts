@@ -137,6 +137,8 @@ const SUITES: Suite[] = [
   // Derivation ZERO for "may this person enter portal X" — the gates call it. Asserts the
   // collapse changed no access decision, by replaying each original inline gate against it.
   { group: 'boundary',    name: 'portal-state',           file: 'scripts/portal-state-test.ts' },
+  // No portal door may be rendered from Clerk metadata — the door must read the gates' predicate.
+  { group: 'boundary',    name: 'door-source',            file: 'scripts/door-source-guard.ts' },
 ]
 
 // ─── Tiered gate ──────────────────────────────────────────────────────────────
