@@ -132,6 +132,8 @@ const SUITES: Suite[] = [
   // The invariant that makes the roles[] union safe: nothing may delete a membership row, or
   // metadata would keep asserting access the gates no longer grant.
   { group: 'boundary',    name: 'membership-delete',      file: 'scripts/membership-delete-guard.ts' },
+  // intendedRole is CLIENT-WRITABLE. It may only choose between two refusals, never grant.
+  { group: 'boundary',    name: 'intended-role-purity',   file: 'scripts/intended-role-purity-guard.ts' },
 ]
 
 // ─── Tiered gate ──────────────────────────────────────────────────────────────
