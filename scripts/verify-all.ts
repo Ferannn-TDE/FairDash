@@ -134,6 +134,9 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'membership-delete',      file: 'scripts/membership-delete-guard.ts' },
   // intendedRole is CLIENT-WRITABLE. It may only choose between two refusals, never grant.
   { group: 'boundary',    name: 'intended-role-purity',   file: 'scripts/intended-role-purity-guard.ts' },
+  // Derivation ZERO for "may this person enter portal X" — the gates call it. Asserts the
+  // collapse changed no access decision, by replaying each original inline gate against it.
+  { group: 'boundary',    name: 'portal-state',           file: 'scripts/portal-state-test.ts' },
 ]
 
 // ─── Tiered gate ──────────────────────────────────────────────────────────────

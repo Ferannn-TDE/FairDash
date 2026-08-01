@@ -5,7 +5,8 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import OrganizerShell from './_components/OrganizerShell'
 import OrganizerGateScreen from './_components/OrganizerGateScreen'
-import { organizerPortalState } from '@/lib/organizer-portal-state'
+import type { OrganizerPortalView } from '@/lib/organizer-portal-state'
+import { organizerPortalStatus } from '@/lib/portal-state'
 import QueryProvider from '../_providers/QueryProvider'
 
 export const metadata: Metadata = {
@@ -30,7 +31,7 @@ export default async function OrganizerLayout({ children }: { children: React.Re
   // organizer NEVER sees the dashboard fire its queries and paint a wall of 403s — they get the
   // gate screen directly, with no flash. Derived from the SAME helpers as requireOrganizerAuth,
   // so this screen and the server 403s can't disagree.
-  let gate: ReturnType<typeof organizerPortalState> | null = null
+  let gate: OrganizerPortalView | null = null
 
   if (!exempt) {
     const { userId: clerkId } = await auth()
@@ -39,21 +40,15 @@ export default async function OrganizerLayout({ children }: { children: React.Re
     const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
     if (!dbUser) redirect('/organizer/unauthorized')
 
-    const orgMember = await db.orgMember.findFirst({
-      where: { userId: dbUser.id },
-      select: {
-        id: true,
-        organizer: {
-          select: {
-            approvalStatus: true, rejectionReason: true,
-            suspendedAt: true, suspendedReason: true,
-          },
-        },
-      },
-    })
-    if (!orgMember) redirect('/organizer/unauthorized')
+    // Via lib/portal-state.ts, which the DOORS also read (through /api/auth/access). The gate
+    // CALLING the shared predicate — rather than merely agreeing with it — is what stops the
+    // door and the gate from drifting apart; a predicate the gate doesn't call is one more
+    // derivation of the same question. Same single query, same outcomes: no row → unauthorized,
+    // otherwise the OrganizerPortalView decides portal-vs-gate-screen exactly as before.
+    const { state, view } = await organizerPortalStatus(dbUser.id)
+    if (state === 'none') redirect('/organizer/unauthorized')
 
-    gate = organizerPortalState(orgMember.organizer)
+    gate = view
   }
 
   // Profile for the shell chrome (best-effort; Clerk may be absent locally).
