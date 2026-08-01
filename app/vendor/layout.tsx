@@ -2,6 +2,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
+import { vendorPortalStatus } from '@/lib/portal-state'
 import VendorResumeScreen from './_components/VendorResumeScreen'
 
 // AUTHORITY guard for the Vendor Portal (DB VendorMember row). Middleware is the
@@ -19,9 +20,14 @@ export default async function VendorLayout({ children }: { children: React.React
     if (!dbUser) redirect('/vendor/unauthorized')
 
     // ── THE GATE. The ONLY thing that admits anyone to this portal. ────────────────────────
-    const member = await db.vendorMember.findFirst({ where: { userId: dbUser.id }, select: { id: true } })
+    // Via lib/portal-state.ts, which the DOORS also read (through /api/auth/access). The gate
+    // CALLING the shared predicate — rather than merely agreeing with it — is what stops the
+    // door and the gate from drifting apart again; a predicate the gate doesn't call would be
+    // one more derivation of the same question. Same single query as before, same outcome:
+    // 'active' iff a VendorMember row exists.
+    const { state } = await vendorPortalStatus(dbUser.id)
 
-    if (!member) {
+    if (state !== 'active') {
       // ⛔ ACCESS HAS ALREADY BEEN DENIED BY THE LINE ABOVE. ⛔
       // Everything in this block chooses between TWO TERMINAL OUTCOMES — a resume screen or
       // the unauthorized page. Neither admits anyone. Nothing below can grant access, and
