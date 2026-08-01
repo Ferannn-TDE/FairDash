@@ -125,6 +125,30 @@ function RoleAuthInner({
     redirectParam ? `&redirect=${encodeURIComponent(redirectParam)}` : ""
   }`;
 
+  // SIGN-IN GOES THROUGH ONBOARDING TOO — for the OPERATOR roles only.
+  //
+  // Sign-in used to land straight on `dest` (the portal), which meant /onboarding — the ONLY
+  // code that unions a role into publicMetadata.roles[] — ran on sign-UP and never again. So
+  // an existing account could never acquire a second role: signing up again is refused by
+  // Clerk ("that email address is taken", correctly — one account per email), and signing in
+  // skipped the only granting path. There was no route at all. Onboarding is idempotent and
+  // additive (it unions into the existing roles[]), so the hop is safe for the ordinary
+  // single-role case and is the whole fix for the multi-role one. `dest` rides along as
+  // ?redirect= so the user still lands where they were going.
+  //
+  // SCOPED TO vendor | organizer | runner, deliberately:
+  //   • customer — this card fronts CHECKOUT (?redirect=/fair/…/checkout). Customer access is
+  //     ungated (/api/auth/access returns hasAccess:true unconditionally), so the hop would
+  //     grant nothing while adding a Clerk write + redirect to the money path. Not worth it.
+  //   • admin    — not one of onboarding's VALID_ROLES, so it would silently degrade to
+  //     'customer', append that to the admin's roles[], and land them on /fairs instead of
+  //     /admin. The admin family is granted in Clerk metadata by invite; onboarding has no
+  //     part in it.
+  const ONBOARDING_ROLES = ["vendor", "organizer", "runner"];
+  const afterSignIn = ONBOARDING_ROLES.includes(role)
+    ? `/onboarding?role=${role}&redirect=${encodeURIComponent(dest)}`
+    : dest;
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-[#0a0a0a] relative overflow-hidden px-5 py-10">
       {/* Atmosphere — static; quieter for admin */}
@@ -205,7 +229,7 @@ function RoleAuthInner({
 
             <div className={REVEAL} style={reveal(240)}>
               {mode === "sign-in" ? (
-                <SignIn routing="hash" forceRedirectUrl={dest} appearance={{ elements: clerkElements }} />
+                <SignIn routing="hash" forceRedirectUrl={afterSignIn} appearance={{ elements: clerkElements }} />
               ) : (
                 <SignUp routing="hash" forceRedirectUrl={afterSignUp} unsafeMetadata={signUpUnsafeMetadata} appearance={{ elements: clerkElements }} />
               )}
