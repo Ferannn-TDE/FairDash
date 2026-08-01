@@ -5,6 +5,10 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { hasRole } from '@/lib/roles'
 import { enforceRateLimit } from '@/lib/ratelimit'
+import {
+  allPortalStates, vendorPortalStatus, organizerPortalStatus, runnerPortalStatus,
+  NO_PORTALS, type PortalState,
+} from '@/lib/portal-state'
 
 // GET /api/auth/access?role=runner|vendor|organizer|admin|customer
 //
@@ -21,6 +25,9 @@ import { enforceRateLimit } from '@/lib/ratelimit'
 export async function GET(req: NextRequest) {
   try {
     const role = req.nextUrl.searchParams.get('role') ?? ''
+    // No ?role= → DOOR MODE: return every portal's state in one call. With ?role= the existing
+    // LOGIN contract (RoleAuthCard) is unchanged.
+    const wantsAllPortals = role === ''
     const { userId: clerkId } = await auth()
 
     // Rate limit: this endpoint does a Clerk currentUser() round-trip (+ maybe a
@@ -40,7 +47,9 @@ export async function GET(req: NextRequest) {
     // Everyone is a customer — no gate.
     if (role === 'customer') return success({ hasAccess: true })
 
-    if (!clerkId) return success({ hasAccess: false })
+    // Signed out → no portals, no access. In door mode this is the honest "render no doors"
+    // answer (a signed-out visitor is in no portal), NOT an unknown state.
+    if (!clerkId) return success(wantsAllPortals ? { states: NO_PORTALS } : { hasAccess: false })
 
     // admin → metadata only (no DB membership model — the documented single-source
     // -of-truth exception for the admin family).
@@ -49,32 +58,37 @@ export async function GET(req: NextRequest) {
       return success({ hasAccess: hasRole(user?.publicMetadata, 'admin') })
     }
 
-    // All other roles → the DB membership row is the SINGLE authority. No metadata
-    // fast-path: login (this endpoint) and the portal layout now read the identical
-    // source, so they can never disagree and loop. (The metadata roles[] still
-    // exists for the navbar, but it is no longer an auth gate.)
+    // All other roles → lib/portal-state.ts, the SAME predicate the portal layouts (the gates)
+    // call. This endpoint used to re-derive the answer itself, which made it a THIRD definition
+    // of "may this person enter portal X" alongside the doors and the gates. Now there is one.
     const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
-    if (!dbUser) return success({ hasAccess: false })
+    if (!dbUser) return success(wantsAllPortals ? { states: NO_PORTALS } : { hasAccess: false })
 
+    // ── DOOR MODE (no ?role=) — all three states, for the navbar/landing quick-nav. ──────────
+    // One request answers every door, so the client makes a single call rather than three.
+    if (wantsAllPortals) return success({ states: await allPortalStates(dbUser.id) })
+
+    // ── LOGIN MODE (?role=) — for RoleAuthCard. ──────────────────────────────────────────────
+    //
+    // ⚠️ hasAccess IS NOT THE DOOR POLICY, AND MUST NOT BE COLLAPSED ONTO IT. Two different
+    // questions that happen to share a source:
+    //   • hasAccess ("should the login card send you to the portal URL?") → state !== 'none'.
+    //   • the door  ("should a quick-nav link render?")                   → shouldShowPortalDoor.
+    // They differ precisely at `pending` and `blocked`. A PENDING organizer SHOULD be sent to
+    // /organizer, because that route renders the honest gate screen carrying the approval status
+    // and the rejection reason. Answering `false` here would instead dead-end them on the login
+    // card's terminal "No Organizer Access" state, which tells them less than the screen they
+    // were entitled to. So hasAccess keeps its EXACT prior semantics — row exists → true — while
+    // the door applies the stricter policy. `state` is returned alongside so a caller that wants
+    // the finer answer never has to re-derive one.
+    let state: PortalState
     switch (role) {
-      case 'runner': {
-        const runner = await db.runner.findUnique({
-          where: { userId: dbUser.id },
-          select: { event: { select: { urlSlug: true } } },
-        })
-        return success({ hasAccess: Boolean(runner?.event?.urlSlug) })
-      }
-      case 'organizer': {
-        const m = await db.orgMember.findFirst({ where: { userId: dbUser.id }, select: { id: true } })
-        return success({ hasAccess: Boolean(m) })
-      }
-      case 'vendor': {
-        const m = await db.vendorMember.findFirst({ where: { userId: dbUser.id }, select: { id: true } })
-        return success({ hasAccess: Boolean(m) })
-      }
-      default:
-        return success({ hasAccess: false })
+      case 'runner':    state = (await runnerPortalStatus(dbUser.id)).state; break
+      case 'organizer': state = (await organizerPortalStatus(dbUser.id)).state; break
+      case 'vendor':    state = (await vendorPortalStatus(dbUser.id)).state; break
+      default:          return success({ hasAccess: false })
     }
+    return success({ hasAccess: state !== 'none', state })
   } catch (err) {
     return handleApiError(err)
   }
