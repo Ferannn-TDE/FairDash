@@ -77,14 +77,26 @@ export default async function OnboardingPage({
   //                bootstrap below decides off `role` from searchParams, not off this
   //                metadata field), but still written for continuity; full retirement
   //                is a separate logged cleanup.
-  const client = await clerkClient()
-  await client.users.updateUser(user.id, {
-    publicMetadata: {
-      ...user.publicMetadata,
-      role,
-      roles: Array.from(new Set([...existingRoles, role])),
-    },
-  })
+  //
+  // SKIPPED WHEN IT WOULD BE A NO-OP. This page is now also on the SIGN-IN path for the
+  // operator roles (RoleAuthCard), which is what makes acquiring a second role possible at
+  // all — but it turns what was a once-per-signup Clerk write into a once-per-sign-in one.
+  // When roles[] already grants this role and the singular field already matches, the
+  // updateUser produces byte-identical metadata, so skipping it leaves the SAME end state
+  // and keeps the common sign-in free of a Clerk round-trip. The write still happens the
+  // moment anything would actually change — i.e. the first time a role is acquired.
+  const nextRoles = Array.from(new Set([...existingRoles, role]))
+  const metadataUnchanged =
+    user.publicMetadata?.role === role &&
+    nextRoles.length === existingRoles.length &&
+    nextRoles.every(r => existingRoles.includes(r))
+
+  if (!metadataUnchanged) {
+    const client = await clerkClient()
+    await client.users.updateUser(user.id, {
+      publicMetadata: { ...user.publicMetadata, role, roles: nextRoles },
+    })
+  }
 
   // Organizer self-signup: provision FairOrganizer + owner OrgMember SYNCHRONOUSLY,
   // before the redirect to /organizer, so the portal's DB authority check (and
