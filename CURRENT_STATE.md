@@ -584,6 +584,43 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 
 ## 7. Known partials and open questions
 
+- **🔴 OPEN — the gate does not evaluate any module under a CLIENT bundler. A server-only
+  module reachable from a `'use client'` file passes every suite and dies on first page load.**
+
+  **How it was found (2026-08-01).** The door/gate collapse (`dcd1b26` + `ab8d4f6`) shipped
+  with `app/_contexts/RoleContext.tsx` — a `'use client'` component — importing a pure policy
+  helper from `lib/portal-state.ts`, whose first line is `import { db } from './db'`:
+
+  ```
+  'use client' RoleContext.tsx → @/lib/portal-state → ./db → @prisma/client
+  ```
+
+  Prisma is pulled into the client bundle; the app dies on first page load. **All 90 suites
+  passed on that code, twice.** Both commits were reverted (`6b45684`).
+
+  **Why nothing caught it, and why this is a class not an incident.** Every suite is a
+  tsx/node process, where importing `lib/db` is legal and correct — which is exactly what a
+  server predicate should do. The defect is not in either module: it is in the EDGE between
+  them, and that edge is only meaningful to a bundler. Nothing in `verify-all.ts` runs a
+  bundler. `npx tsc --noEmit` does not either — the types are fine; the problem is that a
+  server-only dependency became reachable from a client entry point. The pure function and the
+  server predicates shared a module, and **only the module boundary is visible to a bundler,
+  never the purity of the individual function**.
+
+  This hole is independent of the door work and outlives it. It applies to any future change
+  that lets a `'use client'` file reach `lib/db`, `@prisma/client`, `stripe`, `ioredis`,
+  `firebase-admin`, or `@clerk/nextjs/server`.
+
+  **The candidate guard**, not yet built: walk every `'use client'` file's transitive import
+  graph and assert none reaches a server-only module. Shape-keyed on the import edge, not on
+  filenames. Positive control: plant a `lib/db` import behind a `'use client'` entry point and
+  confirm the scan fails and names the offending EDGE (importer → importee), not just the file.
+  Cheaper stopgap with real coverage: `npm run build` in the gate would have caught this one,
+  at the cost of build time on every run.
+
+  **Deferred to post-fair** (2026-08-05). Prod is unaffected — it is at `011dfba` and never
+  saw either commit.
+
 - **✅ CLOSED 2026-07-26 — the five permanent Pattern X2 alerts. NOT a books discrepancy.**
   Read this before reacting to *"settled transfer … with NO VendorEarning row at all"*, which
   is alarming on its face and was not a leak.
