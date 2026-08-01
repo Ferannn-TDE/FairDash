@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useWakeLock } from './useWakeLock'
 import Link from 'next/link'
 import { ChevronLeft, Car, MapPin, Phone, CheckSquare, Square, Package, Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -53,6 +54,13 @@ export default function DeliveryPage() {
   const [submitting, setSubmitting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Screen Wake Lock — holds the screen on while a delivery is ACTIVE, because a sleeping screen
+  // suspends watchPosition and the customer's dot then goes stale with no error anywhere. An
+  // AID, never a gate: no custody action below reads this value. ./useWakeLock.ts documents the
+  // three failure modes (unsupported / denied / auto-released-when-hidden) and re-acquires on
+  // visibilitychange, without which the lock would work exactly once.
+  const wakeLock = useWakeLock(order?.status === 'RUNNER_COLLECTED')
+
   async function load() {
     try {
       const res = await fetch(`/api/runners/me/orders?orderId=${orderId}`)
@@ -81,7 +89,8 @@ export default function DeliveryPage() {
   // LIVE LOCATION CAPTURE — while this order is RUNNER_COLLECTED (active delivery),
   // watch GPS and POST each fix to the server, which relays it to the customer.
   // The server independently re-verifies ownership + state on every write; this is
-  // just the client feeding it. No wake lock yet (Phase 2) — hence the on-screen note.
+  // just the client feeding it. The screen wake lock above keeps this watch alive when the
+  // phone would otherwise sleep; when the lock can't be held, the status card says so.
   useEffect(() => {
     if (!order || order.status !== 'RUNNER_COLLECTED') return
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -280,7 +289,19 @@ export default function DeliveryPage() {
             {geoStatus === 'denied' && <p className="font-semibold">Location permission needed to share your position. Enable location for this site in your browser settings, then reload.</p>}
             {geoStatus === 'unavailable' && <p className="font-semibold">Location is unavailable on this device right now.</p>}
             {geoStatus === 'off' && <p className="font-semibold">Starting location sharing…</p>}
-            <p className="text-xs mt-0.5 opacity-80">Keep this screen on — sharing pauses if your phone sleeps.</p>
+            {/* The screen-sleep note is now CONDITIONAL on whether the browser is actually
+                holding the screen for us. When it is, the old unconditional "keep this screen
+                on" was busywork; when it is NOT, the runner is the only person who can act, so
+                they must be told rather than left to a silent stall. */}
+            {wakeLock === 'held' ? (
+              <p className="text-xs mt-0.5 opacity-80">Screen kept on automatically while you deliver.</p>
+            ) : wakeLock === 'unsupported' ? (
+              <p className="text-xs mt-0.5 opacity-80">Keep this screen on — this browser can&rsquo;t hold it awake, and sharing pauses if your phone sleeps.</p>
+            ) : wakeLock === 'denied' ? (
+              <p className="text-xs mt-0.5 opacity-80">Couldn&rsquo;t keep the screen awake (your phone may be in battery saver). Keep this screen on — sharing pauses if it sleeps.</p>
+            ) : (
+              <p className="text-xs mt-0.5 opacity-80">Keep this screen on — sharing pauses if your phone sleeps.</p>
+            )}
           </div>
         </div>
       )}
