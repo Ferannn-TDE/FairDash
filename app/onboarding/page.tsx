@@ -1,8 +1,8 @@
 import { currentUser, clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
-import { db } from '@/lib/db'
 import { safeRedirect } from '@/lib/safe-redirect'
 import { ensureOrganizerBootstrap } from '@/lib/organizer-bootstrap'
+import { ensureDbUser } from '@/lib/ensure-db-user'
 
 const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type Role = (typeof VALID_ROLES)[number]
@@ -52,13 +52,14 @@ export default async function OnboardingPage({
   // Ensure the DB User exists NOW rather than depending on the async user.created
   // webhook having landed — the organizer bootstrap below needs the DB user id, and
   // we must not race webhook delivery on the signup-critical path.
+  //
+  // Via ensureDbUser, NOT a bare upsert: `email` is @unique too, so a row already owning
+  // this email under a stale clerkId made the old upsert fall through to create and die
+  // with P2002 — a permanent 500 on this page for that person (prod, 2026-08-01).
   let dbUserId: string | null = null
   if (primaryEmail) {
-    const dbUser = await db.user.upsert({
-      where: { clerkId: user.id },
-      create: { clerkId: user.id, email: primaryEmail, name, phone, avatarUrl, isActive, role },
-      update: { email: primaryEmail, name, phone, avatarUrl, isActive, role },
-      select: { id: true },
+    const { user: dbUser } = await ensureDbUser(user.id, {
+      email: primaryEmail, name, phone, avatarUrl, isActive, role,
     })
     dbUserId = dbUser.id
   }

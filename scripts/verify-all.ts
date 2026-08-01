@@ -126,6 +126,9 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'sweep-run-record',      file: 'scripts/sweep-run-record-test.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
+  // The clerkId/email identity collision that 500'd /onboarding in prod (2026-08-01), plus
+  // the user.deleted handler that could never succeed against Order_customerId_fkey.
+  { group: 'boundary',    name: 'user-identity-upsert',   file: 'scripts/user-identity-upsert-test.ts' },
 ]
 
 // ─── Tiered gate ──────────────────────────────────────────────────────────────
