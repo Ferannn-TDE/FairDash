@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { TruckIcon } from '@heroicons/react/24/outline'
+import RunnerLocationMap from './RunnerLocationMap'
 
 // ─── THE LOCATION FEED — one axis, and NOT the order's state ─────────────────────────────────
 //
@@ -30,7 +31,7 @@ import { TruckIcon } from '@heroicons/react/24/outline'
 // and deriveDeliveryProgress must NOT be widened to model it — telemetry freshness is not a
 // stage of the order.
 //
-// HONESTY SIGNALS ARE LOad-BEARING. Accuracy (±Nm) and staleness ("updated Ns ago", amber past
+// HONESTY SIGNALS ARE LOAD-BEARING. Accuracy (±Nm) and staleness ("updated Ns ago", amber past
 // 30s) are why a stale fix cannot pass as a live one. Anything rendering this feed must keep
 // them.
 
@@ -98,26 +99,35 @@ export default function RunnerLocationBanner({
 
   const hasFix = loc.hasLocation && loc.lat != null && loc.lng != null && Boolean(loc.updatedAt)
 
-  // FEED state only. No claim about where the order is in its lifecycle.
-  let body: React.ReactNode
+  // NO FIX YET — feed state, and NO MAP. An empty map centred on a guess would read as "your
+  // runner is here", which is the flicker class: a plausible-looking value standing in for one
+  // we do not have. A line of text cannot be mistaken for a position.
   if (!hasFix) {
-    body = <span className="text-[#A1A1A1]">Waiting for your runner&rsquo;s location…</span>
-  } else {
-    const ageSec = Math.max(0, Math.round((now - new Date(loc.updatedAt!).getTime()) / 1000))
-    const stale = ageSec > STALE_AFTER_SEC
-    body = (
-      <span className="text-white">
-        <span className="font-mono">{loc.lat!.toFixed(5)}, {loc.lng!.toFixed(5)}</span>
-        {loc.accuracy != null && <span className="text-[#A1A1A1]"> · ±{Math.round(loc.accuracy)}m</span>}
-        <span className={stale ? 'text-amber-400' : 'text-emerald-400'}> · updated {ageSec}s ago{stale ? ' (stale)' : ''}</span>
-      </span>
+    return (
+      <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-4 flex items-center gap-2.5 text-sm">
+        <TruckIcon className="w-4 h-4 text-[#FF0077] shrink-0" />
+        <span className="text-[#A1A1A1]">Waiting for your runner&rsquo;s location…</span>
+      </div>
     )
   }
 
+  const ageSec = Math.max(0, Math.round((now - new Date(loc.updatedAt!).getTime()) / 1000))
+  const stale = ageSec > STALE_AFTER_SEC
+
   return (
-    <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-4 flex items-center gap-2.5 text-sm">
-      <TruckIcon className="w-4 h-4 text-[#FF0077] shrink-0" />
-      {body}
+    <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 text-sm">
+      <RunnerLocationMap lat={loc.lat!} lng={loc.lng!} accuracy={loc.accuracy ?? null} stale={stale} />
+      {/* The honesty signals stay, verbatim, BELOW the map. On a map a four-minute-old fix looks
+          exactly like a live one — accuracy and staleness are the only things that distinguish
+          them, so the map is an addition to this line and never a replacement for it. */}
+      <div className="flex items-center gap-2.5">
+        <TruckIcon className="w-4 h-4 text-[#FF0077] shrink-0" />
+        <span className="text-white">
+          <span className="font-mono">{loc.lat!.toFixed(5)}, {loc.lng!.toFixed(5)}</span>
+          {loc.accuracy != null && <span className="text-[#A1A1A1]"> · ±{Math.round(loc.accuracy)}m</span>}
+          <span className={stale ? 'text-amber-400' : 'text-emerald-400'}> · updated {ageSec}s ago{stale ? ' (stale)' : ''}</span>
+        </span>
+      </div>
     </div>
   )
 }
