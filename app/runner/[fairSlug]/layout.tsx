@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import { auth } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
-import { runnerPortalStatus } from '@/lib/portal-state'
 import RunnerPortalShell from './RunnerPortalShell'
 
 // AUTHORITY guard for the Runner Portal (DB Runner row). Previously this layout was
@@ -30,12 +29,8 @@ export default async function RunnerLayout({
   // this event (see app/api/drivers POST). This door is READ-ONLY w.r.t. an existing
   // Runner — findUnique by the @unique userId is a pure existence check; it never
   // creates, resets, or downgrades a row. Unauthenticated users still hit sign-in above.
-  // Via lib/portal-state.ts, which the DOORS also read (through /api/auth/access). The gate
-  // CALLING the shared predicate — rather than merely agreeing with it — is what stops the door
-  // and the gate from drifting apart. Still a pure existence check: 'active' iff a Runner row
-  // exists, approval unchanged and still enforced at the VERBS, not here.
-  const { state } = await runnerPortalStatus(dbUser.id)
-  if (state === 'none') redirect(`/become-driver?fair=${encodeURIComponent(fairSlug)}`)
+  const runner = await db.runner.findUnique({ where: { userId: dbUser.id }, select: { id: true } })
+  if (!runner) redirect(`/become-driver?fair=${encodeURIComponent(fairSlug)}`)
 
   return <RunnerPortalShell fairSlug={fairSlug}>{children}</RunnerPortalShell>
 }
