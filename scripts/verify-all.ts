@@ -129,6 +129,9 @@ const SUITES: Suite[] = [
   // The clerkId/email identity collision that 500'd /onboarding in prod (2026-08-01), plus
   // the user.deleted handler that could never succeed against Order_customerId_fkey.
   { group: 'boundary',    name: 'user-identity-upsert',   file: 'scripts/user-identity-upsert-test.ts' },
+  // The invariant that makes the roles[] union safe: nothing may delete a membership row, or
+  // metadata would keep asserting access the gates no longer grant.
+  { group: 'boundary',    name: 'membership-delete',      file: 'scripts/membership-delete-guard.ts' },
 ]
 
 // ─── Tiered gate ──────────────────────────────────────────────────────────────
