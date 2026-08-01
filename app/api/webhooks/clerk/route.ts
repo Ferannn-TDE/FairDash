@@ -3,6 +3,8 @@ import { Webhook } from 'svix'
 import { db } from '@/lib/db'
 import { handleApiError } from '@/lib/api-error'
 import { logger } from '@/lib/logger'
+import { ensureDbUser } from '@/lib/ensure-db-user'
+import { softDeleteClerkUser } from '@/lib/delete-clerk-user'
 
 // POST /api/webhooks/clerk
 // Verifies the svix signature and syncs Clerk user lifecycle events to our DB.
@@ -53,10 +55,11 @@ async function syncUser(data: ClerkWebhookPayload['data']) {
     ? (rawRole as AppRole)
     : 'customer'
 
-  const user = await db.user.upsert({
-    where: { clerkId: data.id },
-    create: { clerkId: data.id, email: primaryEmail, name, phone, avatarUrl, isActive, role },
-    update: { email: primaryEmail, name, phone, avatarUrl, isActive, role },
+  // ensureDbUser, NOT a bare upsert — see lib/ensure-db-user.ts. The old upsert keyed only
+  // on clerkId while `email` is @unique too, so a row owning this email under a stale
+  // clerkId sent it into create → P2002 → a 500 that svix then retries forever.
+  const { user } = await ensureDbUser(data.id, {
+    email: primaryEmail, name, phone, avatarUrl, isActive, role,
   })
 
   // NOTE: organizer bootstrap (FairOrganizer + owner OrgMember) is NOT done here.
@@ -112,11 +115,14 @@ export async function POST(req: Request) {
       }
 
       case 'user.deleted': {
-        const existing = await db.user.findUnique({ where: { clerkId: event.data.id } })
-        if (existing) {
-          await db.user.delete({ where: { clerkId: event.data.id } })
-          logger.info('[Clerk Webhook] user.deleted removed', { userId: event.data.id })
-        }
+        // Soft-deletes when the user has orders (Order_customerId_fkey is ON DELETE
+        // RESTRICT — a hard delete there is impossible, and throwing made svix retry
+        // forever). See lib/delete-clerk-user.ts.
+        const res = await softDeleteClerkUser(event.data.id)
+        logger.info('[Clerk Webhook] user.deleted handled', {
+          userId: event.data.id,
+          outcome: res.outcome,
+        })
         break
       }
 

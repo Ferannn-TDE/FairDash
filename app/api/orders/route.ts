@@ -12,6 +12,7 @@ import { hasPreviewAccess } from '@/lib/preview-access'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { ensureDbUser } from '@/lib/ensure-db-user'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { calculateServiceFee } from '@/lib/constants'
 import { logger } from '@/lib/logger'
@@ -392,10 +393,13 @@ export async function POST(req: NextRequest) {
     let dbUser = await db.user.findUnique({ where: { clerkId } })
     if (!dbUser) {
       const clerkUser = await currentUser()
-      dbUser = await db.user.upsert({
-        where: { clerkId },
-        create: {
-          clerkId,
+      // ensureDbUser, NOT a bare upsert — see lib/ensure-db-user.ts. `email` is @unique, so
+      // the old create-on-miss died with P2002 whenever another row already owned the
+      // address. syncProfile:false preserves this site's original `update: {}` semantics:
+      // an existing row's profile is never overwritten from a checkout.
+      const ensured = await ensureDbUser(
+        clerkId,
+        {
           email:
             clerkUser?.emailAddresses?.[0]?.emailAddress ??
             `${clerkId}@pending.invalid`,
@@ -404,8 +408,9 @@ export async function POST(req: NextRequest) {
             : undefined,
           phone: clerkUser?.phoneNumbers?.[0]?.phoneNumber ?? undefined,
         },
-        update: {},
-      })
+        { syncProfile: false },
+      )
+      dbUser = ensured.user
     }
 
     // ── 5. Create single Stripe PaymentIntent ──────────────────────────────
