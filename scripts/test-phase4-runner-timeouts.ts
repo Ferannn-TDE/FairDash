@@ -17,6 +17,7 @@ import { db } from '../lib/db'
 import { reconcileMasterStatus } from '../lib/reconcile-order-status'
 import { splitRunnerFee } from '../lib/payout-split'
 import { getOrderQueue } from '../lib/queues'
+import { VENDOR_DID_NOT_ACCEPT_REASON } from '../lib/constants'
 import { __setRtdbForTest } from '../lib/firebase-sync'
 
 const RUN = Date.now()
@@ -143,7 +144,7 @@ async function main() {
     }, select: { id: true },
   })
   seededOrderIds.push(o6.id)
-  const r6 = await reconcileMasterStatus(o6.id, { timeout: { status: 'CANCELLED', by: 'system', reason: 'Vendor did not accept within 2 minutes' } })
+  const r6 = await reconcileMasterStatus(o6.id, { timeout: { status: 'CANCELLED', by: 'system', reason: VENDOR_DID_NOT_ACCEPT_REASON } })
   const s6 = await ostatus(o6.id)
   check('accept-timeout writes CANCELLED, cancelledBy=system', r6.to === 'CANCELLED' && s6.status === 'CANCELLED' && s6.cancelledBy === 'system')
 

@@ -39,6 +39,7 @@ import { Queue } from 'bullmq'
 import { runReconciliationSweep } from '../lib/reconciler'
 import {
   VENDOR_OFFLINE_HEARTBEAT_MS,
+  VENDOR_DID_NOT_ACCEPT_REASON,
 } from '../lib/constants'
 import { processOrderPayout, PayoutReconciliationError, PayoutTerminalError } from '../lib/process-payout'
 import { processRunnerPayout } from '../lib/runner-payout'
@@ -107,7 +108,7 @@ async function updateOrderInFirebase(
 
 /**
  * mark-unaccepted
- * Fires 2 minutes after an order is PLACED.
+ * Fires VENDOR_ACCEPT_TIMEOUT_MS after an order is PLACED (see lib/constants.ts).
  * If vendor still hasn't accepted → CANCELLED + full Stripe refund.
  */
 async function handleMarkUnaccepted(job: Job<JobData>) {
@@ -140,7 +141,7 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
   // TOCTOU re-fire is refused). Reconcile FIRST so a retry's top guard (status ===
   // PLACED) short-circuits and never duplicates the audit rows below.
   await reconcileMasterStatus(orderId, {
-    timeout: { status: 'CANCELLED', by: 'system', reason: 'Vendor did not accept within 2 minutes' },
+    timeout: { status: 'CANCELLED', by: 'system', reason: VENDOR_DID_NOT_ACCEPT_REASON },
   })
 
   await prisma.$transaction([
@@ -151,9 +152,9 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
       create: {
         orderId,
         vendorId: order.vendorId,
-        reason: 'Vendor did not accept within 2 minutes',
+        reason: VENDOR_DID_NOT_ACCEPT_REASON,
       },
-      update: { reason: 'Vendor did not accept within 2 minutes' },
+      update: { reason: VENDOR_DID_NOT_ACCEPT_REASON },
     }),
     prisma.orderEvent.create({
       data: {
@@ -161,14 +162,14 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
         eventType: 'cancelled',
         actorId: null,
         actorRole: 'system',
-        metadata: { reason: 'Vendor did not accept within 2 minutes', refundAmount: order.total },
+        metadata: { reason: VENDOR_DID_NOT_ACCEPT_REASON, refundAmount: order.total },
       },
     }),
   ])
 
   await updateOrderInFirebase(eventId, vendorId, orderId, order.customerId, {
     status: 'CANCELLED',
-    cancellationReason: 'Vendor did not accept within 2 minutes',
+    cancellationReason: VENDOR_DID_NOT_ACCEPT_REASON,
   })
 
   console.log(`[Worker] Order ${orderId} auto-cancelled — vendor did not accept in time`)

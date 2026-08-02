@@ -1,4 +1,5 @@
 import { FAILED_STATUSES } from './order-status'
+import { VENDOR_ACCEPT_TIMEOUT_MINUTES } from './constants'
 
 /**
  * THE single derivation of a runner-fulfilled order's customer-facing progress — one function,
@@ -72,6 +73,6 @@ export function deriveDeliveryProgress(i: DeliveryProgressInput): DeliveryProgre
       return { activeIndex: i.vendorStatus === 'PREPARING' ? 2 : 1, state: 'active', message: `The vendor is preparing your order.${eta}` }
     }
     default: // PLACED / PENDING_PAYMENT / unknown → the honest floor
-      return { activeIndex: 0, state: 'active', message: 'Waiting for the vendor to accept your order (up to 2 minutes)…' }
+      return { activeIndex: 0, state: 'active', message: `Waiting for the vendor to accept your order (up to ${VENDOR_ACCEPT_TIMEOUT_MINUTES} minutes)…` }
   }
 }

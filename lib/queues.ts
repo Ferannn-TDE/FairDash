@@ -63,7 +63,7 @@ export function getQueuePrefix(): string {
 // ─── Job name constants ───────────────────────────────────────────────────────
 // Single source of truth. Worker imports these same constants.
 
-/** Order timeout: vendor did not accept within 2 minutes → auto-cancel + full refund */
+/** Order timeout: vendor did not accept within VENDOR_ACCEPT_TIMEOUT_MS → auto-cancel + per-vendor refund */
 export const JOB_UNACCEPTED = 'mark-unaccepted'
 
 /** Order timeout: booth/curbside not collected 10 min after READY → UNCOLLECTED, no refund */
