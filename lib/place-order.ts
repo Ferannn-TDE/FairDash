@@ -22,6 +22,7 @@ import { fireAndForgetFirebaseSet } from './firebase-sync'
 import { getOrderQueue, JOB_UNACCEPTED } from './queues'
 import { enqueueJobSafely } from './queue-safe'
 import { VENDOR_ACCEPT_TIMEOUT_MS } from './constants'
+import { deriveEventLiveState } from './event-date'
 import { logger } from './logger'
 
 export interface PlaceOrderResult {
@@ -44,6 +45,9 @@ export async function placePaidOrder(
     include: {
       orderItems: { include: { menuItem: { select: { name: true } } } },
       vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      // For the accept-timeout arming decision below. Joined into the existing read
+      // rather than fetched separately — no extra round trip.
+      event: { select: { name: true, startDate: true, endDate: true } },
     },
   })
 
@@ -131,9 +135,46 @@ export async function placePaidOrder(
     { orderId: order.id },
   )
 
-  // Schedule the accept-timeout (jobId dedupes — safe to call on convergence).
+  // ── Schedule the accept-timeout (jobId dedupes — safe to call on convergence) ──────────────
+  //
+  // NOT ARMED ON A FAIR THAT IS NOT OPEN. The timer's whole premise is that a vendor is standing
+  // at a staffed booth and has VENDOR_ACCEPT_TIMEOUT_MS to react. On a fair that has not started
+  // (or has ended) nobody is there by definition, so the timer would expire unattended and move
+  // REAL money: it cancels the order and refunds the customer through the per-vendor engine
+  // (workers/order-worker.ts:113 handleMarkUnaccepted → refundVendorPortion, actor
+  // 'system:accept-timeout'). That is exactly what happened to order cmsawszw70008edtcv6giekll
+  // on 2026-08-01 — placed through the admin preview bypass against a fair opening 2026-08-05,
+  // auto-refunded 128.7s later. It was the fifth such refund.
+  //
+  // ONE DERIVATION. This asks deriveEventLiveState — the SAME predicate POST /api/orders:185
+  // gates on and the storefront badges render from (lib/event-date.ts:82, guarded by
+  // scripts/fair-open-gate-guard.ts). It deliberately does NOT re-compare dates here; a second
+  // date comparison is how "is this fair open" would become a fifth derivation.
+  //
+  // NOT ENQUEUE-THEN-CANCEL: the job is never created, so there is nothing to race, nothing to
+  // leave in Redis, and no window in which a worker could pick it up.
+  //
+  // Deliberately independent of the PREVIEW BYPASS. A preview order is exactly the case that
+  // caused this, and the reasoning is about the BOOTH being unstaffed, not about who placed the
+  // order — an admin previewing does not staff the booth either.
+  const liveState = order.event
+    ? deriveEventLiveState(order.event.startDate, order.event.endDate)
+    : null
+
   const ordersQueue = getOrderQueue()
-  if (ordersQueue) {
+  if (liveState !== 'live') {
+    // A DELIBERATE SKIP, LOGGED AS ONE. `if (ordersQueue)` below has no else, so a missing queue
+    // skips the enqueue silently on the money-in path (CURRENT_STATE.md §7). This branch must not
+    // add a second indistinguishable silence: "no timer because the fair is closed" and "no timer
+    // because the producer failed" have identical observable effects and opposite meanings.
+    logger.warn('[PlaceOrder] Accept-timeout NOT armed — fair is not open', {
+      orderId: order.id,
+      eventId: order.eventId,
+      liveState: liveState ?? 'unknown',
+      fair: order.event?.name ?? null,
+      reason: 'fair_not_open',
+    })
+  } else if (ordersQueue) {
     const result = await enqueueJobSafely({
       queue: ordersQueue,
       name: JOB_UNACCEPTED,
