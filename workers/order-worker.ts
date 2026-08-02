@@ -126,12 +126,23 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
   // Per-vendor refund through the SINGLE engine, FEE KEPT (the vendor failed to
   // accept, but the platform service still ran). NOT a whole-order/fee-inclusive
   // raw Stripe refund. CASE 1 — payout never fired, so no reversal.
+  // A RECEIPT IS WHAT MOVED, NOT WHAT WAS PLANNED. The audit below used to write
+  // `refundAmount: order.total` — the whole order, fee included — while the engine refunds only
+  // the vendor SUBTOTAL slice and KEEPS the fee. On order cmsawszw70008edtcv6giekll that audit
+  // claimed $29.19 against an actual $12.00 refund: a money trail overstating itself by $17.19,
+  // in the exact row a human reads when reconstructing an incident. So the amount is accumulated
+  // from what refundVendorPortion RETURNED (sliceCents = the amount actually returned to the
+  // customer), matching the incident path at :337/:355 which already does this.
+  let refundedCents = 0
   if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
     const items = await prisma.orderItem.findMany({ where: { orderId }, select: { vendorId: true } })
     for (const vid of [...new Set(items.map(i => i.vendorId))]) {
       try {
-        await refundVendorPortion({ orderId, vendorId: vid, reason: 'vendor_did_not_accept', actor: 'system:accept-timeout' })
+        const r = await refundVendorPortion({ orderId, vendorId: vid, reason: 'vendor_did_not_accept', actor: 'system:accept-timeout' })
+        refundedCents += r.sliceCents
       } catch (err) {
+        // A failed slice contributes NOTHING to the receipt — the reconciler retries it, and the
+        // audit must not claim money that did not move.
         console.error(`[Worker] accept-timeout per-vendor refund failed (reconciler will retry) order ${orderId} vendor ${vid}:`, err)
       }
     }
@@ -162,7 +173,7 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
         eventType: 'cancelled',
         actorId: null,
         actorRole: 'system',
-        metadata: { reason: VENDOR_DID_NOT_ACCEPT_REASON, refundAmount: order.total },
+        metadata: { reason: VENDOR_DID_NOT_ACCEPT_REASON, refundAmount: refundedCents / 100 },
       },
     }),
   ])
@@ -456,11 +467,16 @@ async function handleBulkRefundEvent(job: Job<JobData>) {
       // Emergency "the event broke, refund everyone in full" → per-vendor through
       // the SINGLE engine with FEE WAIVED (genuine emergency goodwill). Best-effort
       // per vendor; the reconciler backstops any failure.
+      // Same receipt rule as the accept-timeout path above: the audit reports what the engine
+      // RETURNED, never order.total. This path waives the fee, so the slice and the order total
+      // differ by a different amount again — one more reason not to infer the receipt.
+      let refundedCents = 0
       if (order.stripePaymentIntentId && process.env.STRIPE_SECRET_KEY) {
         const items = await prisma.orderItem.findMany({ where: { orderId: order.id }, select: { vendorId: true } })
         for (const vid of [...new Set(items.map(i => i.vendorId))]) {
           try {
-            await refundVendorPortion({ orderId: order.id, vendorId: vid, reason: 'emergency_event_cancel', actor: 'system:emergency', waiveFee: true, markVendorStatus: false })
+            const r = await refundVendorPortion({ orderId: order.id, vendorId: vid, reason: 'emergency_event_cancel', actor: 'system:emergency', waiveFee: true, markVendorStatus: false })
+            refundedCents += r.sliceCents
           } catch (err) {
             console.error(`[Worker] bulk-refund: engine refund failed order ${order.id} vendor ${vid}:`, err)
           }
@@ -489,7 +505,7 @@ async function handleBulkRefundEvent(job: Job<JobData>) {
             orderId: order.id,
             eventType: 'cancelled',
             actorRole: 'system',
-            metadata: { reason: 'emergency_event_cancel', eventId, refundAmount: order.total },
+            metadata: { reason: 'emergency_event_cancel', eventId, refundAmount: refundedCents / 100 },
           },
         }),
       ])
