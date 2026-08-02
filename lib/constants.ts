@@ -50,10 +50,40 @@ export const CONSULTING_RATE_USD = 1_500
 // ── Order Timeouts (BullMQ job delays) ───────────────────────────────────────
 
 /**
- * How long a vendor has to accept an order before it is auto-cancelled.
- * Playbook S2: "Vendor order acceptance window: 2 minutes"
+ * How long a vendor has to accept an order before it is auto-cancelled AND THE CUSTOMER IS
+ * REFUNDED. Not a display timeout — expiry moves real money (workers/order-worker.ts:113
+ * handleMarkUnaccepted → refundVendorPortion, actor 'system:accept-timeout').
+ *
+ * ── THE TRADE, CHOSEN DELIBERATELY (2026-08-01): 2 minutes → 10 minutes ─────────────────────
+ * Playbook S2 originally specified 2 minutes. That is too tight for a vendor mid-rush: a busy
+ * booth with a queue of walk-ups cannot reliably look at a tablet inside 120 seconds, and every
+ * miss auto-refunds a paying customer who did nothing wrong.
+ *
+ * THE COST, STATED SO IT IS NOT DISCOVERED LATER: a customer who orders from a genuinely
+ * UNATTENDED booth now waits 10 minutes before their refund starts, instead of 2. That is the
+ * price of not punishing a busy vendor, and it is the right way round — a slow refund is
+ * recoverable, a wrongly-cancelled order is a lost sale and a bad first impression. Revisit if
+ * unattended-booth complaints outnumber missed-accept refunds.
+ *
+ * ⚠️ The delay is baked in AT ENQUEUE TIME (lib/place-order.ts, `delay:`). Changing this value
+ * does NOT re-time jobs already sitting in Redis — those keep the fuse they were created with.
+ * Only orders placed after deploy get the new window.
+ *
+ * The reconciler's Pattern E backstop derives its cutoff from this same constant
+ * (lib/reconciler.ts:700), so it widens in step automatically — one value, not two.
  */
-export const VENDOR_ACCEPT_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes
+export const VENDOR_ACCEPT_TIMEOUT_MS = 10 * 60 * 1000
+
+/** Whole minutes, for prose. Derived so copy cannot drift from the timer. */
+export const VENDOR_ACCEPT_TIMEOUT_MINUTES = Math.round(VENDOR_ACCEPT_TIMEOUT_MS / 60_000)
+
+/**
+ * THE canonical sentence for an accept-timeout cancellation. Written to the Cancellation row,
+ * the cancelled OrderEvent, and the customer's Firebase feed — so all three agree, and none of
+ * them can outlive a change to the window above.
+ */
+export const VENDOR_DID_NOT_ACCEPT_REASON =
+  `Vendor did not accept within ${VENDOR_ACCEPT_TIMEOUT_MINUTES} minutes`
 
 /**
  * How long a Runner waits at curbside before the order is forfeited (no refund).

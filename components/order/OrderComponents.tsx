@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import type { Order, VendorGroup, VendorOrderStatus } from './types'
+import { VENDOR_ACCEPT_TIMEOUT_MINUTES } from '@/lib/constants'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -565,7 +566,7 @@ export function StatusBanner({ order, status }: { order: Order; status: string }
   let message: string | null = null
 
   if (status === 'PLACED') {
-    message = 'Waiting for the vendor to accept your order (up to 2 minutes)…'
+    message = `Waiting for the vendor to accept your order (up to ${VENDOR_ACCEPT_TIMEOUT_MINUTES} minutes)…`
   } else if (status === 'ACCEPTED' || status === 'PREPARING') {
     colorClass = 'bg-blue-500/10 border-blue-500/20 text-blue-300'
     const readyStr = estimatedReadyAt
