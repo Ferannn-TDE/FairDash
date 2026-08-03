@@ -23,6 +23,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { stripComments } from './_strip-comments'
 import { formatAuditTimestamp, formatAuditDate } from '../lib/audit-time'
 
 let pass = 0, fail = 0
@@ -70,10 +71,19 @@ assert(/const AUDIT_LOCALE = 'en-US'/.test(lib) && /timeZoneName: 'short'/.test(
   'locale is explicit and the zone is always labelled, in one place')
 
 console.log('\n[3] instants and calendar dates stay separate')
-const eventDate = readFileSync('lib/event-date.ts', 'utf8')
+// COMMENT-STRIPPED (scripts/_strip-comments.ts). These assert what the modules DO, not what they
+// mention: audit-time's header explains the instant-vs-calendar split, and naming the other
+// module's constant while explaining it is not pinning a carrier zone. Reading raw source here
+// failed on that prose and would have pressured the next person to delete the explanation to go
+// green — `guards-scan-code-not-prose`, the reason the shared stripper exists.
+const eventDate = stripComments(readFileSync('lib/event-date.ts', 'utf8'))
+const libCode = stripComments(lib)
 assert(!/from '\.\/audit-time'/.test(eventDate), 'lib/event-date does NOT import the instant formatter')
-assert(!/from '\.\/event-date'/.test(lib), 'lib/audit-time does NOT import the calendar-date formatter')
-assert(/EVENT_DATE_ZONE/.test(eventDate) && !/EVENT_DATE_ZONE/.test(lib), 'only the calendar-date module pins a carrier zone')
+assert(!/from '\.\/event-date'/.test(libCode), 'lib/audit-time does NOT import the calendar-date formatter')
+assert(/EVENT_DATE_ZONE/.test(eventDate) && !/EVENT_DATE_ZONE/.test(libCode), 'only the calendar-date module pins a carrier zone')
+// The stripping must not have blinded it: a REAL use in audit-time still fails.
+assert(/EVENT_DATE_ZONE/.test(stripComments("import { EVENT_DATE_ZONE } from './event-date'")),
+  'positive control: a real EVENT_DATE_ZONE import survives stripping and would still be caught')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} audit-time-guard: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

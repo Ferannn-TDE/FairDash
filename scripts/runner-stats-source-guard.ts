@@ -35,6 +35,9 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { summarizeCustody } from '../lib/runner-completion'
 
+/** The fair's zone. summarizeCustody has no default — every caller states one. */
+const TZ = 'America/Chicago'
+
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
 
@@ -86,13 +89,13 @@ assert(/eventId:\s*event\.id/.test(route), 'stats are scoped to the requireAdmin
 console.log('\n[3] fee-shaped-count class: a zero-fee, no-tip, no-ledger-row delivery COUNTS')
 // The pure core's input has no money field — this delivered order "paid" nothing and still counts.
 const rows = [{ collectedAt: new Date(), possessionAt: null, order: { status: 'DELIVERED', runnerId: 'r1' } }]
-const s = summarizeCustody(rows, 'r1')
+const s = summarizeCustody(rows, 'r1', TZ)
 assert(s.delivered === 1 && s.collected === 1, 'delivered count = 1 with NO fee, tip, or RunnerEarning anywhere in the input')
 // The sibling evidence-shaped undercount: a delivery with NO collect tap (the status route
 // permits deliver on proofPath alone) counts on both sides via the possession fallback.
-const noTap = summarizeCustody([{ collectedAt: null, possessionAt: new Date(), order: { status: 'DELIVERED', runnerId: 'r1' } }], 'r1')
+const noTap = summarizeCustody([{ collectedAt: null, possessionAt: new Date(), order: { status: 'DELIVERED', runnerId: 'r1' } }], 'r1', TZ)
 assert(noTap.delivered === 1 && noTap.collected === 1 && noTap.deliveredToday === 1, 'a tap-skipped delivery still counts (delivery proves possession)')
-const emptied = summarizeCustody([], 'r1')
+const emptied = summarizeCustody([], 'r1', TZ)
 assert(emptied.delivered === 0 && emptied.rate === 1, 'baseline: empty custody → 0 delivered, rate 1.0 (the [3] counts above are not vacuous)')
 const completionSrc = readFileSync('lib/runner-completion.ts', 'utf8')
 assert(!/runnerEarning|amountCents|deliveryFee|\btip\b/i.test(completionSrc.replace(/^\s*\/?\*.*$|\/\/.*$/gm, '')),

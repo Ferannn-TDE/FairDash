@@ -21,6 +21,9 @@
 import { readFileSync } from 'node:fs'
 import { summarizeRunnerEarnings, type RunnerLedgerRow } from '../lib/runner-earnings'
 
+/** The fair's zone. Every call states one — the summarizer has no default, by design. */
+const TZ = 'America/Chicago'
+
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
 
@@ -36,7 +39,7 @@ const row = (over: Partial<RunnerLedgerRow> & { tip?: number | null }): RunnerLe
 })
 
 console.log('[1] the real case: #762F3H0Y — $11.50 = $6.50 fee share + $5.00 tip')
-const s1 = summarizeRunnerEarnings([row({ orderId: 'cmrv5vvly0014cf2l762f3h0y', amountCents: 1150, tip: 5 })], NOW)
+const s1 = summarizeRunnerEarnings([row({ orderId: 'cmrv5vvly0014cf2l762f3h0y', amountCents: 1150, tip: 5 })], TZ, NOW)
 assert(s1.lines[0].feeShareCents === 650, `fee share is $6.50 — 50% of the $12.99 fee, NOT the customer's $12.99 (got ${s1.lines[0].feeShareCents})`)
 assert(s1.lines[0].tipCents === 500, 'tip is $5.00 — 100% the runner\'s')
 assert(s1.lines[0].totalCents === 1150 && s1.earnedTotalCents === 1150, 'total matches the ledger row exactly')
@@ -48,19 +51,19 @@ const s2 = summarizeRunnerEarnings([
   row({ amountCents: 700, tip: 2, status: 'tracked' }),
   row({ amountCents: 500, tip: 0, status: 'held' }),
   row({ amountCents: 900, tip: 0, status: 'cancelled' }),
-], NOW)
+], TZ, NOW)
 assert(s2.paidTotalCents === 1000 && s2.pendingTotalCents === 700 && s2.heldTotalCents === 500, 'paid/pending/held each sum their own rows')
 assert(s2.earnedTotalCents === 2200, 'earned total EXCLUDES the cancelled row (2200, not 3100)')
 assert(s2.lines.length === 4 && s2.lines.some(l => l.status === 'cancelled'), 'cancelled row is still LISTED (history stays honest)')
-const s2b = summarizeRunnerEarnings([row({ amountCents: 900, tip: 0, status: 'tracked' })], NOW)
+const s2b = summarizeRunnerEarnings([row({ amountCents: 900, tip: 0, status: 'tracked' })], TZ, NOW)
 assert(s2b.earnedTotalCents === 900, 'positive control: the same 900c row DOES sum when not cancelled')
 
 console.log('\n[3] defensive honesty')
-const s3 = summarizeRunnerEarnings([row({ amountCents: 300, tip: 5 })], NOW) // tip 500c > amount 300c
+const s3 = summarizeRunnerEarnings([row({ amountCents: 300, tip: 5 })], TZ, NOW) // tip 500c > amount 300c
 assert(s3.lines[0].feeShareCents === 0 && s3.lines[0].tipCents === 300, 'row smaller than its tip clamps: share 0, never negative')
-const s0 = summarizeRunnerEarnings([], NOW)
+const s0 = summarizeRunnerEarnings([], TZ, NOW)
 assert(s0.earnedTotalCents === 0 && s0.lines.length === 0, 'zero rows → all-zero summary (honest empty state)')
-const sOld = summarizeRunnerEarnings([row({ amountCents: 400, tip: 0, createdAt: new Date('2026-07-20T12:00:00Z') })], NOW)
+const sOld = summarizeRunnerEarnings([row({ amountCents: 400, tip: 0, createdAt: new Date('2026-07-20T12:00:00Z') })], TZ, NOW)
 assert(sOld.earnedTodayCents === 0 && sOld.earnedTotalCents === 400, "yesterday's earning counts in total but not today")
 
 console.log('\n[3b] the summarizer is MONEY-ONLY — no delivery count is even available here')
@@ -68,7 +71,7 @@ console.log('\n[3b] the summarizer is MONEY-ONLY — no delivery count is even a
 // deliveriesTotal/deliveriesToday fields undercounted: a DELIVERED zero-fee no-tip order has
 // no RunnerEarning row, so the ledger showed "2 deliveries" for 3 made. The fields were
 // REMOVED, not paralleled — assert no count field survives for a future caller to reach.
-const sAny = summarizeRunnerEarnings([row({ amountCents: 1000, tip: 0, status: 'paid', paidAt: today, createdAt: today })], NOW) as unknown as Record<string, unknown>
+const sAny = summarizeRunnerEarnings([row({ amountCents: 1000, tip: 0, status: 'paid', paidAt: today, createdAt: today })], TZ, NOW) as unknown as Record<string, unknown>
 assert(!('deliveriesTotal' in sAny) && !('deliveriesToday' in sAny), 'summary exposes NO delivery counts (custody owns counts, the ledger owns money)')
 const earnSrc = readFileSync(new URL('../lib/runner-earnings.ts', import.meta.url), 'utf8')
 assert(!/HOME_DELIVERY/.test(earnSrc), 'the earnings summarizer has NO HOME_DELIVERY literal (money is fulfillment-agnostic)')

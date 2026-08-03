@@ -17,9 +17,11 @@ export async function GET() {
     const clerkId = await requireRunnerAuth()
     const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
     if (!dbUser) return apiError('User not found', 404, 'USER_NOT_FOUND')
+    // event.timezone comes along for the ride — "today" is the runner's wall-clock day where the
+    // FAIR is, not the server's. Joined into the existing lookup, so no extra round trip.
     const runner = await db.runner.findUnique({
       where: { userId: dbUser.id },
-      select: { id: true },
+      select: { id: true, event: { select: { timezone: true } } },
     })
     if (!runner) return apiError('No runner record found', 404, 'RUNNER_NOT_FOUND')
 
@@ -33,7 +35,7 @@ export async function GET() {
       },
     })
 
-    const s = summarizeRunnerEarnings(rows)
+    const s = summarizeRunnerEarnings(rows, runner.event.timezone)
     // CUSTODY IS THE SPINE FOR COUNTS; THE LEDGER IS THE SPINE FOR MONEY (lib/runner-completion).
     // The dollar figures above come from RunnerEarning; the delivery COUNTS and the completion
     // rate come from the custody events — the ledger only knows deliveries that generated money,

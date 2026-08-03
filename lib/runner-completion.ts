@@ -1,3 +1,4 @@
+import { startOfDayInZone } from './audit-time'
 import { db } from './db'
 
 /**
@@ -71,8 +72,24 @@ export interface RunnerCustodyStats {
  * fee-shaped-count class this module exists to prevent), and whether or not the collect tap
  * was made (delivery proves possession).
  */
-export function summarizeCustody(rows: CustodyCountRow[], runnerId: string, nowMs = Date.now()): RunnerCustodyStats {
-  const startOfToday = new Date(nowMs); startOfToday.setHours(0, 0, 0, 0)
+/**
+ * @param timeZone  The FAIR's IANA zone (Event.timezone) — REQUIRED, never defaulted. See
+ *   lib/audit-time.ts: this used to be server-local midnight, which on a UTC host split one
+ *   Chicago day in two and reported 1 delivery for a 2-delivery day.
+ *
+ * ⚠️ KNOWN RESIDUAL — the day here is keyed on possession (collectedAt ?? dispatchedAt), while
+ * the MONEY day in lib/runner-earnings.ts is keyed on RunnerEarning.createdAt (accrual, at
+ * DELIVERED). Zoning does not reconcile them: an order collected 11:55 PM and delivered 12:05 AM
+ * counts on one day and pays on the next. Deliberately left — which instant "counts" a delivery
+ * to a day is a product decision, not a boundary bug.
+ */
+export function summarizeCustody(
+  rows: CustodyCountRow[],
+  runnerId: string,
+  timeZone: string,
+  nowMs = Date.now(),
+): RunnerCustodyStats {
+  const startOfToday = startOfDayInZone(nowMs, timeZone)
   const deliveredRows = rows.filter(r => r.order.status === 'DELIVERED' && r.order.runnerId === runnerId)
   // The denominator: every row is a possession — a tap-collected order, a delivered order, or
   // both (the caller de-duplicates per order). A row that is neither (defensive) doesn't count.
@@ -103,7 +120,15 @@ export async function computeRunnerCompletionRates(
   // legacy event written before the void must not linger in the denominator.
   const orderScope = { voidedAt: null, ...(scope?.eventId ? { eventId: scope.eventId } : {}) }
 
-  const [events, deliveredOrders] = await Promise.all([
+  // THE FAIR'S ZONE, per runner, resolved HERE so no caller can forget to pass one and silently
+  // fall back to the server's. Runner is event-scoped (Runner.eventId), so the zone is always
+  // reachable from the row itself — a hardcoded 'America/Chicago' would be right for today's
+  // only fair and wrong for the first fair anywhere else.
+  const [runnerZones, events, deliveredOrders] = await Promise.all([
+    db.runner.findMany({
+      where: { id: { in: runnerIds } },
+      select: { id: true, event: { select: { timezone: true } } },
+    }),
     // Possession by tap: the 'collected' custody events. A re-collect after a confirmed return
     // is a second chance on the same order, not a second order — distinct per (order, runner).
     db.deliveryCustodyEvent.findMany({
@@ -131,8 +156,11 @@ export async function computeRunnerCompletionRates(
     if (rows && !rows.has(o.id)) rows.set(o.id, { collectedAt: null, possessionAt: o.dispatchedAt, order: { status: o.status, runnerId: o.runnerId } })
   }
 
+  const zoneOf = new Map(runnerZones.map(r => [r.id, r.event.timezone]))
   for (const id of runnerIds) {
-    stats.set(id, summarizeCustody([...byRunner.get(id)!.values()], id))
+    // Event.timezone is non-nullable with a schema default, so a missing entry can only mean the
+    // runner id does not exist — in which case there are no rows to bucket and the zone is inert.
+    stats.set(id, summarizeCustody([...byRunner.get(id)!.values()], id, zoneOf.get(id) ?? 'UTC'))
   }
   return stats
 }
