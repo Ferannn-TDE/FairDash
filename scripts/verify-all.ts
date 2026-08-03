@@ -98,6 +98,9 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'health-guard',           file: 'scripts/test-health-guard.ts' },
   { group: 'correctness', name: 'escalation-guard',       file: 'scripts/test-escalation-guard.ts' },
   { group: 'money',       name: 'runner-earnings',        file: 'scripts/runner-earnings-guard.ts' },
+  // "Today" is the FAIR's calendar day, not the server's. Forces TZ=UTC — the defect is
+  // invisible on a Chicago host, which is how it reached prod past 89 green suites.
+  { group: 'money',       name: 'runner-today-boundary',  file: 'scripts/runner-today-boundary-guard.ts' },
   { group: 'money',       name: 'runner-fee-gate',        file: 'scripts/runner-fee-gate-guard.ts' },
   { group: 'money',       name: 'runner-completion',      file: 'scripts/runner-completion-guard.ts' },
   { group: 'correctness', name: 'runner-stats-source',    file: 'scripts/runner-stats-source-guard.ts' },

@@ -1,3 +1,4 @@
+import { startOfDayInZone } from './audit-time'
 /**
  * Runner earnings summarizer — the ONE derivation of "what MONEY does this runner see".
  * (Delivery COUNTS live in lib/runner-completion.ts — custody is the spine for counts.)
@@ -58,8 +59,25 @@ const DISPLAY_STATUS: Record<string, RunnerEarningDisplayStatus> = {
   tracked: 'pending', held: 'held', paid: 'paid', cancelled: 'cancelled',
 }
 
-export function summarizeRunnerEarnings(rows: RunnerLedgerRow[], nowMs = Date.now()): RunnerEarningsSummary {
-  const startOfToday = new Date(nowMs); startOfToday.setHours(0, 0, 0, 0)
+/**
+ * @param timeZone  The FAIR's IANA zone (Event.timezone) — REQUIRED, never defaulted. "Today"
+ *   means the runner's wall-clock day where the fair is, not the server's. This used to be
+ *   `setHours(0,0,0,0)` = server-local midnight, which on Vercel (UTC) split one Chicago day
+ *   across two buckets and reported "$11.50" for a $21.00 day. See lib/audit-time.ts.
+ *
+ * ⚠️ KNOWN RESIDUAL — this keys the day on RunnerEarning.createdAt (the ACCRUAL instant, written
+ * at DELIVERED), while the delivery COUNT keys on Order.collectedAt (possession start) in
+ * lib/runner-completion.ts. Zoning the boundary does NOT reconcile those: an order collected
+ * 11:55 PM and delivered 12:05 AM still lands the money on one day and the count on the previous
+ * one. Deliberately left — deciding which instant "counts" a delivery to a day is a product
+ * question, not a boundary bug. Do not silently unify them; decide it.
+ */
+export function summarizeRunnerEarnings(
+  rows: RunnerLedgerRow[],
+  timeZone: string,
+  nowMs = Date.now(),
+): RunnerEarningsSummary {
+  const startOfToday = startOfDayInZone(nowMs, timeZone)
 
   const lines: RunnerEarningLine[] = rows.map(r => {
     const tipCents = Math.min(Math.max(Math.round((r.order.tip ?? 0) * 100), 0), r.amountCents)
