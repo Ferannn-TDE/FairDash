@@ -21,7 +21,7 @@ import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps'
 // ON the map, not dropped in the upgrade:
 //   • accuracy → an actual circle at the reported radius, so ±120m LOOKS like ±120m rather than
 //     hiding behind a pin drawn at a single point.
-//   • staleness → the marker desaturates and the caption goes amber past the threshold.
+//   • staleness → the dot stops pulsing and goes grey; the caption says "last seen".
 //
 // This file is 'use client' and must stay free of any server-only import (lib/db, prisma,
 // stripe, …) — see CURRENT_STATE.md §7: a server-only module reachable from a client entry
@@ -70,16 +70,38 @@ export default function RunnerLocationMap({
           className="w-full h-full"
         >
           <AdvancedMarker position={{ lat, lng }}>
+            {/* LIVENESS IS CARRIED BY THE DOT ITSELF, not by an alarm colour.
+                A fresh fix pulses in brand pink; a stale one stops moving and goes grey. Motion
+                is the honest signal here — a still, colourless dot reads as "this is the last
+                thing we heard", which is exactly what it is. Amber was the wrong register: a
+                runner briefly losing signal is ordinary, not a warning state, and colouring it
+                like an error trains people to ignore real ones. */}
             <div className="relative flex items-center justify-center">
               {radiusPx != null && (
                 <span
                   aria-hidden
-                  className={`absolute rounded-full ${stale ? 'bg-amber-400/10 border border-amber-400/25' : 'bg-[#FF0077]/10 border border-[#FF0077]/30'}`}
+                  className={`absolute rounded-full transition-colors duration-500 ${
+                    stale
+                      ? 'bg-white/[0.06] border border-white/15'
+                      : 'bg-[#FF0077]/10 border border-[#FF0077]/30'
+                  }`}
                   style={{ width: radiusPx * 2, height: radiusPx * 2 }}
                 />
               )}
+              {/* The pulse. Rendered only when fresh, so "stopped" is the absence of the
+                  element rather than a paused animation — nothing to resume incorrectly.
+                  motion-safe: respects prefers-reduced-motion; the colour change still
+                  distinguishes the two states without it. */}
+              {!stale && (
+                <span
+                  aria-hidden
+                  className="absolute w-3.5 h-3.5 rounded-full bg-[#FF0077]/60 motion-safe:animate-ping"
+                />
+              )}
               <span
-                className={`relative w-3.5 h-3.5 rounded-full border-2 border-white shadow ${stale ? 'bg-amber-400' : 'bg-[#FF0077]'}`}
+                className={`relative w-3.5 h-3.5 rounded-full border-2 shadow transition-colors duration-500 ${
+                  stale ? 'bg-[#8A8A8A] border-white/60' : 'bg-[#FF0077] border-white'
+                }`}
               />
             </div>
           </AdvancedMarker>

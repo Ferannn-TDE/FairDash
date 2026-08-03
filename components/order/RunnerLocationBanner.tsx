@@ -31,9 +31,9 @@ import RunnerLocationMap from './RunnerLocationMap'
 // and deriveDeliveryProgress must NOT be widened to model it — telemetry freshness is not a
 // stage of the order.
 //
-// HONESTY SIGNALS ARE LOAD-BEARING. Accuracy (±Nm) and staleness ("updated Ns ago", amber past
-// 30s) are why a stale fix cannot pass as a live one. Anything rendering this feed must keep
-// them.
+// HONESTY SIGNALS ARE LOAD-BEARING. Accuracy (±Nm) and age ("updated"/"last seen Ns ago",
+// with the dot greying and stopping past STALE_AFTER_SEC) are why a stale fix cannot pass as a
+// live one. Anything rendering this feed must keep them.
 
 interface LocationResponse {
   runnerAssigned: boolean
@@ -50,7 +50,8 @@ interface LocationResponse {
 const FULFILLED_BY_RUNNER = new Set(['HOME_DELIVERY', 'CURBSIDE'])
 const RELEVANT_STATUS = new Set(['READY', 'RUNNER_COLLECTED'])
 
-/** A fix older than this reads as stale — amber, and labelled. */
+/** A fix older than this reads as stale: the dot greys and stops, the caption says "last seen".
+ *  ONE threshold — the map's styling and this caption both derive from it, never a second copy. */
 export const STALE_AFTER_SEC = 30
 
 export default function RunnerLocationBanner({
@@ -117,15 +118,19 @@ export default function RunnerLocationBanner({
   return (
     <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 text-sm">
       <RunnerLocationMap lat={loc.lat!} lng={loc.lng!} accuracy={loc.accuracy ?? null} stale={stale} />
-      {/* The honesty signals stay, verbatim, BELOW the map. On a map a four-minute-old fix looks
-          exactly like a live one — accuracy and staleness are the only things that distinguish
-          them, so the map is an addition to this line and never a replacement for it. */}
+      {/* The honesty signals stay BELOW the map. On a map a four-minute-old fix looks exactly
+          like a live one — accuracy and age are the only things that distinguish them, so this
+          line is never dropped in favour of the picture.
+          QUIET, NOT ALARMED. Staleness is stated in words ("last seen") rather than shouted in
+          amber: a runner passing through a signal dead-spot is ordinary, and a colour reserved
+          for problems should be kept for problems. The dot going grey and still is the primary
+          signal; this line is the precise version of it. */}
       <div className="flex items-center gap-2.5">
-        <TruckIcon className="w-4 h-4 text-[#FF0077] shrink-0" />
-        <span className="text-white">
-          <span className="font-mono">{loc.lat!.toFixed(5)}, {loc.lng!.toFixed(5)}</span>
-          {loc.accuracy != null && <span className="text-[#A1A1A1]"> · ±{Math.round(loc.accuracy)}m</span>}
-          <span className={stale ? 'text-amber-400' : 'text-emerald-400'}> · updated {ageSec}s ago{stale ? ' (stale)' : ''}</span>
+        <TruckIcon className={`w-4 h-4 shrink-0 transition-colors duration-500 ${stale ? 'text-[#8A8A8A]' : 'text-[#FF0077]'}`} />
+        <span className="text-[#A1A1A1]">
+          <span className="font-mono text-white/70">{loc.lat!.toFixed(5)}, {loc.lng!.toFixed(5)}</span>
+          {loc.accuracy != null && <span> · ±{Math.round(loc.accuracy)}m</span>}
+          <span> · {stale ? 'last seen' : 'updated'} {ageSec}s ago</span>
         </span>
       </div>
     </div>

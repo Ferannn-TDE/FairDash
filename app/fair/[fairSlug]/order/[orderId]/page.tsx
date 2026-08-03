@@ -219,20 +219,21 @@ export default function OrderTrackingPage() {
   }
 
   const isMultiVendor = buildVendorGroups(order.orderItems).length > 1
+  const locationPanel = (
+    <RunnerLocationBanner
+      orderId={orderId}
+      fulfillmentType={order.fulfillmentType}
+      status={liveStatus}
+    />
+  )
   return (
     <>
-      {/* Phase 1 live runner location — minimal coord + staleness, no map. Self-polls;
+      {/* Live runner location is passed as a SLOT so it renders UNDER the "Track Order"
+          header (which lives inside each tracking view) rather than above it. Self-polls;
           renders nothing until a runner-fulfilled order reaches READY/RUNNER_COLLECTED. */}
-      <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 pt-4">
-        <RunnerLocationBanner
-          orderId={orderId}
-          fulfillmentType={order.fulfillmentType}
-          status={liveStatus}
-        />
-      </div>
       {isMultiVendor
-        ? <MultiOrderTracking {...sharedProps} />
-        : <SingleOrderTracking {...sharedProps} />}
+        ? <MultiOrderTracking {...sharedProps} locationSlot={locationPanel} />
+        : <SingleOrderTracking {...sharedProps} locationSlot={locationPanel} />}
     </>
   )
 }

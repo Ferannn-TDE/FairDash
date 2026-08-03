@@ -26,6 +26,7 @@ export default function SingleOrderTracking({
   liveStatus,
   fairSlug,
   cancelling,
+  locationSlot,
   showCancelModal,
   setShowCancelModal,
   showSupportModal,
@@ -84,6 +85,12 @@ export default function SingleOrderTracking({
             </div>
           </div>
         </div>
+
+        {/* Live runner map — directly under the header, so the page reads
+            Track Order → where it is → the rest. */}
+        {locationSlot && (
+          <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 pt-6">{locationSlot}</div>
+        )}
 
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6">
           <div className="mb-4 space-y-4">

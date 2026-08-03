@@ -84,4 +84,9 @@ export interface OrderTrackingProps {
   setShowSupportModal: (v: boolean) => void
   onCancel: () => void
   onOrderAgain: () => void
+  /** Live runner-location panel, rendered directly UNDER the "Track Order" header.
+   *  Passed as a slot rather than imported here because the header lives inside each tracking
+   *  view while the panel's data-fetching lives on the page — a slot puts it in the right place
+   *  in the layout without either side taking on the other's concern. */
+  locationSlot?: React.ReactNode
 }
