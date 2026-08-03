@@ -22,6 +22,7 @@ export default function MultiOrderTracking({
   liveStatus,
   fairSlug,
   cancelling,
+  locationSlot,
   showCancelModal,
   setShowCancelModal,
   showSupportModal,
@@ -68,6 +69,11 @@ export default function MultiOrderTracking({
             </div>
           </div>
         </div>
+
+        {/* Live runner map — directly under the header, matching SingleOrderTracking. */}
+        {locationSlot && (
+          <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 pt-6">{locationSlot}</div>
+        )}
 
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6">
           <div className="mb-4">
