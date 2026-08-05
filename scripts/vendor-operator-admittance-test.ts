@@ -26,8 +26,9 @@
  *      asserted NOW, by injecting a fake Redis and watching the real DEL key, rather than being
  *      "added later" in the commit that would depend on it.
  *
- *   🔌 STILL INERT. Step 2 changes no vendor-facing behaviour: a rejected operator keeps full
- *      portal access until the gate ships. Asserted, so "inert" is a fact and not a claim.
+ *   ⚡ NO LONGER INERT. Step 2 shipped changing no vendor-facing behaviour; step 3 gave these
+ *      routes teeth, so a reject here now WALLS the operator out of the portal. [7] tracks that
+ *      reach: the door reads approvalStatus, the accept path still does not (step 4).
  *
  * NOT VACUOUS: every negative has a positive control on the SAME route and SAME subject — a real
  * strict admin succeeds where the others are refused, and step [0] proves the route can return
@@ -225,11 +226,15 @@ async function main() {
     await callApprove(member.id)
     assert(delKeys.includes(EXPECTED_KEY), `approve DELETED the membership key (saw: ${delKeys.join(', ') || 'none'})`)
 
-    // ── [7] 🔌 STILL INERT ────────────────────────────────────────────────────────
-    // ⚠️ THIS BLOCK IS MEANT TO BE DELETED by the commit that adds the portal gate.
-    console.log('\n[7] INERT: nothing vendor-facing reads approvalStatus yet')
-    for (const f of ['app/vendor/layout.tsx', 'lib/vendor-auth-cache.ts', 'app/api/orders/[id]/vendor-status/route.ts']) {
-      assert(!/approvalStatus/.test(readFileSync(f, 'utf8')), `${f} still does not read approvalStatus`)
+    // ── [7] 🔌 NO LONGER INERT AT THE DOOR — step 3 shipped ───────────────────────
+    // Converted rather than deleted (this block's note said to delete it): the step-4 sites it
+    // also pins are still inert, and dropping that pin would let the accept-verb gate land
+    // unnoticed. What step 2 called "inert" is now true of everything EXCEPT the portal door.
+    console.log('\n[7] the portal door reads approvalStatus (step 3); the accept path does not (step 4)')
+    assert(/approvalStatus/.test(readFileSync('app/vendor/layout.tsx', 'utf8')),
+      'app/vendor/layout.tsx reads approvalStatus — these routes now change what an operator can reach')
+    for (const f of ['lib/vendor-auth-cache.ts', 'app/api/orders/[id]/vendor-status/route.ts']) {
+      assert(!/approvalStatus/.test(readFileSync(f, 'utf8')), `${f} still does not read approvalStatus (step 4)`)
     }
     const authSrc = readFileSync('lib/auth.ts', 'utf8')
     const vendorAuthFn = authSrc.slice(

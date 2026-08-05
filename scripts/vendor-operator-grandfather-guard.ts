@@ -1,5 +1,8 @@
 /**
- * VENDOR OPERATOR ADMITTANCE — STEP 1 GUARD: the grandfather held, and this step is INERT.
+ * VENDOR OPERATOR ADMITTANCE — STEP 1 GUARD: the grandfather held.
+ *
+ * ⚡ The grandfather now MATTERS: step 3 shipped the door, so an un-promoted operator is a
+ * locked-out one. What this guard protects stopped being hypothetical.
  *
  * 20260804000000_add_vendor_member_approval_status adds VendorMember.approvalStatus with a
  * PENDING default. That ADD COLUMN sets EVERY pre-existing operator to PENDING, so the
@@ -19,10 +22,9 @@
  *   [3] THE MIGRATION TEXT — the grandfather UPDATE, the four columns and the index are all
  *       still in the migration file. This is the assertion that survives a regenerated
  *       migration, which is the actual regression path.
- *   [4] INERTNESS — the step-3 enforcement sites do not read approvalStatus yet. Step 1 adds
- *       columns and changes no behaviour; this pins that claim. ⚠️ THIS BLOCK IS MEANT TO BE
- *       DELETED by the commit that adds the door gate — it asserts a property that is true only
- *       while the axis is inert, and retiring it should be a conscious act, not a surprise.
+ *   [4] ENFORCEMENT REACH — which sites read approvalStatus. Retired as an inertness pin in
+ *       step 3 (a conscious act, as its original note asked) and CONVERTED rather than deleted:
+ *       the door must now read it, and the accept path must still not, until step 4.
  *
  * HONEST LIMITATION: run against the local test database, [2]'s population is this suite's OWN
  * fixtures — the test DB has no real operators. The guard proves the probe works and that the
@@ -156,12 +158,17 @@ async function main() {
     assert(!/ALTER TABLE "Vendor"\b/.test(sql) && !/UPDATE "Vendor"\b/.test(sql),
       '⛔ the migration does NOT touch Vendor (the BOOTH axis stays untouched — two independent axes)')
 
-    // ── [4] INERTNESS — true only for step 1 ──────────────────────────────────────
-    // ⚠️ DELETE THIS BLOCK in the commit that adds the door gate. It asserts that the axis is
-    // not yet read, which is step 1's entire contract and step 3's entire purpose to end.
-    console.log('\n[4] INERT: the enforcement sites do not read approvalStatus yet (step-1 contract)')
-    for (const f of ['app/vendor/layout.tsx', 'lib/vendor-auth-cache.ts', 'app/api/orders/[id]/vendor-status/route.ts']) {
-      assert(!/approvalStatus/.test(readFileSync(f, 'utf8')), `${f} does not read approvalStatus (enforcement is a later commit)`)
+    // ── [4] PARTIAL INERTNESS — step 1's contract, as amended by step 3 ───────────
+    // This block's original note said to DELETE it when the door gate ships. Converted instead,
+    // because deleting it would also drop the STEP-4 boundary it pins. Step 3 ended inertness at
+    // exactly ONE site — the portal door — and the remaining sites must still be inert until the
+    // accept-verb re-verification lands. So the layout flips to a POSITIVE assertion and the
+    // rest keep their negative one.
+    console.log('\n[4] the door ENFORCES (step 3); the step-4 sites are still inert')
+    assert(/approvalStatus/.test(readFileSync('app/vendor/layout.tsx', 'utf8')),
+      'app/vendor/layout.tsx DOES read approvalStatus — the grandfather now has something to protect against')
+    for (const f of ['lib/vendor-auth-cache.ts', 'app/api/orders/[id]/vendor-status/route.ts']) {
+      assert(!/approvalStatus/.test(readFileSync(f, 'utf8')), `${f} does not read approvalStatus (step 4, not yet)`)
     }
     // lib/auth.ts is NOT scanned wholesale — it legitimately reads approvalStatus for the
     // ORGANIZER gate (requireOrganizerAuth). The step-1 claim is narrower and so is the check:
