@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Calendar, Store, ChevronRight, AlertTriangle, Users } from 'lucide-react'
+import { Calendar, Store, ChevronRight, AlertTriangle, Users, UserCheck } from 'lucide-react'
 import { formatEventDateRange } from '@/lib/event-date'
 
 interface Fair {
@@ -56,15 +56,26 @@ export default function FairPicker() {
             {loading ? 'Loading…' : `${fairs.length} fair${fairs.length === 1 ? '' : 's'} across all organizers — pick one to manage`}
           </p>
         </div>
-        {/* Organizers are PLATFORM-level (one organizer, many fairs), so their panel is a
-            sibling of the fair list — not something you reach by picking a fair. */}
-        <Link
-          href="/admin/organizers"
-          className="inline-flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 transition-colors"
-        >
-          <Users className="w-3.5 h-3.5" /> Organizers
-          <ChevronRight className="w-3.5 h-3.5 text-text-gray" />
-        </Link>
+        {/* Both panels are PLATFORM-level (one organizer owns many fairs; one operator may work
+            booths at several), so they are siblings of the fair list — not something you reach by
+            picking a fair. "Booth Operators" is deliberately not called "Vendors": picking a fair
+            leads to a Vendors page, and that one is the BOOTHS. This is the people who work them. */}
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/admin/organizers"
+            className="inline-flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 transition-colors"
+          >
+            <Users className="w-3.5 h-3.5" /> Organizers
+            <ChevronRight className="w-3.5 h-3.5 text-text-gray" />
+          </Link>
+          <Link
+            href="/admin/vendor-members"
+            className="inline-flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 transition-colors"
+          >
+            <UserCheck className="w-3.5 h-3.5" /> Booth Operators
+            <ChevronRight className="w-3.5 h-3.5 text-text-gray" />
+          </Link>
+        </div>
       </div>
 
       {error ? (
