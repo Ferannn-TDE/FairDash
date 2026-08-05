@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle, CreditCard, Store, XCircle, Clock, EyeOff } from 'lucide-react'
+import { AlertTriangle, CheckCircle, CreditCard, Store, XCircle, Clock, ShieldAlert } from 'lucide-react'
 import ApprovalQueue, { type ApprovalItem } from './ApprovalQueue'
 import { formatAuditTimestamp } from '@/lib/audit-time'
 
@@ -20,11 +20,12 @@ import { formatAuditTimestamp } from '@/lib/audit-time'
  * built to close. Those are the rows worth looking at, and the row says so in words.
  * (Same discipline as the Organizers panel's approval/suspension split — two facts, two badges.)
  *
- * NOT ENFORCED YET, AND THE PANEL SAYS SO. Nothing reads approvalStatus at this point: the portal
- * door still admits anyone with a membership row. Rejecting someone here moves the column and
- * changes nothing else. That is deliberate — it lets the decision be rehearsed before it has
- * teeth — but a panel that implied otherwise would be lying, so the banner states it plainly and
- * comes out with the commit that adds the gate.
+ * ENFORCED, AND THE PANEL SAYS SO. When this panel shipped, nothing read approvalStatus and the
+ * banner said so plainly — decisions were rehearsable without consequence. The portal door now
+ * reads it on every page load, so the banner was flipped in the same commit that gave it teeth.
+ * The rule is the invariant, not the wording: this panel must never understate what a click here
+ * does. A stale "recorded, not enforced" would be at its most dangerous exactly when it became
+ * false — an admin locking a working operator out of a live booth while being told otherwise.
  *
  * NO SECOND SOURCE OF TRUTH: after any action the list is RE-READ from the database rather than
  * patched locally, so what you see is what the database says.
@@ -133,13 +134,18 @@ export default function VendorOperatorsPanel() {
         </p>
       </div>
 
-      {/* Inert-state notice. Removed by the commit that adds the portal gate. */}
-      <div className="mb-5 flex items-start gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-        <EyeOff className="w-4 h-4 text-[#777] shrink-0 mt-0.5" />
+      {/* LIVE notice — replaced the inert-state one when the portal gate shipped. The panel must
+          never understate what a click here does: this banner previously said decisions were
+          "recorded, not enforced", which became false the moment the door started reading the
+          column. An admin rejecting someone mid-fair is locking an operator out of a booth that
+          is trading right now. */}
+      <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3">
+        <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <p className="text-xs text-[#999] font-inter">
-          <span className="font-semibold text-[#bbb]">Decisions here are recorded, not enforced.</span>{' '}
-          The vendor portal does not check operator approval yet, so approving or rejecting someone
-          changes this record and nothing else. Enforcement ships separately.
+          <span className="font-semibold text-amber-300">Decisions here take effect immediately.</span>{' '}
+          The vendor portal checks operator approval on every page load, so rejecting someone
+          removes their access to the booth on their next navigation. They keep access to booth
+          settings and onboarding, and can be re-approved at any time.
         </p>
       </div>
 
