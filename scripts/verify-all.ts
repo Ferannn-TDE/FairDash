@@ -72,6 +72,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'vendor-online-persist',   file: 'scripts/vendor-online-persist-guard.ts' },
   { group: 'correctness', name: 'vendor-status-revalidation', file: 'scripts/vendor-status-revalidation-guard.ts' },
   { group: 'correctness', name: 'vendor-operator-grandfather', file: 'scripts/vendor-operator-grandfather-guard.ts' },
+  { group: 'boundary',    name: 'vendor-operator-admittance', file: 'scripts/vendor-operator-admittance-test.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
@@ -156,7 +157,7 @@ const AREA_SUITES: Record<string, string[]> = {
   delivery: ['collect-guard', 'release-guard', 'return-guard', 'strand-guard', 'ghost-guard', 'escalation-guard', 'runner-boundary', 'reverser-pattern-t'],
   money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t', 'x2-referral-ack', 'payout-failure-gate', 'money-move-sites', 'stripe-error-class', 'payout-fast-fail', 'connect-url', 'transfer-linkage', 'vendor-fee-coupling', 'payout-failure-marker', 'transfer-existence', 'pollution-cohort', 'sweep-run-record'],
   reconcile:['backstop-warning', 'reverser-pattern-t', 'sweep-summary', 'stuck-money-reader', 'health-guard', 'incoming-divergence', 'x2-referral-ack'],
-  vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence', 'vendor-operator-grandfather'],
+  vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence', 'vendor-operator-grandfather', 'vendor-operator-admittance'],
   // Runner stats surfaces (runner-facing earnings + admin roster): the custody-for-counts /
   // ledger-for-money split, the dead-column scan, the floor, and the flicker + boundary
   // cross-cuts.
