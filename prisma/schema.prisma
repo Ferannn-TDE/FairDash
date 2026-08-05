@@ -348,10 +348,48 @@ model VendorMember {
   user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   role     String @default("staff") // owner | manager | staff
 
+  // ── OPERATOR ADMITTANCE ─────────────────────────────────────────────────────
+  //
+  // ⚠️ READ THIS BEFORE TOUCHING EITHER FIELD. There are TWO "status" concepts on the
+  // vendor side, they sit two models apart, and the whole design depends on never
+  // confusing them:
+  //
+  //   VendorMember.approvalStatus (HERE) = "may this HUMAN operate this booth"
+  //   Vendor.status               (:232) = "may this BOOTH trade"
+  //
+  // They are INDEPENDENT axes and neither implies the other. An APPROVED operator whose
+  // booth is PENDING still cannot take orders (app/api/orders/route.ts gates on
+  // Vendor.status). A REJECTED operator whose booth is ACTIVE must not be able to work it
+  // — which is the hole this axis exists to close. Booth trading, readiness
+  // (lib/vendor-readiness.ts) and payouts read Vendor.status and are NOT affected by the
+  // field below; do not wire them to it.
+  //
+  // Reuses the SHARED ApprovalStatus enum (see its definition below) and the same
+  // four-field audit shape as Runner (:1142) and FairOrganizer (:1071) — one lifecycle,
+  // three subjects. approvedBy holds an admin User.id, resolved from the acting admin's
+  // Clerk id, because User.id is the only identity this DB can JOIN on ("who admitted
+  // this operator" should be answerable in SQL, not via a Clerk round-trip). It is
+  // deliberately a plain String? and NOT a relation: the 'system-grandfather' sentinel
+  // written by the backfill migration is not a User.id, and an FK would reject it —
+  // matching :1073 and :1144.
+  //
+  // Rejection is REVERSIBLE here (organizer's model, not runner's terminal one): an
+  // admin may re-admit a REJECTED operator, which clears rejectionReason.
+  //
+  // 🔌 INERT AS OF THIS MIGRATION. Nothing reads approvalStatus yet — no gate, no route,
+  // no UI. Enforcement lands in later, separate commits (portal door + gate screen, then
+  // the accept-verb re-verification). The backfill ships FIRST and ALONE, deliberately, so
+  // the grandfather is in the database before anything can lock anyone out.
+  approvalStatus  ApprovalStatus @default(PENDING)
+  approvedAt      DateTime?
+  approvedBy      String? // admin User.id, or the 'system-grandfather' backfill sentinel
+  rejectionReason String?
+
   createdAt DateTime @default(now())
 
   @@unique([vendorId, userId])
   @@unique([userId, vendorId], map: "uq_vendormember_user_vendor")
+  @@index([approvalStatus])
 }
 
 // ============================================================================
