@@ -9,8 +9,10 @@
  *
  *   [0] POSITIVE CONTROLS (first) — the derivation returns all three states, and the scanner
  *       flags a status-only gate, so the assertions below can't pass vacuously.
- *   [1] THE REAL FAIR — with the stored Aug 5–12 dates, "today" resolves to upcoming → the gate
- *       refuses. Asserted against the same function the route calls, not a restatement.
+ *   [1] THE REAL FAIR — with the stored Aug 5–12 dates, the gate refuses outside the window and
+ *       permits inside it, at instants DERIVED FROM THOSE DATES. Asserted against the same
+ *       function the route calls, not a restatement. Deliberately never reads the wall clock:
+ *       it once did, and expired the day the fair opened.
  *   [2] THE ROUTE — gates on liveState from the shared derivation, refuses with the NAMED
  *       FAIR_NOT_OPEN, and hand-rolls no second date comparison.
  *   [3] THE BYPASS — routed through the one server-side both-conditions decision.
@@ -48,9 +50,30 @@ const STATUS_ONLY = /event\.status\s*!==\s*EventStatus\.ACTIVE/
 assert(STATUS_ONLY.test('if (event.status !== EventStatus.ACTIVE) { throw }'),
   'scanner recognises the status-only gate (the shape that was insufficient on its own)')
 
-console.log('\n[1] the real fair, today: the gate refuses')
-assert(deriveEventLiveState(START, END) !== 'live',
-  `Italian Fest (Aug 5–12) is not live today → an order must be refused (state: ${deriveEventLiveState(START, END)})`)
+console.log('\n[1] the real fair, across its whole lifecycle: refuses outside the window, permits inside')
+// ⏱ PINNED, NEVER "NOW". This block used to call deriveEventLiveState(START, END) with no
+// instant — i.e. the wall clock — and assert the fair "is not live today". That was true the day
+// it was written and became FALSE the moment the fair opened (2026-08-05), so a correct product
+// started failing its own guard. The tempting repair — "assert it IS live, because it is" — is
+// the same bug wearing a different hat: it just moves the expiry to the day the fair ends.
+//
+// The invariant has no "today" in it, so neither does this test. Every instant below is DERIVED
+// FROM THE STORED DATES, which means it holds on Aug 13, in November, in 2030, and still follows
+// the fair if those dates are edited. The gate's rule is `liveState !== 'live'` (asserted against
+// the route at [2]), so "refuses" and "permits" below are that rule applied, not a restatement.
+const DAY = 86_400_000
+const REFUSES = (ms: number) => deriveEventLiveState(START, END, ms) !== 'live'
+
+assert(deriveEventLiveState(START, END, at(START) - DAY) === 'upcoming' && REFUSES(at(START) - DAY),
+  'the day BEFORE it opens → upcoming → an order is REFUSED')
+assert(deriveEventLiveState(START, END, at(START)) === 'live' && !REFUSES(at(START)),
+  'OPENING day → live → an order is PERMITTED (the boundary that expired the old assertion)')
+assert(deriveEventLiveState(START, END, at(START) + (at(END) - at(START)) / 2) === 'live',
+  'mid-fair → live → PERMITTED (so this is not a gate that refuses everything)')
+assert(deriveEventLiveState(START, END, at(END)) === 'live' && !REFUSES(at(END)),
+  'CLOSING day → live → still PERMITTED (the window is inclusive at both ends)')
+assert(deriveEventLiveState(START, END, at(END) + DAY) === 'ended' && REFUSES(at(END) + DAY),
+  'the day AFTER it ends → ended → an order is REFUSED again')
 
 console.log('\n[2] the route gates on the shared derivation, with a named refusal')
 assert(/deriveEventLiveState\(event\.startDate, event\.endDate\)/.test(route),
