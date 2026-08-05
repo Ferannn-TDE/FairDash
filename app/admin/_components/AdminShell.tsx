@@ -20,6 +20,7 @@ import {
   BanknotesIcon,
   ArrowRightOnRectangleIcon,
   UserGroupIcon,
+  IdentificationIcon,
 } from '@heroicons/react/24/outline'
 interface Props {
   children: React.ReactNode
@@ -136,6 +137,14 @@ function SidebarContent({ currentSlug, fairs, loaded, onClose }: { currentSlug: 
             suspending one is not a fair-scoped decision. Sits alongside "All Events",
             never inside the per-event nav. */}
         <SidebarLink href="/admin/organizers" icon={UserGroupIcon} label="Organizers" exact onClick={onClose} />
+        {/* Also PLATFORM-level: a VendorMember has no eventId and one person may work booths at
+            several fairs, so admitting them is not a fair-scoped decision either.
+            ⚠️ LABEL: "Booth Operators", NOT "Vendors". The per-fair nav above already has a
+            "Vendors" entry, and that one is the BOOTHS (Vendor.status — may this stall trade).
+            This is the PEOPLE who work them (VendorMember.approvalStatus — may this human
+            operate). Two entries both called "Vendors" would be a coin flip, and these are
+            genuinely different things. */}
+        <SidebarLink href="/admin/vendor-members" icon={IdentificationIcon} label="Booth Operators" exact onClick={onClose} />
 
         {/* Per-event nav */}
         {currentSlug && <EventNav slug={currentSlug} fairs={fairs} loaded={loaded} onClose={onClose} />}
