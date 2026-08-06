@@ -116,6 +116,38 @@ export function vendorCarveOutPath(fairSlug: string, segment: VendorCarveOutSegm
   return `/vendor/${fairSlug}/${segment}`
 }
 
+/**
+ * Every view the vendor portal shell can link to, for an ADMITTED operator.
+ * (`onboarding` is deliberately absent — it is reached from the gate screen and from the
+ * exits-only nav below, not offered as a standing view to someone already working.)
+ */
+export const VENDOR_PORTAL_NAV_KEYS = ['dashboard', 'orders', 'menu', 'analytics', 'settings'] as const
+
+export type VendorNavKey = (typeof VENDOR_PORTAL_NAV_KEYS)[number] | VendorCarveOutSegment
+
+/**
+ * WHICH NAV THE SHELL MAY RENDER — the fix for a real hole, not a cosmetic one.
+ *
+ * The door is a PAGE gate, and a page gate does not re-run on soft navigation. So while a gated
+ * operator is legitimately sitting on a carve-out page (settings/onboarding — which they MUST
+ * still reach), the portal shell around them was rendering its full sidebar, and its Dashboard
+ * link soft-navigated them straight back into the portal the door had just refused them. The
+ * carve-out built to prevent a deadlock was handing out a working way back in.
+ *
+ * A non-admitted operator therefore gets EXACTLY the carve-out routes as navigation — the same
+ * set the door allows and the same set the gate screen links to, by construction rather than by
+ * a third hand-written list. Nothing that re-enters the portal.
+ *
+ * ⚠️ THIS CLOSES THE VISIBLE PATH, NOT THE GATE. Typing /vendor/<slug>/dashboard, or a history
+ * back/forward, still reaches the dashboard shell, because no layout-level change can survive a
+ * soft navigation. Only a per-request check on the vendor APIs closes that, which is the
+ * accept-verb step. Do not read this function as an authorization boundary; it decides what is
+ * OFFERED, and the API decides what is SERVED.
+ */
+export function vendorShellNavKeys(state: VendorOperatorState): readonly VendorNavKey[] {
+  return state === 'ADMITTED' ? VENDOR_PORTAL_NAV_KEYS : VENDOR_GATE_CARVE_OUT_SEGMENTS
+}
+
 export function isVendorGateCarveOut(pathname: string): boolean {
   const segments = pathname.split('?')[0].replace(/\/+$/, '').split('/').filter(Boolean)
   // ['vendor', '<fairSlug>', '<leaf>'] — nothing shorter, nothing deeper.
