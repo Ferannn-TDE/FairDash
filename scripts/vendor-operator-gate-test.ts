@@ -35,6 +35,7 @@ import {
   vendorOperatorState,
   isVendorGateCarveOut,
   VENDOR_GATE_CARVE_OUT_SEGMENTS,
+  vendorCarveOutPath,
   type VendorOperatorFacts,
 } from '../lib/vendor-operator-state'
 
@@ -202,6 +203,46 @@ async function main() {
     'no rendered text claims the portal skips the approval check')
   assert(/take effect immediately/i.test(panel),
     'positive control: the panel states that decisions take effect immediately — the banner was flipped, not merely deleted')
+
+  // ── [10] THE ESCAPE BUTTONS ACTUALLY WORK ──────────────────────────────────
+  // [5] proved the carve-out routes are REACHABLE. That is only half the deadlock check, and the
+  // half that was already green while both buttons were dead: reachability says nothing about
+  // where the screen POINTS, or about whether clicking it navigates at all. Both halves live
+  // here now.
+  console.log('\n[10] the gate screen links to exactly the routes the door carves out')
+  const screen = readFileSync('app/vendor/_components/VendorOperatorGateScreen.tsx', 'utf8')
+
+  // (a) ROUND-TRIP: every path the screen can build is one the door lets through. Derived from
+  //     the shared builder, so this cannot drift into two hand-written copies of the path set.
+  for (const seg of VENDOR_GATE_CARVE_OUT_SEGMENTS) {
+    const href = vendorCarveOutPath('vogfixture-fair', seg)
+    assert(isVendorGateCarveOut(href), `the door lets through the exact href the screen builds: ${href}`)
+    assert(doorAdmits([rejected(REASON)], href) === true, `a REJECTED operator clicking '${seg}' is not bounced back`)
+  }
+  // Positive control on the round-trip: the builder feeds the SAME matcher that refuses a
+  // non-carved route, so the assertions above are not true of every string.
+  assert(isVendorGateCarveOut('/vendor/vogfixture-fair/dashboard') === false,
+    'positive control: the matcher still refuses a non-carve-out route built the same way')
+
+  // (b) ONE SOURCE: the screen must derive hrefs, not hand-write them. A hand-written
+  //     `/vendor/${slug}/settings` is what allows the screen and the allowlist to disagree.
+  assert(screen.includes('vendorCarveOutPath('),
+    'the screen builds hrefs with vendorCarveOutPath — one source shared with the door')
+  assert(!/href=\{`\/vendor\//.test(screen),
+    'the screen hand-writes no /vendor/... href — that is the two-copies-one-lies shape')
+
+  // (c) THE CLICK MUST NAVIGATE. next/link is a SOFT navigation, and these targets sit under the
+  //     layout that rendered this screen — which Next does not re-execute on soft nav, so the
+  //     gate screen stays mounted and the button does nothing. This is the bug that shipped.
+  // Anchor on the rendered exit block, not the whole file: the support/sign-out exits below it
+  // legitimately stay <Link> (they leave the /vendor segment, so the layout really is torn down).
+  const exitStart = screen.indexOf('VENDOR_GATE_CARVE_OUT_SEGMENTS.map')
+  assert(exitStart > 0, 'probe anchor: the exit block renders from the shared segment constant')
+  const exitBlock = screen.slice(exitStart, exitStart + 400)
+  assert(/<a\b/.test(exitBlock),
+    'the carve-out exits are plain <a> — a full document request re-runs the layout so the door re-evaluates')
+  assert(!/<Link\b/.test(exitBlock),
+    'no carve-out exit is a <Link> — a soft navigation does not re-run the gated layout, so the button would do nothing')
 
   console.log(`\n${'─'.repeat(70)}\n  ${pass} passed, ${fail} failed\n`)
   if (fail > 0) process.exit(1)

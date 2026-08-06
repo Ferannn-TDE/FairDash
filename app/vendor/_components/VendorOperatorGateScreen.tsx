@@ -3,7 +3,12 @@
 import Link from 'next/link'
 import { useClerk } from '@clerk/clerk-react'
 import { Clock, ShieldX } from 'lucide-react'
-import type { VendorOperatorView } from '@/lib/vendor-operator-state'
+import {
+  VENDOR_GATE_CARVE_OUT_SEGMENTS,
+  vendorCarveOutPath,
+  type VendorCarveOutSegment,
+  type VendorOperatorView,
+} from '@/lib/vendor-operator-state'
 
 /**
  * The OPERATOR's side of the admittance door (step 3). Rendered INSTEAD of the portal by the
@@ -31,6 +36,17 @@ import type { VendorOperatorView } from '@/lib/vendor-operator-state'
  * operator whose application stalled on a missing payout destination can go fix the thing that
  * would make them approvable.
  */
+
+/**
+ * Button text per carve-out route. Keyed by the segment constant and typed as a total Record, so
+ * adding a route to the allowlist FAILS TO COMPILE until it is given a label — a new escape route
+ * cannot ship as an unlabelled button, and the screen cannot link anywhere the door does not
+ * carve out.
+ */
+const EXIT_LABELS: Record<VendorCarveOutSegment, string> = {
+  settings: 'Booth settings & payouts',
+  onboarding: 'Finish onboarding',
+}
 
 const META: Record<
   Exclude<VendorOperatorView['state'], 'ADMITTED'>,
@@ -87,21 +103,31 @@ export default function VendorOperatorGateScreen({
 
         {/* THE EXITS. These are the carve-out routes — reachable in both gated states by
             design, so this is a door and not a dead end. Rendered only when we know which fair
-            to point at; the sign-out/support exits below always render. */}
+            to point at; the sign-out/support exits below always render.
+
+            🔴 PLAIN <a>, NOT <Link> — AND THAT IS THE WHOLE FIX. These first shipped as next/link
+            anchors and did nothing when clicked. A <Link> is a SOFT navigation, and these targets
+            live under the very layout that rendered this screen: app/vendor/layout.tsx returns
+            THIS COMPONENT INSTEAD OF {children} when an operator is gated. Next does not
+            re-execute an unchanged shared layout on soft navigation — it diffs the router state
+            tree by segment key, it does not re-run the layout and compare output — so the cached
+            layout tree has no children slot for the incoming page to land in. The URL changed and
+            the gate screen stayed put: a dead button, and the exact deadlock the carve-out exists
+            to prevent. A full document request re-runs middleware and the layout, the carve-out is
+            evaluated, and the page renders. Do not "optimise" these back into <Link>.
+            (The exits BELOW may stay <Link>: they leave the /vendor segment entirely, so the tree
+            really does change and the layout is torn down.) */}
         {fairSlug && (
           <div className="mt-6 flex flex-col gap-2">
-            <Link
-              href={`/vendor/${fairSlug}/settings`}
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
-            >
-              Booth settings &amp; payouts
-            </Link>
-            <Link
-              href={`/vendor/${fairSlug}/onboarding`}
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
-            >
-              Finish onboarding
-            </Link>
+            {VENDOR_GATE_CARVE_OUT_SEGMENTS.map(segment => (
+              <a
+                key={segment}
+                href={vendorCarveOutPath(fairSlug, segment)}
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                {EXIT_LABELS[segment]}
+              </a>
+            ))}
           </div>
         )}
 

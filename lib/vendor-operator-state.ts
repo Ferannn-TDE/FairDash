@@ -102,6 +102,20 @@ export function vendorOperatorState(memberships: VendorOperatorFacts[]): VendorO
  */
 export const VENDOR_GATE_CARVE_OUT_SEGMENTS = ['onboarding', 'settings'] as const
 
+export type VendorCarveOutSegment = (typeof VENDOR_GATE_CARVE_OUT_SEGMENTS)[number]
+
+/**
+ * The ONE place a carve-out URL is built. The gate screen's escape buttons and the door's
+ * allowlist must name the same routes, and they used to be two hand-written copies of that set —
+ * the two-copies-one-lies shape. A screen linking somewhere the door does not carve out is a
+ * button that bounces the operator straight back to the wall, which is the deadlock wearing a
+ * disguise. Derive, don't repeat: isVendorGateCarveOut(vendorCarveOutPath(s, seg)) is true for
+ * every segment by construction, and the guard asserts that round-trip.
+ */
+export function vendorCarveOutPath(fairSlug: string, segment: VendorCarveOutSegment): string {
+  return `/vendor/${fairSlug}/${segment}`
+}
+
 export function isVendorGateCarveOut(pathname: string): boolean {
   const segments = pathname.split('?')[0].replace(/\/+$/, '').split('/').filter(Boolean)
   // ['vendor', '<fairSlug>', '<leaf>'] — nothing shorter, nothing deeper.
