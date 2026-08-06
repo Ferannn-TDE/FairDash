@@ -7,6 +7,7 @@ import { requireOrganizerAuth } from '@/lib/auth'
 import { boundedHeartbeatRead } from '@/lib/heartbeat-read'
 import { OrderStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
+import { organizerFairScope } from '@/lib/organizer-fair-context'
 
 // ── Cached sub-queries ───────────────────────────────────────────────────────
 
@@ -46,8 +47,10 @@ export async function GET(
     const { fairSlug } = await params
 
     const event = await db.event.findFirst({
-      // Relation-heavy read (pulls vendors) → inline archivedAt rather than resolveOwnedFair.
-      where: { urlSlug: fairSlug, organizerId, archivedAt: null },
+      // Relation-heavy read (pulls vendors) → cannot use the scalar-only resolveOwnedFair, but it
+      // must not diverge from it either: the fragment supplies the SAME organizerId + archivedAt +
+      // not-DRAFT exclusions the resolver applies. A draft's analytics must not open.
+      where: { ...organizerFairScope(organizerId), urlSlug: fairSlug },
       select: {
         id: true, name: true, urlSlug: true, status: true, isPaused: true,
         startDate: true, endDate: true,

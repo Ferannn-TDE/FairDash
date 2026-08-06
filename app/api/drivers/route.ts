@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { fairAcceptsJoins } from '@/lib/fair-join-gate'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { ApiError } from '@/lib/api-error'
@@ -92,10 +93,16 @@ export async function POST(req: NextRequest) {
     if (applicant?.id && typeof fairSlug === 'string' && fairSlug.trim()) {
       const event = await db.event.findUnique({
         where: { urlSlug: fairSlug.trim() },
-        select: { id: true },
+        select: { id: true, status: true },
       })
       // Unresolvable fair → application still succeeds; skip the mint, never 500.
-      if (event) {
+      //
+      // ACQUISITION GATE: a DRAFT fair is treated exactly like an unresolvable one — the
+      // application is accepted, but NO Runner is minted against it. Runner CASCADEs on Event
+      // delete and discarding a draft is a hard delete, so a runner attached to a draft would be
+      // silently destroyed. Skipping (rather than throwing) preserves this route's contract that
+      // an applicant is never rejected because of the fair's state. See lib/fair-join-gate.ts.
+      if (event && fairAcceptsJoins(event.status)) {
         const existing = await db.runner.findUnique({
           where: { userId: applicant.id },
           select: { id: true },

@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { OrderStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
+import { organizerFairScope } from '@/lib/organizer-fair-context'
 
 const PAID_STATUSES: OrderStatus[] = [
   'PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED',
@@ -27,14 +28,14 @@ export async function GET(req: NextRequest) {
     let eventIds: string[]
     if (fairId) {
       const event = await db.event.findFirst({
-        where: { id: fairId, organizerId, archivedAt: null },
+        where: { ...organizerFairScope(organizerId), id: fairId },
         select: { id: true },
       })
       if (!event) return apiError('Fair not found or access denied', 404, 'NOT_FOUND')
       eventIds = [fairId]
     } else {
       const events = await db.event.findMany({
-        where: { organizerId, archivedAt: null },
+        where: organizerFairScope(organizerId),
         select: { id: true },
       })
       eventIds = events.map(e => e.id)

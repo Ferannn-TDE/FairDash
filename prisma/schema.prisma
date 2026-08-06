@@ -106,6 +106,23 @@ enum EventStatus {
   ACTIVE // Event is live and accepting orders
   UPCOMING // Event is scheduled but not yet open
   INACTIVE // Event has ended or been deactivated
+
+  // A half-built fair from the create wizard's "Save Draft". A REAL row (same NOT NULL
+  // name/startDate/endDate as any fair — there are no partial Events), but excluded from every
+  // user-facing, money, analytics and count surface until the wizard publishes it as UPCOMING.
+  //
+  // ⚠️ EXCLUSION IS NOT PER-QUERY. Organizer list reads go through organizerFairScope()
+  // (lib/organizer-fair-context.ts) — one fragment, and adding `status: { not: DRAFT }` inline to a
+  // new reader instead is the bug that fragment exists to prevent. Public/customer surfaces already
+  // filter `status: ACTIVE` and are covered for free.
+  //
+  // APPENDED, NOT INSERTED, deliberately: Postgres ALTER TYPE ... ADD VALUE appends, so this is a
+  // zero-risk additive migration. It does mean DRAFT sorts LAST under `orderBy: { status: 'asc' }`
+  // (the admin fair list) rather than first.
+  //
+  // Discard is a HARD DELETE, which is only safe because a draft can never acquire a Vendor or
+  // Runner (both CASCADE) — enforced at the two attach paths, see assertFairAcceptsJoins().
+  DRAFT
 }
 
 // ============================================================================

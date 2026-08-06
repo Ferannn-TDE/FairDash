@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { assertFairAcceptsJoins } from '@/lib/fair-join-gate'
 import { success, apiError, paginated } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -26,6 +27,10 @@ export async function GET(req: Request) {
     // 404s non-live fairs, so status gating here would be redundant.
     const event = await db.event.findFirst({ where: { urlSlug: eventSlug, archivedAt: null } })
     if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
+    // ACQUISITION GATE: a DRAFT fair must never gain a Vendor — Vendor CASCADEs on Event delete,
+    // and discarding a draft is a hard delete. Resolving by slug alone (as above) is exactly how a
+    // leaked draft slug could attach one. See lib/fair-join-gate.ts.
+    assertFairAcceptsJoins(event.status, event.name)
 
     const where = {
       eventId: event.id,

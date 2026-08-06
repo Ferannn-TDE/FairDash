@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 import { formatEventDate } from '@/lib/event-date'
+import DraftFairsSection from './_components/DraftFairsSection'
 
 interface Fair {
   id: string
@@ -105,6 +106,10 @@ export default function OrganizerFairsPage() {
           ))}
         </div>
       )}
+
+      {/* Drafts render BELOW and separately — a draft is not a fair yet, so it must not appear in
+          the list or the count above. Renders nothing when there are none. */}
+      <DraftFairsSection />
     </div>
   )
 }

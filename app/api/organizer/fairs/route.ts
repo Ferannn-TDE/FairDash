@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
+import { EventStatus } from '@prisma/client'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
+import { organizerFairScope } from '@/lib/organizer-fair-context'
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
@@ -23,8 +25,9 @@ const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
 
 async function fetchOrganizerFairs(organizerId: string) {
   const events = await db.event.findMany({
-    // My Fairs list hides soft-deleted fairs (archived ones vanish from the organizer's view).
-    where: { organizerId, archivedAt: null },
+    // My Fairs list: archived fairs vanish, and DRAFT fairs are not fairs yet. Both exclusions
+    // come from ONE fragment — see organizerFairScope for why this must not be typed inline.
+    where: organizerFairScope(organizerId),
     orderBy: { startDate: 'desc' },
     select: {
       id: true,
@@ -124,8 +127,16 @@ export async function GET(_req: NextRequest) {
 
 // POST /api/organizer/fairs
 // Creates a fair owned by the authenticated organizer (from the create-fair wizard).
-// New fairs start UPCOMING (scheduled, not accepting orders). The draft/publish +
-// admin-approval lifecycle is a separate workflow; both wizard buttons create here.
+//
+// TWO OUTCOMES, ONE ROUTE. `asDraft: true` (the wizard's "Save Draft") creates a DRAFT — a real
+// row, hidden from every list/count/public surface until published. Anything else creates an
+// UPCOMING fair exactly as before. Previously BOTH buttons created UPCOMING, which is why
+// "Save Draft" produced permanent, publicly-eligible fairs and left abandoned half-built rows
+// behind; that is the bug this closes.
+//
+// STILL NO PARTIAL ROWS. Both paths require name + startDate + endDate, so a DRAFT satisfies
+// every NOT NULL column like any other Event. Mid-wizard resume (persisted step + partial payload,
+// which WOULD need nullable dates) is deliberately out of scope.
 export async function POST(req: NextRequest) {
   try {
     const { organizerId } = await requireOrganizerAuth()
@@ -135,6 +146,7 @@ export async function POST(req: NextRequest) {
       venueAddress, venueCity, venueState, venueZip,
       openTime, closeTime, timezone, accentColor,
       maxVendors, deliveryEnabled, pickupEnabled, admissionFree,
+      asDraft,
     } = body
 
     if (!name || !String(name).trim()) return apiError('Fair name is required', 400, 'VALIDATION_ERROR')
@@ -148,7 +160,9 @@ export async function POST(req: NextRequest) {
         name: String(name).trim(),
         urlSlug,
         description: description ?? null,
-        status: 'UPCOMING',
+        // "Save Draft" parks the fair as DRAFT; "Create" publishes it as UPCOMING. A DRAFT is
+        // excluded from every list/count/public surface by organizerFairScope until published.
+        status: asDraft === true ? EventStatus.DRAFT : EventStatus.UPCOMING,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
         timezone: timezone || 'America/Chicago',
@@ -173,9 +187,13 @@ export async function POST(req: NextRequest) {
       select: { id: true, name: true, urlSlug: true, status: true },
     })
 
-    // Refresh the organizer's fair-list cache (this endpoint's own GET tag) so the
-    // new fair shows immediately, and the public discovery cache — new fairs start
-    // UPCOMING, which getAllFairsCached includes.
+    // Refresh the organizer's fair-list cache (this endpoint's own GET tag) so the new fair shows
+    // immediately, plus the public discovery cache.
+    //
+    // (The previous note here claimed getAllFairsCached "includes UPCOMING". It does not — it
+    // filters status: ACTIVE (lib/fairs.ts), so neither an UPCOMING fair nor a DRAFT one is
+    // publicly discoverable at creation. Corrected rather than left as stale prose on the exact
+    // line someone would read to answer "can a draft leak to the public site?". It cannot.)
     revalidateTag(`organizer-fairs-${organizerId}`, 'default')
     revalidateTag('fair', 'default')
 

@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
+import { organizerFairScope } from '@/lib/organizer-fair-context'
 
 // GET /api/organizer/vendors
 // Returns all vendors across all events for the authenticated organizer,
@@ -13,7 +14,7 @@ export async function GET(_req: NextRequest) {
     const { organizerId } = await requireOrganizerAuth()
 
     const events = await db.event.findMany({
-      where: { organizerId, archivedAt: null },
+      where: organizerFairScope(organizerId),
       select: { id: true, name: true },
     })
     const eventIds = events.map(e => e.id)
