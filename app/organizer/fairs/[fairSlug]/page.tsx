@@ -151,14 +151,32 @@ export default function FairDashboardPage() {
   // Live heartbeats from Firebase — overlaid on top of DB vendor status
   const [heartbeats, setHeartbeats] = useState<Record<string, number>>({})
   const firebaseCleanupRef = useRef<(() => void) | null>(null)
+  // Holds the in-flight dashboard request so the 30s poll cannot stack a second one on top.
+  const inFlightRef = useRef<AbortController | null>(null)
 
   // ── Data fetch ─────────────────────────────────────────────────────────────
 
   const fetchDashboard = useCallback(async (silent = false) => {
+    // ── IN-FLIGHT GUARD ───────────────────────────────────────────────────────
+    // The 30s poll below fires on a timer with no regard for whether the previous request
+    // finished. When the dashboard route was hanging, each tick added ANOTHER hung request:
+    // the browser showed a growing stack of pending `dashboard` rows, every one holding a
+    // serverless invocation. Bounding the route (see boundedHeartbeatRead) stops any single
+    // request hanging forever — but on its own it would only trade "hangs forever" for "fires
+    // a fresh doomed request every 30s". A background tick must never queue behind a request
+    // that is still running: skip this round, the next tick is only 30s away.
+    if (inFlightRef.current) {
+      if (silent) return
+      // A user-initiated load supersedes a background refresh rather than being dropped.
+      inFlightRef.current.abort()
+    }
+    const controller = new AbortController()
+    inFlightRef.current = controller
+
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const res  = await fetch(`/api/organizer/fairs/${fairSlug}/dashboard`)
+      const res  = await fetch(`/api/organizer/fairs/${fairSlug}/dashboard`, { signal: controller.signal })
       const json = await res.json()
       if (!json.data) return
       setEvent(json.data.event)
@@ -167,8 +185,11 @@ export default function FairDashboardPage() {
       setRecentOrders(json.data.recentOrders)
       setLastRefreshed(new Date())
     } catch {
-      // silently fail on background refresh
+      // silently fail on background refresh (an aborted request lands here too, by design)
     } finally {
+      // Only the CURRENT request clears the slot. An aborted predecessor must not release the
+      // guard out from under its replacement, or the stack it exists to prevent comes back.
+      if (inFlightRef.current === controller) inFlightRef.current = null
       setLoading(false)
       setRefreshing(false)
     }
@@ -177,10 +198,16 @@ export default function FairDashboardPage() {
   // Initial load
   useEffect(() => { void fetchDashboard(false) }, [fetchDashboard])
 
-  // 30s polling
+  // 30s polling. The tick is a no-op while a request is still in flight (see the guard in
+  // fetchDashboard), so at most ONE dashboard request exists at any moment.
   useEffect(() => {
     const id = setInterval(() => { void fetchDashboard(true) }, REFRESH_INTERVAL)
-    return () => clearInterval(id)
+    return () => {
+      clearInterval(id)
+      // Navigating away must not leave a request running against a dead page.
+      inFlightRef.current?.abort()
+      inFlightRef.current = null
+    }
   }, [fetchDashboard])
 
   // ── Firebase heartbeats (live vendor connectivity) ─────────────────────────

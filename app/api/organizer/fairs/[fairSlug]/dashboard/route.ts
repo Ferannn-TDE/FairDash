@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { boundedHeartbeatRead } from '@/lib/heartbeat-read'
 import { OrderStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
@@ -92,17 +92,11 @@ export async function GET(
       vendorOrderCountMap[g.vendorId] = g._count.id
     }
 
-    // Firebase heartbeats — always live, skip cache
-    const rtdb = getRealtimeDb()
-    const heartbeats: Record<string, number> = {}
-    if (rtdb) {
-      try {
-        const snap = await rtdb.ref(`fairs/${event.id}/heartbeats`).get()
-        if (snap.exists()) Object.assign(heartbeats, snap.val() as Record<string, number>)
-      } catch {
-        // Firebase unavailable — heartbeats default to zero (disconnected)
-      }
-    }
+    // Firebase heartbeats — live, skip cache, and STRICTLY BOUNDED. This read used to be an
+    // unbounded rtdb.get(): a cold-start RTDB connection can hang rather than error, which hung
+    // this whole route until FUNCTION_INVOCATION_TIMEOUT (504). On timeout the map comes back
+    // empty and every vendor falls through to lastHeartbeatAt below — the grid still renders.
+    const heartbeats = await boundedHeartbeatRead(event.id)
 
     const now = Date.now()
     const vendorGrid = event.vendors.map(v => {
