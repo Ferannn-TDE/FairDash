@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { boundedHeartbeatRead } from '@/lib/heartbeat-read'
 import { OrderStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
@@ -139,15 +139,10 @@ export async function GET(
     const revTodayMap    = Object.fromEntries(vendorRevenueToday.map(g => [g.vendorId, g._sum.subtotal ?? 0]))
     const allTimeRevMap  = Object.fromEntries(vendorRevenue.map(g => [g.vendorId, { rev: g._sum.subtotal ?? 0, count: g._count.id }]))
 
-    // Firebase heartbeats
-    const rtdb = getRealtimeDb()
-    const heartbeats: Record<string, number> = {}
-    if (rtdb) {
-      try {
-        const snap = await rtdb.ref(`fairs/${event.id}/heartbeats`).get()
-        if (snap.exists()) Object.assign(heartbeats, snap.val() as Record<string, number>)
-      } catch { /* Firebase unavailable */ }
-    }
+    // Firebase heartbeats — STRICTLY BOUNDED (see boundedHeartbeatRead). Previously an unbounded
+    // rtdb.get(), which hung this route to a 504 on cold start. On timeout this is {} and every
+    // vendor's connectionStatus falls through to lastHeartbeatAt below.
+    const heartbeats = await boundedHeartbeatRead(event.id)
 
     const now = Date.now()
     const vendorGrid = event.vendors.map(v => {

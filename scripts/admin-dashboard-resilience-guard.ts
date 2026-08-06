@@ -26,12 +26,19 @@ const route = readFileSync('app/api/admin/events/[id]/dashboard/route.ts', 'utf8
 const page  = readFileSync('app/admin/[eventSlug]/dashboard/page.tsx', 'utf8')
 
 console.log('\n[1] the Firebase heartbeat read is TIME-BOUNDED (cannot hang the request)')
-// The RTDB .get() must be raced against a timeout — never awaited bare.
-assert(/Promise\.race\(\[[\s\S]*?rtdb\.ref\([\s\S]*?\.get\(\)[\s\S]*?setTimeout[\s\S]*?\]\)/.test(route)
-     || /Promise\.race\(\[[\s\S]*?\.get\(\)[\s\S]*?\]\)/.test(route) && /setTimeout\(\(\) => reject/.test(route),
-  'the heartbeat read is wrapped in Promise.race with a timeout')
-assert(!/const snap = await rtdb\.ref\([^\n]*\)\.get\(\)/.test(route),
-  'the RTDB .get() is NOT awaited bare (the unbounded form that caused the 504)')
+// The bound MOVED, it did not go away. It used to be an inline Promise.race in THIS route; the
+// same 504 then recurred on the two organizer routes, which had been hand-copied from the same
+// original and never received it. It now lives in ONE shared helper that every dashboard-class
+// route calls, so the wrap cannot be present on some copies and missing on others. This suite
+// therefore follows the bound to where it lives; scripts/rtdb-bound-guard.ts proves that NO
+// route anywhere performs an unbounded read, which is the stronger form of this assertion.
+const bound = readFileSync('lib/heartbeat-read.ts', 'utf8')
+assert(/boundedHeartbeatRead\(/.test(route),
+  'the route delegates its heartbeat read to the shared bounded helper')
+assert(/Promise\.race\(/.test(bound) && /setTimeout\(/.test(bound),
+  'that helper races the RTDB read against a timeout')
+assert(!/rtdb\.ref\([^\n]*\)\.get\(\)/.test(route),
+  'the RTDB .get() is NOT awaited bare in the route (the unbounded form that caused the 504)')
 
 console.log('\n[2] the client SURFACES a load failure instead of swallowing it')
 assert(/setLoadError/.test(page), 'the page has a loadError state')

@@ -5,7 +5,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { getGoLiveChecklist } from '@/lib/go-live-checklist'
-import { getRealtimeDb } from '@/lib/firebase-admin'
+import { boundedHeartbeatRead } from '@/lib/heartbeat-read'
 import { OrderStatus } from '@prisma/client'
 
 // GET /api/admin/events/[id]/dashboard
@@ -80,28 +80,11 @@ export async function GET(
     )
     const { todayOrders, liveOrders, totalRevenue, platformFee } = await getCachedStats()
 
-    // Firebase heartbeats — live, but STRICTLY BOUNDED. This is the one unbounded external
-    // call in the request, and the request runs under a ~10s serverless ceiling. On a cold
-    // serverless start, establishing a fresh authenticated RTDB connection can HANG (not
-    // error — a hang isn't caught by try/catch), which hangs the whole request → 504. So we
-    // race it against a short timeout: if the realtime read doesn't answer fast, we fall
-    // back to the DB's lastHeartbeatAt (already the fallback in vendorGrid below). Live
-    // heartbeats are a nicety; they must never be able to time out the dashboard.
-    const rtdb = getRealtimeDb()
-    const heartbeats: Record<string, number> = {}
-    if (rtdb) {
-      try {
-        const HEARTBEAT_TIMEOUT_MS = 2500
-        const snap = await Promise.race([
-          rtdb.ref(`fairs/${event.id}/heartbeats`).get(),
-          new Promise<null>((_, reject) =>
-            setTimeout(() => reject(new Error('heartbeat read timed out')), HEARTBEAT_TIMEOUT_MS)),
-        ])
-        if (snap && snap.exists()) Object.assign(heartbeats, snap.val() as Record<string, number>)
-      } catch {
-        // Firebase unavailable OR too slow — degrade to DB lastHeartbeatAt, never hang.
-      }
-    }
+    // Firebase heartbeats — live, but STRICTLY BOUNDED. This route pioneered the wrap (it 504'd
+    // in prod for exactly this reason); the bound now lives in boundedHeartbeatRead so the two
+    // organizer routes cannot miss it the way they did the first time. Same 2500ms, same
+    // degrade-to-lastHeartbeatAt fallback in vendorGrid below.
+    const heartbeats = await boundedHeartbeatRead(event.id)
 
     const now = Date.now()
     const vendorGrid = vendors.map(v => {
