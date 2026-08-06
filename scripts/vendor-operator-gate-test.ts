@@ -35,7 +35,9 @@ import {
   vendorOperatorState,
   isVendorGateCarveOut,
   VENDOR_GATE_CARVE_OUT_SEGMENTS,
+  VENDOR_PORTAL_NAV_KEYS,
   vendorCarveOutPath,
+  vendorShellNavKeys,
   type VendorOperatorFacts,
 } from '../lib/vendor-operator-state'
 
@@ -243,6 +245,94 @@ async function main() {
     'the carve-out exits are plain <a> — a full document request re-runs the layout so the door re-evaluates')
   assert(!/<Link\b/.test(exitBlock),
     'no carve-out exit is a <Link> — a soft navigation does not re-run the gated layout, so the button would do nothing')
+
+  // ── [11] NO NAVIGATION BACK INTO THE PORTAL WHILE GATED ────────────────────
+  // The hole this closes: a REJECTED operator legitimately sitting on a carve-out page got the
+  // full portal shell around them, and its Dashboard link soft-navigated them back inside. The
+  // page gate does not re-run on soft nav, so the carve-out built to prevent a deadlock was
+  // handing out a working way back in.
+  console.log('\n[11] a gated operator is offered the exits and nothing that re-enters the portal')
+
+  /** Names the offending links rather than reporting a bare boolean. */
+  const portalOnly = VENDOR_PORTAL_NAV_KEYS.filter(
+    k => !(VENDOR_GATE_CARVE_OUT_SEGMENTS as readonly string[]).includes(k),
+  )
+  const offenders = (state: 'ADMITTED' | 'AWAITING' | 'DECLINED') =>
+    vendorShellNavKeys(state).filter(k => (portalOnly as readonly string[]).includes(k))
+
+  for (const state of ['AWAITING', 'DECLINED'] as const) {
+    const found = offenders(state)
+    assert(found.length === 0, `${state}: no portal link is offered — offenders: [${found.join(', ')}]`)
+    const keys = vendorShellNavKeys(state)
+    assert(keys.length === VENDOR_GATE_CARVE_OUT_SEGMENTS.length,
+      `${state}: the nav is exactly the carve-out set (got [${keys.join(', ')}])`)
+    // ROUND-TRIP: every link the gated shell offers is one the DOOR actually admits. A shell
+    // offering a route the door refuses would bounce the operator into the wall — the deadlock
+    // wearing a different hat.
+    for (const key of keys) {
+      assert(isVendorGateCarveOut(`/vendor/vogfixture-fair/${key}`),
+        `${state}: the offered link '${key}' is a route the door lets through`)
+    }
+  }
+
+  // POSITIVE CONTROLS — the checker must be able to FAIL and to NAME the link.
+  const poisoned = ['dashboard', 'settings'] as const
+  const named = poisoned.filter(k => (portalOnly as readonly string[]).includes(k))
+  assert(named.length === 1 && named[0] === 'dashboard',
+    `positive control: the offender check NAMES a reintroduced Dashboard link (named: [${named.join(', ')}])`)
+  assert(portalOnly.length > 0,
+    `positive control: there ARE portal-only keys to catch (${portalOnly.join(', ')}) — not vacuous`)
+  // …and the ADMITTED case must still get the full portal, or this "fix" just broke the portal.
+  assert(offenders('ADMITTED').length === portalOnly.length,
+    'an ADMITTED operator still gets the full portal nav — the filter is conditional, not a deletion')
+  assert(vendorShellNavKeys('ADMITTED').includes('dashboard'),
+    'positive control: ADMITTED still sees Dashboard')
+
+  // ── [12] the gate screen offers ZERO portal navigation ─────────────────────
+  console.log('\n[12] the ACCESS DECLINED screen links nowhere into the portal')
+  for (const key of portalOnly) {
+    assert(!new RegExp(`/${key}\\b`).test(screen), `the gate screen has no '${key}' link`)
+  }
+  assert(/vendorCarveOutPath\(/.test(screen),
+    'positive control: the gate screen DOES render links (the exits) — so "no portal link" is not "no links at all"')
+  // It is rendered BARE by the layout — no portal chrome — matching OrganizerGateScreen.
+  const layoutSrc = readFileSync('app/vendor/layout.tsx', 'utf8')
+  assert(/return <VendorOperatorGateScreen[^>]*\/>/.test(layoutSrc),
+    'the gate screen is returned standalone, not wrapped in the portal shell')
+
+  // ── [13] both nav surfaces are filtered, and from the SHARED source ────────
+  console.log('\n[13] the shell derives its nav from the door\'s verdict (both surfaces)')
+  const shellRaw = readFileSync('app/vendor/[fairSlug]/_components/VendorPortalShell.tsx', 'utf8')
+  // Strip comments FIRST. A raw count of `vendorShellNavKeys(` silently included the phrase from
+  // a doc comment, so unfiltering the mobile nav still left two "call sites" and this check
+  // passed while the hole was open. Same code-vs-prose trap as [8] and [9]; caught by the
+  // negative control, which is the only reason it is not still wrong.
+  const shell = shellRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  // Assert PER NAV SURFACE, by name, so a failure says WHICH one is unfiltered rather than
+  // reporting a count that two different bugs could produce.
+  for (const fn of ['SidebarContent', 'MobileBottomNav']) {
+    const start = shell.indexOf(`function ${fn}`)
+    assert(start > 0, `probe anchor: ${fn} exists in the shell`)
+    // Slice to the NEXT top-level declaration, not to the first `\n}`: these components
+    // destructure their props across lines, so `}: {` puts a brace in column 0 *inside the
+    // parameter list* and a naive scan ended the body before it started — which made this check
+    // fail on correct code. Found by the negative control, not by reading.
+    const after = shell.slice(start + 1)
+    const nextDecl = after.search(/\n(?:export default function |export function |function |const \w+ = \()/)
+    const body = nextDecl === -1 ? after : after.slice(0, nextDecl)
+    assert(/vendorShellNavKeys\(/.test(body),
+      `${fn} filters its nav through the door's verdict — an unfiltered surface hands a gated operator a way back in`)
+    assert(!/VENDOR_PORTAL_NAV_KEYS/.test(body),
+      `${fn} does not reach past the filter to the full portal key set`)
+  }
+  assert(!/const NAV_ITEMS\s*=/.test(shell),
+    'the shell no longer hand-rolls its own nav list — the key set is shared with the door')
+  assert(/useVendorAdmittance\(/.test(shell),
+    'the shell reads the DOOR\'s verdict rather than deriving admittance a second time')
+  const provider = readFileSync('app/vendor/_components/VendorAdmittanceProvider.tsx', 'utf8')
+  for (const mod of SERVER_ONLY) {
+    assert(!importsServerOnly(provider, mod), `the admittance provider does not import ${mod} (§7)`)
+  }
 
   console.log(`\n${'─'.repeat(70)}\n  ${pass} passed, ${fail} failed\n`)
   if (fail > 0) process.exit(1)

@@ -11,7 +11,10 @@ import {
   Cog6ToothIcon,
   BellIcon,
   BuildingStorefrontIcon,
+  ClipboardDocumentCheckIcon,
 } from '@heroicons/react/24/outline'
+import { useVendorAdmittance } from '../../_components/VendorAdmittanceProvider'
+import { vendorShellNavKeys, type VendorNavKey } from '@/lib/vendor-operator-state'
 
 interface Props {
   children: React.ReactNode
@@ -22,13 +25,23 @@ interface Props {
   pendingCount?: number
 }
 
-const NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard',   icon: HomeModernIcon },
-  { key: 'orders',    label: 'Orders',       icon: ClipboardDocumentListIcon },
-  { key: 'menu',      label: 'Menu Manager', icon: Squares2X2Icon },
-  { key: 'analytics', label: 'Analytics',    icon: ChartBarIcon },
-  { key: 'settings',  label: 'Settings',     icon: Cog6ToothIcon },
-]
+/**
+ * Presentation for every nav key. A TOTAL Record over VendorNavKey, so a key added to the shared
+ * nav sets fails to compile until it has a label and an icon — the shell cannot silently omit a
+ * route, nor invent one that the shared set does not contain.
+ *
+ * WHICH keys render is NOT decided here — vendorShellNavKeys() decides, from the door's verdict.
+ * See its comment: a non-admitted operator gets the carve-out routes and nothing that re-enters
+ * the portal, because the shell used to hand a gated operator a working Dashboard link.
+ */
+const NAV_META: Record<VendorNavKey, { label: string; icon: React.ElementType }> = {
+  dashboard:  { label: 'Dashboard',       icon: HomeModernIcon },
+  orders:     { label: 'Orders',          icon: ClipboardDocumentListIcon },
+  menu:       { label: 'Menu Manager',    icon: Squares2X2Icon },
+  analytics:  { label: 'Analytics',       icon: ChartBarIcon },
+  settings:   { label: 'Settings',        icon: Cog6ToothIcon },
+  onboarding: { label: 'Finish setup',    icon: ClipboardDocumentCheckIcon },
+}
 
 
 // ─── Sidebar contents ─────────────────────────────────────────────────────────
@@ -41,6 +54,10 @@ function SidebarContent({
   vendorName: string
 }) {
   const pathname = usePathname()
+  // The DOOR's verdict, threaded from the server layout — not a second derivation.
+  const admittance = useVendorAdmittance()
+  const navKeys = vendorShellNavKeys(admittance)
+  const gated = admittance !== 'ADMITTED'
 
   return (
     <div className="flex flex-col h-full p-5">
@@ -71,9 +88,10 @@ function SidebarContent({
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto space-y-0.5">
         <p className="text-[0.5625rem] uppercase tracking-[0.0625rem] text-text-gray font-bold mb-2 px-1">
-          Views
+          {gated ? 'Get set up' : 'Views'}
         </p>
-        {NAV_ITEMS.map(({ key, label, icon: Icon }) => {
+        {navKeys.map(key => {
+          const { label, icon: Icon } = NAV_META[key]
           const href = `/vendor/${fairSlug}/${key}`
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
@@ -170,10 +188,14 @@ export default function VendorPortalShell({
 
 function MobileBottomNav({ fairSlug }: { fairSlug: string }) {
   const pathname = usePathname()
+  // The SAME filter as the desktop sidebar. Filtering only one of the two would leave the hole
+  // wide open on a phone — which is where a vendor actually runs this portal, standing at a booth.
+  const navKeys = vendorShellNavKeys(useVendorAdmittance())
 
   return (
     <div className="flex items-center justify-around h-14 px-2">
-      {NAV_ITEMS.map(({ key, label, icon: Icon }) => {
+      {navKeys.map(key => {
+        const { label, icon: Icon } = NAV_META[key]
         const href = `/vendor/${fairSlug}/${key}`
         const active = pathname === href || pathname.startsWith(href + '/')
         return (

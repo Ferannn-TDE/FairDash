@@ -4,8 +4,13 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import VendorResumeScreen from './_components/VendorResumeScreen'
 import VendorOperatorGateScreen from './_components/VendorOperatorGateScreen'
+import { VendorAdmittanceProvider } from './_components/VendorAdmittanceProvider'
 import { hasPreviewAccess } from '@/lib/preview-access'
-import { isVendorGateCarveOut, vendorOperatorState } from '@/lib/vendor-operator-state'
+import {
+  isVendorGateCarveOut,
+  vendorOperatorState,
+  type VendorOperatorState,
+} from '@/lib/vendor-operator-state'
 
 // AUTHORITY guard for the Vendor Portal (DB VendorMember row). Middleware is the
 // fast filter; this is the source of truth + stale-token backstop. The vendor
@@ -13,6 +18,12 @@ import { isVendorGateCarveOut, vendorOperatorState } from '@/lib/vendor-operator
 // /vendor/unauthorized page needs exempting to avoid a self-loop.
 export default async function VendorLayout({ children }: { children: React.ReactNode }) {
   const pathname = (await headers()).get('x-pathname') ?? ''
+
+  // The door's verdict, hoisted so the shell can be told what the DOOR decided rather than
+  // deriving it a second time. FAIL-CLOSED default: only /vendor/unauthorized skips the block
+  // below, and it renders no shell — but if that ever changes, an un-set value must mean
+  // "exits only", never "full portal".
+  let admittanceState: VendorOperatorState = 'AWAITING'
 
   if (pathname !== '/vendor/unauthorized') {
     const { userId: clerkId } = await auth()
@@ -84,6 +95,7 @@ export default async function VendorLayout({ children }: { children: React.React
 
     // ── ADMITTANCE (step 3) — the second question, asked only of people who passed the first.
     const admittance = vendorOperatorState(memberships)
+    admittanceState = admittance.state
 
     if (admittance.state !== 'ADMITTED') {
       // THE CARVE-OUT, checked before anything expensive. A gated operator must still reach
@@ -107,5 +119,9 @@ export default async function VendorLayout({ children }: { children: React.React
     }
   }
 
-  return <>{children}</>
+  // Everyone who reaches here is either ADMITTED, on a carve-out page while gated, or an admin
+  // previewing. The shell needs to know which: a gated operator sitting on settings/onboarding
+  // must not be offered a Dashboard link back into the portal the door just refused them.
+  // The value is the one computed above — threaded, not recomputed.
+  return <VendorAdmittanceProvider state={admittanceState}>{children}</VendorAdmittanceProvider>
 }
