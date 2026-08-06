@@ -6,10 +6,11 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
+import { organizerFairScope } from '@/lib/organizer-fair-context'
 
 async function computeOrganizerStats(organizerId: string) {
   const events = await db.event.findMany({
-    where: { organizerId, archivedAt: null },
+    where: organizerFairScope(organizerId),
     select: { id: true, status: true },
   })
 

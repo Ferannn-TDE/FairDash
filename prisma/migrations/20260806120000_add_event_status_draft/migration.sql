@@ -1,0 +1,16 @@
+-- Draft fairs: a new EventStatus value. ADDITIVE ONLY.
+--
+-- No column changes, no nullability changes. `Event.startDate` / `endDate` / `name` stay NOT NULL:
+-- the wizard still collects them before it POSTs, so a DRAFT row is a complete Event that simply
+-- has not been published. Partial rows (and the nullable dates they would require) are explicitly
+-- out of scope.
+--
+-- NO GRANDFATHER / NO BACKFILL, deliberately. Every existing row keeps its current status. An
+-- "empty + UPCOMING -> DRAFT" reclassification cannot distinguish an abandoned draft from a real
+-- fair created last week that has not recruited vendors yet, and would also have swept up two
+-- archived test fixtures. The few junk rows are cleaned by hand instead of guessed at by a
+-- migration.
+--
+-- ALTER TYPE ... ADD VALUE appends to the end of the enum. Safe inside a transaction on PG12+ as
+-- long as the new value is not USED in the same transaction — nothing below uses it.
+ALTER TYPE "EventStatus" ADD VALUE 'DRAFT';

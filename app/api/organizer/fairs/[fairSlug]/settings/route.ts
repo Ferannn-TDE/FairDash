@@ -6,6 +6,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { EventStatus } from '@prisma/client'
+import { organizerFairScope } from '@/lib/organizer-fair-context'
 
 const ALLOWED_FIELDS = new Set([
   // Operational timing
@@ -55,9 +56,9 @@ export async function GET(
     const { fairSlug } = await params
 
     const event = await db.event.findFirst({
-      // Archived fair's settings are not viewable (relation-heavy read, so inline
-      // archivedAt rather than the scalar-only resolveOwnedFair).
-      where: { urlSlug: fairSlug, organizerId, archivedAt: null },
+      // Archived fair's settings are not viewable, and neither are a DRAFT's — the fragment
+      // carries both exclusions so this relation-heavy read cannot drift from resolveOwnedFair.
+      where: { ...organizerFairScope(organizerId), urlSlug: fairSlug },
       include: { fulfillmentConfig: true },
     })
     if (!event) return apiError('Fair not found', 404, 'NOT_FOUND')

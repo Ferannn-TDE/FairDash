@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import { ChevronLeftIcon } from '@heroicons/react/24/outline'
 
@@ -175,17 +175,57 @@ function Step5({ data }: { data: FairDraft }) {
 
 export default function CreateFairPage() {
   const router = useRouter()
+  // "Continue editing" reopens the wizard against an EXISTING draft row. Not step-resume — the
+  // wizard always starts at step 1; only the values are loaded. With a slug present, both buttons
+  // PATCH that row instead of POSTing a new one, so publishing promotes the draft rather than
+  // creating a duplicate and burning a second slug.
+  const editingSlug = useSearchParams().get('draft')
   const [step, setStep] = useState(0)
   const [data, setData] = useState<FairDraft>(INITIAL)
   const [submitting, setSubmitting] = useState(false)
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(editingSlug))
 
-  async function createFair() {
+  useEffect(() => {
+    if (!editingSlug) return
+    let cancelled = false
+    fetch(`/api/organizer/fairs/drafts/${encodeURIComponent(editingSlug)}`)
+      .then(r => r.json())
+      .then(json => {
+        if (cancelled || !json.success) return
+        const d = json.data.draft
+        setData(prev => ({
+          ...prev,
+          name: d.name ?? '', slug: d.urlSlug ?? '', description: d.description ?? '',
+          startDate: d.startDate ? String(d.startDate).slice(0, 10) : '',
+          endDate:   d.endDate   ? String(d.endDate).slice(0, 10)   : '',
+          address: d.venueAddress ?? '', city: d.venueCity ?? '',
+          state: d.venueState ?? '', zip: d.venueZip ?? '',
+          openTime: d.openTime ?? prev.openTime, closeTime: d.closeTime ?? prev.closeTime,
+          timezone: d.timezone ?? prev.timezone, accentColor: d.primaryColor ?? prev.accentColor,
+          maxVendors: d.maxVendors ?? prev.maxVendors,
+          admissionFree: d.admissionFree ?? prev.admissionFree,
+          pickupEnabled:   d.fulfillmentConfig?.boothPickupEnabled  ?? prev.pickupEnabled,
+          deliveryEnabled: d.fulfillmentConfig?.homeDeliveryEnabled ?? prev.deliveryEnabled,
+        }))
+      })
+      .catch(() => toast.error('Could not load that draft'))
+      .finally(() => { if (!cancelled) setLoadingDraft(false) })
+    return () => { cancelled = true }
+  }, [editingSlug])
+
+  // ONE submit, TWO outcomes. asDraft parks the fair as a hidden DRAFT (excluded from every
+  // list/count/public surface until published); the default publishes it as UPCOMING, unchanged.
+  // Both still require name + dates — there are no partial rows, and mid-wizard resume is out of
+  // scope, so "Save Draft" means "park this complete fair unpublished", not "save my progress".
+  async function createFair(asDraft = false) {
     if (!data.name.trim()) { toast.error('Fair name is required'); setStep(0); return }
     if (!data.startDate || !data.endDate) { toast.error('Start and end dates are required'); setStep(1); return }
     setSubmitting(true)
     try {
-      const res = await fetch('/api/organizer/fairs', {
-        method: 'POST',
+      const res = await fetch(
+        editingSlug ? `/api/organizer/fairs/drafts/${encodeURIComponent(editingSlug)}` : '/api/organizer/fairs',
+        {
+        method: editingSlug ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: data.name, slug: data.slug, description: data.description,
@@ -194,11 +234,14 @@ export default function CreateFairPage() {
           openTime: data.openTime, closeTime: data.closeTime, timezone: data.timezone,
           accentColor: data.accentColor, maxVendors: data.maxVendors,
           deliveryEnabled: data.deliveryEnabled, pickupEnabled: data.pickupEnabled, admissionFree: data.admissionFree,
+          asDraft,
+          // PATCH speaks `publish`; POST speaks `asDraft`. Both are sent — the route reads its own.
+          publish: !asDraft,
         }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error?.message ?? 'Failed to create fair')
-      toast.success('Fair created')
+      toast.success(asDraft ? 'Draft saved' : 'Fair published')
       router.push('/organizer/fairs')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create fair')
@@ -257,7 +300,7 @@ export default function CreateFairPage() {
           </button>
           <div className="flex items-center gap-3">
             <button
-              onClick={createFair}
+              onClick={() => createFair(true)}
               disabled={submitting}
               className="px-4 py-2 text-sm font-inter text-[#888] border border-white/10 rounded-lg hover:text-white hover:border-white/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
               {submitting ? 'Saving…' : 'Save Draft'}
@@ -269,7 +312,7 @@ export default function CreateFairPage() {
               </button>
             ) : (
               <button
-                onClick={createFair}
+                onClick={() => createFair(false)}
                 disabled={submitting}
                 className="px-6 py-2 bg-[#FF0077] text-white text-sm font-semibold rounded-lg hover:bg-[#e0006b] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                 {submitting ? 'Publishing…' : 'Publish Fair'}
