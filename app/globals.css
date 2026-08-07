@@ -228,14 +228,40 @@
   display: contents !important;
 }
 
-/* The per-button wrapper stays a REAL box — deliberately not `display: contents`. It carries
-   `position: relative` for the absolutely-positioned "Last used" badge (below); flattening it
-   would strip that containing block and the badge would anchor to some ancestor instead. It is
-   the flex child, so the equal-share sizing lives here. */
-/* ── THE LAYOUT: one full-width pill on row 1, two half-width pills on row 2. ────────────────
-   Deliberate and identical at EVERY width — not a wrap artifact. There is no media query: the
-   basis values below produce this shape from 448px down to ~250px, and half-width comfortably
-   fits the longest label ("Facebook" ~126px vs 219px at desktop, 135px at a 320px viewport), so
+/* ── 🔴 MEASURED DOM, 2026-08-07, live at localhost:3000/sign-in (Clerk 5 / clerk-js 6) ──────
+   Read this before editing anything below. It is the reason several rounds of "correct-looking"
+   rules changed nothing on screen. Dumped with getComputedStyle on the real tree:
+
+       .cl-socialButtonsRoot                    display: flex      w=448
+         └ .cl-socialButtons  (cl-internal-…)   display: contents
+             └ .cl-socialButtonsBlockButton__google
+         └ .cl-socialButtons  (cl-internal-…)   display: contents
+             └ .cl-socialButtonsBlockButton__apple
+             └ .cl-socialButtonsBlockButton__facebook
+
+   TWO FACTS, both counted in the live DOM:
+
+   1. `.cl-socialButtonsBlockButtonBox` DOES NOT EXIST — querySelectorAll returns 0. This Clerk
+      version puts the provider button directly inside the grouping wrapper. Every Box-based
+      selector is inert; they are kept below only so a Clerk upgrade that reintroduces the Box
+      does not silently regress, NOT because they match anything today.
+
+   2. THE BUTTONS ARE GRANDCHILDREN OF THE ROOT, so a `>` combinator matches NOTHING:
+         .cl-socialButtonsRoot > .cl-socialButtonsBlockButton   → 0 elements
+         .cl-socialButtonsRoot   .cl-socialButtonsBlockButton   → 3 elements
+      `display: contents` on the wrapper removes its BOX from layout; it does not reparent the
+      DOM, and selector matching is DOM-based. This is the whole bug: every `order`/`flex-basis`
+      rule was written with `>`, matched zero elements, and left only the generic
+      `.cl-socialButtonsBlockButton { width: 100% }` in force — three full-width pills, three
+      rows, root 140px tall. The rules were right; they were aimed at nothing.
+
+   ⚠️ NOT A GRID. `cl-internal-xbbw02` carries Clerk's `grid-template-columns: repeat(2, …)`, and
+   DevTools' Styles panel shows that declaration — but its computed `display` is `contents`,
+   because our rule above wins. The declared grid-template is inert. Do not "fix" this with
+   grid-column spans: there is no grid box to span. The layout engine here is the ROOT's flex.
+
+   ── THE LAYOUT: one full-width pill on row 1, two half-width pills on row 2. ────────────────
+   Half-width comfortably fits the longest label ("Facebook" ~126px vs 219px at a 448px card), so
    the clipping that equal-thirds caused cannot recur.
 
    🔴 WHY THE PROVIDER CLASS AND NOT :first-child.
@@ -259,9 +285,11 @@
    `:has(.cl-badge)` / `:not(:has(.cl-badge))` — that follows last-used and is equally
    structure-independent, but has no full-width pill at all for a first-time visitor. */
 
-/* Row 1 — the full-width pill. */
+/* Row 1 — the full-width pill.
+   DESCENDANT combinator, never `>`: the button is a grandchild of the root (see MEASURED DOM
+   above). The Box variant is the upgrade-safety net and matches nothing today. */
 .cl-socialButtonsBlockButtonBox:has(.cl-socialButtonsBlockButton__google),
-.cl-socialButtonsRoot > .cl-socialButtonsBlockButton__google {
+.cl-socialButtonsRoot .cl-socialButtonsBlockButton__google {
   order: -1 !important;
   flex: 0 0 100% !important;
   min-width: 0 !important;
@@ -272,12 +300,36 @@
 /* Row 2 — the remaining providers split it. calc subtracts HALF the 0.625rem gap from each so the
    pair fills the row exactly. */
 .cl-socialButtonsBlockButtonBox:not(:has(.cl-socialButtonsBlockButton__google)),
-.cl-socialButtonsRoot > .cl-socialButtonsBlockButton:not(.cl-socialButtonsBlockButton__google) {
+.cl-socialButtonsRoot .cl-socialButtonsBlockButton:not(.cl-socialButtonsBlockButton__google) {
   order: 0 !important;
   flex: 0 0 calc(50% - 0.3125rem) !important;
   min-width: 0 !important;
   max-width: calc(50% - 0.3125rem) !important;
   width: calc(50% - 0.3125rem) !important;
+}
+
+/* ── Narrow viewports: all three pills stack, one per row. ───────────────────────────────────
+   A real breakpoint, and deliberate: the two layouts genuinely differ, so this is not the "no
+   media query" doctrine being violated. Below ~430px a half-width pill is ~200px on a 430px card
+   but keeps shrinking with the viewport, and a full-width tap target reads better on a phone.
+   🔴 SPECIFICITY, AND IT BIT ONCE — measured, not theorised. `:not()` takes the specificity of its
+   ARGUMENT, so the row-2 rule above is (0,3,0), not (0,2,0). A media query adds NOTHING to
+   specificity, so the obvious `.cl-socialButtonsRoot .cl-socialButtonsBlockButton { }` at (0,2,0)
+   LOSES to it no matter how far down the file it sits — the query matched, and the pills stayed
+   half-width. Each selector below therefore MIRRORS the desktop rule it has to beat, one for one,
+   so it ties on specificity and wins on source order. If you touch the rules above, re-check these.
+   Google's `order: -1` still applies, so it stays on top. */
+@media (max-width: 26.875rem) {
+  /* mirrors the row-1 rule — (0,2,0) vs (0,2,0) */
+  .cl-socialButtonsBlockButtonBox:has(.cl-socialButtonsBlockButton__google),
+  .cl-socialButtonsRoot .cl-socialButtonsBlockButton__google,
+  /* mirrors the row-2 rule — (0,3,0) vs (0,3,0), the one that was losing */
+  .cl-socialButtonsBlockButtonBox:not(:has(.cl-socialButtonsBlockButton__google)),
+  .cl-socialButtonsRoot .cl-socialButtonsBlockButton:not(.cl-socialButtonsBlockButton__google) {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
 }
 
 /* Each button FILLS its Box — the Box's flex-basis decides which row it lands on and how wide it
@@ -321,12 +373,20 @@
 /* "Last used" badge — absolutely positioned, fully out of document flow.
    top: 0 + translateY(-50%) straddles the button's top border — the badge
    centre sits exactly on the border line, overlapping it without pushing
-   anything down. The container height is determined solely by the button. */
+   anything down. The container height is determined solely by the button.
+
+   🔴 `.cl-lastAuthenticationStrategyBadge` IS THE ONE THAT ACTUALLY MATCHES on the social pills —
+   measured 2026-08-07. The element carries ONLY that descriptor: no `cl-badge`, no
+   `cl-internal-badge`. Without it the badge rendered as unstyled bare text overhanging the pill's
+   right edge by 10px (Clerk's own absolute positioning, uncorrected). The other three selectors
+   are kept for the badges Clerk renders elsewhere in the form. */
 .cl-badge,
+.cl-lastAuthenticationStrategyBadge,
 .cl-formFieldLabelRow__badge,
 .cl-internal-badge {
   position: absolute !important;
   top: 0 !important;
+  left: auto !important;           /* Clerk positions it from the left; unset before using right */
   right: 0.75rem !important;
   transform: translateY(-50%) !important;
   background: rgba(255, 255, 255, 0.07) !important;
