@@ -215,6 +215,19 @@
   display: contents !important;
 }
 
+/* …and the SAME flattening by STRUCTURE rather than by class name.
+   The rule above only fires if the grouping wrappers actually carry `cl-socialButtons`. Clerk also
+   emits emotion-generated `cl-internal-xxxxxx` wrappers, which that selector does not match — and
+   an unflattened wrapper is full-width, which stacks every button onto its own row. That is the
+   exact 3-stack symptom, and it is invisible from the config because the class name is generated.
+
+   This says it without naming anything: ANY direct child of the root that is not a button or a
+   button-box is, by definition, a grouping wrapper, so remove it from layout. Class-name-agnostic,
+   so a Clerk upgrade renaming its internals cannot silently re-stack the row. */
+.cl-socialButtonsRoot > *:not(.cl-socialButtonsBlockButtonBox):not(.cl-socialButtonsBlockButton) {
+  display: contents !important;
+}
+
 /* The per-button wrapper stays a REAL box — deliberately not `display: contents`. It carries
    `position: relative` for the absolutely-positioned "Last used" badge (below); flattening it
    would strip that containing block and the badge would anchor to some ancestor instead. It is
