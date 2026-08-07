@@ -27,8 +27,9 @@ import { dark } from '@clerk/themes'
  *     renders both fields. The password field is styled to match the email field and is NEVER
  *     hidden — hiding a required field with CSS breaks sign-in.
  *   - a GitHub button. Our enabled providers are google / apple / facebook.
- *   - short social labels ("Google"). Clerk renders "Continue with Google"; changing that is the
- *     `localization` prop, not appearance, and is out of scope.
+ * SHORT SOCIAL LABELS ARE NOW IN (see clerkLocalization below): "Google", not "Continue with
+ * Google". That is the `localization` prop, not appearance — and it is LOAD-BEARING for the layout,
+ * because three long labels cannot share a row. Layout and label are coupled; do not revert one.
  *
  * Must come from @clerk/clerk-react / @clerk/themes (both use @clerk/shared v3). Do NOT import from
  * @clerk/nextjs here — it uses @clerk/shared v2, which creates a different React context object and
@@ -94,13 +95,13 @@ export const clerkAppearance = {
   },
 
   elements: {
-    rootBox: 'w-full',
+    rootBox: '!w-full !overflow-visible',
 
     // ── The shell. auth-06 has NO card: a bare centered column on the page background. ──────────
     // RoleAuthCard supplies the surrounding chrome (brand mark, heading, atmosphere), so Clerk's
     // own card must contribute nothing visual at all.
-    cardBox: '!shadow-none !border-0 !bg-transparent !w-full',
-    card: '!bg-transparent !border-0 !shadow-none !p-0 !w-full !gap-2',
+    cardBox: '!shadow-none !border-0 !bg-transparent !w-full !overflow-visible',
+    card: '!bg-transparent !border-0 !shadow-none !p-0 !w-full !gap-2 !overflow-visible',
     modalBackdrop: '!bg-black/80 !backdrop-blur-sm',
     modalContent: '!bg-[#0F0F0F] !border !border-white/[0.08] !rounded-2xl !shadow-none',
 
@@ -112,18 +113,35 @@ export const clerkAppearance = {
     logoBox: '!hidden',
     logoImage: '!hidden',
 
-    // ── Social row: auth-06's horizontal, wrapped, centered pills. ──────────────────────────────
-    // The container flips from the stacked column Clerk defaults to; the buttons become auto-width
-    // pills. With three providers these wrap to 2 + 1 on a narrow screen, which is the intended
-    // auth-06 behaviour (flex-wrap, centered).
-    // ROW GEOMETRY. `gap-y` is deliberately LARGER than `gap-x`: the "Last used" badge sits above
-    // a button's top edge, so when the row wraps (narrow screens, or a long provider name) the
-    // second row's badge would collide with the first row's buttons on a uniform gap. The extra
-    // vertical gap plus `pt-3` is the room that badge lives in — desktop AND wrapped.
-    socialButtons: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-x-2.5 !gap-y-4 !w-full !pt-3',
-    socialButtonsProviders: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-x-2.5 !gap-y-4 !w-full !pt-3',
+    // ── ROW GEOMETRY. Side-by-side is a BUTTON-WIDTH property, not a flex property. ────────────
+    //
+    // Two earlier attempts set `flex-row` and nothing moved, for two reasons worth recording:
+    //   1. `socialButtonsProviders` IS NOT A CLERK DESCRIPTOR. It does not appear in
+    //      @clerk/shared's ElementsConfig, so every rule written against it was silently dropped.
+    //      (Check a key against that type before trusting it — a typo'd slot fails SILENTLY, with
+    //      no console warning and no type error, because the elements object is loosely typed.)
+    //   2. The container that actually governs layout is socialButtonsRoot — the OUTER wrapper —
+    //      which was never styled. Clerk lays its children out in a single column, and a child in
+    //      a one-column track fills it regardless of `w-auto`. That is why three "auto-width"
+    //      buttons still rendered as full-width bars.
+    //
+    // Both containers are set so it does not matter which one Clerk nests where, and the buttons
+    // are pinned to content width from BOTH sides of the relationship (`w-auto` + `flex-none`, and
+    // `justify-self-center` in case a grid track survives).
+    //
+    // ONE EVEN GAP. The previous `gap-x-2.5 / gap-y-4` split existed to keep a wrapped row's badge
+    // off the row above — but the buttons never wrapped, they stacked, so the asymmetry showed up
+    // as dead space above whichever button carried the "Last used" badge. Content-width pills sit
+    // in a real row with room above them, so a single even gap is correct.
+    //
+    // overflow-visible on the containers is what stops the badge being CLIPPED horizontally — the
+    // clip came from an ancestor, not from the button.
+    socialButtonsRoot: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-2.5 !w-full !overflow-visible',
+    socialButtons: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-2.5 !w-full !overflow-visible',
     socialButtonsBlockButton: [
-      '!w-auto !grow-0 !h-10 !px-4 !gap-2',
+      // ⬇ THE LINE THAT MAKES THEM SIT SIDE-BY-SIDE. Content width, never stretched.
+      '!w-auto !min-w-0 !flex-none !grow-0 !shrink-0 !basis-auto !justify-self-center',
+      '!h-10 !px-4 !gap-2 !inline-flex !items-center !justify-center',
       '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
       '!text-white !text-sm !font-medium !normal-case',
       // The badge is absolutely positioned against THIS button and pokes above its top edge, so
@@ -134,19 +152,36 @@ export const clerkAppearance = {
       'active:!scale-[0.98]',
       'transition-all !duration-200',
     ].join(' '),
+    // Clerk swaps to this variant when several providers are in view — it is a DIFFERENT slot, so
+    // without it the multi-provider case falls back to Clerk's own full-width block styling and
+    // undoes everything above.
+    socialButtonsBlockButtonManyInView: [
+      '!w-auto !min-w-0 !flex-none !grow-0 !shrink-0 !basis-auto !justify-self-center',
+      '!h-10 !px-4 !gap-2 !inline-flex !items-center !justify-center',
+      '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
+      '!text-white !text-sm !font-medium !normal-case',
+      '!relative !overflow-visible',
+      INSET_HIGHLIGHT,
+      'hover:!bg-[#232323] hover:!border-white/[0.18]',
+      'active:!scale-[0.98]',
+      'transition-all !duration-200',
+    ].join(' '),
     socialButtonsBlockButtonText: '!text-white !text-sm !font-medium !whitespace-nowrap',
     socialButtonsProviderIcon: '!w-4 !h-4 !shrink-0',
 
     // ── "LAST USED" BADGE. Clerk pins this pill to the previously-used provider button. ─────────
-    // It was being CLIPPED: this slot existed before the auth-06 reskin and was dropped in the
-    // rewrite, so it fell back to Clerk's default placement and got cut by the button edge.
-    // Restored with three things it needs to survive a wrapping row:
-    //   1. an OPAQUE background (#0F0F0F, the page) — it straddles the button's border, and a
+    // Two separate clips were happening: VERTICALLY (cut by the button's own top edge) and
+    // HORIZONTALLY ("Last usec" — cut by an ANCESTOR, which is why widening the button never
+    // helped). Fixed on both axes without reintroducing asymmetric spacing:
+    //   1. overflow-visible on the button AND on socialButtonsRoot / socialButtons / card / rootBox
+    //      — the horizontal clip was an ancestor's, not the button's
+    //   2. an OPAQUE background (#0F0F0F, the page): it straddles the button's border, and a
     //      transparent pill reads as broken text over that edge
-    //   2. z-10, so a neighbouring button that wrapped underneath cannot paint over it
-    //   3. it sits inside the `pt-3` / `gap-y-4` room reserved by the container above
+    //   3. z-10, so a neighbour that wrapped to the next row cannot paint over it
+    // Inset to `right-2` (from `right-3`) and centred-ish so it stays within a SHORT pill's width
+    // — on a content-width button there is far less horizontal room than on a full-width bar.
     badge: [
-      '!absolute !-top-2 !right-3 !z-10 !m-0',
+      '!absolute !-top-2 !right-2 !z-10 !m-0',
       '!bg-[#0F0F0F] !text-[#A1A1A1] !border !border-white/[0.10]',
       '!text-[0.625rem] !font-medium !leading-none !normal-case',
       '!px-1.5 !py-1 !rounded-full !shadow-none !whitespace-nowrap',
