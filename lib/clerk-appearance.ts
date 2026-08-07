@@ -1,14 +1,73 @@
 import { dark } from '@clerk/themes'
 
 /**
- * Clerk appearance config — used by the client-side ClerkProvider in the SPA.
- * Kept in a separate file so it can be imported without pulling in React or
- * Next.js server dependencies.
+ * Clerk appearance — THE single source for every Clerk surface in the app.
  *
- * Must come from @clerk/clerk-react / @clerk/themes (both use @clerk/shared v3).
- * Do NOT import from @clerk/nextjs here — it uses @clerk/shared v2, which
- * creates a different React context object and breaks useUser / useAuth hooks.
+ * ⚠️ ONE CONFIG, TWO CONSUMERS. There used to be two: this file (applied at the ClerkProvider) and a
+ * separate `clerkElements` object inside RoleAuthCard passed per-mount. Component-level appearance
+ * merges OVER provider-level per slot, so the RoleAuthCard copy silently won on all five auth pages
+ * — and the two had drifted apart (pill vs rounded-xl buttons, `py-12` vs `p-0` card). The result:
+ * editing this file changed nothing an operator could see, while the auth pages were governed by a
+ * copy nobody looked at. Same two-copies-one-lies shape this codebase keeps paying for.
+ *
+ * Both the ClerkProvider (app/_providers/ClerkClientProvider.tsx) and RoleAuthCard now import THIS
+ * object. Do not reintroduce a local elements object in a component — restyle here instead.
+ *
+ * TREATMENT: watermelon auth-06, expressed in FairSynq's OWN palette literals. auth-06 is a
+ * structure (bare centered column, horizontal pill social row, visible "or" divider, muted rounded
+ * inputs, gradient accent button), not a palette — its "primary" is our #FF0077. Deliberately NO
+ * shadcn semantic tokens (`bg-muted`, `text-muted-foreground`): this project defines zero CSS
+ * variables, so those class names resolve to nothing here. Hex literals only:
+ *
+ *   #FF0077  primary (neon-pink)     #0F0F0F  background
+ *   #1A1A1A  muted surface           #A1A1A1  muted text
+ *
+ * WHAT auth-06 HAS THAT WE DELIBERATELY DO NOT:
+ *   - a single email field / "Continue with email". Our instance requires a PASSWORD, so Clerk
+ *     renders both fields. The password field is styled to match the email field and is NEVER
+ *     hidden — hiding a required field with CSS breaks sign-in.
+ *   - a GitHub button. Our enabled providers are google / apple / facebook.
+ *   - content-width (unequal) social pills. Ours are EQUAL width by explicit request; see the
+ *     `flex: 1 1 0` block in globals.css for why, and what it trades away.
+ *
+ * SHORT SOCIAL LABELS ARE NOW IN (see clerkLocalization below): "Google", not "Continue with
+ * Google". That is the `localization` prop, not appearance — and it is LOAD-BEARING for the layout,
+ * because three long labels cannot share a row. Layout and label are coupled; do not revert one.
+ *
+ * Must come from @clerk/clerk-react / @clerk/themes (both use @clerk/shared v3). Do NOT import from
+ * @clerk/nextjs here — it uses @clerk/shared v2, which creates a different React context object and
+ * breaks useUser / useAuth hooks.
  */
+
+/**
+ * LOCALIZATION — copy, not wiring, and the reason the social buttons can sit side-by-side.
+ *
+ * Clerk's default label is "Continue with {{provider|titleize}}". Three of those cannot fit across
+ * one row at any sane auth width, so short labels are NECESSARY for the side-by-side layout.
+ *
+ * They were not SUFFICIENT, and the record should say so: shortening the labels did not unstack
+ * the buttons, because the real blocker was `flex-direction: column !important` in globals.css.
+ * Both had to change. Label length was a constraint on the row; it was never the thing holding
+ * the column in place.
+ *
+ * ⚠️ This changes the TEXT a user reads. It does not change which providers exist, the OAuth flow,
+ * the session, or any redirect — `localization` is a string table consumed by the same render layer
+ * as `appearance`. Kept in this file so the label and the layout that depends on it live together;
+ * shortening one without widening the other is how this regresses.
+ */
+export const clerkLocalization = {
+  socialButtonsBlockButton: '{{provider|titleize}}',
+}
+
+/**
+ * auth-06's raised-surface shadow, dark variant, reproduced EXACTLY — all four layers:
+ *   inset top highlight · hairline ring · tight lift · soft lift
+ * This is the one auth-06 detail that looked like it might be out of reach and is not: a
+ * box-shadow is just a string, and `appearance` passes arbitrary classes through.
+ */
+const INSET_HIGHLIGHT =
+  '!shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25),0_0_0_0.5px_rgba(255,255,255,0.03),0_1px_2px_-1px_rgba(255,255,255,0.08),0_2px_4px_0_rgba(255,255,255,0.08)]'
+
 export const clerkAppearance = {
   baseTheme: dark,
 
@@ -17,17 +76,20 @@ export const clerkAppearance = {
     colorDanger: '#ef4444',
     colorSuccess: '#10b981',
     colorWarning: '#f59e0b',
-    colorBackground: '#0f0f0f',
-    colorInputBackground: '#121212',
+    colorBackground: '#0F0F0F',
+    colorInputBackground: '#1A1A1A',
     colorText: '#ffffff',
-    colorTextSecondary: '#b3b3b3',
-    colorTextOnPrimaryBackground: '#000000',
-    colorNeutral: '#535353',
+    colorTextSecondary: '#A1A1A1',
+    // White, not black: the filled #FF0077 button reads better with white text at this weight, and
+    // it matches the accent buttons already used elsewhere in RoleAuthCard.
+    colorTextOnPrimaryBackground: '#ffffff',
+    colorNeutral: '#A1A1A1',
     fontFamily: 'Inter, sans-serif',
     fontFamilyButtons: 'Inter, sans-serif',
     fontSize: '1rem',
     fontWeight: { normal: 400, medium: 500, semibold: 600, bold: 700 } as const,
-    borderRadius: '62.5rem',
+    // auth-06's default radius is rounded-lg. The social pills override to rounded-full per-slot.
+    borderRadius: '0.5rem',
     spacing: '1rem',
   },
 
@@ -43,76 +105,123 @@ export const clerkAppearance = {
   },
 
   elements: {
-    rootBox: 'w-full',
+    rootBox: '!w-full !overflow-visible',
+
+    // ── The shell. auth-06 has NO card: a bare centered column on the page background. ──────────
+    // RoleAuthCard supplies the surrounding chrome (brand mark, heading, atmosphere), so Clerk's
+    // own card must contribute nothing visual at all.
+    cardBox: '!shadow-none !border-0 !bg-transparent !w-full !overflow-visible',
+    card: '!bg-transparent !border-0 !shadow-none !p-0 !w-full !gap-2 !overflow-visible',
     modalBackdrop: '!bg-black/80 !backdrop-blur-sm',
-    modalContent: '!bg-black !border-0 !rounded-lg !shadow-none',
-    cardBox: '!rounded-lg',
-    card: '!bg-black !border-0 !shadow-none !rounded-lg !py-12 !px-6 !max-w-[28rem] !mx-auto',
-    logoBox: '!justify-center !mb-12',
-    logoImage: '!h-24 !w-auto !mix-blend-screen ![filter:brightness(1.2)]',
-    headerTitle: '!text-[2rem] !font-bold !text-white !mb-8 !text-center !tracking-[0.02em]',
+    modalContent: '!bg-[#0F0F0F] !border !border-white/[0.08] !rounded-2xl !shadow-none',
+
+    // Header + logo are RoleAuthCard's job (its own JSX, role-tailored copy). Clerk's are hidden
+    // rather than restyled so the two can never both render.
+    header: '!hidden',
+    headerTitle: '!hidden',
     headerSubtitle: '!hidden',
-    socialButtonsProviders: '!gap-3 !w-full !flex !flex-col',
+    logoBox: '!hidden',
+    logoImage: '!hidden',
+
+    // ── Social row: VISUAL TREATMENT ONLY. ─────────────────────────────────────────────────────
+    // 🔴 LAYOUT LIVES IN app/globals.css, NOT HERE. The row's flex-direction, the button width and
+    // height, and the badge position are set by the `.cl-socialButtons` / `.cl-socialButtonsBlockButton`
+    // block in globals.css, which outranks anything writable in this file: an appearance class is a
+    // single utility (0-1-0) and loses to `div[class*="cl-socialButtons"]` (0-1-1) and to
+    // `.cl-socialButtons` on source order.
+    //
+    // Three rounds were spent adding `!flex-row` / `!w-auto` here and watching nothing happen. Do
+    // NOT re-add flex-direction, width, flex, or gap to these slots — they will be silently
+    // overridden, look like they "did nothing", and send the next person down the same path.
+    // Colour, border, radius, hover and type belong here; geometry belongs there.
+    socialButtonsRoot: '!overflow-visible',
+    socialButtons: '!overflow-visible',
     socialButtonsBlockButton: [
-      '!relative !w-full !h-12 !rounded-[62.5rem]',
-      '!border !border-[#727272] !bg-transparent',
-      '!text-white !font-bold',
-      'hover:!border-white hover:!bg-white/[0.05] hover:!scale-[1.02]',
+      '!rounded-full !border !border-white/[0.08] !bg-[#1A1A1A]',
+      '!text-white !text-sm !font-medium !normal-case !tracking-normal',
+      INSET_HIGHLIGHT,
+      'hover:!bg-[#232323] hover:!border-white/[0.18]',
       'active:!scale-[0.98]',
       'transition-all !duration-200',
     ].join(' '),
-    socialButtonsBlockButtonText: '!text-white !font-bold',
-    socialButtonsProviderIcon: '!w-6 !h-6',
-    dividerRow: '!my-8',
-    dividerLine: '!bg-[#292929]',
-    dividerText: '!hidden',
-    formFieldRow: '!mb-4',
-    formFieldLabel: '!text-white !text-[0.875rem] !font-bold !mb-2 !tracking-[0.02em]',
+    // A SEPARATE slot Clerk swaps to when several providers are in view — without it that case
+    // falls back to Clerk's own block styling and loses the treatment.
+    socialButtonsBlockButtonManyInView: [
+      '!rounded-full !border !border-white/[0.08] !bg-[#1A1A1A]',
+      '!text-white !text-sm !font-medium !normal-case !tracking-normal',
+      INSET_HIGHLIGHT,
+      'hover:!bg-[#232323] hover:!border-white/[0.18]',
+      'active:!scale-[0.98]',
+      'transition-all !duration-200',
+    ].join(' '),
+    socialButtonsBlockButtonText: '!text-white !text-sm !font-medium !whitespace-nowrap',
+    socialButtonsProviderIcon: '!w-4 !h-4 !shrink-0',
+
+    // "Last used" badge: positioned and coloured entirely by `.cl-badge` in globals.css, which
+    // straddles the button's top border via translateY(-50%). Deliberately NOT redefined here —
+    // two sources for one pill is what left it clipped and mis-set for three rounds.
+
+    // ── Divider: auth-06 shows a VISIBLE "or" with a rule on both sides. ────────────────────────
+    dividerRow: '!flex !items-center !gap-4 !my-5',
+    dividerLine: '!bg-white/[0.10] !flex-1',
+    dividerText: '!text-[#A1A1A1] !text-xs !font-medium !uppercase !tracking-[0.2em] !shrink-0',
+
+    // ── Fields. Email AND password share one treatment — the password field is styled, never ────
+    // hidden: it is required by the instance, so hiding it would break sign-in.
+    form: '!gap-3',
+    formFieldRow: '!mb-3',
+    formFieldLabel: '!text-[#A1A1A1] !text-[0.6875rem] !font-semibold !uppercase !tracking-[0.12em] !mb-1.5',
     formFieldHintText: '!hidden',
     formFieldInput: [
-      '!bg-[#121212] !border !border-[#727272] !text-white',
-      '!rounded-[0.25rem] !py-3.5 !px-4 !text-[1rem] !min-h-[3rem]',
+      '!h-10 !px-3 !w-full',
+      '!bg-[#1A1A1A] !border !border-white/[0.10] !text-white !text-sm',
+      '!rounded-lg',
       'placeholder:!text-[#6a6a6a]',
-      'focus:!border-white focus:!ring-0 focus:!shadow-none',
-      'hover:!border-white',
+      'focus:!border-[#FF0077]/50 focus:!ring-2 focus:!ring-[#FF0077]/20 focus:!shadow-none',
+      'hover:!border-white/[0.18]',
       'transition-all !duration-200',
     ].join(' '),
-    formFieldInputShowPasswordButton: '!text-[#b3b3b3] hover:!text-white !mr-1',
-    formFieldErrorText: '!text-[#f15e6c] !text-[0.875rem] !mt-1',
+    formFieldInputShowPasswordButton: '!text-[#A1A1A1] hover:!text-white !mr-1',
+    formFieldErrorText: '!text-[#f15e6c] !text-xs !mt-1',
+    formFieldAction: '!text-[#FF0077] hover:!text-white !text-xs !font-medium transition-colors',
+
+    // ── Primary action: auth-06's top-lit gradient fill in our accent. ─────────────────────────
+    // NO ::after arrow. auth-06 renders an arrow icon inside the button, but Clerk swaps the
+    // button's contents for a spinner while submitting and a pseudo-element would survive that,
+    // leaving "⟳ →" mid-request. Approximating it was optional; a clean button beats a hacked one.
     formButtonPrimary: [
-      '!bg-[#FF0077] hover:!bg-[#ff3399]',
-      '!text-[#000000] !font-bold uppercase !tracking-[0.1em]',
-      '!min-h-[3.5rem] !rounded-[62.5rem]',
-      '!shadow-none',
-      'hover:!scale-[1.02]',
+      '!h-10 !w-full',
+      '!bg-gradient-to-b !from-[#FF0077] !to-[#FF0077]/70',
+      'hover:!from-[#ff2a8d] hover:!to-[#FF0077]/80',
+      '!text-white !text-sm !font-semibold !normal-case !tracking-normal',
+      '!rounded-lg !border-0',
+      '!shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18),0_4px_16px_-4px_rgba(255,0,119,0.45)]',
       'active:!scale-[0.98]',
       'transition-all !duration-200',
-      '!mt-8',
+      '!mt-1',
     ].join(' '),
-    footer: '!mt-8',
-    footerAction: '!pt-8 ![border-top:1px_solid_#292929] !justify-center',
-    footerActionLink:
-      '!text-white hover:!text-[#FF0077] !font-semibold transition-colors !duration-200 !ml-1 !underline',
-    footerActionText: '!text-[#b3b3b3]',
-    identityPreview:
-      '!bg-white/[0.04] !border !border-[#727272] !rounded-[0.25rem] !py-3.5 !px-4',
-    identityPreviewEditButton: '!text-[#FF0077] hover:!text-[#ff3399]',
-    identityPreviewText: '!text-white !text-[0.875rem]',
-    formResendCodeLink: '!text-[#FF0077] hover:!text-[#ff3399]',
+
+    // ── OTP (email code) — same surface treatment as the text fields. ───────────────────────────
     otpCodeFieldInput: [
-      '!border !border-[#727272] !bg-[#121212] !text-white',
-      '!rounded-[0.25rem] !h-[3rem] !w-[3rem] !text-xl !font-bold',
-      'focus:!border-white focus:!ring-0 focus:!shadow-none',
+      '!h-11 !w-11 !text-lg !font-semibold',
+      '!bg-[#1A1A1A] !border !border-white/[0.10] !text-white !rounded-lg',
+      'focus:!border-[#FF0077]/50 focus:!ring-2 focus:!ring-[#FF0077]/20 focus:!shadow-none',
       'transition-all !duration-200',
     ].join(' '),
-    backLink: '!text-white hover:!text-[#FF0077] !underline transition-colors !duration-200',
-    formFieldAction:
-      '!text-white hover:!text-[#FF0077] !font-semibold !underline transition-colors !duration-200',
-    alert:
-      '!bg-[#2e77d0]/10 !border !border-[#2e77d0]/20 !text-white !rounded-[0.25rem] !text-sm !p-4',
-    alertText: '!text-white !text-[0.875rem]',
-    badge:
-      '!absolute !-top-2 !right-4 !bg-transparent !text-[#b3b3b3] !text-[0.75rem] !font-medium !p-0 !border-0 !shadow-none !z-10 !m-0 !leading-none',
+    formResendCodeLink: '!text-[#FF0077] hover:!text-white transition-colors',
+
+    identityPreview: '!bg-[#1A1A1A] !border !border-white/[0.10] !rounded-lg !py-2.5 !px-3',
+    identityPreviewText: '!text-white !text-sm',
+    identityPreviewEditButton: '!text-[#FF0077] hover:!text-white',
+    backLink: '!text-[#FF0077] hover:!text-white transition-colors',
+
+    alert: '!bg-[#1A1A1A] !border !border-white/[0.10] !text-white !rounded-lg !text-sm !p-3',
+    alertText: '!text-white !text-sm',
+
+    // RoleAuthCard renders its own sign-in/sign-up switcher below the form, so Clerk's footer stays
+    // hidden — otherwise both would offer the same action twice.
+    footer: '!hidden',
+    footerAction: '!hidden',
     footerPages: '!hidden',
   },
 }
