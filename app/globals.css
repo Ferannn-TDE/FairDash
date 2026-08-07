@@ -219,31 +219,35 @@
    would strip that containing block and the badge would anchor to some ancestor instead. It is
    the flex child, so the equal-share sizing lives here. */
 .cl-socialButtonsBlockButtonBox {
-  flex: 1 1 0 !important;
-  min-width: 8rem !important;
+  flex: 0 0 auto !important;   /* content-width: never grow, never SHRINK (shrinking is what clips) */
+  min-width: 0 !important;
   max-width: 100% !important;
   width: auto !important;
 }
 
-/* Each button: EQUAL-SHARE pill, sized from the ROW rather than from its own content.
-   Both `flex` and `width:100%` are set on purpose — whichever of the two boxes above ends up
-   being the flex parent, the button sizes correctly: as a flex child `flex-basis: 0` wins and all
-   three are equal; as a block child inside the Box, `width: 100%` fills it. Content sizing is
-   what made "do three fit?" depend on text metrics and font-load state, which differ per machine.
+/* Each button: CONTENT-WIDTH pill — as wide as its own label needs, no wider.
+   This is what auth-06 actually does, and its pills are correspondingly UNEQUAL.
 
-   NOTE this diverges from auth-06, which uses content-width pills and so has UNEQUAL button
-   widths. Equal widths were the explicit ask; a deliberate difference, not a miss.
+   WHY NOT equal-share (`flex: 1 1 0`, which this was): equal shares gave every pill ~142px, and
+   "Facebook" is the longest label — it did not fit its share and was clipped. Equal width and full
+   labels are in direct tension at three providers; the label wins, because a clipped provider name
+   is a defect and an uneven row is a style choice.
 
-   min-width is the WRAP CONTROL, paired with the card width:
-     card max-w-md 448px : 3 × 8rem + 2 × 0.625rem = 404px ≤ 448 → 3 across, ~142px each
-     ~380px              : 404px > 380                           → third wraps → clean 2 + 1
-   Change either and the boundary moves. */
+   `flex: 0 0 auto` — never grow AND never shrink. The no-shrink half is the part that actually
+   guarantees no clipping: a shrinkable pill compresses below its content when the row gets tight
+   instead of wrapping. With no-shrink it wraps, which is what we want.
+   `white-space: nowrap` stops the label breaking to two lines inside a 2.5rem-tall pill.
+
+   Natural 3-across width ≈ 362px (112 + 104 + 126 + two 10px gaps), so it fits the 448px card
+   comfortably and wraps on its own around a ~402px viewport. Below that the media query at the
+   bottom of this block takes over with an explicit 1-over-2 layout. */
 .cl-socialButtonsBlockButton {
   position: relative !important;
-  flex: 1 1 0 !important;
-  min-width: 8rem !important;
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
   max-width: 100% !important;
-  width: 100% !important;
+  width: auto !important;
+  white-space: nowrap !important;  /* the label is never allowed to wrap or be cut */
   height: 2.5rem !important;      /* 40px — auth-06's h-10 */
   padding-left: 1.25rem !important;   /* auth-06 px-5 */
   padding-right: 1.25rem !important;
@@ -251,6 +255,50 @@
   justify-content: center !important;
   text-align: center !important;
   overflow: visible !important;
+}
+
+/* ── NARROW BREAKPOINT: one FULL-WIDTH pill on top, two splitting the row below ─────────────
+   A DELIBERATE layout, not the natural wrap. Left alone, content-width pills wrap 2 + 1 (Google
+   and Apple on top, Facebook stranded below). Inverted here to 1 + 2: the first provider spans
+   the row, the remaining two share the next one. It also gives the "Last used" badge the most
+   room, since it sits above the widest pill.
+
+   🔴 SELECTOR NOTE — why this targets the PROVIDER class and not `:first-child`.
+   `display: contents` on .cl-socialButtons flattens those wrappers for LAYOUT only; the DOM tree
+   is unchanged, so `:first-child` matches the first button of EVERY wrapper. With Clerk splitting
+   providers across more than one wrapper (which is exactly what caused the 1+2 bug), that would
+   make two buttons full-width instead of one. Clerk emits `__<provider>` option classes
+   (socialButtonsBlockButton is WithOptions<OAuthProvider> in @clerk/shared), so the provider class
+   is the only stable handle on "the Google one" regardless of how the wrappers are grouped.
+
+   Both structures are covered: the Box-wrapped case (:has) and the case where the button is a
+   direct flex child. Whichever exists matches; the other is inert.
+
+   Breakpoint is 430px — ABOVE the ~402px where these would wrap on their own, so this layout
+   takes effect before a natural 2+1 can appear. Desktop is untouched. */
+@media (max-width: 430px) {
+  /* Row 1 — the first provider spans the full width. */
+  .cl-socialButtonsRoot .cl-socialButtonsBlockButtonBox:has(.cl-socialButtonsBlockButton__google),
+  .cl-socialButtonsRoot > .cl-socialButtonsBlockButton__google {
+    flex: 0 0 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Row 2 — everything else splits it equally. `min-width: 0` lets them shrink to half a narrow
+     screen; the labels there ("Apple", "Facebook") are short enough to fit at that size. */
+  .cl-socialButtonsRoot .cl-socialButtonsBlockButtonBox:not(:has(.cl-socialButtonsBlockButton__google)),
+  .cl-socialButtonsRoot > .cl-socialButtonsBlockButton:not(.cl-socialButtonsBlockButton__google) {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+  }
+
+  /* A button inside a Box must fill it in BOTH rows — the Box carries the width at this
+     breakpoint, so the pill stretches to its parent rather than staying content-width. */
+  .cl-socialButtonsBlockButtonBox > .cl-socialButtonsBlockButton {
+    width: 100% !important;
+    flex: 1 1 auto !important;
+  }
 }
 
 /* Wrapper: relative so badge can be absolutely positioned inside it.
