@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { SignIn, SignUp, useUser, useClerk } from "@clerk/clerk-react";
 import { ArrowLeft, LogOut, type LucideIcon } from "lucide-react";
 import { safeRedirect } from "@/lib/safe-redirect";
+import { clerkAppearance } from "@/lib/clerk-appearance";
 
 // Shared mono-pink auth shell for every role login (vendor / runner / organizer /
 // admin). One reusable component so all operator logins are consistent with the
@@ -23,35 +24,6 @@ export interface RoleAuthProps {
   quiet?: boolean;        // admin = unbranded, no marketing atmosphere
 }
 
-const clerkElements = {
-  rootBox: "w-full",
-  card: "bg-transparent shadow-none p-0 w-full gap-2 border-0",
-  header: "hidden",
-  headerTitle: "hidden",
-  headerSubtitle: "hidden",
-  logoBox: "hidden",
-  logoImage: "hidden",
-  socialButtonsBlockButton:
-    "relative bg-white/[0.04] border border-white/[0.08] text-white hover:bg-white/[0.08] hover:border-white/[0.14] transition-all duration-200 rounded-xl h-10 font-inter mt-0",
-  socialButtonsBlockButtonText: "font-inter text-sm text-gray-200 font-medium",
-  socialButtonsProviderIcon: "w-4 h-4",
-  dividerLine: "bg-white/[0.06]",
-  dividerText: "text-gray-600 font-inter text-xs uppercase tracking-wider bg-[#111111] px-3",
-  formFieldLabel: "text-[10px] font-inter text-gray-400 uppercase tracking-wider mb-1",
-  formFieldInput:
-    "w-full h-10 px-3 bg-white/[0.03] border border-white/[0.08] text-white text-sm font-inter rounded-xl placeholder:text-gray-600 focus:border-[#FF0077]/50 focus:ring-2 focus:ring-[#FF0077]/25 focus:bg-white/[0.05] focus:shadow-[0_0_20px_rgba(255,0,119,0.15)] transition-all duration-200 outline-none",
-  formFieldInputShowPasswordButton: "text-gray-500 hover:text-gray-300",
-  formButtonPrimary:
-    "w-full h-10 bg-[#FF0077] hover:bg-[#FF0077]/90 active:scale-[0.98] text-white font-inter font-semibold text-sm uppercase tracking-wider rounded-xl transition-all duration-200 shadow-[0_4px_20px_rgba(255,0,119,0.25)] hover:shadow-[0_6px_30px_rgba(255,0,119,0.4)]",
-  formFieldAction: "text-[#FF0077] hover:text-[#FF0077]/80 font-inter text-xs transition-colors",
-  identityPreviewEditButton: "text-[#FF0077] hover:text-[#FF0077]/80",
-  formResendCodeLink: "text-[#FF0077] hover:text-[#FF0077]/80",
-  backLink: "text-[#FF0077] hover:text-[#FF0077]/80",
-  footer: "hidden",
-  footerAction: "hidden",
-  footerPages: "hidden",
-  alert: "bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm p-3",
-};
 
 const REVEAL =
   "motion-safe:opacity-0 motion-safe:animate-fadeIn motion-safe:[animation-fill-mode:forwards]";
@@ -169,9 +141,12 @@ function RoleAuthInner({
           </span>
         </Link>
 
-        <div className={`flex items-center gap-2.5 mb-6 ${REVEAL}`} style={reveal(80)}>
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-[#FF0077]/12 border border-[#FF0077]/25">
-            <Icon className="w-4 h-4 text-[#FF0077]" />
+        {/* auth-06's brand mark: a solid accent square, centered and standalone above the copy
+            (it was a small tinted chip inline with the eyebrow). RoleAuthCard's own JSX — there is
+            no Clerk slot involved, and nothing here touches the form. */}
+        <div className={`flex flex-col items-center gap-3 mb-6 ${REVEAL}`} style={reveal(80)}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 bg-[#FF0077] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2),0_6px_20px_-6px_rgba(255,0,119,0.6)]">
+            <Icon className="w-7 h-7 text-white" />
           </div>
           <p className="text-[10px] text-gray-500 font-inter uppercase tracking-[0.15em]">{eyebrow}</p>
         </div>
@@ -218,20 +193,20 @@ function RoleAuthInner({
         ) : (
           // ── Signed out: the actual sign-in / sign-up form. ──────────────────
           <>
-            <h1 className={`font-bebas text-4xl text-white uppercase tracking-wide leading-none ${REVEAL}`} style={reveal(140)}>
+            <h1 className={`font-bebas text-4xl text-white uppercase tracking-wide leading-none text-center ${REVEAL}`} style={reveal(140)}>
               {heading}
             </h1>
-            <p className={`mt-2 text-xs text-gray-400 font-inter leading-relaxed ${REVEAL}`} style={reveal(180)}>
+            <p className={`mt-2 text-xs text-gray-400 font-inter leading-relaxed text-center ${REVEAL}`} style={reveal(180)}>
               {blurb}
             </p>
 
-            <div className="mt-4 mb-4 h-px bg-white/[0.06]" />
+            <div className="mt-5 mb-5 h-px bg-white/[0.06]" />
 
             <div className={REVEAL} style={reveal(240)}>
               {mode === "sign-in" ? (
-                <SignIn routing="hash" forceRedirectUrl={afterSignIn} appearance={{ elements: clerkElements }} />
+                <SignIn routing="hash" forceRedirectUrl={afterSignIn} appearance={clerkAppearance} />
               ) : (
-                <SignUp routing="hash" forceRedirectUrl={afterSignUp} unsafeMetadata={signUpUnsafeMetadata} appearance={{ elements: clerkElements }} />
+                <SignUp routing="hash" forceRedirectUrl={afterSignUp} unsafeMetadata={signUpUnsafeMetadata} appearance={clerkAppearance} />
               )}
             </div>
 
