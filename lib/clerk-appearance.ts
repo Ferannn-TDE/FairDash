@@ -39,11 +39,13 @@ import { dark } from '@clerk/themes'
 /**
  * LOCALIZATION — copy, not wiring, and the reason the social buttons can sit side-by-side.
  *
- * Clerk's default label is "Continue with {{provider|titleize}}". Three of those ("Continue with
- * Google/Apple/Facebook") cannot fit across one column at any sane auth width, so the row wrapped
- * to one button per line and READ as stacked even though the container was already flex-row —
- * the layout was never the problem, the label length was. Shortening to the bare provider name is
- * what actually produces the auth-06 row.
+ * Clerk's default label is "Continue with {{provider|titleize}}". Three of those cannot fit across
+ * one row at any sane auth width, so short labels are NECESSARY for the side-by-side layout.
+ *
+ * They were not SUFFICIENT, and the record should say so: shortening the labels did not unstack
+ * the buttons, because the real blocker was `flex-direction: column !important` in globals.css.
+ * Both had to change. Label length was a constraint on the row; it was never the thing holding
+ * the column in place.
  *
  * ⚠️ This changes the TEXT a user reads. It does not change which providers exist, the OAuth flow,
  * the session, or any redirect — `localization` is a string table consumed by the same render layer
@@ -113,54 +115,32 @@ export const clerkAppearance = {
     logoBox: '!hidden',
     logoImage: '!hidden',
 
-    // ── ROW GEOMETRY. Side-by-side is a BUTTON-WIDTH property, not a flex property. ────────────
+    // ── Social row: VISUAL TREATMENT ONLY. ─────────────────────────────────────────────────────
+    // 🔴 LAYOUT LIVES IN app/globals.css, NOT HERE. The row's flex-direction, the button width and
+    // height, and the badge position are set by the `.cl-socialButtons` / `.cl-socialButtonsBlockButton`
+    // block in globals.css, which outranks anything writable in this file: an appearance class is a
+    // single utility (0-1-0) and loses to `div[class*="cl-socialButtons"]` (0-1-1) and to
+    // `.cl-socialButtons` on source order.
     //
-    // Two earlier attempts set `flex-row` and nothing moved, for two reasons worth recording:
-    //   1. `socialButtonsProviders` IS NOT A CLERK DESCRIPTOR. It does not appear in
-    //      @clerk/shared's ElementsConfig, so every rule written against it was silently dropped.
-    //      (Check a key against that type before trusting it — a typo'd slot fails SILENTLY, with
-    //      no console warning and no type error, because the elements object is loosely typed.)
-    //   2. The container that actually governs layout is socialButtonsRoot — the OUTER wrapper —
-    //      which was never styled. Clerk lays its children out in a single column, and a child in
-    //      a one-column track fills it regardless of `w-auto`. That is why three "auto-width"
-    //      buttons still rendered as full-width bars.
-    //
-    // Both containers are set so it does not matter which one Clerk nests where, and the buttons
-    // are pinned to content width from BOTH sides of the relationship (`w-auto` + `flex-none`, and
-    // `justify-self-center` in case a grid track survives).
-    //
-    // ONE EVEN GAP. The previous `gap-x-2.5 / gap-y-4` split existed to keep a wrapped row's badge
-    // off the row above — but the buttons never wrapped, they stacked, so the asymmetry showed up
-    // as dead space above whichever button carried the "Last used" badge. Content-width pills sit
-    // in a real row with room above them, so a single even gap is correct.
-    //
-    // overflow-visible on the containers is what stops the badge being CLIPPED horizontally — the
-    // clip came from an ancestor, not from the button.
-    socialButtonsRoot: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-2.5 !w-full !overflow-visible',
-    socialButtons: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-2.5 !w-full !overflow-visible',
+    // Three rounds were spent adding `!flex-row` / `!w-auto` here and watching nothing happen. Do
+    // NOT re-add flex-direction, width, flex, or gap to these slots — they will be silently
+    // overridden, look like they "did nothing", and send the next person down the same path.
+    // Colour, border, radius, hover and type belong here; geometry belongs there.
+    socialButtonsRoot: '!overflow-visible',
+    socialButtons: '!overflow-visible',
     socialButtonsBlockButton: [
-      // ⬇ THE LINE THAT MAKES THEM SIT SIDE-BY-SIDE. Content width, never stretched.
-      '!w-auto !min-w-0 !flex-none !grow-0 !shrink-0 !basis-auto !justify-self-center',
-      '!h-10 !px-4 !gap-2 !inline-flex !items-center !justify-center',
       '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
       '!text-white !text-sm !font-medium !normal-case',
-      // The badge is absolutely positioned against THIS button and pokes above its top edge, so
-      // the button must establish the positioning context and must NOT clip it.
-      '!relative !overflow-visible',
       INSET_HIGHLIGHT,
       'hover:!bg-[#232323] hover:!border-white/[0.18]',
       'active:!scale-[0.98]',
       'transition-all !duration-200',
     ].join(' '),
-    // Clerk swaps to this variant when several providers are in view — it is a DIFFERENT slot, so
-    // without it the multi-provider case falls back to Clerk's own full-width block styling and
-    // undoes everything above.
+    // A SEPARATE slot Clerk swaps to when several providers are in view — without it that case
+    // falls back to Clerk's own block styling and loses the treatment.
     socialButtonsBlockButtonManyInView: [
-      '!w-auto !min-w-0 !flex-none !grow-0 !shrink-0 !basis-auto !justify-self-center',
-      '!h-10 !px-4 !gap-2 !inline-flex !items-center !justify-center',
       '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
       '!text-white !text-sm !font-medium !normal-case',
-      '!relative !overflow-visible',
       INSET_HIGHLIGHT,
       'hover:!bg-[#232323] hover:!border-white/[0.18]',
       'active:!scale-[0.98]',
@@ -169,23 +149,9 @@ export const clerkAppearance = {
     socialButtonsBlockButtonText: '!text-white !text-sm !font-medium !whitespace-nowrap',
     socialButtonsProviderIcon: '!w-4 !h-4 !shrink-0',
 
-    // ── "LAST USED" BADGE. Clerk pins this pill to the previously-used provider button. ─────────
-    // Two separate clips were happening: VERTICALLY (cut by the button's own top edge) and
-    // HORIZONTALLY ("Last usec" — cut by an ANCESTOR, which is why widening the button never
-    // helped). Fixed on both axes without reintroducing asymmetric spacing:
-    //   1. overflow-visible on the button AND on socialButtonsRoot / socialButtons / card / rootBox
-    //      — the horizontal clip was an ancestor's, not the button's
-    //   2. an OPAQUE background (#0F0F0F, the page): it straddles the button's border, and a
-    //      transparent pill reads as broken text over that edge
-    //   3. z-10, so a neighbour that wrapped to the next row cannot paint over it
-    // Inset to `right-2` (from `right-3`) and centred-ish so it stays within a SHORT pill's width
-    // — on a content-width button there is far less horizontal room than on a full-width bar.
-    badge: [
-      '!absolute !-top-2 !right-2 !z-10 !m-0',
-      '!bg-[#0F0F0F] !text-[#A1A1A1] !border !border-white/[0.10]',
-      '!text-[0.625rem] !font-medium !leading-none !normal-case',
-      '!px-1.5 !py-1 !rounded-full !shadow-none !whitespace-nowrap',
-    ].join(' '),
+    // "Last used" badge: positioned and coloured entirely by `.cl-badge` in globals.css, which
+    // straddles the button's top border via translateY(-50%). Deliberately NOT redefined here —
+    // two sources for one pill is what left it clipped and mis-set for three rounds.
 
     // ── Divider: auth-06 shows a VISIBLE "or" with a rule on both sides. ────────────────────────
     dividerRow: '!flex !items-center !gap-4 !my-5',

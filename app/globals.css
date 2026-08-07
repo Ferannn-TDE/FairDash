@@ -166,31 +166,59 @@
   font-family: 'Inter', sans-serif !important;
 }
 
-/* Social buttons — stacked column, full width, tight gap */
-.cl-socialButtons {
+/* ── Social buttons — SIDE-BY-SIDE ROW (auth-06 treatment) ──────────────────────────────────
+   ⚠️ LOAD-BEARING. This block is the ONLY thing that decides the social row's direction and the
+   button width. It previously read "stacked column, full width, tight gap" and set
+   `flex-direction: column !important` + `width: 100% !important` — deliberately, for the old
+   design.
+
+   That is why three rounds of setting `!flex-row` / `!w-auto` in lib/clerk-appearance.ts did
+   nothing: an appearance utility is one class (0-1-0) and lost to `div[class*="cl-socialButtons"]`
+   (0-1-1) and to `.cl-socialButtons` on source order. The rules were applying; they were being
+   overridden HERE, by our own CSS, not by Clerk's.
+
+   So the direction lives in this file and NOWHERE else. lib/clerk-appearance.ts owns the visual
+   treatment (colour, radius, border, hover); it must not try to set flex-direction or width again
+   — two sources fighting is what produced the whole loop. */
+.cl-socialButtons,
+div[class*="cl-socialButtons"] {
   display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-  gap: 0.75rem !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: center !important;
+  /* ONE even gap in both axes — the earlier asymmetric gap-y existed to reserve room for the
+     "Last used" badge, but the badge is absolutely positioned and straddles the button's top
+     border (see .cl-badge below), so it consumes no layout height and needs no extra row gap. */
+  gap: 0.625rem !important;
   width: 100% !important;
   margin-top: 0 !important;
   margin-bottom: 0 !important;
+  overflow: visible !important;   /* the badge protrudes above the button's top edge */
 }
 
-div[class*="cl-socialButtons"] {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 0.75rem !important;
-  margin-bottom: 0 !important;
-}
-
-/* Each button: fixed height, zero margin — gap on parent is the only spacing */
+/* Each button: CONTENT-WIDTH pill — this is what lets three sit across.
+   `width: auto` + `flex: 0 0 auto` together; a flex child with flex-grow would stretch back out
+   even at width:auto. Fixed height so the absolutely-positioned badge never changes it. */
 .cl-socialButtonsBlockButton {
   position: relative !important;
-  height: 3rem !important;        /* 48px — never expands for badge content */
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
+  height: 2.5rem !important;      /* 40px — auth-06's h-10 */
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
   margin: 0 !important;
   justify-content: center !important;
   text-align: center !important;
+  overflow: visible !important;
+}
+
+/* The per-button wrapper is also a flex child of the row — it must not stretch either, or the
+   pill inside it gets a full-width parent and the row collapses back to one-per-line. */
+.cl-socialButtonsBlockButtonBox {
+  width: auto !important;
+  flex: 0 0 auto !important;
 }
 
 /* Wrapper: relative so badge can be absolutely positioned inside it.
