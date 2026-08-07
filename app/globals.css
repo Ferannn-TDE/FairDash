@@ -197,28 +197,49 @@ div[class*="cl-socialButtons"] {
   overflow: visible !important;   /* the badge protrudes above the button's top edge */
 }
 
-/* Each button: CONTENT-WIDTH pill — this is what lets three sit across.
-   `width: auto` + `flex: 0 0 auto` together; a flex child with flex-grow would stretch back out
-   even at width:auto. Fixed height so the absolutely-positioned badge never changes it. */
+/* Each button: EQUAL-SHARE pill, sized from the ROW rather than from its own content.
+   `flex: 1 1 0` (grow, shrink, zero basis) makes all three exactly the same width regardless of
+   label length — "Facebook" no longer measures wider than "Apple".
+
+   WHY NOT content-width (the previous `flex: 0 0 auto`): with content sizing, the row broke 1+2 —
+   whichever pill was widest (the one carrying the "Last used" badge, or simply the longest label)
+   pushed the total past the container and forced a wrap. Content sizing makes "do three fit?"
+   depend on text metrics and badge rendering, which differ per machine and per font-load state.
+   Sizing from the row removes the question: three items with a zero basis ALWAYS share one row
+   while the min-width floor is satisfiable.
+
+   NOTE this diverges from auth-06, which uses content-width pills and therefore has unequal
+   button widths. Equal widths were the explicit ask here; it is a deliberate difference, not a
+   miss.
+
+   min-width is the WRAP CONTROL, and it is what makes narrow screens behave:
+     desktop  (card max-w-md = 448px): 3 × 8rem + 2 × 0.625rem gap = 404px ≤ 448 → 3 across,
+                                       each grown to ~142px
+     ~380px:                            404px > 380 → the third wraps → clean 2 + 1
+   Change the card width or this floor and that boundary moves — they are a pair. */
 .cl-socialButtonsBlockButton {
   position: relative !important;
+  flex: 1 1 0 !important;
+  min-width: 8rem !important;
+  max-width: 100% !important;
   width: auto !important;
-  min-width: 0 !important;
-  flex: 0 0 auto !important;
   height: 2.5rem !important;      /* 40px — auth-06's h-10 */
-  padding-left: 1rem !important;
-  padding-right: 1rem !important;
+  padding-left: 1.25rem !important;   /* auth-06 px-5 */
+  padding-right: 1.25rem !important;
   margin: 0 !important;
   justify-content: center !important;
   text-align: center !important;
   overflow: visible !important;
 }
 
-/* The per-button wrapper is also a flex child of the row — it must not stretch either, or the
-   pill inside it gets a full-width parent and the row collapses back to one-per-line. */
+/* The per-button wrapper is itself a flex child of the row, so it has to share the SAME sizing —
+   leave it content-width and the pill inside it inherits a content-width parent and the equal
+   split never happens. */
 .cl-socialButtonsBlockButtonBox {
+  flex: 1 1 0 !important;
+  min-width: 8rem !important;
+  max-width: 100% !important;
   width: auto !important;
-  flex: 0 0 auto !important;
 }
 
 /* Wrapper: relative so badge can be absolutely positioned inside it.

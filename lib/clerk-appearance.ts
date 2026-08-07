@@ -27,6 +27,9 @@ import { dark } from '@clerk/themes'
  *     renders both fields. The password field is styled to match the email field and is NEVER
  *     hidden — hiding a required field with CSS breaks sign-in.
  *   - a GitHub button. Our enabled providers are google / apple / facebook.
+ *   - content-width (unequal) social pills. Ours are EQUAL width by explicit request; see the
+ *     `flex: 1 1 0` block in globals.css for why, and what it trades away.
+ *
  * SHORT SOCIAL LABELS ARE NOW IN (see clerkLocalization below): "Google", not "Continue with
  * Google". That is the `localization` prop, not appearance — and it is LOAD-BEARING for the layout,
  * because three long labels cannot share a row. Layout and label are coupled; do not revert one.
@@ -56,9 +59,14 @@ export const clerkLocalization = {
   socialButtonsBlockButton: '{{provider|titleize}}',
 }
 
-/** auth-06's raised-surface treatment: a 1px inner highlight over a soft drop shadow. */
+/**
+ * auth-06's raised-surface shadow, dark variant, reproduced EXACTLY — all four layers:
+ *   inset top highlight · hairline ring · tight lift · soft lift
+ * This is the one auth-06 detail that looked like it might be out of reach and is not: a
+ * box-shadow is just a string, and `appearance` passes arbitrary classes through.
+ */
 const INSET_HIGHLIGHT =
-  '!shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06),0_1px_2px_-1px_rgba(0,0,0,0.4),0_2px_4px_0_rgba(0,0,0,0.3)]'
+  '!shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25),0_0_0_0.5px_rgba(255,255,255,0.03),0_1px_2px_-1px_rgba(255,255,255,0.08),0_2px_4px_0_rgba(255,255,255,0.08)]'
 
 export const clerkAppearance = {
   baseTheme: dark,
@@ -129,8 +137,8 @@ export const clerkAppearance = {
     socialButtonsRoot: '!overflow-visible',
     socialButtons: '!overflow-visible',
     socialButtonsBlockButton: [
-      '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
-      '!text-white !text-sm !font-medium !normal-case',
+      '!rounded-full !border !border-white/[0.08] !bg-[#1A1A1A]',
+      '!text-white !text-sm !font-medium !normal-case !tracking-normal',
       INSET_HIGHLIGHT,
       'hover:!bg-[#232323] hover:!border-white/[0.18]',
       'active:!scale-[0.98]',
@@ -139,8 +147,8 @@ export const clerkAppearance = {
     // A SEPARATE slot Clerk swaps to when several providers are in view — without it that case
     // falls back to Clerk's own block styling and loses the treatment.
     socialButtonsBlockButtonManyInView: [
-      '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
-      '!text-white !text-sm !font-medium !normal-case',
+      '!rounded-full !border !border-white/[0.08] !bg-[#1A1A1A]',
+      '!text-white !text-sm !font-medium !normal-case !tracking-normal',
       INSET_HIGHLIGHT,
       'hover:!bg-[#232323] hover:!border-white/[0.18]',
       'active:!scale-[0.98]',
