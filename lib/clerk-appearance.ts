@@ -35,6 +35,24 @@ import { dark } from '@clerk/themes'
  * breaks useUser / useAuth hooks.
  */
 
+/**
+ * LOCALIZATION — copy, not wiring, and the reason the social buttons can sit side-by-side.
+ *
+ * Clerk's default label is "Continue with {{provider|titleize}}". Three of those ("Continue with
+ * Google/Apple/Facebook") cannot fit across one column at any sane auth width, so the row wrapped
+ * to one button per line and READ as stacked even though the container was already flex-row —
+ * the layout was never the problem, the label length was. Shortening to the bare provider name is
+ * what actually produces the auth-06 row.
+ *
+ * ⚠️ This changes the TEXT a user reads. It does not change which providers exist, the OAuth flow,
+ * the session, or any redirect — `localization` is a string table consumed by the same render layer
+ * as `appearance`. Kept in this file so the label and the layout that depends on it live together;
+ * shortening one without widening the other is how this regresses.
+ */
+export const clerkLocalization = {
+  socialButtonsBlockButton: '{{provider|titleize}}',
+}
+
 /** auth-06's raised-surface treatment: a 1px inner highlight over a soft drop shadow. */
 const INSET_HIGHLIGHT =
   '!shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06),0_1px_2px_-1px_rgba(0,0,0,0.4),0_2px_4px_0_rgba(0,0,0,0.3)]'
@@ -98,19 +116,41 @@ export const clerkAppearance = {
     // The container flips from the stacked column Clerk defaults to; the buttons become auto-width
     // pills. With three providers these wrap to 2 + 1 on a narrow screen, which is the intended
     // auth-06 behaviour (flex-wrap, centered).
-    socialButtons: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-2.5 !w-full',
-    socialButtonsProviders: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-2.5 !w-full',
+    // ROW GEOMETRY. `gap-y` is deliberately LARGER than `gap-x`: the "Last used" badge sits above
+    // a button's top edge, so when the row wraps (narrow screens, or a long provider name) the
+    // second row's badge would collide with the first row's buttons on a uniform gap. The extra
+    // vertical gap plus `pt-3` is the room that badge lives in — desktop AND wrapped.
+    socialButtons: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-x-2.5 !gap-y-4 !w-full !pt-3',
+    socialButtonsProviders: '!flex !flex-row !flex-wrap !items-center !justify-center !gap-x-2.5 !gap-y-4 !w-full !pt-3',
     socialButtonsBlockButton: [
-      '!w-auto !grow-0 !h-10 !px-5 !gap-2',
+      '!w-auto !grow-0 !h-10 !px-4 !gap-2',
       '!rounded-full !border !border-white/[0.10] !bg-[#1A1A1A]',
       '!text-white !text-sm !font-medium !normal-case',
+      // The badge is absolutely positioned against THIS button and pokes above its top edge, so
+      // the button must establish the positioning context and must NOT clip it.
+      '!relative !overflow-visible',
       INSET_HIGHLIGHT,
       'hover:!bg-[#232323] hover:!border-white/[0.18]',
       'active:!scale-[0.98]',
       'transition-all !duration-200',
     ].join(' '),
-    socialButtonsBlockButtonText: '!text-white !text-sm !font-medium',
-    socialButtonsProviderIcon: '!w-4 !h-4',
+    socialButtonsBlockButtonText: '!text-white !text-sm !font-medium !whitespace-nowrap',
+    socialButtonsProviderIcon: '!w-4 !h-4 !shrink-0',
+
+    // ── "LAST USED" BADGE. Clerk pins this pill to the previously-used provider button. ─────────
+    // It was being CLIPPED: this slot existed before the auth-06 reskin and was dropped in the
+    // rewrite, so it fell back to Clerk's default placement and got cut by the button edge.
+    // Restored with three things it needs to survive a wrapping row:
+    //   1. an OPAQUE background (#0F0F0F, the page) — it straddles the button's border, and a
+    //      transparent pill reads as broken text over that edge
+    //   2. z-10, so a neighbouring button that wrapped underneath cannot paint over it
+    //   3. it sits inside the `pt-3` / `gap-y-4` room reserved by the container above
+    badge: [
+      '!absolute !-top-2 !right-3 !z-10 !m-0',
+      '!bg-[#0F0F0F] !text-[#A1A1A1] !border !border-white/[0.10]',
+      '!text-[0.625rem] !font-medium !leading-none !normal-case',
+      '!px-1.5 !py-1 !rounded-full !shadow-none !whitespace-nowrap',
+    ].join(' '),
 
     // ── Divider: auth-06 shows a VISIBLE "or" with a rule on both sides. ────────────────────────
     dividerRow: '!flex !items-center !gap-4 !my-5',

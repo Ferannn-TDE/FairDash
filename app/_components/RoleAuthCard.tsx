@@ -132,7 +132,13 @@ function RoleAuthInner({
       )}
       <div className="h-px w-full max-w-md absolute top-0 left-1/2 -translate-x-1/2 bg-gradient-to-r from-transparent via-[#FF0077]/40 to-transparent" />
 
-      <div className="relative z-10 w-full max-w-sm">
+      {/* max-w-md, widened from max-w-sm for HEADROOM, not necessity: three short-label pills
+          (Google / Apple / Facebook) measure ~338px and would technically fit 24rem's 384px, but
+          with only ~46px of slack — enough that a font fallback (Inter not yet loaded, so a wider
+          system face) pushes the row over and it wraps. 28rem leaves ~110px.
+          The card width and the SHORT LABELS together produce the side-by-side row; revert either
+          — the width here, or clerkLocalization — and it wraps back to one button per line. */}
+      <div className="relative z-10 w-full max-w-md">
         <Link href="/" className={`group inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition-colors mb-8 ${REVEAL}`} style={reveal(0)}>
           <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
           <span className="font-bebas tracking-[0.2em] text-base">
