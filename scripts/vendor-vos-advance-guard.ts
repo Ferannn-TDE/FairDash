@@ -134,6 +134,119 @@ async function main() {
     assert(routeSrc.includes('isRunnerFulfilled('), 'the vendor-status ROUTE gates via the shared predicate (not a hand-rolled copy)')
     assert(dashSrc.includes('isRunnerFulfilled('), 'the DASHBOARD ready-lane gates via the shared predicate (not a hand-rolled copy)')
 
+    // ══ TERMINAL OVERRIDES MUST CLOSE THE LANE TOO ═══════════════════════════════
+    // DELIVERED (above) was the ONLY target that closed the vendor lane. The three asserted
+    // terminals left it open, which stranded orders in a vendor's live queue (one sat in Randy's
+    // "Ready" lane for 52 days) and kept them quoting "pending" take-home for money nobody would
+    // ever receive. WHICH terminal value each case closes to is a MONEY decision: earnings zero
+    // on DECLINED and only on DECLINED, so DECLINED = "$0, never touched it" and
+    // CANCELLED = "paid, did the work".
+    const { computeVendorOrderEarnings } = await import('../lib/vendor-earnings')
+    const { vendorLaneClosePlan } = await import('../lib/reconcile-order-status')
+
+    /** The analysis query, as a reusable probe: lanes still open on a terminal-failure order. */
+    const danglingLanes = async (orderId: string) =>
+      prisma.vendorOrderStatus.count({
+        where: { orderId, status: { in: ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'] } },
+      })
+
+    /** Earnings for one lane, read the way every vendor surface reads it. */
+    const laneCents = async (orderId: string, vendorId: string) => {
+      const o = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: {
+        total: true, status: true,
+        orderItems: { select: { vendorId: true, subtotal: true } },
+        payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
+        refunds: { select: { vendorId: true, status: true, amountCents: true } },
+        vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      } })
+      return computeVendorOrderEarnings(o, vendorId)
+    }
+
+    // ── [6] undeliverable / uncollected → CANCELLED (the food was made; vendor is paid) ──
+    console.log('\n[6] an asserted terminal closes the vendor lane — to CANCELLED, which KEEPS the money')
+    for (const [ft, timeout] of [['HOME_DELIVERY', 'UNDELIVERABLE'], ['BOOTH_PICKUP', 'UNCOLLECTED']] as const) {
+      const id = await mkOrder(ft, OrderStatus.READY, 'READY')
+      // [0] baseline on the PROBE: the lane is open BEFORE, or "closed after" proves nothing.
+      assert(await danglingLanes(id) === 1, `[0] ${timeout}: baseline — the lane IS open before reconcile`)
+      const paidBefore = (await laneCents(id, v.id)).cents
+      assert(paidBefore > 0, `[0] ${timeout}: baseline — the open lane IS quoting money (${paidBefore}¢), so "still paid" is testable`)
+
+      await reconcileMasterStatus(id, { timeout: { status: timeout } })
+      assert(await master(id) === timeout, `${timeout}: master asserted (got ${await master(id)})`)
+      assert(await vos(id, v.id) === 'CANCELLED', `${timeout}: lane closed READY→CANCELLED (got ${await vos(id, v.id)})`)
+      assert(await danglingLanes(id) === 0, `${timeout}: ZERO lanes left open — the order leaves the vendor's queue`)
+      const after = await laneCents(id, v.id)
+      assert(after.cents === paidBefore, `${timeout}: the vendor KEEPS their money (${after.cents}¢ = ${paidBefore}¢) — they made the food`)
+
+      // Idempotent: every update is status-conditional, so a re-run matches nothing.
+      await reconcileMasterStatus(id, { timeout: { status: timeout } })
+      assert(await vos(id, v.id) === 'CANCELLED', `${timeout}: re-run is a no-op (idempotent)`)
+    }
+
+    // ── [7] operator cancel is PER LANE — the #OMKVUDXZ shape ───────────────────
+    console.log('\n[7] ⛔ operator CANCEL closes per-lane BY PROGRESS — it must not zero a vendor who did the work')
+    const v2 = await prisma.vendor.create({ data: { eventId: ev.id, name: `V2 ${rand()}`, slug: `${SLUG}${rand()}`, cuisineType: 'T', status: 'ACTIVE' } })
+    const v3 = await prisma.vendor.create({ data: { eventId: ev.id, name: `V3 ${rand()}`, slug: `${SLUG}${rand()}`, cuisineType: 'T', status: 'ACTIVE' } })
+    const mi2 = await prisma.menuItem.create({ data: { vendorId: v2.id, name: 'I2', price: 10, category: 'T' } })
+    const mi3 = await prisma.menuItem.create({ data: { vendorId: v3.id, name: 'I3', price: 10, category: 'T' } })
+
+    // Three vendors, three lane states — exactly the real order that made this per-lane:
+    //   v  = PLACED    (never started)  → DECLINED, $0
+    //   v2 = READY     (food made)      → CANCELLED, paid
+    //   v3 = COMPLETED (already done)   → UNTOUCHED
+    const multi = await prisma.order.create({ data: {
+      eventId: ev.id, customerId: await mkCustomer(), vendorId: v.id, status: OrderStatus.PLACED,
+      fulfillmentType: 'BOOTH_PICKUP', subtotal: 30, fairSynqFee: 3, total: 33, vendorPayout: 30,
+      customerName: 'C', customerPhone: '+10000000000', placedAt: new Date(),
+      orderItems: { create: [
+        { vendorId: v.id,  menuItemId: mi.id,  itemName: 'Item', quantity: 1, unitPrice: 10, totalPrice: 10, subtotal: 10 },
+        { vendorId: v2.id, menuItemId: mi2.id, itemName: 'I2',   quantity: 1, unitPrice: 10, totalPrice: 10, subtotal: 10 },
+        { vendorId: v3.id, menuItemId: mi3.id, itemName: 'I3',   quantity: 1, unitPrice: 10, totalPrice: 10, subtotal: 10 },
+      ] },
+      vendorOrderStatuses: { create: [
+        { vendorId: v.id,  status: 'PLACED' },
+        { vendorId: v2.id, status: 'READY' },
+        { vendorId: v3.id, status: 'COMPLETED' },
+      ] },
+    } })
+    const workedBefore = (await laneCents(multi.id, v2.id)).cents
+    const doneBefore   = (await laneCents(multi.id, v3.id)).cents
+    assert(await danglingLanes(multi.id) === 2, '[0] baseline: 2 lanes open (PLACED + READY), COMPLETED is not "open"')
+    assert(workedBefore > 0 && doneBefore > 0, `[0] baseline: the worked (${workedBefore}¢) and done (${doneBefore}¢) lanes both quote money`)
+
+    await reconcileMasterStatus(multi.id, { timeout: { status: 'CANCELLED', by: 'system', reason: 'Event cancelled by operator' } })
+    assert(await master(multi.id) === 'CANCELLED', 'master asserted CANCELLED')
+    assert(await vos(multi.id, v.id)  === 'DECLINED',  `the NOT-STARTED lane → DECLINED (got ${await vos(multi.id, v.id)})`)
+    assert(await vos(multi.id, v2.id) === 'CANCELLED', `the WORKED lane → CANCELLED (got ${await vos(multi.id, v2.id)})`)
+    assert(await vos(multi.id, v3.id) === 'COMPLETED', `⛔ the COMPLETED lane is UNTOUCHED (got ${await vos(multi.id, v3.id)}) — a per-order flip would have overwritten it`)
+    assert(await danglingLanes(multi.id) === 0, 'no lane left open on the cancelled order')
+
+    assert((await laneCents(multi.id, v.id)).cents === 0, 'the not-started vendor earns $0 (DECLINED zeroes)')
+    assert((await laneCents(multi.id, v2.id)).cents === workedBefore, `the vendor who COOKED keeps ${workedBefore}¢ (CANCELLED does NOT zero)`)
+    assert((await laneCents(multi.id, v3.id)).cents === doneBefore, `⛔ the vendor who FINISHED keeps ${doneBefore}¢ — the failure this test exists to catch`)
+
+    // ── [8] the plan itself: an allowlist of LEGAL vendor statuses, never a master-only one ──
+    console.log('\n[8] the close plan never writes a MASTER-only status into a vendor lane')
+    const LEGAL_VENDOR = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'COMPLETED', 'DECLINED', 'REFUNDED', 'CANCELLED'])
+    for (const t of ['UNDELIVERABLE', 'UNCOLLECTED', 'CANCELLED'] as const) {
+      for (const { to } of vendorLaneClosePlan(t)) {
+        // Widened to string ON PURPOSE. `to` is typed VendorStatus, and tsc ALREADY refuses the
+        // master-only comparison below as provably impossible ("no overlap") — the type is the
+        // real guarantee. This keeps a runtime check anyway, so the invariant still holds if
+        // someone later widens VendorStatus or reaches the plan through an `as` cast.
+        const value: string = to
+        assert(LEGAL_VENDOR.has(value), `${t} → writes "${value}", a legal VendorOrderStatus`)
+        assert(value !== 'UNDELIVERABLE' && value !== 'UNCOLLECTED',
+          `${t} → does NOT write a master-only status (deriveMasterStatus would throw on it forever)`)
+      }
+    }
+    assert(vendorLaneClosePlan('CANCELLED').length === 2, 'operator cancel has TWO rules (progress-split), not one blanket flip')
+    assert(vendorLaneClosePlan('UNDELIVERABLE').length === 1 && vendorLaneClosePlan('UNDELIVERABLE')[0].to === 'CANCELLED',
+      'undeliverable has ONE rule, closing to CANCELLED (paid)')
+    // [0] control on the detector itself: re-open a lane and the probe MUST see it.
+    await prisma.vendorOrderStatus.update({ where: { orderId_vendorId: { orderId: multi.id, vendorId: v.id } }, data: { status: 'READY' } })
+    assert(await danglingLanes(multi.id) === 1, '[0] positive control: the dangling-lane probe DOES catch a re-opened lane (not vacuously 0)')
+
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)
   } finally {
