@@ -111,7 +111,17 @@ function OrderCard({ order }: { order: Order }) {
           {/* Below lg the dedicated tracks are hidden, so fold their content in here —
               same information, still truncating rather than wrapping into ragged rows. */}
           <div className="lg:hidden mt-1.5 flex flex-col gap-1">
-            <StatusPill status={order.status} />
+            {/* self-start, because this parent is a flex COLUMN. `inline-flex` sizes the pill to
+                its label on the MAIN axis, but a column's cross axis is WIDTH and align-items
+                defaults to `stretch` — so the pill was filling the whole card row as a green
+                slab. The lg: track above is a flex ROW, where width IS the main axis, which is
+                why the same component hugs its text on desktop and only broke on mobile.
+
+                Deliberately on the PILL and not `items-start` on this container: the two spans
+                below need the stretched width for their `min-w-0` + `truncate` to have anything
+                to truncate against. Shrinking them to content would turn a long customer name
+                from an ellipsis into an overflow. */}
+            <StatusPill status={order.status} className="self-start" />
             <span className="flex items-center gap-1 text-xs text-text-gray min-w-0">
               <User className="w-3 h-3 shrink-0" />
               <span className="truncate">{order.customerName}</span>
