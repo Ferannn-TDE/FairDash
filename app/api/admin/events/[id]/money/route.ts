@@ -133,7 +133,7 @@ export async function GET(
     const estOrders = await db.order.findMany({
       where: { eventId: event.id, voidedAt: null, status: { in: [...ACTIVE_STATUSES, ...COMPLETED_STATUSES] } },
       select: {
-        id: true, total: true,
+        id: true, total: true, status: true,
         orderItems: { select: { vendorId: true, subtotal: true } },
         payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
         refunds: { select: { vendorId: true, status: true, amountCents: true } },

@@ -1,6 +1,7 @@
 import { OrderStatus } from '@prisma/client'
 import { db } from './db'
 import { sumVendorEarnings } from './vendor-earnings'
+import { isPaidOrderStatus } from './order-status'
 
 /**
  * Fair financial report — computed SERVER-SIDE, ONCE, entirely from the ledgers. The page
@@ -97,6 +98,13 @@ export async function computeFairReport(eventId: string): Promise<FairReport> {
   for (const o of orders) {
     totalOrders++
     if (o.status === OrderStatus.CANCELLED) { cancelledOrders++; continue }
+    // UNPAID ORDERS ARE NOT SALES. Same root as the earnings leak one screen down, different
+    // number: this loop's only status test was a `!== CANCELLED` DENYLIST, and PENDING_PAYMENT
+    // is absent from every status list, so orders awaiting Stripe confirmation were being added
+    // to the organizer's gross takings and platform fee — money no customer had paid.
+    // An allowlist, so a status added to the enum later is excluded until someone decides it is
+    // revenue, rather than counted by default.
+    if (!isPaidOrderStatus(o.status)) continue
     grossSalesCents += cents(o.total)
     platformFeeCents += cents(o.fairSynqFee)
     if ((COMPLETE as string[]).includes(o.status)) completedOrders++
@@ -114,6 +122,10 @@ export async function computeFairReport(eventId: string): Promise<FairReport> {
   const revenueOrders = orders.filter(o => o.status !== OrderStatus.CANCELLED)
   const ordersForEarnings = revenueOrders.map(o => ({
     total: o.total,
+    // The base query already selects `status` (it drives the counts above) — it simply was not
+    // being handed to the earnings helper, so the helper could not apply the unpaid invariant
+    // and PENDING_PAYMENT orders were counted as estimated take-home.
+    status: o.status,
     orderItems: o.orderItems,
     payouts: o.payouts,
     refunds: o.refunds,
