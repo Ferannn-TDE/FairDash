@@ -30,6 +30,47 @@ export const TERMINAL_STATUSES = [
   ...FAILED_STATUSES,
 ] as const
 
+/**
+ * MASTER Order.status values for which the customer's money was actually CAPTURED.
+ *
+ * WHY THIS EXISTS AS ITS OWN LIST, and why it is an ALLOWLIST.
+ *
+ * `PENDING_PAYMENT` is an orphan: it is a real value of the Prisma `OrderStatus` enum, and it
+ * appears in NONE of the lists above. So `isCompleted`, `isFailed` and `isActive` are all false
+ * for it, and — the part that cost money — it slips through any filter that is not an explicit
+ * allowlist. A `where: { voidedAt: null }` scope admits it. A `status !== CANCELLED` denylist
+ * admits it. Both of those shipped, and both fed unpaid orders into the earnings estimator,
+ * which showed a vendor take-home for an order no customer ever paid for.
+ *
+ * Deliberately NOT derived as "everything except PENDING_PAYMENT": that spelling is a denylist
+ * wearing an allowlist's clothes, and the next orphan status added to the enum would be admitted
+ * by default — exactly the failure being fixed. Every status here is written out, so a new enum
+ * member is $0 until someone decides otherwise. `scripts/earnings-invariant-guard.ts` asserts
+ * this list stays exhaustive over the enum.
+ *
+ * NOTE the money was captured, not that the vendor keeps it: CANCELLED/UNCOLLECTED/UNDELIVERABLE
+ * orders were all paid for, and what happens to that money afterwards is the refund/clawback
+ * engine's business, which `computeVendorOrderEarnings` handles separately via Refund and
+ * Payout.reversedAt. This list answers ONE question: did money ever arrive?
+ */
+export const PAID_ORDER_STATUSES = [
+  'PLACED',
+  'ACCEPTED',
+  'PREPARING',
+  'READY',
+  'RUNNER_COLLECTED',
+  'COMPLETED',
+  'DELIVERED',
+  'CANCELLED',
+  'UNCOLLECTED',
+  'UNDELIVERABLE',
+] as const
+
+/** True when the customer's money was captured for this order (see PAID_ORDER_STATUSES). */
+export function isPaidOrderStatus(status: string): boolean {
+  return (PAID_ORDER_STATUSES as readonly string[]).includes(status)
+}
+
 export type OrderStatus =
   | typeof COMPLETED_STATUSES[number]
   | typeof FAILED_STATUSES[number]

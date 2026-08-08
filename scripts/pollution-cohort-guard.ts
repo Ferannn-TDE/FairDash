@@ -59,6 +59,7 @@ const REAL_TX = 'tr_3Tvl9NHk5f3uB8J900UakK3u' // the runner payout proven in pro
 /** One order, one vendor, one payout — parameterised by which transfer id backs it. */
 const orderWith = (transferId: string, netAmount = 29.79): OrderForEarnings => ({
   total: 33.10,
+  status: 'COMPLETED',
   orderItems: [{ vendorId: 'v1', subtotal: 29.79 }],
   payouts: [{ vendorId: 'v1', netAmount, reversedAt: null, stripeTransferId: transferId }],
   refunds: [],
@@ -125,6 +126,7 @@ async function main() {
     // A mixed order: the real slice still shows, the polluted one does not.
     const mixed: OrderForEarnings = {
       total: 60,
+      status: 'COMPLETED',
       orderItems: [{ vendorId: 'v1', subtotal: 29.79 }, { vendorId: 'v2', subtotal: 29.79 }],
       payouts: [
         { vendorId: 'v1', netAmount: 29.79, reversedAt: null, stripeTransferId: POLLUTED },
