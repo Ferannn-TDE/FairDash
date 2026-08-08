@@ -209,6 +209,10 @@ export async function GET(
       where: { ...IN_MODEL_ORDERS, orderItems: { some: { vendorId: id } }, placedAt: { gte: startDate, lte: endDate } },
       select: {
         total: true,
+        // The MASTER status — the invariant lives in the helper now, and it needs this to run.
+        // This query scopes on `voidedAt: null` alone, which admits PENDING_PAYMENT orders; the
+        // helper zeroes them rather than quoting a pending take-home for an unpaid order.
+        status: true,
         vendorOrderStatuses: { where: { vendorId: id }, select: { vendorId: true, status: true } },
         payouts: { where: { vendorId: id }, select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
         refunds: { where: { vendorId: id }, select: { vendorId: true, status: true, amountCents: true } },
