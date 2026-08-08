@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useVendorAdmittance } from '../../_components/VendorAdmittanceProvider'
 import { vendorShellNavKeys, type VendorNavKey } from '@/lib/vendor-operator-state'
+import FluidTabBar from './FluidTabBar'
 
 interface Props {
   children: React.ReactNode
@@ -168,16 +169,17 @@ export default function VendorPortalShell({
         </div>
       </div>
 
-      {/* Mobile bottom nav */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-bg-dark/95 backdrop-blur-md border-t border-white/[0.06]">
-        <MobileBottomNav fairSlug={fairSlug} />
-      </div>
+      {/* Mobile bottom nav — the bar owns its own fixed positioning (it floats, so there is no
+          full-bleed wrapper to hang it in). */}
+      <MobileBottomNav fairSlug={fairSlug} />
 
       {/* Main content */}
       <div className="lg:pl-64 xl:lg:pl-72 min-h-screen">
         <div className="h-14 lg:hidden" />
         {children}
-        <div className="h-16 lg:hidden" />
+        {/* Reserves the floating bar's footprint: pill (~52px) + top padding + safe-area inset.
+            Must stay >= the bar's real height or the last row of every vendor page hides under it. */}
+        <div className="h-20 lg:hidden" />
       </div>
 
     </div>
@@ -190,27 +192,27 @@ function MobileBottomNav({ fairSlug }: { fairSlug: string }) {
   const pathname = usePathname()
   // The SAME filter as the desktop sidebar. Filtering only one of the two would leave the hole
   // wide open on a phone — which is where a vendor actually runs this portal, standing at a booth.
+  //
+  // This list is 5 keys for an ADMITTED operator and 2 (the carve-out set) for anyone else, so the
+  // bar below must lay out for both. It is built HERE, from the door's verdict, and handed to the
+  // presentation component already filtered — FluidTabBar never derives a nav set of its own.
   const navKeys = vendorShellNavKeys(useVendorAdmittance())
 
-  return (
-    <div className="flex items-center justify-around h-14 px-2">
-      {navKeys.map(key => {
-        const { label, icon: Icon } = NAV_META[key]
-        const href = `/vendor/${fairSlug}/${key}`
-        const active = pathname === href || pathname.startsWith(href + '/')
-        return (
-          <Link
-            key={key}
-            href={href}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl no-underline transition-colors ${
-              active ? 'text-neon-pink' : 'text-text-gray hover:text-white'
-            }`}
-          >
-            <Icon className="w-5 h-5 shrink-0" />
-            <span className="text-[0.5625rem] font-semibold">{label}</span>
-          </Link>
-        )
-      })}
-    </div>
-  )
+  const tabs = navKeys.map(key => ({
+    key,
+    // Nav-LOCAL label override. "Menu Manager" is two words, and with five tabs on a 360px screen
+    // the expand-on-active pill has no room for it. The key and NAV_META are untouched — the
+    // sidebar, which has the width, still reads "Menu Manager".
+    label: key === 'menu' ? 'Menu' : NAV_META[key].label,
+    href: `/vendor/${fairSlug}/${key}`,
+    icon: NAV_META[key].icon,
+  }))
+
+  // DERIVED from the URL, not mirrored into state. `startsWith` is load-bearing: it keeps Orders
+  // lit while a vendor is inside an order detail (/orders/{id}) rather than dropping the highlight
+  // the moment they open one.
+  const activeKey =
+    tabs.find(t => pathname === t.href || pathname.startsWith(t.href + '/'))?.key ?? null
+
+  return <FluidTabBar tabs={tabs} activeKey={activeKey} />
 }
