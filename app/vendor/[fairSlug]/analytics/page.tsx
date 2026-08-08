@@ -116,7 +116,13 @@ export default function VendorAnalyticsPage() {
             : `take-home (settled) · $${periodRevenue.toFixed(0)} gross sales`}
         />
         <StatCard
-          label="Today's Orders"
+          // Tracks `period`, exactly like the Earned card above it. This read "Today's Orders"
+          // while being fed `?range=${period}` (default 7d), so it labelled a seven-day count as
+          // today's — and silently got wronger when a vendor picked 30d or 90d. The COUNT was
+          // always right for the selected period; only the label lied.
+          // NOT fixed by re-pointing this card at range=today: that would make it say today and
+          // show a number that ignores the dropdown the vendor just used.
+          label={`${period} Orders`}
           value={analytics?.totalOrders ?? '—'}
           icon={ShoppingBagIcon}
           accentColor="blue"
