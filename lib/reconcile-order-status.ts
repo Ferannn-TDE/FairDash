@@ -83,6 +83,65 @@ const PROGRESS_TO_STATUS: MasterStatus[] = ['PLACED', 'ACCEPTED', 'PREPARING', '
 // A vendor portion is "out" (doesn't gate the order's progress) once it fails.
 const FAILED_VENDOR = new Set<VendorStatus>(['DECLINED', 'REFUNDED', 'CANCELLED'])
 
+/**
+ * ── CLOSING THE VENDOR LANE WHEN THE ORDER DIES ──────────────────────────────────────────────
+ *
+ * A master terminal OVERRIDE (UNDELIVERABLE / UNCOLLECTED / operator CANCELLED) is asserted, not
+ * derived — so nothing about it touched the per-vendor rows, and the vendor's lane stayed at
+ * whatever it was. That left the order sitting in a vendor's live queue forever (one had been in
+ * Randy's "Ready" lane for 52 days) AND quietly earning: the estimator treats any non-failed lane
+ * without a payout as "pending", so a dead order kept quoting take-home.
+ *
+ * WHICH TERMINAL VALUE IS A MONEY DECISION, not bookkeeping. `computeVendorOrderEarnings` zeroes
+ * on DECLINED and ONLY on DECLINED; CANCELLED keeps the money. So:
+ *     DECLINED  = "$0 — the vendor never touched this"
+ *     CANCELLED = "paid — the vendor did the work, the order died for other reasons"
+ *
+ * THE POLICY: the vendor is made whole whenever THEY DID THE WORK.
+ *   • UNDELIVERABLE — food was made, the runner failed to deliver it → CANCELLED (paid).
+ *   • UNCOLLECTED   — food was made, the customer never showed      → CANCELLED (paid).
+ *   • operator CANCELLED — PER LANE, because a cancel can land at any moment:
+ *        PLACED / ACCEPTED  → DECLINED  ($0 — work had not started)
+ *        PREPARING / READY  → CANCELLED (paid — work was done)
+ *
+ * ⚠️ PER-LANE, NEVER PER-ORDER. Order #OMKVUDXZ is the proof: one lane was still PLACED while
+ * another had already reached COMPLETED. A blanket flip of "every open lane on a cancelled order"
+ * to DECLINED would have zeroed a vendor who had finished the food.
+ *
+ * COMPLETED IS ABSENT FROM EVERY SET BELOW, deliberately. It is terminal SUCCESS: a vendor who
+ * finished keeps that fact and their money however the order later died.
+ *
+ * ⚠️ NEVER write UNDELIVERABLE / UNCOLLECTED into a VendorOrderStatus row. Those are MASTER-only
+ * statuses; VOS has a smaller alphabet, and `deriveMasterStatus` THROWS on an unrecognised active
+ * lane (see VENDOR_PROGRESS below) — so a master-only value here would break every future
+ * re-derive of that order, permanently.
+ */
+const OPEN_VENDOR_LANES      = ['PLACED', 'ACCEPTED', 'PREPARING', 'READY'] as const
+/** Open lanes where the vendor had NOT started — $0 on an operator cancel. */
+const UNSTARTED_VENDOR_LANES = ['PLACED', 'ACCEPTED'] as const
+/** Open lanes where the vendor HAD done the work — paid, even though the order died. */
+const WORKED_VENDOR_LANES    = ['PREPARING', 'READY'] as const
+
+/** The master targets that must close their vendor lanes. */
+export type LaneClosingTarget = 'UNDELIVERABLE' | 'UNCOLLECTED' | 'CANCELLED'
+
+/**
+ * Idempotent by construction: every update is status-conditional, so a re-run matches nothing.
+ * Exported for the guard, which asserts the mapping rather than re-describing it.
+ */
+export function vendorLaneClosePlan(
+  target: LaneClosingTarget,
+): { from: readonly string[]; to: VendorStatus }[] {
+  if (target === 'CANCELLED') {
+    return [
+      { from: UNSTARTED_VENDOR_LANES, to: 'DECLINED' },
+      { from: WORKED_VENDOR_LANES,    to: 'CANCELLED' },
+    ]
+  }
+  // Undeliverable / uncollected: the food was made in both cases.
+  return [{ from: OPEN_VENDOR_LANES, to: 'CANCELLED' }]
+}
+
 const DELIVERY_ARM = new Set<FulfillmentType>(['HOME_DELIVERY', 'CURBSIDE'])
 
 // ─── Derivation inputs ───────────────────────────────────────────────────────
@@ -551,6 +610,32 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     } catch (err) {
       const { logger } = await import('./logger')
       logger.error('[reconcileMasterStatus] vendor VOS advance on DELIVERED failed (non-fatal; analytics under-reports this order until a re-derive repairs it)', { orderId: order.id, error: String(err) })
+    }
+  }
+
+  // ── The same close, for the terminal OVERRIDES ───────────────────────────────────────────────
+  // Sibling of the DELIVERED branch above, and the reason this one exists: DELIVERED was the ONLY
+  // target that closed the vendor lane, so the three asserted terminals (undeliverable /
+  // uncollected / operator cancel) advanced the master and left the vendor's row untouched —
+  // stranding the order in a live queue and leaving it quoting "pending" take-home for money
+  // nobody would ever receive. See vendorLaneClosePlan for WHICH value each case closes to and
+  // why that choice is a money decision.
+  //
+  // Non-fatal like its sibling: the master transition is the money-relevant write and must not be
+  // rolled back by a lane-close failure. The reconciler's dangling-lane sweep re-attempts it, and
+  // the failure is loud so it is not merely lost.
+  if (target === 'UNDELIVERABLE' || target === 'UNCOLLECTED' || target === 'CANCELLED') {
+    for (const { from, to } of vendorLaneClosePlan(target)) {
+      try {
+        await db.vendorOrderStatus.updateMany({
+          where: { orderId: order.id, status: { in: from as unknown as string[] } },
+          data: { status: to },
+        })
+      } catch (err) {
+        const { logger } = await import('./logger')
+        logger.error('[reconcileMasterStatus] vendor lane close failed (non-fatal; the order stays in the vendor queue and keeps quoting pending take-home until repaired)',
+          { orderId: order.id, target, from, to, error: String(err) })
+      }
     }
   }
 
