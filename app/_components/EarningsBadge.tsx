@@ -3,7 +3,17 @@
 // are VISUALLY distinct (solid emerald "$X earned" vs muted "~$X pending" with a tilde) —
 // an estimate must never read as cash in hand.
 
-export type EarningsStatus = 'settled' | 'estimated' | 'refunded' | 'reversed' | 'declined' | 'excluded'
+/**
+ * RE-EXPORTED, not redeclared. This was a hand-written copy of the union in lib/vendor-earnings,
+ * i.e. two lists that had to be edited together and nothing making anyone do so. Adding a state
+ * to the helper left this copy stale and the badge would have rendered the new state as a crash
+ * or a blank — the two-copies-one-lies shape, on money labels.
+ *
+ * Type-only import: erased at compile time, so this presentational component pulls no runtime
+ * code out of the earnings lib.
+ */
+export type { EarningsStatus } from '@/lib/vendor-earnings'
+import type { EarningsStatus } from '@/lib/vendor-earnings'
 
 const fmt = (n: number) => `$${(n ?? 0).toFixed(2)}`
 
@@ -31,6 +41,12 @@ const STATE: Record<Exclude<EarningsStatus, 'excluded'>, { amount: (n: number) =
   // A bare "—" reads as missing data. It isn't: a declined order means the vendor earned
   // nothing, which is a FACT worth stating rather than a gap worth guessing at.
   declined:  { amount: () => fmt(0), label: 'declined',     amountClass: 'text-white/30',    labelClass: 'text-white/25' },
+  // Same reasoning as `declined`, different cause: the customer never paid, so the vendor is
+  // owed nothing. Defensive — every vendor-facing query filters unpaid orders out by allowlist,
+  // so this should not render. It exists because the map is TOTAL over the union: if an unpaid
+  // order ever does reach a badge, it must say so rather than fall through to "~$X pending",
+  // which is the exact sentence this whole change exists to stop printing.
+  unpaid:    { amount: () => fmt(0), label: 'unpaid',       amountClass: 'text-white/30',    labelClass: 'text-white/25' },
   // 'excluded' is deliberately ABSENT — it renders NOTHING (see the early return below), so it
   // has no shape here. A written-off slice with a "$0 excluded" label would invite a question
   // whose only honest answer is "a testing accident"; the slice was never real, so it does not

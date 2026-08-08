@@ -23,13 +23,14 @@
 
 import { splitStripeFee } from './payout-split'
 import { isPollutedTransfer } from './pollution-cohort'
+import { isPaidOrderStatus } from './order-status'
 
 /**
  * `excluded` — the slice is NOT REAL and must render as NOTHING. Not zero, not a "cancelled"
  * label: a written-off slice showing "$0" invites a question whose only honest answer is "a
  * testing accident". See lib/pollution-cohort.ts.
  */
-export type EarningsStatus = 'settled' | 'estimated' | 'refunded' | 'reversed' | 'declined' | 'excluded'
+export type EarningsStatus = 'settled' | 'estimated' | 'refunded' | 'reversed' | 'declined' | 'excluded' | 'unpaid'
 
 export interface VendorOrderEarnings {
   cents: number
@@ -39,6 +40,22 @@ export interface VendorOrderEarnings {
 /** Minimal shape each display surface must load per order to compute earnings. */
 export interface OrderForEarnings {
   total: number
+  /**
+   * The MASTER Order.status — REQUIRED, and required for a reason.
+   *
+   * This field was absent, and its absence WAS the bug. Without it the helper cannot tell a paid
+   * order from one still awaiting Stripe confirmation, so the invariant "an unpaid order owes the
+   * vendor nothing" had nowhere to live except in each caller's WHERE clause — five copies of a
+   * constraint, of which two were wrong. `admin-fair-reports.ts` documents its own copy in a
+   * comment ("computeVendorOrderEarnings only zeroes DECLINED, not CANCELLED…"): a call site
+   * hand-patching around this blindness, which patched one status and missed another.
+   *
+   * Making it REQUIRED rather than optional is the whole point. Every caller's Prisma `select`
+   * now fails to COMPILE until it adds `status: true`, so the next earnings query cannot forget
+   * the invariant — it will not build. A centralised function would not have achieved this: a
+   * future query can simply not call one. A required field cannot be not-passed.
+   */
+  status: string
   orderItems: { vendorId: string; subtotal: number }[]
   /**
    * `stripeTransferId` is REQUIRED — without it this helper cannot tell a real payout from a
@@ -123,6 +140,18 @@ export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: st
     base = c(payout.netAmount)        // settled — real transfer
     status = 'settled'
   } else {
+    // ── UNPAID ORDERS OWE NOTHING ────────────────────────────────────────────────────────
+    // The estimate below is the fall-through for "no settled payout yet", and it used to be
+    // reached by orders the customer had never paid for: PENDING_PAYMENT is absent from every
+    // semantic status list, so a `voidedAt: null` scope or a `!== CANCELLED` denylist admitted
+    // it, and this branch dutifully quoted a take-home for money that never arrived.
+    //
+    // GUARDING THE ESTIMATE BRANCH ONLY, NOT THE WHOLE FUNCTION — deliberate. If an unpaid
+    // order somehow carries a REAL settled transfer, money genuinely left the platform and the
+    // vendor genuinely has it; returning $0 there would understate a real balance and hide an
+    // anomaly worth seeing. "Unpaid" suppresses a PREDICTION, never a measurement.
+    if (!isPaidOrderStatus(order.status)) return { cents: 0, status: 'unpaid' }
+
     // Estimate: slice − this vendor's share of the estimated Stripe fee, split
     // proportionally with the SAME function the real payout uses.
     const estFeeTotal = estimateStripeFeeCents(c(order.total))
