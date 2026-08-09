@@ -26,15 +26,10 @@ import { logger } from './logger'
 
 export const VENDOR_DOC_BUCKET = process.env.SUPABASE_VENDOR_BUCKET ?? 'vendor-documents'
 
-export const VENDOR_DOC_ALLOWED_MIME = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-])
-
-export const VENDOR_DOC_MAX_BYTES = 10 * 1024 * 1024 // 10 MB
+// Size cap and MIME allowlist deliberately DO NOT live here. They live in
+// lib/upload-limits.ts, which every upload point — server and client — reads, because this
+// module having its own copy is how the codebase ended up with four disagreeing numbers.
+// See ALLOWED_DOC_MIME / UPLOAD_MAX_BYTES there.
 
 /** Signed read URLs are deliberately short-lived — long enough to render, not to share. */
 export const SIGNED_URL_TTL_SECONDS = 60

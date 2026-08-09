@@ -60,6 +60,10 @@ const SUITES: Suite[] = [
 
   // Security — the vendor-document exposure and its guards.
   { group: 'security', name: 'vendor-doc-privacy',     file: 'scripts/vendor-doc-privacy-test.ts' },
+  // The 4 MB upload cap: adopted by every server receiver, declared once, and — for the
+  // direct-to-Supabase proof photo — actually set on the bucket, which is the only place that
+  // path can be capped at all.
+  { group: 'security', name: 'upload-cap',             file: 'scripts/upload-cap-guard.ts' },
   { group: 'security', name: 'vendor-public-leak',     file: 'scripts/vendor-public-leak-test.ts' },
   { group: 'security', name: 'vendor-detail-status-gate', file: 'scripts/vendor-detail-status-gate-test.ts' },
 
