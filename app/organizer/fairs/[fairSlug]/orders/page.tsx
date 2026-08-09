@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
+import AnimatedPagination from '@/app/_components/ui/AnimatedPagination'
 import {
   ArrowPathIcon,
   MagnifyingGlassIcon,
@@ -726,6 +727,21 @@ function OrderRow({ order, onClick }: { order: Order; onClick: () => void }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Rows per page — the SINGLE source for both the fetch `take` and the totalPages divisor.
+ *
+ * Written separately, those two drift and the pager lies: the take decides how many rows a page
+ * HOLDS, the divisor decides what "N of M" CLAIMS. This value was previously implicit — buildUrl
+ * sent no take at all and leaned on the route's default (50). An implicit size is fine when
+ * nothing does arithmetic on it; the moment a divisor exists, "whatever the server happens to
+ * default to" is a number this file must state out loud, or a server-side default change would
+ * silently make every page count wrong.
+ *
+ * Deliberately NOT shared with the admin log (50) or vendor order history (25) — different
+ * surfaces, separately tunable, which is the whole reason each owns its own constant.
+ */
+const ORGANIZER_ORDERS_PAGE_SIZE = 25
+
 type Tab = 'all' | 'vendor' | 'pending' | 'issues'
 
 export default function FairOrdersPage() {
@@ -736,16 +752,33 @@ export default function FairOrdersPage() {
   const [vendorFilter, setVendorFilter] = useState<string>('')
   const [search, setSearch]         = useState('')
   const [orders, setOrders]         = useState<Order[]>([])
+  const [total, setTotal]           = useState(0)
   const [meta, setMeta]             = useState<Meta>({ pendingCount: 0, issuesCount: 0, disputeCount: 0 })
   const [vendors, setVendors]       = useState<VendorOption[]>([])
   const [loading, setLoading]       = useState(true)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [paging, setPaging]         = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // CURSOR STACK — the cursors walked to reach the page on screen (page 1 = empty stack).
+  // Same pattern and same reason as the admin log and vendor order history: getFairOrders is
+  // cursor-paginated over a placedAt+id stable sort, and a cursor only walks forward.
+  const [cursorStack, setCursorStack] = useState<string[]>([])
+  const [pageDir, setPageDir] = useState<1 | -1>(1)
+  const listTopRef = useRef<HTMLDivElement>(null)
+  const fetchKeyRef = useRef('')
+  // Mirrors of the two values the 30s poll needs to read. The interval is created once per
+  // (tab, vendor); without these it would close over the stack as it was at creation time and
+  // keep refreshing whichever page was on screen back then. Refs updated in an effect — never
+  // written during render (scripts/flicker-class-guard.ts [G]).
+  const stackRef = useRef<string[]>([])
+  const pagingRef = useRef(false)
+  useEffect(() => { stackRef.current = cursorStack }, [cursorStack])
+  useEffect(() => { pagingRef.current = paging }, [paging])
+
   function buildUrl(cursor?: string) {
-    const u = new URLSearchParams()
+    const u = new URLSearchParams({ take: String(ORGANIZER_ORDERS_PAGE_SIZE) })
     if (tab === 'pending')                u.set('tab', 'pending')
     else if (tab === 'issues')            u.set('tab', 'issues')
     if (tab === 'vendor' && vendorFilter) u.set('vendorId', vendorFilter)
@@ -753,22 +786,27 @@ export default function FairOrdersPage() {
     return `/api/organizer/fairs/${fairSlug}/orders?${u.toString()}`
   }
 
-  const loadOrders = useCallback((replace = true) => {
-    if (replace) setLoading(true)
+  /** Page 1 of the current (tab, vendor). Resets the stack — the filters just changed. */
+  const loadFirstPage = useCallback(() => {
+    fetchKeyRef.current = buildUrl()
+    setLoading(true)
+    setCursorStack([])
+    setPageDir(1)
     fetch(buildUrl())
       .then(r => r.json())
       .then(json => {
         if (!json.success) return
-        setOrders(prev => replace ? json.data.orders : [...prev, ...json.data.orders])
+        setOrders(json.data.orders)
+        setTotal(json.data.total ?? 0)
         setNextCursor(json.data.nextCursor ?? null)
         if (json.data.meta) setMeta(json.data.meta)
       })
       .catch(() => {})
-      .finally(() => { setLoading(false); setLoadingMore(false) })
+      .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fairSlug, tab, vendorFilter])
 
-  useEffect(() => { loadOrders() }, [loadOrders])
+  useEffect(() => { loadFirstPage() }, [loadFirstPage])
 
   // Vendor list for By Vendor selector
   useEffect(() => {
@@ -782,26 +820,73 @@ export default function FairOrdersPage() {
       .catch(() => {})
   }, [fairSlug])
 
-  // 30s polling
+  // 30s polling — REFRESHES THE PAGE ON SCREEN, not page 1.
+  //
+  // This used to re-run the page-1 fetch on a timer, which was harmless while the list appended
+  // (it just re-seeded the top). With a pager it is not: an organizer reading page 4 would be
+  // yanked back to page 1 twice a minute, mid-scroll. So the poll re-fetches the CURRENT page's
+  // cursor and leaves the stack alone — same rows, refreshed, same position. It also skips while
+  // a manual page change is in flight, so the two can't interleave and cross their responses.
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = setInterval(() => loadOrders(), 30_000)
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [loadOrders])
-
-  function loadMore() {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    fetch(buildUrl(nextCursor))
-      .then(r => r.json())
-      .then(json => {
-        if (json.data?.orders) {
-          setOrders(prev => [...prev, ...json.data.orders])
+    pollRef.current = setInterval(() => {
+      if (pagingRef.current) return
+      const key = fetchKeyRef.current
+      const currentCursor = stackRef.current[stackRef.current.length - 1]
+      fetch(buildUrl(currentCursor))
+        .then(r => r.json())
+        .then(json => {
+          // The filters may have moved while this poll was in flight; a stale refresh must not
+          // overwrite the page the organizer is actually on.
+          if (!json.success || fetchKeyRef.current !== key) return
+          setOrders(json.data.orders)
+          setTotal(json.data.total ?? 0)
           setNextCursor(json.data.nextCursor ?? null)
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingMore(false))
+          if (json.data.meta) setMeta(json.data.meta)
+        })
+        .catch(() => {})
+    }, 30_000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fairSlug, tab, vendorFilter])
+
+  /** Apply a fetched page, THEN move the stack. REPLACES the rows — one page at a time. */
+  function applyPage(
+    json: { success?: boolean; data?: { orders?: Order[]; nextCursor?: string | null; total?: number } },
+    nextStack: string[],
+    dir: 1 | -1,
+    key: string,
+  ) {
+    if (fetchKeyRef.current !== key) return   // a filter moved while this page was in flight
+    if (!json?.success || !json.data?.orders) return
+    setOrders(json.data.orders)
+    setTotal(json.data.total ?? 0)
+    setNextCursor(json.data.nextCursor ?? null)
+    setCursorStack(nextStack)
+    setPageDir(dir)
+    listTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  async function goNext() {
+    if (!nextCursor || paging) return
+    setPaging(true)
+    try {
+      const used = nextCursor      // captured before the await; the response overwrites it
+      const key = fetchKeyRef.current
+      applyPage(await (await fetch(buildUrl(used))).json(), [...cursorStack, used], 1, key)
+    } catch { /* stack untouched */ }
+    finally { setPaging(false) }
+  }
+
+  async function goPrev() {
+    if (cursorStack.length === 0 || paging) return
+    setPaging(true)
+    try {
+      const nextStack = cursorStack.slice(0, -1)
+      const key = fetchKeyRef.current
+      applyPage(await (await fetch(buildUrl(nextStack[nextStack.length - 1]))).json(), nextStack, -1, key)
+    } catch { /* stack untouched */ }
+    finally { setPaging(false) }
   }
 
   function handleDisputeResolved(orderId: string) {
@@ -812,6 +897,10 @@ export default function FairOrdersPage() {
     ))
     setMeta(prev => ({ ...prev, disputeCount: Math.max(0, prev.disputeCount - 1) }))
   }
+
+  // DERIVED, never mirrored: the page IS the depth of the stack that fetched these rows.
+  const page = cursorStack.length + 1
+  const totalPages = Math.max(1, Math.ceil(total / ORGANIZER_ORDERS_PAGE_SIZE))
 
   const visible = search.trim()
     ? orders.filter(o =>
@@ -829,7 +918,7 @@ export default function FairOrdersPage() {
   ]
 
   return (
-    <div className="p-6 md:p-4 max-w-[60rem] mx-auto">
+    <div ref={listTopRef} className="p-6 md:p-4 max-w-[60rem] mx-auto">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -845,7 +934,7 @@ export default function FairOrdersPage() {
           </div>
         </div>
         <button
-          onClick={() => loadOrders()}
+          onClick={() => loadFirstPage()}
           className="shrink-0 p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
         >
           <ArrowPathIcon className={`w-4 h-4 text-white/50 ${loading ? 'animate-spin' : ''}`} />
@@ -962,14 +1051,29 @@ export default function FairOrdersPage() {
               <OrderRow key={order.id} order={order} onClick={() => setSelectedId(order.id)} />
             ))}
           </div>
-          {nextCursor && !search && (
-            <button
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="mt-4 w-full py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-50 text-white/40 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-            >
-              {loadingMore ? 'Loading…' : 'Load more orders'}
-            </button>
+          {/* THE PAGER HIDES WHILE A SEARCH IS ACTIVE — deliberately, and for a checkable
+              reason rather than by copying the old behaviour.
+              This page's search is CLIENT-SIDE (`visible` filters the loaded rows) and the
+              organizer orders route accepts no search param, so the `total` behind "N of M"
+              describes the UNFILTERED set. Showing "1 of 6" over three search hits would be a
+              confidently wrong number — the exact failure this component was built to avoid.
+              (The admin log differs: its search is a server `q` param, so its total IS
+              search-aware and its pager stays up.)
+              Everything else is derived: hasNext from the server's nextCursor, hasPrev from the
+              stack, page from the stack's depth. */}
+          {!search && totalPages > 1 && (
+            <div className="mt-4">
+              <AnimatedPagination
+                page={page}
+                totalPages={totalPages}
+                hasPrev={cursorStack.length > 0}
+                hasNext={nextCursor !== null}
+                onPrev={goPrev}
+                onNext={goNext}
+                busy={paging}
+                direction={pageDir}
+              />
+            </div>
           )}
         </>
       )}

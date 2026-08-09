@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useMemo, useEffect, use, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, use, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, ChevronDown, ChevronUp, Package, User, Store, Clock, ArrowUpDown } from 'lucide-react'
 import { STRAND_THRESHOLDS_MS } from '@/lib/constants'
+import AnimatedPagination from '@/app/_components/ui/AnimatedPagination'
 
 // ─── Types (the real /api/admin/events/[id]/orders shape) ─
 
@@ -95,9 +96,18 @@ const FILTER_TABS = [
   { value: 'issues',    label: 'Issues' },
 ] as const
 
-/** One page. The server clamps take to 100 (lib/fair-orders); "Load older" appends the next page
- *  via nextCursor, so the log is no longer capped — just paged. */
-const PAGE_TAKE = 100
+/**
+ * Rows per page — the SINGLE source for both the fetch `take` and the totalPages divisor.
+ *
+ * Write those two separately and the pager lies: the take decides how many rows a page HOLDS,
+ * the divisor decides what "N of M" CLAIMS about it, and any gap between them is an indicator
+ * confidently describing a page shape that doesn't exist. One constant makes that unexpressible.
+ *
+ * Deliberately NOT shared with the vendor order-history list (25) — these are different surfaces
+ * with different densities, and coupling them would mean one can't be tuned without moving the
+ * other. lib/fair-orders clamps take to 100 and defaults to 50; this sits inside that.
+ */
+const ADMIN_ORDERS_PAGE_SIZE = 50
 
 const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED'])
 
@@ -123,43 +133,120 @@ function OrderRow({ order, nowMs }: { order: AdminOrder; nowMs: number }) {
 
   return (
     <div className="border border-white/10 rounded-xl overflow-hidden bg-bg-card">
+      {/* THE ROW IS A GRID, NOT A FLEX BOX — the same fix the vendor order card carries, for the
+          same reason. It was a flex row whose cells were sized by their CONTENT: `flex-1` on the
+          left group, `shrink-0` on the right cluster, and no truncation anywhere. So "CB" and
+          "RANDY'S HOUSE OF BBQ" put the following columns at different x-positions, and the age
+          badge — which only renders for ACTIVE orders — shifted the amount on some rows and not
+          others. Nothing lined up, which is exactly what a log is scanned for: an admin runs
+          their eye down the amount column to compare, or down the status column to see a
+          pattern, and can only do that if those columns actually ARE columns.
+
+          Tracks (lg+):  [id] [status] [fulfil] [customer] [vendor] [time] [age] [amount] [chev]
+                        5.5rem  7rem    6rem      1fr        1fr    4.5rem 4rem  5.25rem  1rem
+          The status track is FIXED at the width of the longest label ("Undeliverable") so a wide
+          badge can never push its neighbours. Name tracks are the only flexible ones and carry
+          min-w-0 + truncate, so a long value ellipses INSIDE its track instead of widening it —
+          that truncation is what makes every row identical, and the title attribute is where the
+          full value went.
+
+          Below lg the nine tracks cannot fit, so they fold into the first cell as stacked,
+          truncating lines — uniform for the same reason, just vertically. Hidden cells are
+          display:none and leave the grid entirely, so the remaining items land in tracks 1-4 by
+          DOM order without a second template. Under sm the fold keeps today's visibility rules
+          exactly: id + status + age + amount + chevron, nothing else. */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer"
+        className="w-full grid items-center gap-x-3 gap-y-1 px-4 py-3.5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer
+                   grid-cols-[minmax(0,1fr)_auto_auto_1rem]
+                   lg:grid-cols-[5.5rem_7rem_6rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem_4rem_5.25rem_1rem]"
       >
-        <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          <span className="font-bold text-white text-sm">#{order.id.slice(-8).toUpperCase()}</span>
+        {/* 1 — order id. Below lg this cell also carries everything the narrow layout folds in. */}
+        <div className="min-w-0">
+          <span className="block font-bold text-white text-sm tabular-nums truncate">
+            #{order.id.slice(-8).toUpperCase()}
+          </span>
+
+          <div className="lg:hidden mt-1.5 flex flex-col gap-1">
+            {/* The wrapper carries self-start because this parent is a flex COLUMN, whose cross
+                axis is WIDTH — align-items defaults to stretch, which would smear the pill
+                across the whole cell as a slab. It wraps rather than taking a className so
+                StatusBadge's own styles stay untouched. */}
+            <span className="self-start">
+              <StatusBadge status={order.status} />
+            </span>
+            <span className="hidden sm:inline text-xs text-text-gray truncate">
+              {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
+            </span>
+            <span className="hidden sm:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.customerName}>
+              <User className="w-3 h-3 shrink-0" />
+              <span className="truncate">{order.customerName}</span>
+            </span>
+            <span className="hidden sm:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.vendorName}>
+              <Store className="w-3 h-3 shrink-0" />
+              <span className="truncate">{order.vendorName}</span>
+            </span>
+            <span className="hidden sm:flex items-center gap-1 text-xs text-text-gray">
+              <Clock className="w-3 h-3 shrink-0" />
+              <span className="tabular-nums">{placedTime}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* 2 — status. Fixed track: badge labels vary from "New" to "Undeliverable". */}
+        <div className="hidden lg:flex min-w-0">
           <StatusBadge status={order.status} />
-          <span className="text-xs text-text-gray hidden sm:inline">{FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}</span>
         </div>
-        <div className="hidden sm:flex items-center gap-4 text-sm shrink-0">
-          <span className="text-text-gray text-xs flex items-center gap-1">
-            <User className="w-3 h-3" />
-            {order.customerName}
-          </span>
-          <span className="text-text-gray text-xs flex items-center gap-1">
-            <Store className="w-3 h-3" />
-            {order.vendorName}
-          </span>
-          <span className="text-text-gray text-xs flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            {placedTime}
-          </span>
-        </div>
-        {ageMins !== null && (
-          <span
-            title={`Placed ${formatAge(ageMins)} ago`}
-            className={`shrink-0 tabular-nums text-xs font-semibold px-2 py-0.5 rounded-md ${
-              stuck ? 'bg-orange-500/15 text-orange-300' : 'bg-white/5 text-text-gray'
-            }`}
-          >
-            {formatAge(ageMins)}
-          </span>
-        )}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="font-bold text-neon-pink text-sm">${(order.total ?? 0).toFixed(2)}</span>
-          {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
-        </div>
+
+        {/* 3 — fulfillment */}
+        <span className="hidden lg:block text-xs text-text-gray truncate">
+          {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
+        </span>
+
+        {/* 4 — customer. Left-aligned: right-aligning a truncated name would leave the column
+               ragged on its left edge and harder to scan, not easier. */}
+        <span className="hidden lg:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.customerName}>
+          <User className="w-3 h-3 shrink-0" />
+          <span className="truncate">{order.customerName}</span>
+        </span>
+
+        {/* 5 — vendor */}
+        <span className="hidden lg:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.vendorName}>
+          <Store className="w-3 h-3 shrink-0" />
+          <span className="truncate">{order.vendorName}</span>
+        </span>
+
+        {/* 6 — placed time */}
+        <span className="hidden lg:flex items-center gap-1 text-xs text-text-gray">
+          <Clock className="w-3 h-3 shrink-0" />
+          <span className="tabular-nums">{placedTime}</span>
+        </span>
+
+        {/* 7 — age. The cell is ALWAYS rendered, badge or not: it only appears on ACTIVE orders,
+               and a conditional TRACK would slide the amount left on finished rows — one of the
+               two things that made this list look mis-aligned. */}
+        <span className="flex justify-end">
+          {ageMins !== null && (
+            <span
+              title={`Placed ${formatAge(ageMins)} ago`}
+              className={`tabular-nums text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap ${
+                stuck ? 'bg-orange-500/15 text-orange-300' : 'bg-white/5 text-text-gray'
+              }`}
+            >
+              {formatAge(ageMins)}
+            </span>
+          )}
+        </span>
+
+        {/* 8 — amount. Right-aligned + tabular so the $ figures form one clean edge to read down. */}
+        <span className="font-bold text-neon-pink text-sm tabular-nums text-right whitespace-nowrap">
+          ${(order.total ?? 0).toFixed(2)}
+        </span>
+
+        {/* 9 — expand chevron */}
+        {expanded
+          ? <ChevronUp className="w-4 h-4 text-text-gray" />
+          : <ChevronDown className="w-4 h-4 text-text-gray" />}
       </button>
 
       {expanded && (
@@ -217,8 +304,22 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({})
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [paging, setPaging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // CURSOR STACK — the cursors walked to REACH the page on screen; page 1 is the empty stack,
+  // cursorStack[i] is the cursor that fetched page i+2. Same pattern as vendor order history,
+  // for the same reason: lib/fair-orders is cursor-paginated with a placedAt+id stable sort, and
+  // a cursor only walks forward, so remembering the ones we used is what makes Previous possible
+  // without an offset rewrite. Pushed/popped ONLY after a fetch succeeds — the page number is
+  // derived from its length, so moving it on click could caption page 2's rows "3 of 6".
+  const [cursorStack, setCursorStack] = useState<string[]>([])
+  const [pageDir, setPageDir] = useState<1 | -1>(1)
+  const listTopRef = useRef<HTMLDivElement>(null)
+  // Which filter/search/sort combination the rows on screen belong to. The page-1 effect drops
+  // its own stale responses with an `active` flag; a page fetch needs the same protection,
+  // because the FILTERS stay live while a page is loading.
+  const fetchKeyRef = useRef('')
   const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([])
   // Distinguishes "no vendors yet" from "not loaded" — without it the select renders as if the
   // fair had no vendors, then snaps wider when they arrive (the flicker class: a
@@ -277,7 +378,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   }, [params.eventSlug])
 
   const buildUrl = useCallback((cursor?: string) => {
-    const qp = new URLSearchParams({ take: String(PAGE_TAKE), tab: filter, sort: sortNewest ? 'newest' : 'oldest' })
+    const qp = new URLSearchParams({ take: String(ADMIN_ORDERS_PAGE_SIZE), tab: filter, sort: sortNewest ? 'newest' : 'oldest' })
     if (urlSearch)             qp.set('q', urlSearch)
     if (vendorFilt !== 'all')  qp.set('vendorId', vendorFilt)
     if (fulfilFilt !== 'all')  qp.set('type', fulfilFilt)
@@ -288,8 +389,11 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   // First page — refetched whenever any server-scoped filter changes.
   useEffect(() => {
     let active = true
+    fetchKeyRef.current = buildUrl()  // any page fetch keyed to an older URL is stale
     setLoading(true)
     setError(null)
+    setCursorStack([])   // filters changed → back to page 1; old cursors address another query
+    setPageDir(1)
     fetch(buildUrl())
       .then((r) => r.json())
       .then((json) => {
@@ -305,18 +409,54 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     return () => { active = false }
   }, [buildUrl])
 
-  const loadOlder = useCallback(() => {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    fetch(buildUrl(nextCursor))
-      .then(r => r.json())
-      .then(json => {
-        if (!json.success) return
-        setOrders(prev => [...prev, ...((json.data.orders ?? []) as AdminOrder[])])
-        setNextCursor(json.data.nextCursor ?? null)
-      })
-      .finally(() => setLoadingMore(false))
-  }, [nextCursor, loadingMore, buildUrl])
+  /** Apply a fetched page, THEN move the stack. REPLACES the rows — one page at a time. */
+  const applyPage = useCallback((
+    json: { success?: boolean; data?: { orders?: AdminOrder[]; nextCursor?: string | null; total?: number } },
+    nextStack: string[],
+    dir: 1 | -1,
+    key: string,
+  ) => {
+    // A filter moved while this page was in flight — this response describes a query nobody is
+    // looking at any more.
+    if (fetchKeyRef.current !== key) return
+    if (!json?.success) return
+    setOrders((json.data?.orders ?? []) as AdminOrder[])
+    setNextCursor(json.data?.nextCursor ?? null)
+    setCursorStack(nextStack)
+    setPageDir(dir)
+    listTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  const goNext = useCallback(async () => {
+    if (!nextCursor || paging) return
+    setPaging(true)
+    try {
+      // Captured before the await: nextCursor is about to be replaced by the response, and this
+      // is the value that belongs on the stack.
+      const used = nextCursor
+      const key = buildUrl()
+      applyPage(await (await fetch(buildUrl(used))).json(), [...cursorStack, used], 1, key)
+    } catch { /* stack untouched — the indicator still describes the rows on screen */ }
+    finally { setPaging(false) }
+  }, [nextCursor, paging, cursorStack, buildUrl, applyPage])
+
+  const goPrev = useCallback(async () => {
+    if (cursorStack.length === 0 || paging) return
+    setPaging(true)
+    try {
+      // The page before this one was fetched with the cursor one below the top of the stack —
+      // or with no cursor at all, which is page 1.
+      const nextStack = cursorStack.slice(0, -1)
+      const key = buildUrl()
+      const prevCursor = nextStack[nextStack.length - 1]
+      applyPage(await (await fetch(buildUrl(prevCursor))).json(), nextStack, -1, key)
+    } catch { /* stack untouched */ }
+    finally { setPaging(false) }
+  }, [cursorStack, paging, buildUrl, applyPage])
+
+  // DERIVED, never mirrored: the page IS the depth of the stack that fetched it.
+  const page = cursorStack.length + 1
+  const totalPages = Math.max(1, Math.ceil(total / ADMIN_ORDERS_PAGE_SIZE))
 
   const hasActiveFilter = filter !== 'all' || fulfilFilt !== 'all' || vendorFilt !== 'all' || Boolean(urlSearch)
 
@@ -334,7 +474,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   }, [orders, nowMs])
 
   return (
-    <div className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
+    <div ref={listTopRef} className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
       {/* Header */}
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
@@ -342,11 +482,12 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
             Order <span className="text-neon-pink">Log</span>
           </h1>
           <p className="text-text-gray text-sm mt-0.5">
+            {/* The whole-event total for the CURRENT filter+search. It no longer says "showing
+                N of" — with one page on screen that number described the accumulation, and
+                position now lives in the pager. */}
             {loading
               ? 'Loading…'
-              : total === orders.length
-                ? `${total} order${total === 1 ? '' : 's'}${hasActiveFilter ? ' match' : ''}`
-                : `Showing ${orders.length} of ${total}`}
+              : `${total} order${total === 1 ? '' : 's'}${hasActiveFilter ? ' match' : ''}`}
           </p>
         </div>
         <button
@@ -477,18 +618,26 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
             </div>
           ))}
 
-          {nextCursor ? (
-            <button
-              onClick={loadOlder}
-              disabled={loadingMore}
-              className="w-full py-3 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {loadingMore ? 'Loading…' : `Load older orders (${total - orders.length} more)`}
-            </button>
-          ) : (
-            orders.length > 0 && total > PAGE_TAKE && (
-              <p className="text-center text-[0.6875rem] text-text-gray py-3">End of the log — all {total} shown.</p>
-            )
+          {/* Cursor-stack pagination.
+              • hasNext is the SERVER's answer (nextCursor is null once this query has no further
+                rows — the reader only claims another page when this one came back full), never a
+                page-number comparison.
+              • hasPrev is the stack, so page 1 is disabled by construction.
+              • page and totalPages are both derived — the stack that fetched these rows, and the
+                server-counted total for the CURRENT filter+search (lib/fair-orders counts the same
+                where-clause as the list). Neither is a click counter.
+              Hidden at one page: a pager over a single page is furniture. */}
+          {totalPages > 1 && (
+            <AnimatedPagination
+              page={page}
+              totalPages={totalPages}
+              hasPrev={cursorStack.length > 0}
+              hasNext={nextCursor !== null}
+              onPrev={goPrev}
+              onNext={goNext}
+              busy={paging}
+              direction={pageDir}
+            />
           )}
         </div>
       )}
