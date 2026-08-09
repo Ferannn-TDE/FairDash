@@ -123,43 +123,120 @@ function OrderRow({ order, nowMs }: { order: AdminOrder; nowMs: number }) {
 
   return (
     <div className="border border-white/10 rounded-xl overflow-hidden bg-bg-card">
+      {/* THE ROW IS A GRID, NOT A FLEX BOX — the same fix the vendor order card carries, for the
+          same reason. It was a flex row whose cells were sized by their CONTENT: `flex-1` on the
+          left group, `shrink-0` on the right cluster, and no truncation anywhere. So "CB" and
+          "RANDY'S HOUSE OF BBQ" put the following columns at different x-positions, and the age
+          badge — which only renders for ACTIVE orders — shifted the amount on some rows and not
+          others. Nothing lined up, which is exactly what a log is scanned for: an admin runs
+          their eye down the amount column to compare, or down the status column to see a
+          pattern, and can only do that if those columns actually ARE columns.
+
+          Tracks (lg+):  [id] [status] [fulfil] [customer] [vendor] [time] [age] [amount] [chev]
+                        5.5rem  7rem    6rem      1fr        1fr    4.5rem 4rem  5.25rem  1rem
+          The status track is FIXED at the width of the longest label ("Undeliverable") so a wide
+          badge can never push its neighbours. Name tracks are the only flexible ones and carry
+          min-w-0 + truncate, so a long value ellipses INSIDE its track instead of widening it —
+          that truncation is what makes every row identical, and the title attribute is where the
+          full value went.
+
+          Below lg the nine tracks cannot fit, so they fold into the first cell as stacked,
+          truncating lines — uniform for the same reason, just vertically. Hidden cells are
+          display:none and leave the grid entirely, so the remaining items land in tracks 1-4 by
+          DOM order without a second template. Under sm the fold keeps today's visibility rules
+          exactly: id + status + age + amount + chevron, nothing else. */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer"
+        className="w-full grid items-center gap-x-3 gap-y-1 px-4 py-3.5 hover:bg-white/[0.02] transition-colors text-left cursor-pointer
+                   grid-cols-[minmax(0,1fr)_auto_auto_1rem]
+                   lg:grid-cols-[5.5rem_7rem_6rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem_4rem_5.25rem_1rem]"
       >
-        <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          <span className="font-bold text-white text-sm">#{order.id.slice(-8).toUpperCase()}</span>
+        {/* 1 — order id. Below lg this cell also carries everything the narrow layout folds in. */}
+        <div className="min-w-0">
+          <span className="block font-bold text-white text-sm tabular-nums truncate">
+            #{order.id.slice(-8).toUpperCase()}
+          </span>
+
+          <div className="lg:hidden mt-1.5 flex flex-col gap-1">
+            {/* The wrapper carries self-start because this parent is a flex COLUMN, whose cross
+                axis is WIDTH — align-items defaults to stretch, which would smear the pill
+                across the whole cell as a slab. It wraps rather than taking a className so
+                StatusBadge's own styles stay untouched. */}
+            <span className="self-start">
+              <StatusBadge status={order.status} />
+            </span>
+            <span className="hidden sm:inline text-xs text-text-gray truncate">
+              {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
+            </span>
+            <span className="hidden sm:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.customerName}>
+              <User className="w-3 h-3 shrink-0" />
+              <span className="truncate">{order.customerName}</span>
+            </span>
+            <span className="hidden sm:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.vendorName}>
+              <Store className="w-3 h-3 shrink-0" />
+              <span className="truncate">{order.vendorName}</span>
+            </span>
+            <span className="hidden sm:flex items-center gap-1 text-xs text-text-gray">
+              <Clock className="w-3 h-3 shrink-0" />
+              <span className="tabular-nums">{placedTime}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* 2 — status. Fixed track: badge labels vary from "New" to "Undeliverable". */}
+        <div className="hidden lg:flex min-w-0">
           <StatusBadge status={order.status} />
-          <span className="text-xs text-text-gray hidden sm:inline">{FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}</span>
         </div>
-        <div className="hidden sm:flex items-center gap-4 text-sm shrink-0">
-          <span className="text-text-gray text-xs flex items-center gap-1">
-            <User className="w-3 h-3" />
-            {order.customerName}
-          </span>
-          <span className="text-text-gray text-xs flex items-center gap-1">
-            <Store className="w-3 h-3" />
-            {order.vendorName}
-          </span>
-          <span className="text-text-gray text-xs flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            {placedTime}
-          </span>
-        </div>
-        {ageMins !== null && (
-          <span
-            title={`Placed ${formatAge(ageMins)} ago`}
-            className={`shrink-0 tabular-nums text-xs font-semibold px-2 py-0.5 rounded-md ${
-              stuck ? 'bg-orange-500/15 text-orange-300' : 'bg-white/5 text-text-gray'
-            }`}
-          >
-            {formatAge(ageMins)}
-          </span>
-        )}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="font-bold text-neon-pink text-sm">${(order.total ?? 0).toFixed(2)}</span>
-          {expanded ? <ChevronUp className="w-4 h-4 text-text-gray" /> : <ChevronDown className="w-4 h-4 text-text-gray" />}
-        </div>
+
+        {/* 3 — fulfillment */}
+        <span className="hidden lg:block text-xs text-text-gray truncate">
+          {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
+        </span>
+
+        {/* 4 — customer. Left-aligned: right-aligning a truncated name would leave the column
+               ragged on its left edge and harder to scan, not easier. */}
+        <span className="hidden lg:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.customerName}>
+          <User className="w-3 h-3 shrink-0" />
+          <span className="truncate">{order.customerName}</span>
+        </span>
+
+        {/* 5 — vendor */}
+        <span className="hidden lg:flex items-center gap-1 text-xs text-text-gray min-w-0" title={order.vendorName}>
+          <Store className="w-3 h-3 shrink-0" />
+          <span className="truncate">{order.vendorName}</span>
+        </span>
+
+        {/* 6 — placed time */}
+        <span className="hidden lg:flex items-center gap-1 text-xs text-text-gray">
+          <Clock className="w-3 h-3 shrink-0" />
+          <span className="tabular-nums">{placedTime}</span>
+        </span>
+
+        {/* 7 — age. The cell is ALWAYS rendered, badge or not: it only appears on ACTIVE orders,
+               and a conditional TRACK would slide the amount left on finished rows — one of the
+               two things that made this list look mis-aligned. */}
+        <span className="flex justify-end">
+          {ageMins !== null && (
+            <span
+              title={`Placed ${formatAge(ageMins)} ago`}
+              className={`tabular-nums text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap ${
+                stuck ? 'bg-orange-500/15 text-orange-300' : 'bg-white/5 text-text-gray'
+              }`}
+            >
+              {formatAge(ageMins)}
+            </span>
+          )}
+        </span>
+
+        {/* 8 — amount. Right-aligned + tabular so the $ figures form one clean edge to read down. */}
+        <span className="font-bold text-neon-pink text-sm tabular-nums text-right whitespace-nowrap">
+          ${(order.total ?? 0).toFixed(2)}
+        </span>
+
+        {/* 9 — expand chevron */}
+        {expanded
+          ? <ChevronUp className="w-4 h-4 text-text-gray" />
+          : <ChevronDown className="w-4 h-4 text-text-gray" />}
       </button>
 
       {expanded && (
