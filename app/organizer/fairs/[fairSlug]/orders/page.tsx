@@ -10,7 +10,6 @@ import {
   ExclamationTriangleIcon,
   BanknotesIcon,
   ClockIcon,
-  CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 import { getStatusConfig } from '@/lib/order-status-config'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
@@ -1008,12 +1007,17 @@ export default function FairOrdersPage() {
         </button>
       )}
 
-      {/* Stats bar */}
+      {/* Stats bar — TWO tiles, not three. The third was "Loaded" = orders.length, which meant
+          "rows fetched so far" while this list accumulated. Under replace-paging it counts the
+          CURRENT PAGE — "25 Loaded" beside a 156-order fair, which reads as a stale counter
+          rather than a fact about the fair. Position is the pager's job now ("N of M") and the
+          total sits in the header, so the tile had nothing left to say. Both survivors describe
+          the WHOLE fair (server-side meta counts), which is what a stats bar is for and why
+          neither one drifted when the paging model changed. */}
       {tab === 'all' && !loading && orders.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="grid grid-cols-2 gap-3 mb-5">
           {([
             { icon: ClockIcon,            label: 'Live',           value: meta.pendingCount,   cls: 'text-amber-400' },
-            { icon: CheckCircleIcon,      label: 'Loaded',         value: orders.length,       cls: 'text-white' },
             { icon: ExclamationTriangleIcon, label: 'Disputes',    value: meta.disputeCount,   cls: meta.disputeCount > 0 ? 'text-amber-400' : 'text-white/20' },
           ] as const).map(stat => (
             <div key={stat.label} className="bg-[#111] border border-white/[0.05] rounded-xl p-3 flex items-center gap-2">
