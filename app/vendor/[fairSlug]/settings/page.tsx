@@ -72,14 +72,23 @@ function AccountSection() {
         <h2 className="font-bebas text-base tracking-wide text-white">Account</h2>
       </div>
       <div className="p-5">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
+        {/* Same row shape as the Documents cards (flex / items-center / justify-between), so the
+            action sits on the right in every action card on this page.
+            `flex-wrap` was the bug, not the alignment: this card's description is long, and the
+            text block had no way to shrink, so the row wrapped and the button dropped onto its own
+            line — where `justify-between` puts a lone item at flex-START, i.e. hard left. The
+            document cards never showed this only because their labels are short enough not to
+            trigger the wrap.
+            So: no wrap, the text may shrink (min-w-0 — the <p> re-wraps internally instead of
+            forcing the row wider), and the button keeps its size (shrink-0). */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
             <p className="text-white font-semibold text-sm mb-0.5">Sign out</p>
             <p className="text-text-gray text-xs">You'll need to sign in again to access your vendor dashboard.</p>
           </div>
           <button
             onClick={() => setShowConfirm(true)}
-            className="px-4 py-2.5 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 hover:text-red-400 hover:border-red-500/20 transition-all cursor-pointer"
+            className="shrink-0 px-4 py-2.5 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 hover:text-red-400 hover:border-red-500/20 transition-all cursor-pointer"
           >
             Sign Out
           </button>
@@ -451,7 +460,19 @@ export default function VendorSettingsPage() {
                 </button>
                 <span className={`w-8 text-xs font-semibold shrink-0 ${hours[day].enabled ? 'text-white' : 'text-text-gray'}`}>{day}</span>
                 {hours[day].enabled ? (
-                  <div className="flex items-center gap-2 flex-1">
+                  // min-w-0 at BOTH levels — on this wrapper and on each input below.
+                  //
+                  // An <input> carries an intrinsic minimum width (its default `size`, ~20
+                  // characters), and a flex item's `min-width` defaults to `auto`, which means
+                  // "never shrink below intrinsic content". So `flex-1` was granting permission to
+                  // grow that the inputs then refused to give back: two ~180px inputs plus the
+                  // toggle, the day label and the gaps exceeded the panel, and the row spilled off
+                  // the right edge with no way to reach it.
+                  //
+                  // Fixing only the inputs would not help — this wrapper is itself a flex item of
+                  // the day row with the same `min-width: auto`, so it would hold the old width
+                  // open regardless. Both levels, or neither works.
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
                     {/* Plain text HH:MM inputs — always click-and-type editable, unlike
                         native type="time" (which only edits via segment/spinner and reads
                         as "uneditable" to many users). Validated to HH:MM on Save. */}
@@ -462,7 +483,7 @@ export default function VendorSettingsPage() {
                       placeholder="HH:MM"
                       value={hours[day].open}
                       onChange={e => setHours(p => ({ ...p, [day]: { ...p[day], open: e.target.value } }))}
-                      className="flex-1 bg-bg-dark border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors"
+                      className="flex-1 min-w-0 bg-bg-dark border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors"
                     />
                     <span className="text-text-gray text-xs shrink-0">–</span>
                     <input
@@ -472,7 +493,7 @@ export default function VendorSettingsPage() {
                       placeholder="HH:MM"
                       value={hours[day].close}
                       onChange={e => setHours(p => ({ ...p, [day]: { ...p[day], close: e.target.value } }))}
-                      className="flex-1 bg-bg-dark border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors"
+                      className="flex-1 min-w-0 bg-bg-dark border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors"
                     />
                   </div>
                 ) : (
@@ -542,10 +563,17 @@ export default function VendorSettingsPage() {
               </div>
             </div>
           ) : stripeState === 'incomplete' ? (
-            <div className="flex items-center justify-between gap-4 flex-wrap p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-              <div className="flex items-start gap-3">
+            // Same non-wrapping right-aligned shape as every other action card here.
+            // min-w-0 twice: once on this flex item of the row, and again on the text div
+            // inside it — that inner div is itself a flex item (of the icon+text flex), so
+            // without it the paragraphs hold the old width open and the outer min-w-0 does
+            // nothing. Same both-levels-or-neither rule as the operating-hours row.
+            // NB a braced JSX comment cannot go here: a ternary branch is an expression
+            // position, where the braces parse as an object literal and break the build.
+            <div className="flex items-center justify-between gap-4 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+              <div className="flex items-start gap-3 min-w-0">
                 <ExclamationCircleIcon className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-white font-semibold text-sm">Payout setup unfinished</p>
                   <p className="text-text-gray text-xs">Your account exists but onboarding isn't complete. Payouts are blocked until you finish.</p>
                 </div>
@@ -553,21 +581,21 @@ export default function VendorSettingsPage() {
               <button
                 onClick={startOnboarding}
                 disabled={stripeBusy}
-                className="px-4 py-2.5 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#FF0077]/85 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="shrink-0 px-4 py-2.5 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#FF0077]/85 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {stripeBusy ? 'Opening…' : 'Finish payout setup'}
               </button>
             </div>
           ) : (
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
                 <p className="text-white font-semibold text-sm mb-1">Set up payouts</p>
                 <p className="text-text-gray text-xs">Connect a Stripe account to receive payouts from FairSynq.</p>
               </div>
               <button
                 onClick={startOnboarding}
                 disabled={stripeBusy}
-                className="px-4 py-2.5 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#FF0077]/85 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="shrink-0 px-4 py-2.5 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#FF0077]/85 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {stripeBusy ? 'Opening…' : 'Set up payouts'}
               </button>
