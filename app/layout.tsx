@@ -32,19 +32,38 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ClerkClientProvider>
           {children}
+          {/*
+            Toast palette. Colours are hardcoded hex rather than Tailwind classes because
+            react-hot-toast applies its own light background as an INLINE style, which beats
+            any class. Every value below mirrors a token in tailwind.config.js — keep them in
+            step: neon-pink #FF0077, bg-card #1A1A1A, text-gray #A1A1A1, boxShadow.glow.
+
+            Error is the loud one (pink outline + glow); success and loading stay quiet grey,
+            so the toast that needs attention is the one that gets it.
+          */}
           <Toaster
             position="bottom-center"
             toastOptions={{
               style: {
-                background: '#1a1a1a',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: '#1A1A1A',
+                color: '#FFFFFF',
+                border: '1px solid #A1A1A1',      // text-gray — quiet default
                 borderRadius: '12px',
-                fontFamily: 'Inter, sans-serif',
+                padding: '12px 14px',
                 fontSize: '14px',
+                fontFamily: 'Inter, sans-serif',
+                boxShadow: 'none',
+                maxWidth: '380px',
               },
               success: {
-                iconTheme: { primary: '#FF0077', secondary: '#fff' },
+                iconTheme: { primary: '#A1A1A1', secondary: '#1A1A1A' },
+              },
+              error: {
+                style: {
+                  border: '1px solid #FF0077',                  // neon-pink
+                  boxShadow: '0 0 20px rgba(255, 0, 119, 0.4)', // boxShadow.glow
+                },
+                iconTheme: { primary: '#FF0077', secondary: '#1A1A1A' },
               },
             }}
           />
