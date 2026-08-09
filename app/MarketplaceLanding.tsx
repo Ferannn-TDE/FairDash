@@ -8,6 +8,7 @@ import { EASE, TIMING, Reveal, Stagger, StaggerItem } from '@/components/animati
 import MarketplaceNavbar from './_components/MarketplaceNavbar'
 import FairCard from './_components/FairCard'
 import HowItWorksSection from './_components/HowItWorksSection'
+import FAQSection from './_components/FAQSection'
 import { type PublicFairCard } from '@/lib/fair-view'
 import { useUser } from '@clerk/clerk-react'
 import { useRole } from './_contexts/RoleContext'
@@ -450,6 +451,9 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
           fairCount={allFairs.length}
           vendorTotal={allFairs.reduce((s, f) => s + f.vendorCount, 0)}
         />
+
+        {/* ── FAQ ── */}
+        <FAQSection />
 
         {/* ── Final CTA ── */}
         <FinalCTABanner />

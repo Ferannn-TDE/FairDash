@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { PlusIcon, MinusIcon } from '@heroicons/react/24/outline'
 import MarketplaceNavbar from '../_components/MarketplaceNavbar'
+import { FAQ_CATEGORIES } from '../_components/faq-content'
 
 export const metadata = {
   title: 'FAQ — FairSynq',
@@ -12,65 +13,11 @@ export const metadata = {
 // client boundary, so this page stays a server component like /refund-policy.
 // The +/− swap is pure CSS: `group-open:` keys off the <details open> attribute.
 //
-// ⚠️ These answers restate numbers that live in lib/constants.ts (10% service
-// fee, 10-min accept timeout, $5 cancellation, 4-hour payout window, 5-min
-// vendor heartbeat, 100m delivery radius). This is a SECOND COPY in prose, and
-// prose has no drift-guard — if a constant changes, change it here too.
+// The 15 answers are NOT written here. They come from ../_components/faq-content,
+// which the landing page's tabbed <FAQSection /> also reads — one array, two
+// renderers, so the stacked page and the animated section cannot drift apart.
+// This page is the server-rendered one, for deep links and SEO.
 // ---------------------------------------------------------------------------
-
-const FAQ_SECTIONS = [
-  {
-    audience: 'For customers',
-    items: [
-      { q: 'How do I get my food?',
-        a: "Three ways: pick it up at the vendor's booth, have it brought to your car curbside, or get it delivered to an address off-site." },
-      { q: 'What fees will I pay?',
-        a: 'A 10% service fee on your food subtotal (not on delivery), plus a delivery fee if you choose curbside or home delivery.' },
-      { q: "What happens if the vendor doesn't accept my order?",
-        a: "If a vendor doesn't accept within 10 minutes, your order is automatically cancelled and fully refunded." },
-      { q: 'Can I cancel an order?',
-        a: "Yes, for free before the vendor accepts it. Once they've accepted, a $5 cancellation fee applies." },
-    ],
-  },
-  {
-    audience: 'For vendors',
-    items: [
-      { q: 'When do I get paid?',
-        a: 'Your payout is released 4 hours after an order is completed — a short window that covers any refunds before money moves.' },
-      { q: 'What does FairSynq take?',
-        a: "No commission. Our only revenue is the customer's 10% service fee. You do cover your share of Stripe's processing fee, the same as any card payment." },
-      { q: 'What do I need before customers can order from me?',
-        a: 'Three things: your booth set to active, a verified Stripe payout account connected, and at least one item available on your menu.' },
-      { q: 'Why did I disappear from the customer menu?',
-        a: "Your dashboard sends a heartbeat while it's open. If it stops for 5 minutes, you're automatically hidden until it reconnects — just reopen your dashboard." },
-    ],
-  },
-  {
-    audience: 'For runners',
-    items: [
-      { q: 'How do I get deliveries?',
-        a: "You claim them. Available deliveries are first-come, and once you claim one it's locked to you." },
-      { q: 'What do I earn?',
-        a: 'A share of the delivery fee (set by the event organizer) plus 100% of any tip. Tips are never split and carry no service fee.' },
-      { q: 'How is a home delivery confirmed?',
-        a: 'By GPS. You confirm the drop-off within 100 metres of the delivery address.' },
-    ],
-  },
-  {
-    audience: 'For organizers',
-    items: [
-      { q: 'Can I start running fairs as soon as I sign up?',
-        a: 'Not quite. New organizer accounts are reviewed by the FairSynq team first. You can sign in and see your status, but creating fairs and managing vendors open up once you\'re approved.' },
-      { q: 'Do I need a Stripe account?',
-        a: 'Yes. Payouts go to your own Stripe account, which you connect yourself from the organizer portal. Until it\'s connected and verified, your earnings are held safely — never lost.' },
-      { q: 'How and when do I get paid?',
-        a: 'In one batched payout per fair, not per order: FairSynq sums everything you\'ve earned at that event and transfers it to your Stripe account. Each portion becomes payable 4 hours after its order completes.' },
-      { q: 'What does it cost, and what do I earn?',
-        a: 'Commercial terms — including your share of any delivery or curbside fees — are agreed per event with the FairSynq team.',
-        cta: { label: 'Get in touch', href: '/contact' } },
-    ],
-  },
-]
 
 export default function FAQPage() {
   return (
@@ -93,9 +40,9 @@ export default function FAQPage() {
         {/* Content */}
         <section className="max-w-[800px] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 py-14 space-y-10">
 
-          {FAQ_SECTIONS.map(({ audience, items }) => (
-            <div key={audience}>
-              <h2 className="font-bebas text-2xl tracking-wide text-white mb-4">{audience}</h2>
+          {FAQ_CATEGORIES.map(({ id, label, items }) => (
+            <div key={id}>
+              <h2 className="font-bebas text-2xl tracking-wide text-white mb-4">{label}</h2>
 
               <div className="flex flex-col gap-3">
                 {items.map(({ q, a, cta }) => (
