@@ -13,6 +13,13 @@ import {
   ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
+import {
+  ACCEPT_DOC,
+  ALLOWED_DOC_MIME,
+  invalidMimeMessage,
+  isWithinUploadCap,
+  uploadTooLargeMessage,
+} from '@/lib/upload-limits'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -314,13 +321,15 @@ export default function VendorSettingsPage() {
     if (!file || !docKey || !vendorId) return
     e.target.value = '' // reset so same file can be re-selected
 
-    const ALLOWED = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp']
-    if (!ALLOWED.includes(file.type)) {
-      toast.error('File must be a PDF or image (JPEG, PNG, WebP)')
+    // Courtesy pre-checks only — /api/vendors/:id/documents re-checks both, and that check is
+    // the boundary. Constants come from lib/upload-limits.ts so this message and the route's
+    // rejection are the same number by construction.
+    if (!ALLOWED_DOC_MIME.has(file.type)) {
+      toast.error(invalidMimeMessage(ALLOWED_DOC_MIME))
       return
     }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File must be 10 MB or smaller')
+    if (!isWithinUploadCap(file.size)) {
+      toast.error(uploadTooLargeMessage())
       return
     }
 
@@ -362,7 +371,7 @@ export default function VendorSettingsPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,image/jpeg,image/jpg,image/png,image/webp"
+        accept={ACCEPT_DOC}
         className="hidden"
         onChange={handleFileChange}
       />

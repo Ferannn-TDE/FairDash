@@ -9,6 +9,14 @@ import {
 } from '@heroicons/react/24/outline'
 import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
+import {
+  ACCEPT_IMAGE,
+  ALLOWED_IMAGE_MIME,
+  UPLOAD_MAX_MB,
+  invalidMimeMessage,
+  isWithinUploadCap,
+  uploadTooLargeMessage,
+} from '@/lib/upload-limits'
 
 interface MenuItem {
   id: string
@@ -34,6 +42,18 @@ interface PendingRequest {
 const inputCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40'
 const labelCls = 'block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1'
 
+/**
+ * A blob: URL is an in-memory handle to a file in ONE browser tab. Persisting it produced a
+ * link that was broken by the time anyone loaded the page — the menu-image bug. Until a real
+ * upload endpoint exists, the preview stays local and the field is submitted empty. The server
+ * rejects blob:/data: values too (lib/upload-limits.ts); this keeps the flow from hitting that
+ * rejection for something the vendor can't fix.
+ */
+function submittableImageUrl(url: string | undefined): string {
+  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return ''
+  return url
+}
+
 const BLANK = {
   name: '', description: '', price: 0, prepTime: 10,
   category: '', imageUrl: '', isAvailable: true,
@@ -41,12 +61,27 @@ const BLANK = {
 
 // ─── Image upload ─────────────────────────────────────────────────────────────
 
+// This picker does NOT upload. It makes a local blob: preview — there is no menu-image upload
+// endpoint yet — and `submittableImageUrl()` below strips that blob: URL before the request
+// goes out, because a blob: reference is dead the moment the tab closes and storing one only
+// ever produced a permanently-broken image link. The size/type checks are here anyway so the
+// picker obeys the same rule as every other upload point the day the real endpoint lands, and
+// so the "Max 4MB" copy is something the app actually honours rather than decoration.
 function ImageUpload({ imageUrl, onChange }: { imageUrl: string; onChange: (url: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
+    e.target.value = '' // let the same file be re-picked after a rejection
     if (!file) return
+    if (!ALLOWED_IMAGE_MIME.has(file.type)) {
+      toast.error(invalidMimeMessage(ALLOWED_IMAGE_MIME))
+      return
+    }
+    if (!isWithinUploadCap(file.size)) {
+      toast.error(uploadTooLargeMessage())
+      return
+    }
     onChange(URL.createObjectURL(file))
   }
 
@@ -67,10 +102,10 @@ function ImageUpload({ imageUrl, onChange }: { imageUrl: string; onChange: (url:
             <ImagePlus className="w-5 h-5 text-text-gray group-hover:text-neon-pink transition-colors" />
           </div>
           <p className="text-sm text-text-gray">Upload an image</p>
-          <p className="text-xs text-text-gray/50">PNG, JPG · Max 5MB</p>
+          <p className="text-xs text-text-gray/50">PNG, JPG · Max {UPLOAD_MAX_MB}MB</p>
         </button>
       )}
-      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/jpg" className="hidden" onChange={handleFile} />
+      <input ref={fileRef} type="file" accept={ACCEPT_IMAGE} className="hidden" onChange={handleFile} />
     </div>
   )
 }
@@ -374,7 +409,7 @@ export default function VendorMenuPage() {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, vendorId, type: 'ADD' }),
+        body: JSON.stringify({ ...data, imageUrl: submittableImageUrl(data.imageUrl), vendorId, type: 'ADD' }),
       })
       const json = await res.json()
       if (json.success) {
@@ -396,7 +431,10 @@ export default function VendorMenuPage() {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, ...updates }),
+        body: JSON.stringify({
+          vendorId, type: 'EDIT', menuItemId: id, ...updates,
+          ...(updates.imageUrl !== undefined && { imageUrl: submittableImageUrl(updates.imageUrl) }),
+        }),
       })
       const json = await res.json()
       if (json.success) {
