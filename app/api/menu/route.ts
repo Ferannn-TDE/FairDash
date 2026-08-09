@@ -4,6 +4,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireVendorAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { getGroupedMenuItemsByEvent } from '@/lib/menu/getGroupedMenuItems'
+import { assertSafeImageUrl } from '@/lib/upload-limits'
 
 // GET /api/menu?eventSlug=&vendorId=
 // Returns pre-grouped menu items for a fair.
@@ -43,6 +44,9 @@ export async function POST(req: Request) {
     if (!vendorId || !name || price == null || !category) {
       return apiError('vendorId, name, price, and category are required', 400, 'VALIDATION_ERROR')
     }
+    // imageUrl is a LINK, not a payload — a data: URI here would be an upload-cap bypass with
+    // no file upload involved. See lib/upload-limits.ts.
+    assertSafeImageUrl(imageUrl)
 
     const vendor = await db.vendor.findUnique({ where: { id: vendorId } })
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')

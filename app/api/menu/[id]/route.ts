@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorAuth } from '@/lib/auth'
+import { assertSafeImageUrl } from '@/lib/upload-limits'
 
 // GET /api/menu/:id
 export async function GET(
@@ -32,6 +33,9 @@ export async function PATCH(
     await requireVendorAuth()
     const body = await req.json()
     const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
+
+    // Same bypass door as POST /api/menu — an update can smuggle a data: URI just as easily.
+    assertSafeImageUrl(imageUrl)
 
     const item = await db.menuItem.update({
       where: { id: (await params).id },

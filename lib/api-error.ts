@@ -1,4 +1,5 @@
 import { apiError } from './api-response'
+import { UploadRejection } from './upload-limits'
 
 /**
  * Structured error class for API route handlers.
@@ -36,6 +37,15 @@ export class ApiError extends Error {
 export function handleApiError(err: unknown) {
   if (err instanceof ApiError) {
     return apiError(err.message, err.statusCode, err.code, err.details)
+  }
+
+  // A rejected upload. UploadRejection is NOT an ApiError because lib/upload-limits.ts is
+  // imported by client components and must not pull next/server into the browser bundle —
+  // so it carries its own status/code and is rendered here. Routes keep their plain
+  // `catch (err) { return handleApiError(err) }` and get FILE_TOO_LARGE without re-deciding
+  // per route what a too-large file means.
+  if (err instanceof UploadRejection) {
+    return apiError(err.message, err.statusCode, err.code)
   }
 
   // DB connection-pool exhaustion (Prisma P2024) is a LOAD condition, not a bug in the

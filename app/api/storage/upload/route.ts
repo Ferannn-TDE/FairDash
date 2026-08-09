@@ -2,6 +2,7 @@ import { apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { logger } from '@/lib/logger'
+import { ALLOWED_IMAGE_MIME, assertAllowedMime } from '@/lib/upload-limits'
 
 // POST /api/storage/upload
 // Returns a Supabase Storage presigned UPLOAD url for a runner's proof-of-delivery photo.
@@ -15,6 +16,19 @@ import { logger } from '@/lib/logger'
 // NOTE: vendor menu images do NOT use this route — that flow currently keeps a local
 // blob: URL and never uploads (separate, tracked bug). This route's only caller is the
 // runner delivery page.
+//
+// ── THIS ROUTE CANNOT ENFORCE A SIZE LIMIT. ──────────────────────────────────────────────
+// It hands back a presigned URL; the file then goes from the CLIENT STRAIGHT TO SUPABASE and
+// never passes through this server. There is nothing here to measure, and a Supabase upload
+// token carries no size constraint — so an app-level check at this point would be theatre.
+// The size boundary for this path is the BUCKET's own `file_size_limit` on `delivery-proofs`
+// (4 MB, set in Supabase; asserted by scripts/upload-cap-guard.ts Part C, which fails if it
+// is ever unset — same reasoning as assertPrivateBucket()). The client downscales the photo
+// before uploading (lib/downscale-image.ts) so a real camera photo lands under that limit
+// rather than being rejected at the door.
+//
+// What this route CAN enforce is the declared content type, which it does below — previously
+// unchecked, so any authenticated caller could mint a token for arbitrary content.
 const DELIVERY_PROOFS_BUCKET = 'delivery-proofs'
 
 export async function POST(req: Request) {
@@ -35,6 +49,8 @@ export async function POST(req: Request) {
     if (!filename || !contentType) {
       return apiError('filename and contentType are required', 400, 'VALIDATION_ERROR')
     }
+    // Proof-of-delivery evidence is a photograph. Throws UploadRejection → INVALID_MIME.
+    assertAllowedMime(contentType, ALLOWED_IMAGE_MIME)
 
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
     const path = `proofs/${Date.now()}_${safeName}`

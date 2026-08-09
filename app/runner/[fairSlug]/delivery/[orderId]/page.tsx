@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { ChevronLeft, Car, MapPin, Phone, CheckSquare, Square, Package, Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatDeliveryAddressLines, deliveryMapsQuery, toDeliveryAddress as addr } from '@/lib/delivery-address'
+import { downscaleImage } from '@/lib/downscale-image'
+import { UPLOAD_MAX_MB, isWithinUploadCap } from '@/lib/upload-limits'
 
 const FULFILLMENT_LABEL: Record<string, string> = {
   CURBSIDE: 'Curbside', HOME_DELIVERY: 'Home Delivery', BOOTH_PICKUP: 'Booth Pickup',
@@ -200,16 +202,37 @@ export default function DeliveryPage() {
   }
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const picked = e.target.files?.[0]
+    e.target.value = '' // let the same photo be re-picked after a failure
+    if (!picked) return
     setUploading(true)
     try {
+      // DOWNSCALE FIRST, then check the cap. A phone camera photo is routinely 3–6 MB, which
+      // the bucket's 4 MB file_size_limit would reject — and a rejected proof photo BLOCKS the
+      // delivery (proofPath is required for DELIVERED) and therefore the payout. Shrinking it
+      // is what keeps a legitimate photo under the cap instead of bouncing it.
+      const file = await downscaleImage(picked)
+
+      // Still over after downscale — rare, but the runner is standing at a door and needs to
+      // know what to actually DO, not the old bare "upload failed".
+      if (!isWithinUploadCap(file.size)) {
+        toast.error(
+          `This photo is still over ${UPLOAD_MAX_MB} MB after compression. ` +
+          'Retake it further back or with a lower camera resolution, then try again.',
+          { duration: 8000 },
+        )
+        return
+      }
+
       const signRes = await fetch('/api/storage/upload', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: `delivery_${orderId}_${file.name}`, contentType: file.type }),
       })
       const sign = await signRes.json()
-      if (!sign.success) { toast.error('Could not start photo upload'); return }
+      if (!sign.success) {
+        toast.error(sign.error?.message ?? 'Could not start photo upload')
+        return
+      }
       // PUT to the signed upload url — token is in the url (no Authorization header);
       // x-upsert lets a retake overwrite the same object.
       const put = await fetch(sign.data.uploadUrl, {
@@ -217,7 +240,16 @@ export default function DeliveryPage() {
         headers: { 'Content-Type': file.type, 'x-upsert': 'true' },
         body: file,
       })
-      if (!put.ok) { toast.error('Photo upload failed'); return }
+      if (!put.ok) {
+        // The bucket's file_size_limit lands here as a 413. Name it: this is the one rejection
+        // the app cannot pre-empt, since the bytes never pass through our server.
+        toast.error(
+          put.status === 413
+            ? `Photo is too large (limit ${UPLOAD_MAX_MB} MB) — retake it and try again`
+            : 'Photo upload failed — check your connection and retry',
+        )
+        return
+      }
       // Store the PATH, not a URL — the bucket is private; reads resolve a signed url later.
       setProofPath(sign.data.path)
       toast.success('Photo attached')
@@ -365,6 +397,10 @@ export default function DeliveryPage() {
 
         {/* Proof-of-delivery photo (required by the status route) */}
         <div>
+          {/* Deliberately `image/*`, not the narrow allowlist: an iPhone hands back HEIC, which
+              downscaleImage() re-encodes to JPEG. Narrowing the picker here would block a photo
+              the app can handle. If the re-encode fails, the sign route rejects the MIME and the
+              runner sees that reason verbatim. */}
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPhoto} className="hidden" />
           <button onClick={() => fileRef.current?.click()} disabled={!pickedUp || uploading}
             className={`w-full h-11 rounded-xl font-semibold text-sm border flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 ${proofPath ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-white'}`}>
