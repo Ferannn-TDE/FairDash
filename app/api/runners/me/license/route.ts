@@ -5,14 +5,13 @@ import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import {
-  LICENSE_ALLOWED_MIME,
-  LICENSE_MAX_BYTES,
   StorageNotConfiguredError,
   StorageOpError,
   deleteLicenseObject,
   signLicenseUrl,
   uploadLicense,
 } from '@/lib/runner-license-storage'
+import { ALLOWED_DOC_MIME, assertUploadSize, validateUpload } from '@/lib/upload-limits'
 
 // Driver's licence — SELF-SCOPED. The runner is always resolved from the session
 // (db.runner.findUnique by the caller's own userId); no id is ever accepted from the
@@ -70,18 +69,15 @@ export async function POST(req: NextRequest) {
   try {
     const runner = await requireOwnRunner()
 
+    // Early, pre-buffer reject (see lib/upload-limits.ts) — formData() below materialises the
+    // whole body in memory. Auth deliberately stays ahead of it.
+    assertUploadSize(req)
+
     const form = await req.formData()
     const file = form.get('file')
 
-    if (!(file instanceof Blob)) {
-      return apiError('file is required', 400, 'VALIDATION_ERROR')
-    }
-    if (!LICENSE_ALLOWED_MIME.has(file.type)) {
-      return apiError('Licence must be an image (JPEG, PNG, WebP) or PDF', 400, 'INVALID_MIME')
-    }
-    if (file.size > LICENSE_MAX_BYTES) {
-      return apiError('File must be 10 MB or smaller', 400, 'FILE_TOO_LARGE')
-    }
+    // Authoritative size + MIME. Throws UploadRejection → FILE_TOO_LARGE / INVALID_MIME.
+    validateUpload(file, { allowedMime: ALLOWED_DOC_MIME })
 
     const filename = (file as File).name ?? 'license'
     const previousPath = runner.licensePath

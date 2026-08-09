@@ -3,6 +3,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { IdCard, Upload, AlertTriangle, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import {
+  ACCEPT_DOC,
+  ALLOWED_DOC_MIME,
+  invalidMimeMessage,
+  isWithinUploadCap,
+  uploadTooLargeMessage,
+} from '@/lib/upload-limits'
 
 // Driver's-licence upload — SENSITIVE PII.
 //
@@ -14,8 +21,8 @@ import toast from 'react-hot-toast'
 // public link, and it is never persisted client-side. On reload we re-ask the server for
 // a fresh one. If storage is misconfigured the card says so plainly rather than pretending.
 
-const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf'
-const MAX_BYTES = 10 * 1024 * 1024
+// Accept string, MIME allowlist, cap and wording all come from lib/upload-limits.ts. Nothing
+// about the limit is restated here, so this card cannot promise a number the route won't honour.
 
 interface LicenseState {
   uploaded: boolean
@@ -57,12 +64,12 @@ export default function LicenseCard() {
     if (!file) return
 
     // Client-side pre-checks are courtesy; the route enforces both again.
-    if (!ACCEPT.split(',').includes(file.type)) {
-      toast.error('Licence must be a JPEG, PNG, WebP, or PDF')
+    if (!ALLOWED_DOC_MIME.has(file.type)) {
+      toast.error(invalidMimeMessage(ALLOWED_DOC_MIME))
       return
     }
-    if (file.size > MAX_BYTES) {
-      toast.error('File must be 10 MB or smaller')
+    if (!isWithinUploadCap(file.size)) {
+      toast.error(uploadTooLargeMessage())
       return
     }
 
@@ -139,7 +146,7 @@ export default function LicenseCard() {
             </div>
           )}
 
-          <input ref={fileRef} type="file" accept={ACCEPT} onChange={onFile} className="hidden" />
+          <input ref={fileRef} type="file" accept={ACCEPT_DOC} onChange={onFile} className="hidden" />
 
           <button
             type="button"

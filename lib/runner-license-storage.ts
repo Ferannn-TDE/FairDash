@@ -18,15 +18,8 @@ import { logger } from './logger'
 
 export const LICENSE_BUCKET = process.env.SUPABASE_RUNNER_BUCKET ?? 'runner-documents'
 
-export const LICENSE_ALLOWED_MIME = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-])
-
-export const LICENSE_MAX_BYTES = 10 * 1024 * 1024 // 10 MB
+// Size cap and MIME allowlist live in lib/upload-limits.ts, not here — one rule, read by
+// every server receiver and every client picker. See ALLOWED_DOC_MIME / UPLOAD_MAX_BYTES.
 
 /** Signed read URLs are deliberately short-lived — long enough to render, not to share. */
 export const SIGNED_URL_TTL_SECONDS = 60

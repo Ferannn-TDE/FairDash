@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
+import { assertSafeImageUrl } from '@/lib/upload-limits'
 
 // POST /api/menu-requests — submit ADD / EDIT / DELETE request for organizer approval
 export async function POST(req: NextRequest) {
@@ -34,6 +35,9 @@ export async function POST(req: NextRequest) {
     if ((type === 'EDIT' || type === 'DELETE') && !menuItemId) {
       return apiError('menuItemId is required for EDIT/DELETE', 400, 'VALIDATION_ERROR')
     }
+    // A menu request is copied verbatim onto the MenuItem at approval time, so an unvalidated
+    // imageUrl here is the same bypass one approval later. See lib/upload-limits.ts.
+    assertSafeImageUrl(imageUrl)
 
     const request = await db.menuRequest.create({
       data: {

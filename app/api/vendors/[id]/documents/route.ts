@@ -9,12 +9,11 @@ import {
   DOC_TYPES,
   StorageNotConfiguredError,
   StorageOpError,
-  VENDOR_DOC_ALLOWED_MIME,
-  VENDOR_DOC_MAX_BYTES,
   signVendorDocumentUrl,
   uploadVendorDocument,
   type VendorDocType,
 } from '@/lib/vendor-document-storage'
+import { ALLOWED_DOC_MIME, assertUploadSize, validateUpload } from '@/lib/upload-limits'
 
 const isDocType = (v: unknown): v is VendorDocType =>
   typeof v === 'string' && (DOC_TYPES as readonly string[]).includes(v)
@@ -39,6 +38,11 @@ export async function POST(
     const vendorId = (await params).id
     const { userId } = await requireVendorMembershipById(vendorId, req)
 
+    // Size check BEFORE formData(): the parse buffers the entire body in memory, so an
+    // oversized POST is already resident by the time file.size exists. Auth stays ahead of
+    // both — an anonymous caller must not learn anything from the size of their own request.
+    assertUploadSize(req)
+
     const form = await req.formData()
     const docType = form.get('docType')
     const file    = form.get('file')
@@ -46,15 +50,9 @@ export async function POST(
     if (!isDocType(docType)) {
       return apiError('docType must be one of: foodHandler, insurance, businessLicense', 400, 'VALIDATION_ERROR')
     }
-    if (!(file instanceof Blob)) {
-      return apiError('file is required', 400, 'VALIDATION_ERROR')
-    }
-    if (!VENDOR_DOC_ALLOWED_MIME.has(file.type)) {
-      return apiError('File must be a PDF or image (JPEG, PNG, WebP)', 400, 'INVALID_MIME')
-    }
-    if (file.size > VENDOR_DOC_MAX_BYTES) {
-      return apiError('File must be 10 MB or smaller', 400, 'FILE_TOO_LARGE')
-    }
+    // Authoritative: measured bytes, not a caller-declared Content-Length. Throws
+    // UploadRejection, rendered as FILE_TOO_LARGE / INVALID_MIME by handleApiError below.
+    validateUpload(file, { allowedMime: ALLOWED_DOC_MIME })
 
     // Uploads to the PRIVATE bucket. assertPrivateBucket() inside will REFUSE the upload
     // (loudly) if the bucket has been made public — a misconfiguration can no longer
