@@ -112,6 +112,87 @@ assert(/animate-pulse/.test(ordersPage) && /w-44 h-\[34px\]/.test(ordersPage),
 assert(!/<select[\s\S]{0,200}vendorOptions\.map[\s\S]{0,80}<\/select>\s*\n\s*<select/.test(ordersPage),
   'the two filter selects are not rendered as a bare adjacent pair with unreserved widths')
 
+// ── [G] update-during-render, and page numbers mirrored from clicks (9th instance) ──────
+// The pagination control adapted for vendor order history came from a source that reconciled
+// its previous digits INSIDE THE RENDER BODY:
+//     if (prevDigits.join('') !== digits.join('')) { setPrevTicks(...); setPrevDigits(...) }
+// That is this same class in its purest form — render a frame computed from the stale value,
+// then setState to correct it. The fix was not to move it into an effect but to remove the
+// need for remembered state entirely: AnimatePresence already knows a digit changed (the key
+// changed), and the only thing a diff could add is the DIRECTION of travel, which the caller
+// knows because it just handled the click.
+//
+// So the rule is structural: that component holds NO state. A component with no useState
+// cannot setState during render.
+console.log('\n[G] the pager holds no state, and the page number is derived from fetched data')
+const pager = readFileSync('app/_components/ui/AnimatedPagination.tsx', 'utf8')
+
+// [0] POSITIVE CONTROLS — a scanner that cannot see a useState would pass this vacuously.
+const HOLDS_STATE = /\buseState\s*[<(]|\buseReducer\s*[<(]/
+assert(HOLDS_STATE.test('const [prevDigits, setPrevDigits] = useState<string[]>([])'),
+  '[0] positive control: the scanner DOES flag a useState (the exact line the source used)')
+assert(!HOLDS_STATE.test('const digits = String(value).split("")'),
+  '[0] baseline: a derived value is NOT flagged — only remembered state')
+
+assert(!HOLDS_STATE.test(pager),
+  'AnimatedPagination declares no useState/useReducer — update-during-render is impossible by construction')
+assert(!/\buseEffect\s*\(/.test(pager),
+  'AnimatedPagination declares no useEffect either — it derives everything from props (FluidTabBar precedent)')
+assert(/direction/.test(pager),
+  'the roll direction arrives as a PROP (the caller knows which way it moved; the pager does not guess)')
+
+// The other half of the same bug: a pager that counts its own clicks will read "3 of 8" over
+// page 2's rows the moment a fetch fails or races. The page must be derived from the cursor
+// stack that actually fetched the rows on screen.
+const ordersHistory = readFileSync('app/vendor/[fairSlug]/orders/page.tsx', 'utf8')
+assert(/const page = cursorStack\.length \+ 1/.test(ordersHistory),
+  'order history DERIVES the page from the cursor stack, never from a click counter')
+assert(!/useState[^\n]*\b(currentPage|pageNumber)\b/.test(ordersHistory),
+  'there is no mirrored page-number state to drift from the fetched page')
+
+// The third way this indicator can lie, and the easiest one to introduce by accident: the page
+// SIZE is written twice — once as the fetch `take` (how many rows a page really holds) and once
+// as the totalPages divisor (what the pager claims about it). Change one and "1 of 7" sits over
+// pages of a different size. One constant makes the drift unexpressible; this keeps it that way.
+// Both checks below are NEGATIVE ("this bad shape is absent"), which is the kind that passes
+// for free when the pattern is wrong. So each regex is tested against the exact line it exists
+// to catch BEFORE it is trusted — and against the good line, so it isn't matching everything.
+const BARE_DIVISOR = /Math\.ceil\([^)]*\/\s*\d/
+const BARE_TAKE = /take:\s*String\(\s*\d/
+
+assert(BARE_DIVISOR.test('Math.ceil(totalForTab / 50)'),
+  '[0] positive control: the divisor scanner DOES flag a hard-coded /50')
+assert(!BARE_DIVISOR.test('Math.ceil(totalForTab / ORDER_HISTORY_PAGE_SIZE)'),
+  '[0] baseline: the divisor scanner does NOT flag the constant')
+assert(BARE_TAKE.test('take: String(50),'),
+  '[0] positive control: the take scanner DOES flag a hard-coded take')
+assert(!BARE_TAKE.test('take: String(ORDER_HISTORY_PAGE_SIZE),'),
+  '[0] baseline: the take scanner does NOT flag the constant')
+
+// Every list on the pager gets the same treatment: its own constant, read by BOTH its fetch
+// take and its divisor. Own, not shared — these are different surfaces with different densities
+// (25 / 50 / 50), and one shared number would mean neither could be tuned alone.
+const PAGED_LISTS: { file: string; constant: string; label: string }[] = [
+  { file: 'app/vendor/[fairSlug]/orders/page.tsx',            constant: 'ORDER_HISTORY_PAGE_SIZE',     label: 'vendor order history' },
+  { file: 'app/admin/[eventSlug]/orders/page.tsx',            constant: 'ADMIN_ORDERS_PAGE_SIZE',      label: 'admin order log' },
+  { file: 'app/organizer/fairs/[fairSlug]/orders/page.tsx',   constant: 'ORGANIZER_ORDERS_PAGE_SIZE',  label: 'organizer order log' },
+]
+
+for (const { file, constant, label } of PAGED_LISTS) {
+  const src = readFileSync(file, 'utf8')
+  assert(new RegExp(`const ${constant} = \\d+`).test(src),
+    `${label}: page size is a single named constant`)
+  assert(!BARE_DIVISOR.test(src),
+    `${label}: the totalPages divisor is NOT a bare number — it reads the constant`)
+  assert(!BARE_TAKE.test(src),
+    `${label}: the fetch take is NOT a bare number — it reads the same constant`)
+  assert((src.match(new RegExp(constant, 'g')) ?? []).length >= 3,
+    `${label}: the fetch take and the divisor both read that one constant`)
+  // A pager whose page came from a click counter would caption the wrong rows.
+  assert(/const page = cursorStack\.length \+ 1/.test(src),
+    `${label}: the page is DERIVED from the cursor stack, not counted on click`)
+}
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

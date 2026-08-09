@@ -59,8 +59,27 @@ assert(/qp\.set\('q'|q:\s*urlSearch/.test(page) && /vendorId/.test(page) && /qp\
   'the fetch URL carries q, vendorId, and cursor — the server does the work')
 assert(/setTimeout\(\s*\(\)\s*=>\s*setParam\(\{\s*q:/.test(page), 'the search input is debounced before it becomes a server query')
 assert(/events\/\$\{params\.eventSlug\}\/vendors/.test(page), 'vendor options come from a whole-event fetch, not the loaded page')
-assert(/Showing \$\{orders\.length\} of \$\{total\}/.test(page), 'the header reads "Showing X of N", not a capped count')
-assert(/Load older orders/.test(page) && /nextCursor/.test(page), 'a "Load older" control pages through nextCursor')
+// ── The two assertions below used to lock the OLD controls: a "Showing {orders.length} of
+// {total}" header and a "Load older orders" button. Both were replaced when this log moved from
+// an appending list to one page at a time (AnimatedPagination + cursor stack), so the literal
+// strings are gone. The PROPERTIES they protected are not, and are what is asserted now:
+//
+//   • the count in the header is the whole-event total for the current filter+search, never the
+//     number of rows that happen to be loaded — that was the "capped count" bug;
+//   • rows past the first page are still reachable, via the server's nextCursor rather than a
+//     page-number guess.
+//
+// Restating them this way is the point: a guard that is deleted because the UI moved stops
+// protecting anything, and one that keeps asserting a replaced widget just fails honestly
+// forever. Neither is the same as re-checking the claim against the control that exists now.
+assert(/\$\{total\} order\$\{total === 1 \? '' : 's'\}/.test(page),
+  'the header count is the server-side total for the current filter+search')
+assert(!/Showing \$\{orders\.length\}/.test(page),
+  'the header does NOT count the loaded rows (that is the capped-count bug this locked)')
+assert(/hasNext=\{nextCursor !== null\}/.test(page) && /AnimatedPagination/.test(page),
+  'a pager reaches rows past page 1, and asks the SERVER whether another page exists')
+assert(/const page = cursorStack\.length \+ 1/.test(page),
+  'the page number is derived from the cursors actually walked, not a click counter')
 
 console.log('\n[3] empty state distinguishes no-results from not-loaded')
 assert(!BLIND_EMPTY.test(page), 'the blind "No orders found" empty state is gone')
