@@ -638,3 +638,10 @@ input[type="date"]::-moz-calendar-picker-indicator {
 nextjs-portal {
   bottom: 4rem !important;
 }
+
+/* toasts: bottom-center on mobile, bottom-right on desktop (md = 768px) */
+@media (min-width: 768px) {
+  [data-rht-toaster] > * {
+    justify-content: flex-end !important;
+  }
+}
