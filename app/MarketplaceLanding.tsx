@@ -303,6 +303,7 @@ function SiteFooter() {
             <div>
               <p className="text-[10px] font-inter text-gray-600 uppercase tracking-[0.15em] mb-4">Company</p>
               <div className="flex flex-col gap-2.5">
+                <Link href="/faq" className="text-sm text-text-gray hover:text-white transition-colors font-inter">FAQ</Link>
                 <Link href="/contact" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Contact</Link>
                 <Link href="/refund-policy" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Refund Policy</Link>
               </div>
