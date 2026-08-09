@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronDown, ChevronUp, Clock, User, Phone,
   ShoppingBag, Car, MapPin, CheckCircle, XCircle,
@@ -11,6 +11,7 @@ import { StatusPill } from '@/components/ui/StatusPill'
 import { EarningsBadge } from '@/app/_components/EarningsBadge'
 import { getStatusMeta, TAB_STATUS_MAP } from '@/lib/order-status'
 import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
+import AnimatedPagination from '@/app/_components/ui/AnimatedPagination'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -262,17 +263,57 @@ function OrderCard({ order }: { order: Order }) {
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 50
+/**
+ * Rows per page — the SINGLE source for both the fetch `take` and the totalPages divisor.
+ *
+ * These two must never be written separately. The take decides how many rows a page actually
+ * holds; the divisor decides what the pager CLAIMS about it. Change one and the indicator lies
+ * — "1 of 7" over pages that hold a different count — which is the precise failure the
+ * cursor-stack design exists to prevent. One constant makes that drift unexpressible.
+ *
+ * It lives HERE, not in lib/vendor-order-history.ts, on purpose: that module imports `db`, so
+ * importing a constant from it into this client component would drag Prisma into the browser
+ * bundle. MAX_TAKE over there is a server-side CAP (50), a different thing from a page size —
+ * this value must stay at or under it, and the route clamps anything larger regardless.
+ */
+const ORDER_HISTORY_PAGE_SIZE = 25
 
 export default function VendorOrdersPage() {
   const { vendorId } = useVendorMeta()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [paging, setPaging] = useState(false)
   const [filter, setFilter] = useState<string>('all')
   const [sortNewest, setSortNewest] = useState(true)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [counts, setCounts] = useState<Record<string, number>>({})
+
+  // CURSOR STACK — the cursors walked to REACH the page on screen. Page 1 is the empty stack;
+  // cursorStack[i] is the cursor that fetched page i+2. It exists because the reader is
+  // cursor-paginated by design (lib/vendor-order-history.ts: placedAt is not unique, so the
+  // stable sort + "the row after this id" is what stops a row appearing on two pages) and a
+  // cursor only walks FORWARD. Remembering the ones we've used is what makes Previous possible
+  // without converting the query to offset — which would trade this bug class for the other one,
+  // where new orders arriving between page loads shift every later page down.
+  //
+  // ⚠️ It is pushed/popped ONLY after a fetch SUCCEEDS. The page number is derived from its
+  // length, so if it moved on click the indicator could read "3 of 8" over page 2's rows.
+  const [cursorStack, setCursorStack] = useState<string[]>([])
+  const [pageDir, setPageDir] = useState<1 | -1>(1)
+  const listTopRef = useRef<HTMLDivElement>(null)
+
+  // Which (filter, sort) the rows on screen belong to. The page-1 effect below already drops
+  // its own stale responses with a `cancelled` flag; a page fetch needs the same protection for
+  // a different reason. The arrows lock while paging, but the TABS don't — so a vendor can
+  // switch to Cancelled mid-fetch and the in-flight page 2 of Completed would land after it,
+  // replacing the rows AND pushing a cursor from the old query onto the stack. The indicator
+  // would then be honest about a page that no longer exists.
+  const fetchKeyRef = useRef('')
+
+  // DERIVED, never mirrored: the page IS the depth of the stack that fetched it.
+  const page = cursorStack.length + 1
+  const totalForTab = counts[filter]
+  const totalPages = totalForTab != null ? Math.max(1, Math.ceil(totalForTab / ORDER_HISTORY_PAGE_SIZE)) : null
 
   // FILTERING AND SORTING ARE SERVER-SIDE. They used to be done in the browser over
   // whatever the first (capped) fetch returned — which meant the tab counts lied ("3
@@ -281,18 +322,21 @@ export default function VendorOrdersPage() {
   // wearing the Cancelled tab's label.
   //
   // The fetch key is (filter, sort). Any change to it is a NEW query from page 1 — the
-  // cursor is dropped and the list is REPLACED, never appended. Otherwise you land on page
+  // cursor stack is emptied and the list is REPLACED. Otherwise you land on page
   // 5 of a 2-page filter, or mix Cancelled rows into Completed.
   useEffect(() => {
     if (!vendorId) return
     let cancelled = false
+    fetchKeyRef.current = `${filter}|${sortNewest}` // any page fetch older than this is stale
     setLoading(true)
     setNextCursor(null)
+    setCursorStack([])   // back to page 1 — the old cursors address a different query
+    setPageDir(1)
 
     const qs = new URLSearchParams({
       tab: filter,
       sort: sortNewest ? 'newest' : 'oldest',
-      take: String(PAGE_SIZE),
+      take: String(ORDER_HISTORY_PAGE_SIZE),
       withCounts: '1',
     })
     fetch(`/api/vendors/${vendorId}/orders/history?${qs}`)
@@ -309,26 +353,66 @@ export default function VendorOrdersPage() {
     return () => { cancelled = true } // a stale response must never overwrite a newer filter
   }, [vendorId, filter, sortNewest])
 
-  // Next page of the CURRENT (filter, sort). Appends. The cursor is the last row's id, and
+  // One page of the CURRENT (filter, sort). The cursor is the previous page's last row id, and
   // the server's stable sort (placedAt + id) makes "the row after this one" deterministic.
-  const loadMore = useCallback(async () => {
-    if (!vendorId || !nextCursor || loadingMore) return
-    setLoadingMore(true)
+  // REPLACES the rows — one page on screen at a time, which is what makes a page number mean
+  // anything. (This list used to append; "Showing 50 of 156" described the accumulation.)
+  const fetchPage = useCallback(async (cursor: string | null) => {
+    const qs = new URLSearchParams({
+      tab: filter,
+      sort: sortNewest ? 'newest' : 'oldest',
+      take: String(ORDER_HISTORY_PAGE_SIZE),
+      ...(cursor ? { cursor } : {}),
+    })
+    const res = await fetch(`/api/vendors/${vendorId}/orders/history?${qs}`)
+    return await res.json()
+  }, [vendorId, filter, sortNewest])
+
+  /** Both movers land here: apply the fetched page, THEN move the stack. Order matters. */
+  const applyPage = useCallback((
+    json: { success?: boolean; data?: { orders?: Order[]; nextCursor?: string | null } },
+    nextStack: string[],
+    dir: 1 | -1,
+    key: string,
+  ) => {
+    // The tab or sort moved while this page was in flight — this response describes a query
+    // nobody is looking at any more. Dropping it is the only correct answer.
+    if (fetchKeyRef.current !== key) return false
+    if (!json?.success) return false
+    setOrders(json.data?.orders ?? [])
+    setNextCursor(json.data?.nextCursor ?? null)
+    setCursorStack(nextStack)
+    setPageDir(dir)
+    // Replace-paging without this leaves the vendor halfway down the previous page's rows.
+    listTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return true
+  }, [])
+
+  const goNext = useCallback(async () => {
+    if (!vendorId || !nextCursor || paging) return
+    setPaging(true)
     try {
-      const qs = new URLSearchParams({
-        tab: filter,
-        sort: sortNewest ? 'newest' : 'oldest',
-        take: String(PAGE_SIZE),
-        cursor: nextCursor,
-      })
-      const json = await (await fetch(`/api/vendors/${vendorId}/orders/history?${qs}`)).json()
-      if (json.success) {
-        setOrders(prev => [...prev, ...(json.data?.orders ?? [])])
-        setNextCursor(json.data?.nextCursor ?? null)
-      }
-    } catch { /* leave the cursor intact so the user can retry */ }
-    finally { setLoadingMore(false) }
-  }, [vendorId, nextCursor, filter, sortNewest, loadingMore])
+      // Capture the cursor BEFORE the await — nextCursor is about to be overwritten by the
+      // response, and this is the value that has to go on the stack.
+      const used = nextCursor
+      const key = `${filter}|${sortNewest}`
+      applyPage(await fetchPage(used), [...cursorStack, used], 1, key)
+    } catch { /* stack untouched — the indicator still describes the rows on screen */ }
+    finally { setPaging(false) }
+  }, [vendorId, nextCursor, paging, cursorStack, filter, sortNewest, fetchPage, applyPage])
+
+  const goPrev = useCallback(async () => {
+    if (!vendorId || cursorStack.length === 0 || paging) return
+    setPaging(true)
+    try {
+      // Pop: the page before this one was fetched with the cursor one below the top of the
+      // stack — or with no cursor at all, which is page 1.
+      const nextStack = cursorStack.slice(0, -1)
+      const key = `${filter}|${sortNewest}`
+      applyPage(await fetchPage(nextStack[nextStack.length - 1] ?? null), nextStack, -1, key)
+    } catch { /* stack untouched */ }
+    finally { setPaging(false) }
+  }, [vendorId, cursorStack, paging, filter, sortNewest, fetchPage, applyPage])
 
   // Rows are already filtered AND sorted by the server. Re-filtering here would silently
   // re-introduce the client-side bug; re-sorting would only sort the pages fetched so far.
@@ -336,23 +420,21 @@ export default function VendorOrdersPage() {
   const tabCounts = counts
 
   return (
-    <div className="p-6 md:p-4 sm:p-3 max-w-[56rem] mx-auto">
+    <div ref={listTopRef} className="p-6 md:p-4 sm:p-3 max-w-[56rem] mx-auto">
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
           <h1 className="font-bebas text-[clamp(1.75rem,3.5vw,2.5rem)] tracking-wide text-white leading-tight">
             Order <span className="text-neon-pink">History</span>
           </h1>
           <p className="text-text-gray text-sm mt-0.5">
-            {/* The TRUE total for the active filter (counted server-side across all
-                history), not the number of rows fetched so far. */}
+            {/* The TRUE total for the active filter (counted server-side across all history).
+                It no longer says "showing N of" — with one page on screen at a time that
+                number described the accumulation, and position now lives in the pager. */}
             {loading
               ? 'Loading…'
               : (() => {
                   const total = tabCounts[filter] ?? orders.length
-                  const shown = orders.length
-                  return total > shown
-                    ? `Showing ${shown} of ${total} order${total !== 1 ? 's' : ''}`
-                    : `${total} order${total !== 1 ? 's' : ''} total`
+                  return `${total} order${total !== 1 ? 's' : ''} total`
                 })()}
           </p>
         </div>
@@ -406,16 +488,25 @@ export default function VendorOrdersPage() {
             <OrderCard key={order.id} order={order} />
           ))}
 
-          {/* Cursor pagination. `nextCursor` is null once the server has no further rows
-              for THIS filter, so the button disappears exactly when the list is complete. */}
-          {nextCursor && (
-            <button
-              onClick={loadMore}
-              disabled={loadingMore}
-              className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-text-gray text-xs font-semibold hover:text-white hover:border-white/20 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {loadingMore ? 'Loading…' : `Load ${PAGE_SIZE} more`}
-            </button>
+          {/* Cursor-stack pagination.
+              • hasNext is the SERVER's answer (nextCursor is null once this filter has no
+                further rows), not a page-number comparison — the reader only claims another
+                page when the current one came back full.
+              • hasPrev is the stack, so it is false on page 1 by construction.
+              • `page` and `totalPages` are both derived: the stack that fetched these rows,
+                and the server-counted total for THIS tab. Neither is a click counter.
+              Hidden at one page — a pager over a single page is furniture. */}
+          {totalPages !== null && totalPages > 1 && (
+            <AnimatedPagination
+              page={page}
+              totalPages={totalPages}
+              hasPrev={cursorStack.length > 0}
+              hasNext={nextCursor !== null}
+              onPrev={goPrev}
+              onNext={goNext}
+              busy={paging}
+              direction={pageDir}
+            />
           )}
         </div>
       )}

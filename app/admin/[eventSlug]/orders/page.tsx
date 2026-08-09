@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useMemo, useEffect, use, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, use, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, ChevronDown, ChevronUp, Package, User, Store, Clock, ArrowUpDown } from 'lucide-react'
 import { STRAND_THRESHOLDS_MS } from '@/lib/constants'
+import AnimatedPagination from '@/app/_components/ui/AnimatedPagination'
 
 // ─── Types (the real /api/admin/events/[id]/orders shape) ─
 
@@ -95,9 +96,18 @@ const FILTER_TABS = [
   { value: 'issues',    label: 'Issues' },
 ] as const
 
-/** One page. The server clamps take to 100 (lib/fair-orders); "Load older" appends the next page
- *  via nextCursor, so the log is no longer capped — just paged. */
-const PAGE_TAKE = 100
+/**
+ * Rows per page — the SINGLE source for both the fetch `take` and the totalPages divisor.
+ *
+ * Write those two separately and the pager lies: the take decides how many rows a page HOLDS,
+ * the divisor decides what "N of M" CLAIMS about it, and any gap between them is an indicator
+ * confidently describing a page shape that doesn't exist. One constant makes that unexpressible.
+ *
+ * Deliberately NOT shared with the vendor order-history list (25) — these are different surfaces
+ * with different densities, and coupling them would mean one can't be tuned without moving the
+ * other. lib/fair-orders clamps take to 100 and defaults to 50; this sits inside that.
+ */
+const ADMIN_ORDERS_PAGE_SIZE = 50
 
 const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY', 'RUNNER_COLLECTED'])
 
@@ -294,8 +304,22 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({})
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [paging, setPaging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // CURSOR STACK — the cursors walked to REACH the page on screen; page 1 is the empty stack,
+  // cursorStack[i] is the cursor that fetched page i+2. Same pattern as vendor order history,
+  // for the same reason: lib/fair-orders is cursor-paginated with a placedAt+id stable sort, and
+  // a cursor only walks forward, so remembering the ones we used is what makes Previous possible
+  // without an offset rewrite. Pushed/popped ONLY after a fetch succeeds — the page number is
+  // derived from its length, so moving it on click could caption page 2's rows "3 of 6".
+  const [cursorStack, setCursorStack] = useState<string[]>([])
+  const [pageDir, setPageDir] = useState<1 | -1>(1)
+  const listTopRef = useRef<HTMLDivElement>(null)
+  // Which filter/search/sort combination the rows on screen belong to. The page-1 effect drops
+  // its own stale responses with an `active` flag; a page fetch needs the same protection,
+  // because the FILTERS stay live while a page is loading.
+  const fetchKeyRef = useRef('')
   const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([])
   // Distinguishes "no vendors yet" from "not loaded" — without it the select renders as if the
   // fair had no vendors, then snaps wider when they arrive (the flicker class: a
@@ -354,7 +378,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   }, [params.eventSlug])
 
   const buildUrl = useCallback((cursor?: string) => {
-    const qp = new URLSearchParams({ take: String(PAGE_TAKE), tab: filter, sort: sortNewest ? 'newest' : 'oldest' })
+    const qp = new URLSearchParams({ take: String(ADMIN_ORDERS_PAGE_SIZE), tab: filter, sort: sortNewest ? 'newest' : 'oldest' })
     if (urlSearch)             qp.set('q', urlSearch)
     if (vendorFilt !== 'all')  qp.set('vendorId', vendorFilt)
     if (fulfilFilt !== 'all')  qp.set('type', fulfilFilt)
@@ -365,8 +389,11 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   // First page — refetched whenever any server-scoped filter changes.
   useEffect(() => {
     let active = true
+    fetchKeyRef.current = buildUrl()  // any page fetch keyed to an older URL is stale
     setLoading(true)
     setError(null)
+    setCursorStack([])   // filters changed → back to page 1; old cursors address another query
+    setPageDir(1)
     fetch(buildUrl())
       .then((r) => r.json())
       .then((json) => {
@@ -382,18 +409,54 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     return () => { active = false }
   }, [buildUrl])
 
-  const loadOlder = useCallback(() => {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    fetch(buildUrl(nextCursor))
-      .then(r => r.json())
-      .then(json => {
-        if (!json.success) return
-        setOrders(prev => [...prev, ...((json.data.orders ?? []) as AdminOrder[])])
-        setNextCursor(json.data.nextCursor ?? null)
-      })
-      .finally(() => setLoadingMore(false))
-  }, [nextCursor, loadingMore, buildUrl])
+  /** Apply a fetched page, THEN move the stack. REPLACES the rows — one page at a time. */
+  const applyPage = useCallback((
+    json: { success?: boolean; data?: { orders?: AdminOrder[]; nextCursor?: string | null; total?: number } },
+    nextStack: string[],
+    dir: 1 | -1,
+    key: string,
+  ) => {
+    // A filter moved while this page was in flight — this response describes a query nobody is
+    // looking at any more.
+    if (fetchKeyRef.current !== key) return
+    if (!json?.success) return
+    setOrders((json.data?.orders ?? []) as AdminOrder[])
+    setNextCursor(json.data?.nextCursor ?? null)
+    setCursorStack(nextStack)
+    setPageDir(dir)
+    listTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  const goNext = useCallback(async () => {
+    if (!nextCursor || paging) return
+    setPaging(true)
+    try {
+      // Captured before the await: nextCursor is about to be replaced by the response, and this
+      // is the value that belongs on the stack.
+      const used = nextCursor
+      const key = buildUrl()
+      applyPage(await (await fetch(buildUrl(used))).json(), [...cursorStack, used], 1, key)
+    } catch { /* stack untouched — the indicator still describes the rows on screen */ }
+    finally { setPaging(false) }
+  }, [nextCursor, paging, cursorStack, buildUrl, applyPage])
+
+  const goPrev = useCallback(async () => {
+    if (cursorStack.length === 0 || paging) return
+    setPaging(true)
+    try {
+      // The page before this one was fetched with the cursor one below the top of the stack —
+      // or with no cursor at all, which is page 1.
+      const nextStack = cursorStack.slice(0, -1)
+      const key = buildUrl()
+      const prevCursor = nextStack[nextStack.length - 1]
+      applyPage(await (await fetch(buildUrl(prevCursor))).json(), nextStack, -1, key)
+    } catch { /* stack untouched */ }
+    finally { setPaging(false) }
+  }, [cursorStack, paging, buildUrl, applyPage])
+
+  // DERIVED, never mirrored: the page IS the depth of the stack that fetched it.
+  const page = cursorStack.length + 1
+  const totalPages = Math.max(1, Math.ceil(total / ADMIN_ORDERS_PAGE_SIZE))
 
   const hasActiveFilter = filter !== 'all' || fulfilFilt !== 'all' || vendorFilt !== 'all' || Boolean(urlSearch)
 
@@ -411,7 +474,7 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
   }, [orders, nowMs])
 
   return (
-    <div className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
+    <div ref={listTopRef} className="p-6 md:p-4 sm:p-3 max-w-[64rem] mx-auto">
       {/* Header */}
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
@@ -419,11 +482,12 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
             Order <span className="text-neon-pink">Log</span>
           </h1>
           <p className="text-text-gray text-sm mt-0.5">
+            {/* The whole-event total for the CURRENT filter+search. It no longer says "showing
+                N of" — with one page on screen that number described the accumulation, and
+                position now lives in the pager. */}
             {loading
               ? 'Loading…'
-              : total === orders.length
-                ? `${total} order${total === 1 ? '' : 's'}${hasActiveFilter ? ' match' : ''}`
-                : `Showing ${orders.length} of ${total}`}
+              : `${total} order${total === 1 ? '' : 's'}${hasActiveFilter ? ' match' : ''}`}
           </p>
         </div>
         <button
@@ -554,18 +618,26 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
             </div>
           ))}
 
-          {nextCursor ? (
-            <button
-              onClick={loadOlder}
-              disabled={loadingMore}
-              className="w-full py-3 rounded-xl text-xs font-semibold text-text-gray hover:text-white bg-white/5 border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {loadingMore ? 'Loading…' : `Load older orders (${total - orders.length} more)`}
-            </button>
-          ) : (
-            orders.length > 0 && total > PAGE_TAKE && (
-              <p className="text-center text-[0.6875rem] text-text-gray py-3">End of the log — all {total} shown.</p>
-            )
+          {/* Cursor-stack pagination.
+              • hasNext is the SERVER's answer (nextCursor is null once this query has no further
+                rows — the reader only claims another page when this one came back full), never a
+                page-number comparison.
+              • hasPrev is the stack, so page 1 is disabled by construction.
+              • page and totalPages are both derived — the stack that fetched these rows, and the
+                server-counted total for the CURRENT filter+search (lib/fair-orders counts the same
+                where-clause as the list). Neither is a click counter.
+              Hidden at one page: a pager over a single page is furniture. */}
+          {totalPages > 1 && (
+            <AnimatedPagination
+              page={page}
+              totalPages={totalPages}
+              hasPrev={cursorStack.length > 0}
+              hasNext={nextCursor !== null}
+              onPrev={goPrev}
+              onNext={goNext}
+              busy={paging}
+              direction={pageDir}
+            />
           )}
         </div>
       )}
