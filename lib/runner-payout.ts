@@ -8,10 +8,16 @@
  * (planRunnerPayout returns it) used by the shadow sweep to prove the stored
  * ledger has not drifted from Part A's formula — it is never what gets paid.
  *
- * SHADOW-FIRST: this file currently only PLANS (pure read, no writes, no Stripe
- * transfers). The real transfer (transfers.create + status→paid + Payout record)
- * is enabled after the shadow sweep is reviewed. There is deliberately no
- * transfers.create in this module yet.
+ * LIVE: this file plans AND executes. processRunnerPayout (:231) performs the
+ * real transfer via stripe.transfers.create (:315) and marks the earning paid;
+ * it is called from lib/order-side-effects.ts:113 and :132, and swept by
+ * reconcileRunnerPayouts (:363), imported at lib/reconciler.ts:40 (Pattern P,
+ * :1197). planRunnerPayout (:113) remains a pure read — its independent
+ * recompute is a drift CHECK and is never what gets paid.
+ *
+ * (This header said "SHADOW-FIRST … There is deliberately no transfers.create in
+ * this module yet" while transfers.create sat at :315 of the same file. Reviewed
+ * 2026-08-09 against the tree.)
  *
  * Money model (locked):
  *   - The delivery/curbside fee + tip were charged to the customer and RETAINED
