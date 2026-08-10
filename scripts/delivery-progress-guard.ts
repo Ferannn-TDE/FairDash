@@ -63,7 +63,16 @@ assert(deriveDeliveryProgress({ ...base, vendorStatus: 'PREPARING' }).state === 
 console.log('\n[4] source shape: the dual readers are gone')
 const single = readFileSync(new URL('../components/order/SingleOrderTracking.tsx', import.meta.url), 'utf8')
 assert(!single.includes('PROGRESS_PERCENT'), 'SingleOrderTracking has NO local percent map (the second reader)')
-assert(single.includes('deriveDeliveryProgress'), 'SingleOrderTracking renders from the one derivation')
+// The one derivation moved BEHIND deriveOrderView (lib/order-view.ts), which is now the single
+// place any customer surface asks what an order looks like. The invariant is unchanged and
+// stricter: the component may not call deriveDeliveryProgress itself, it must take the result.
+assert(single.includes('view.delivery') && !single.includes('deriveDeliveryProgress('),
+  'SingleOrderTracking renders from the one derivation (via view.delivery, not its own call)')
+const orderView = readFileSync(new URL('../lib/order-view.ts', import.meta.url), 'utf8')
+assert(/deriveDeliveryProgress\(\{/.test(orderView),
+  'deriveOrderView is the ONE caller of deriveDeliveryProgress')
+assert(/vendorStatus:\s*displayStatus/.test(orderView) && /masterStatus:\s*displayStatus/.test(orderView),
+  'it feeds the CLAMPED displayStatus to both inputs — a raw vendor COMPLETED on the delivery arm would read "complete" while the runner still has the food')
 assert(/\{!isRunnerOrder && <StatusPill/.test(single), 'no status pill on the runner path (bar + line are the only indicators)')
 const driver = readFileSync(new URL('../components/order/DeliveryTracking.tsx', import.meta.url), 'utf8')
 assert(driver.includes('runnerVehicleColor') && !driver.includes('order.vehicleMake'), 'driver card reads SNAPSHOT vehicle fields only — never the customer vehicle or a mutable profile')
@@ -222,8 +231,11 @@ console.log('\n[5] no second derivation of order-state wording')
   // correctly today; pinning that stops the gate being dropped in a refactor.
   const singleSrc = stripComments(readFileSync(new URL('../components/order/SingleOrderTracking.tsx', import.meta.url), 'utf8'))
   assert(singleSrc.includes('<StatusBanner'), 'positive control: SingleOrderTracking really does render StatusBanner (else [6] is vacuous)')
+  // The runner test is now `progress` (i.e. view.delivery), which deriveOrderView sets to
+  // non-null EXACTLY when the order is on the delivery arm — so the branch condition and the
+  // thing it guards are the same fact, rather than two assertions that could drift apart.
   assert(
-    /isRunnerOrder\s*\?[\s\S]*<StatusBanner/.test(singleSrc),
+    /(isRunnerOrder|progress)\s*\?[\s\S]*<StatusBanner/.test(singleSrc),
     'StatusBanner renders only on the NON-runner branch of SingleOrderTracking',
   )
 }

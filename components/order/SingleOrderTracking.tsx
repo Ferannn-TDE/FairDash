@@ -15,15 +15,14 @@ import {
   CancelModal,
   SupportModal,
 } from './OrderComponents'
-import { TERMINAL_STATUSES, getMapEmbedUrl, formatDate } from './helpers'
+import { getMapEmbedUrl, formatDate } from './helpers'
 import type { OrderTrackingProps } from './types'
 import { StatusPill } from '@/components/ui/StatusPill'
-import { deriveDeliveryProgress } from '@/lib/delivery-progress'
 import { DeliverySegmentBar, DeliveryStatusLine, DriverCard } from './DeliveryTracking'
 
 export default function SingleOrderTracking({
   order,
-  liveStatus,
+  view,
   fairSlug,
   cancelling,
   locationSlot,
@@ -34,28 +33,14 @@ export default function SingleOrderTracking({
   onCancel,
   onOrderAgain,
 }: OrderTrackingProps) {
-  // Multi-vendor works because it reads order.vendorOrderStatuses (updated by
-  // setOrder). Mirror that here: prefer vendorOrderStatuses[0] so this uses
-  // the same update path, falling back to liveStatus if the row isn't present.
-  const vendorStatus = order.vendorOrderStatuses?.[0]?.status ?? liveStatus
-
-  const isCancelled     = TERMINAL_STATUSES.includes(vendorStatus)
-  const isCompleted     = vendorStatus === 'COMPLETED' || vendorStatus === 'DELIVERED'
-  const canCancel       = vendorStatus === 'PLACED'
-  const mapSrc          = getMapEmbedUrl(order)
+  // EVERY status question this view asks is answered by the one derivation. It used to
+  // read vendorOrderStatuses[0] (positional, unfiltered — B3) with a liveStatus fallback,
+  // then hand-roll isCancelled / isCompleted / canCancel on top of it. Three of those four
+  // reads disagreed with the other tracking view about the same order.
+  const { displayStatus, isCancelled, isCompleted, canCancel, isRunnerOrder } = view
+  const progress = view.delivery
+  const mapSrc   = getMapEmbedUrl(order)
   const runnerLocation: { lat: number; lng: number } | null = null
-
-  // Runner-fulfilled orders render from ONE derivation (bar + status line + timeline all
-  // read this) — the pill-vs-banner split ("Ready / 80%" while the banner had vanished in
-  // transit) is superseded, not layered over. Booth pickup keeps the vendor-stepper view.
-  const isRunnerOrder = order.fulfillmentType === 'HOME_DELIVERY' || order.fulfillmentType === 'CURBSIDE'
-  const progress = deriveDeliveryProgress({
-    vendorStatus,
-    masterStatus: order.status,
-    runnerId: order.runnerId,
-    collectedAt: order.collectedAt,
-    estimatedReadyAt: order.estimatedReadyAt ?? null,
-  })
 
   return (
     <>
@@ -81,7 +66,7 @@ export default function SingleOrderTracking({
               </div>
               {/* Runner orders: the segment bar + status line are the ONLY indicators —
                   no pill, so a second reader can't disagree with the bar again. */}
-              {!isRunnerOrder && <StatusPill status={vendorStatus} />}
+              {!isRunnerOrder && <StatusPill status={displayStatus} />}
             </div>
           </div>
         </div>
@@ -94,7 +79,9 @@ export default function SingleOrderTracking({
 
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6">
           <div className="mb-4 space-y-4">
-            {isRunnerOrder ? (
+            {/* `progress` is non-null exactly when isRunnerOrder — branching on it directly
+                keeps the two facts from being asserted separately. */}
+            {progress ? (
               <>
                 <DeliverySegmentBar progress={progress} />
                 <DeliveryStatusLine progress={progress} />
@@ -104,9 +91,9 @@ export default function SingleOrderTracking({
               <>
                 <SingleVendorProgress
                   vendorName={order.vendor.name}
-                  status={vendorStatus}
+                  status={displayStatus}
                 />
-                <StatusBanner order={order} status={vendorStatus} />
+                <StatusBanner order={order} status={displayStatus} />
               </>
             )}
           </div>
@@ -135,7 +122,7 @@ export default function SingleOrderTracking({
                       {runnerLocation ? (
                         <>Runner location live <span className="w-2 h-2 rounded-full bg-[#FF0077] animate-pulse" /></>
                       ) : (
-                        order.fulfillmentType === 'HOME_DELIVERY' && liveStatus === 'READY'
+                        order.fulfillmentType === 'HOME_DELIVERY' && displayStatus === 'READY'
                           ? 'Awaiting runner location…'
                           : 'Order location'
                       )}
@@ -144,7 +131,7 @@ export default function SingleOrderTracking({
                 </div>
               )}
 
-              <OrderItemsCard order={order} isMultiVendor={false} />
+              <OrderItemsCard order={order} view={view} isMultiVendor={false} />
 
               {!isCompleted && !isCancelled && (
                 <div className="flex gap-3">
@@ -191,7 +178,7 @@ export default function SingleOrderTracking({
               )}
             </div>
 
-            <OrderMetaCard order={order} isMultiVendor={false} />
+            <OrderMetaCard order={order} view={view} isMultiVendor={false} />
           </div>
         </div>
       </div>
@@ -201,12 +188,13 @@ export default function SingleOrderTracking({
         onClose={() => setShowCancelModal(false)}
         onConfirm={onCancel}
         loading={cancelling}
-        orderStatus={liveStatus}
+        needsApproval={!canCancel}
       />
       <SupportModal
         isOpen={showSupportModal}
         onClose={() => setShowSupportModal(false)}
         order={order}
+        view={view}
       />
     </>
   )

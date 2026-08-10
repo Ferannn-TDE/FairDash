@@ -144,8 +144,16 @@ console.log('\n[2] the aggregator keeps its own monotonic guard (it is the excep
 const agg = stripComments(readFileSync(AGGREGATOR, 'utf8'))
 assert(/updateMany\(\{[\s\S]*?where:\s*\{[\s\S]*?status:\s*\{\s*in:\s*WRITE_GUARD\[target\]/.test(agg),
   'reconcileMasterStatus writes through updateMany gated on WRITE_GUARD[target]')
-assert(/export function canAdvance/.test(agg) && /MASTER_RANK\[derived\] > MASTER_RANK\[stored\]/.test(agg),
+// canAdvance + the rank table live in lib/order-derive.ts — the PURE core, extracted verbatim
+// so the customer tracking view can share the delivery-arm clamp instead of re-implementing it
+// (a browser module cannot import the aggregator: it reaches ./db, ./queues, ./firebase-sync).
+// The aggregator re-exports them, so this asserts the rule at its definition AND that the
+// aggregator still routes through it rather than having grown a private copy.
+const core = stripComments(readFileSync(new URL('../lib/order-derive.ts', import.meta.url).pathname, 'utf8'))
+assert(/export function canAdvance/.test(core) && /MASTER_RANK\[derived\] > MASTER_RANK\[stored\]/.test(core),
   'canAdvance still enforces strictly-increasing rank')
+assert(/canAdvance\(stored, target\)/.test(agg) && !/function canAdvance/.test(agg),
+  'the aggregator CALLS the shared canAdvance and defines no copy of it')
 
 // ── [3] NO FOURTH TRANSITION TABLE ───────────────────────────────────────────
 // The duplicate-derivation class. VENDOR_TRANSITIONS was deleted; ALLOWED_TRANSITIONS (the

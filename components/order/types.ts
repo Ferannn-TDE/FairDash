@@ -1,3 +1,5 @@
+import type { OrderView } from '@/lib/order-view'
+
 export interface OrderItem {
   id: string
   menuItemId: string
@@ -75,7 +77,13 @@ export interface Order {
 
 export interface OrderTrackingProps {
   order: Order
-  liveStatus: string
+  /**
+   * THE derived view — the single source for every status question this tracking surface
+   * asks (displayStatus, isCancelled, isCompleted, canCancel, per-vendor lanes, delivery
+   * progress). It replaced a `liveStatus: string` prop that carried a PER-VENDOR value
+   * under a master-sounding name; see the B1 note in lib/order-view.ts.
+   */
+  view: OrderView
   fairSlug: string
   cancelling: boolean
   showCancelModal: boolean

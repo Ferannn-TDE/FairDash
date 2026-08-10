@@ -16,25 +16,14 @@ export const STEPS = [
 
 export const VENDOR_STEPS = ['Placed', 'Accepted', 'Preparing', 'Ready']
 
-export const VENDOR_STATUS_TO_STEP: Record<string, number> = {
-  PLACED:    0,
-  ACCEPTED:  1,
-  PREPARING: 2,
-  READY:     3,
-  COMPLETED: 4,
-  DECLINED:  -1,
-}
-
-export const STATUS_TO_STEP: Record<string, number> = {
-  PENDING_PAYMENT:  0,
-  PLACED:           0,
-  ACCEPTED:         1,
-  PREPARING:        1,
-  READY:            2,
-  RUNNER_COLLECTED: 2,
-  COMPLETED:        3,
-  DELIVERED:        3,
-}
+// VENDOR_STATUS_TO_STEP moved to lib/order-view.ts (VENDOR_LANE_STEP): it is a derivation
+// over status, not a label map, so it belongs with the other status derivations where
+// order-view-guard can see it. Components read `lane.step` off the derived view instead.
+//
+// STATUS_TO_STEP / getStepFromStatus / getActiveStep / buildSteps / canCancelOrder were
+// DELETED here — all five had zero call sites. canCancelOrder is the telling one: a shared
+// cancel-eligibility helper existed and both tracking views ignored it to inline their own
+// (differing) rule. That rule now lives in deriveOrderView, with callers.
 
 // Terminal-FAILED statuses (drives isCancelled on the tracking surfaces; COMPLETED/DELIVERED
 // are handled separately by isCompleted). DERIVED from the one canonical list — this used to be
@@ -106,31 +95,6 @@ export function buildVendorGroups(orderItems: OrderItem[]): VendorGroup[] {
   return [...map.values()]
 }
 
-export function getStepFromStatus(status: string): number {
-  return STATUS_TO_STEP[status] ?? -1
-}
-
-// Returns the 0-based stepper index for a given order status.
-// Defaults to 0 (Order Placed) for unknown/empty values so the stepper
-// never renders all-gray on initial load.
-export function getActiveStep(status: string): number {
-  if (['PLACED', 'PENDING_PAYMENT'].includes(status))           return 0
-  if (['ACCEPTED', 'PREPARING'].includes(status))               return 1
-  if (['READY', 'RUNNER_COLLECTED'].includes(status))           return 2
-  if (['COMPLETED', 'DELIVERED'].includes(status))              return 3
-  return 0
-}
-
-export function canCancelOrder(order: Order, liveStatus: string, vendorGroups: VendorGroup[]): boolean {
-  if (vendorGroups.length > 1) {
-    const anyAccepted = order.vendorOrderStatuses?.some(vs =>
-      ['ACCEPTED', 'PREPARING', 'READY', 'COMPLETED'].includes(vs.status)
-    ) ?? false
-    return !anyAccepted
-  }
-  return liveStatus === 'PLACED'
-}
-
 export function getMapEmbedUrl(order: Order): string {
   let query = ''
   if (order.fulfillmentType === 'HOME_DELIVERY' && order.deliveryStreet) {
@@ -153,14 +117,3 @@ export function formatDate(iso?: string | null): string {
   return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-export function buildSteps(fulfillmentType: string) {
-  return STEPS.map((s, i) =>
-    i === 2
-      ? {
-          ...s,
-          label: fulfillmentType === 'HOME_DELIVERY' ? 'Out for Delivery' : 'Ready for Pickup',
-          sublabel: fulfillmentType === 'HOME_DELIVERY' ? 'On the way' : 'For pickup',
-        }
-      : s
-  )
-}
