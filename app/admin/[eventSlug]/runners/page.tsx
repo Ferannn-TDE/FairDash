@@ -3,6 +3,7 @@
 import { useState, useEffect, use, useCallback } from 'react'
 import { Truck, AlertTriangle } from 'lucide-react'
 import ApprovalQueue, { type ApprovalItem } from '../../_components/ApprovalQueue'
+import { RUNNER_MIN_COMPLETION_RATE } from '@/lib/constants'
 
 type RunnerStatus = 'ACTIVE' | 'OFFLINE' | 'ON_DELIVERY'
 type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
@@ -111,10 +112,11 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
       {/* Warning for low completion rates — SCORED runners only (at or above the
           minimum-denominator floor). An unscored runner's rate is noise over a tiny
           sample and never fires the banner. */}
-      {!loading && runners.some(r => r.scored && r.completionRate < 0.90) && (
+      {!loading && runners.some(r => r.scored && r.completionRate < RUNNER_MIN_COMPLETION_RATE) && (
         <div className="mb-5 px-4 py-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
           <p className="text-sm text-yellow-300 font-inter">
-            <span className="font-semibold">Warning:</span> Some runners are below the 90% completion rate threshold and may need to be reviewed.
+            <span className="font-semibold">Warning:</span> Some runners are below the{' '}
+            {Math.round(RUNNER_MIN_COMPLETION_RATE * 100)}% completion rate threshold and may need to be reviewed.
           </p>
         </div>
       )}
