@@ -628,8 +628,12 @@ export function CancelModal({
             <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
           </div>
           <div>
-            <h3 className="font-bebas text-xl tracking-wide text-white">Cancel Order?</h3>
-            <p className="text-[#A1A1A1] text-xs">This cannot be undone.</p>
+            <h3 className="font-bebas text-xl tracking-wide text-white">
+              {needsApproval ? 'Request a Refund?' : 'Cancel Order?'}
+            </h3>
+            <p className="text-[#A1A1A1] text-xs">
+              {needsApproval ? 'The organizer will review your request.' : 'This cannot be undone.'}
+            </p>
           </div>
         </div>
         {needsApproval ? (
@@ -649,7 +653,9 @@ export function CancelModal({
             Keep Order
           </button>
           <button onClick={onConfirm} disabled={loading} className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 active:scale-[0.97] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? 'Cancelling…' : needsApproval ? 'Request Refund' : 'Cancel Order'}
+            {loading
+              ? (needsApproval ? 'Submitting request…' : 'Cancelling…')
+              : (needsApproval ? 'Request Refund' : 'Cancel Order')}
           </button>
         </div>
       </div>
