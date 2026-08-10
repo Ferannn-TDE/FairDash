@@ -1236,7 +1236,8 @@ export default function VendorDashboardPage() {
               </div>
             </div>
             <p className="text-white/60 text-sm mb-6">
-              The customer will be notified and a full refund will be issued automatically.
+              The customer will be notified and refunded for the food automatically. The 10%
+              service fee isn&apos;t refunded.
             </p>
             <div className="flex gap-3">
               <button
