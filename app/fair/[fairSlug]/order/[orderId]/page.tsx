@@ -111,7 +111,20 @@ export default function OrderTrackingPage() {
     try {
       const res = await fetch(`/api/orders/${orderId}/cancel`, { method: 'PATCH' })
       if (res.ok) {
-        setOrder(prev => prev ? { ...prev, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : prev)
+        // vendorOrderStatuses must be patched too, not just the master status:
+        // SingleOrderTracking derives EVERYTHING it shows — isCancelled, canCancel, the
+        // timeline — from vendorOrderStatuses[0].status (SingleOrderTracking.tsx:40-44),
+        // not from order.status or liveStatus. Setting only the master left the view on
+        // PLACED, so a successful cancel looked like nothing had happened until a reload.
+        // REFUNDED is what the server actually writes for a pre-accept cancel
+        // (cancel/route.ts:84 → refundVendorPortion) and is terminal for the view
+        // (FAILED_STATUSES, lib/order-status.ts:17), so isCancelled flips.
+        setOrder(prev => prev ? {
+          ...prev,
+          status: 'CANCELLED',
+          cancelledAt: new Date().toISOString(),
+          vendorOrderStatuses: (prev.vendorOrderStatuses ?? []).map(vs => ({ ...vs, status: 'REFUNDED' })),
+        } : prev)
         setLiveStatus('CANCELLED')
         setShowCancelModal(false)
         toast.success('Order cancelled. Refund is on the way.')
