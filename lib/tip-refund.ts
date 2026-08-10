@@ -1,7 +1,13 @@
 /**
- * Tip-refund execution — Part B Phase B4 (the last piece). SHADOW-FIRST: this
- * file currently only PLANS (pure read). The executor (stripe.refunds.create) is
- * enabled after the shadow is reviewed.
+ * Tip-refund execution — Part B Phase B4 (the last piece). LIVE: this file plans
+ * AND executes. processTipRefund (:103) refunds the customer via
+ * stripe.refunds.create (:138), and reconcileTipRefunds (:173) is the PRIMARY
+ * path — imported at lib/reconciler.ts:42, whose Pattern R (:206) records that
+ * there is no per-order enqueue, so an owed-back tip is refunded on the sweep.
+ * planTipRefund (:49) remains a pure read.
+ *
+ * (This header said "SHADOW-FIRST … only PLANS" long after the executor shipped
+ * — reviewed 2026-08-09 against the tree.)
  *
  * THE CASE (from reconciler Pattern L): a CANCELLED runner-fulfilled order with a
  * tip the customer paid, where NO runner ever earned it (no RunnerEarning). No one

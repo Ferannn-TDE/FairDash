@@ -1,7 +1,14 @@
 /**
- * Organizer payout — Part B Phase B3. SHADOW-FIRST: this file currently only
- * PLANS (pure read, no writes, no Stripe transfers). The executor (the batched
- * transfer + OrganizerPayout batch record) is enabled after the shadow is reviewed.
+ * Organizer payout — Part B Phase B3. LIVE: this file plans AND executes.
+ * processEventOrganizerPayout (:147) creates the batch and moves real money via
+ * stripe.transfers.create (:240); it is wired into the worker's
+ * process-organizer-payout job (workers/order-worker.ts:46, :644) and swept by
+ * reconcileOrganizerPayouts (:290), imported at lib/reconciler.ts:41.
+ * planOrganizerPayout (:57) remains a pure read, used by the shadow proofs.
+ *
+ * (This header said "SHADOW-FIRST … only PLANS" long after the executor shipped.
+ * A header claiming a money file cannot move money is the kind of stale fact that
+ * gets believed — reviewed 2026-08-09 against the tree.)
  *
  * DIFFERENT SHAPE from runner payouts (the Phase 0 fork):
  *   - BATCHED, not per-order: one payout per EVENT summing all unpaid accrued
