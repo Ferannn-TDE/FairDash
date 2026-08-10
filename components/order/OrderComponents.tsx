@@ -613,7 +613,12 @@ export function CancelModal({
   isOpen: boolean; onClose: () => void; onConfirm: () => void; loading: boolean; orderStatus: string
 }) {
   if (!isOpen) return null
-  const feeApplies = orderStatus === 'ACCEPTED'
+  // Post-accept the API refuses a self-cancel and files a RefundRequest for the organizer
+  // (app/api/orders/[id]/cancel/route.ts:92-99) — so this branch is about APPROVAL, not a fee.
+  // It replaced `feeApplies`, which gated on ORDER_CANCELLATION_FEE_USD: a constant with zero
+  // call sites that is never charged. Reachable only by race (the button hides once a vendor
+  // accepts), but the copy it showed was false in every direction.
+  const needsApproval = orderStatus !== 'PLACED'
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
@@ -627,20 +632,16 @@ export function CancelModal({
             <p className="text-[#A1A1A1] text-xs">This cannot be undone.</p>
           </div>
         </div>
-        {feeApplies ? (
-          <div className="mb-6 space-y-3">
-            <p className="text-[#A1A1A1] text-sm">
-              The vendor has already accepted your order. A{' '}
-              <span className="text-white font-semibold">$5.00 cancellation fee</span> will be
-              retained and the remainder refunded within 5–10 business days.
-            </p>
-            <p className="text-[0.6875rem] text-amber-400/80">
-              Cancellations after a vendor has started your order incur a $5.00 fee.
-            </p>
-          </div>
+        {needsApproval ? (
+          <p className="text-[#A1A1A1] text-sm mb-6">
+            This vendor has already accepted your order, so it can&apos;t be cancelled directly.
+            We&apos;ll submit a refund request for the event organizer to review, and you&apos;ll
+            hear back once they&apos;ve decided.
+          </p>
         ) : (
           <p className="text-[#A1A1A1] text-sm mb-6">
-            Your order will be cancelled and a full refund will be issued within 5–10 business days.
+            Your order will be cancelled and we&apos;ll refund what you paid for the food. The 10%
+            service fee isn&apos;t refunded. Refunds usually appear within 5–10 business days.
           </p>
         )}
         <div className="flex gap-3">
@@ -648,7 +649,7 @@ export function CancelModal({
             Keep Order
           </button>
           <button onClick={onConfirm} disabled={loading} className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 active:scale-[0.97] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? 'Cancelling…' : feeApplies ? 'Cancel (−$5.00 fee)' : 'Cancel Order'}
+            {loading ? 'Cancelling…' : needsApproval ? 'Request Refund' : 'Cancel Order'}
           </button>
         </div>
       </div>
