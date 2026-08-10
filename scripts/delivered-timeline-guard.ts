@@ -29,10 +29,21 @@ const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  
 
 console.log('[1] timeline: delivered row keys on status, reads the earning timestamp')
 const tl = readFileSync(new URL('../components/order/OrderComponents.tsx', import.meta.url), 'utf8')
-const seg = tl.slice(tl.indexOf('Picked up from booth'), tl.indexOf('Picked up from booth') + 700)
-assert(/order\.status === 'DELIVERED'/.test(seg), "delivered row keys on status === 'DELIVERED' (like the bar)")
+// 1200, not 700: the timeline block grew a comment when the read moved to the derived view.
+// A slice that a comment can overflow reports a regression that isn't one.
+const seg = tl.slice(tl.indexOf('Picked up from booth'), tl.indexOf('Picked up from booth') + 1200)
+// The milestone still keys on STATUS (not completedAt) — it now reads it off the ONE derived
+// view rather than order.status directly, so the timeline and the progress bar are guaranteed
+// to agree about whether the food arrived instead of merely happening to.
+assert(/view\.timeline\.delivered/.test(seg), 'delivered row keys on the derived DELIVERED milestone (like the bar)')
 assert(/order\.runnerEarning\?\.createdAt/.test(seg), 'delivered row reads runnerEarning.createdAt for the time')
 assert(!/status === 'DELIVERED' && order\.completedAt/.test(seg), 'delivered row no longer gated on completedAt (which is always null on DELIVERED)')
+
+// …and the derived milestone is still STATUS-derived, so the indirection did not smuggle in a
+// completedAt dependency one file over.
+const view = readFileSync(new URL('../lib/order-view.ts', import.meta.url), 'utf8')
+assert(/timeline:\s*\{\s*delivered:\s*displayStatus === 'DELIVERED'\s*\}/.test(view),
+  "order-view derives timeline.delivered from displayStatus === 'DELIVERED' (never from completedAt)")
 
 console.log('\n[2] order route exposes the delivery timestamp')
 const route = readFileSync(new URL('../app/api/orders/[id]/route.ts', import.meta.url), 'utf8')

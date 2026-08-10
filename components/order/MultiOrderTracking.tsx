@@ -14,12 +14,12 @@ import {
   CancelModal,
   SupportModal,
 } from './OrderComponents'
-import { TERMINAL_STATUSES, buildVendorGroups, formatDate } from './helpers'
+import { buildVendorGroups, formatDate } from './helpers'
 import type { OrderTrackingProps } from './types'
 
 export default function MultiOrderTracking({
   order,
-  liveStatus,
+  view,
   fairSlug,
   cancelling,
   locationSlot,
@@ -31,17 +31,19 @@ export default function MultiOrderTracking({
   onOrderAgain,
 }: OrderTrackingProps) {
   const vendorGroups = buildVendorGroups(order.orderItems)
-  const isCancelled  = TERMINAL_STATUSES.includes(liveStatus)
-  const isCompleted  = liveStatus === 'COMPLETED' || liveStatus === 'DELIVERED'
-  const anyVendorAccepted = order.vendorOrderStatuses?.some(vs =>
-    ['ACCEPTED', 'PREPARING', 'READY', 'COMPLETED'].includes(vs.status)
-  ) ?? false
-  const canCancel = !anyVendorAccepted
 
-  // Build vendor list for the support modal: name + their individual live status
+  // ⚠️ THIS IS WHERE B1 LIVED. These three came from `liveStatus` — which the page set from
+  // the customer RTDB node, a channel that also carries PER-VENDOR pushes. So one vendor
+  // declining set liveStatus='DECLINED', TERMINAL_STATUSES.includes(...) went true, and the
+  // customer's whole order rendered cancelled while the other vendor was still cooking.
+  // deriveOrderView reads the master status and the lanes as separate things, so a single
+  // failed lane can no longer speak for the order.
+  const { displayStatus, isCancelled, isCompleted, canCancel } = view
+
+  // Support modal: each vendor's own lane, keyed by vendorId (never positional).
   const supportVendors = vendorGroups.map(g => ({
     name: g.vendorName,
-    status: order.vendorOrderStatuses?.find(vs => vs.vendorId === g.vendorId)?.status ?? 'PLACED',
+    status: view.perVendor.get(g.vendorId)?.status ?? 'PLACED',
   }))
 
   return (
@@ -79,15 +81,15 @@ export default function MultiOrderTracking({
           <div className="mb-4">
             <MultiVendorSummaryHeader
               vendorGroups={vendorGroups}
-              vendorStatuses={order.vendorOrderStatuses ?? []}
+              perVendor={view.perVendor}
             />
           </div>
 
-          <StatusBanner order={order} status={liveStatus} />
+          <StatusBanner order={order} status={displayStatus} />
 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_22rem] gap-5">
             <div className="flex flex-col gap-5">
-              <OrderItemsCard order={order} isMultiVendor={true} />
+              <OrderItemsCard order={order} view={view} isMultiVendor={true} />
 
               {!isCompleted && !isCancelled && (
                 <div className="flex gap-3">
@@ -134,7 +136,7 @@ export default function MultiOrderTracking({
               )}
             </div>
 
-            <OrderMetaCard order={order} isMultiVendor={true} />
+            <OrderMetaCard order={order} view={view} isMultiVendor={true} />
           </div>
         </div>
       </div>
@@ -144,12 +146,13 @@ export default function MultiOrderTracking({
         onClose={() => setShowCancelModal(false)}
         onConfirm={onCancel}
         loading={cancelling}
-        orderStatus={liveStatus}
+        needsApproval={!canCancel}
       />
       <SupportModal
         isOpen={showSupportModal}
         onClose={() => setShowSupportModal(false)}
         order={order}
+        view={view}
         vendors={supportVendors}
       />
     </>
