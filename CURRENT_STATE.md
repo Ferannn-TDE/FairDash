@@ -295,6 +295,64 @@ Re-measured 2026-07-24 (`stripeVerified: true AND stripeAccountId NOT NULL` for 
 
 ## 4. What shipped since the last regeneration — by class
 
+### 2026-08-09/10 — public surfaces + a refund-copy audit
+
+- **UI surfaces shipped.** Toast restyle (`aaf8d09`, merge `f7033f7`) — error toasts get the pink
+  outline + glow, success/loading go quiet grey; position flips bottom-center→bottom-right at md via
+  a media query on `[data-rht-toaster]`. Root 404 (`873660a`, merge `ce1390a`) — `app/not-found.tsx`,
+  server component, adds Inter 900 to the `globals.css` @import for the outline numeral. FAQ
+  (`5de5616` + `d78b368`, merges `0228c3e`) — `/faq` stacked server page **and** a tabbed animated
+  landing section, both reading `app/_components/faq-content.ts`.
+- **⚠️ Two customer-facing money claims were FALSE in production and are now fixed.** `4d9ec36`
+  (merge `94ad082`) — the FAQ promised a "free" pre-accept cancel (the 10% is kept) and a "$5
+  cancellation fee" (never charged), plus GPS confirmation "within 100 metres" (no code performs
+  it). `229fd20` + `4b59237` (merge `56bc909`) — CancelModal named the same non-existent $5 fee in
+  four places, promised an automatic post-accept refund that does not happen, and claimed a "full
+  refund" pre-accept. Both branches of that dialog are now honest end to end; `feeApplies` became
+  `needsApproval`. **Copy only — no money path touched.**
+- **Single-vendor cancel now updates the screen** (`985fa47`, merge `cecce10`). The cancel always
+  succeeded server-side, but the optimistic update set master `status` + `liveStatus` while
+  `SingleOrderTracking` derives everything from `vendorOrderStatuses[0].status` — so the view sat on
+  `PLACED` until a hard refresh. See the status-fragmentation note in `PROJECT_INVARIANTS.md`.
+
+**KNOWN GOOD — the refund engine was audited 2026-08-09 and is correct.** Do not re-audit without
+cause. `refundVendorPortion` (`lib/process-refund.ts`) is a real chokepoint, verified by grep, not
+by its own docstring: `stripe.refunds.create` exists in exactly two files and
+`transfers.createReversal` in one (`lib/clawback.ts:51`, called by the engine). All six refund paths
+route through it — customer cancel (`app/api/orders/[id]/cancel/route.ts:84`), organizer refund
+(`.../orders/[orderId]/refund/route.ts:59`), organizer dispute (`.../disputes/[disputeId]/route.ts:71`),
+admin refund (`app/api/admin/events/[id]/money/refund/route.ts:80`), vendor decline
+(`app/api/orders/[id]/vendor-status/route.ts:222`), accept-timeout (`workers/order-worker.ts:141`),
+plus reconciler retries (`lib/reconciler.ts:824`, `:869`). Keep-the-10% holds on every one.
+`waiveFee` (`process-refund.ts:87`, `:182-185`) is a **designed carve-out, not a leak** — three
+system-initiated platform/event-fault paths (`order-worker.ts:347`, `:365`, `:478`) refund the fee
+share too, using the same largest-remainder split as the payout so the total sums to the charge to
+the cent. Idempotency is a durable DB flag, not an expiring Stripe key: `Refund`
+`@@unique([orderId, vendorId])` (`prisma/schema.prisma:893`) + an early `noop` return on
+`status === 'COMPLETED'` (`process-refund.ts:124-131`); `RefundRequest` likewise (`:927`).
+
+**CONSTANTS AUDIT (2026-08-09) — 9 of 18 exports in `lib/constants.ts` are DEAD** (defined, zero
+acting call sites): `ORDER_CANCELLATION_FEE_USD`, `HOME_DELIVERY_GPS_RADIUS_M`,
+`RUNNER_MIN_COMPLETION_RATE`, `ADMIN_HEARTBEAT_INTERVAL_MS`, `INCIDENT_AUTO_REFUND_MS`,
+`DISPUTE_ESCALATION_MS`, `POST_EVENT_REPORT_HOURS`, `MAX_VENDORS_PER_ORDER`, and
+`CONSULTING_RATE_USD` (the last is dead **by design** — `:47` says invoiced manually). **Two of
+these were published as fact in customer-facing copy before being caught**: the $5 cancellation fee
+and the 100m GPS radius (both fixed above). `HOME_DELIVERY_GPS_RADIUS_M` is orphaned alongside
+`haversineMetres`, which is defined at `app/api/orders/[id]/status/route.ts:54` and **never called** —
+the route's own header (`:11-14`) says the check is "implemented NOWHERE in the repo".
+`RUNNER_MIN_COMPLETION_RATE` is worse than dead: nothing imports it, but `0.90` is hardcoded at
+`app/admin/[eventSlug]/runners/page.tsx:114` for an admin warning banner, so changing the constant
+silently does not move the UI. **ENFORCED and safe to quote:** `SERVICE_FEE_RATE` (via
+`calculateServiceFee`, `app/api/orders/route.ts:380`), `REFUND_WINDOW_MS`,
+`VENDOR_ACCEPT_TIMEOUT_MS` (`lib/place-order.ts:183`), `CURBSIDE_WAIT_TIMEOUT_MS`,
+`VENDOR_OFFLINE_HEARTBEAT_MS` (`workers/order-worker.ts:281`), `STRAND_THRESHOLDS_MS`.
+
+**Three stale `SHADOW-FIRST` headers fixed** (`4b1747f`). `lib/organizer-payout.ts`,
+`lib/runner-payout.ts` and `lib/tip-refund.ts` each claimed to be plan-only long after their
+executors shipped — `runner-payout.ts` said "There is deliberately no transfers.create in this
+module yet" with `stripe.transfers.create` at `:315` of the same file. All three are LIVE and now
+say so, with the executor line and its wiring. **No genuinely plan-only file remains.**
+
 - **Runner stats collapsed onto one source.** The admin runner table derives from the ledger +
   custody events; `Runner.totalCompleted` / `totalDispatched` / `completionRate` are **write-dead**
   and marked DEPRECATED in `schema.prisma`. Drop migration deferred.
@@ -369,8 +427,11 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
 
 **Redis migration is DONE and drops off this list.** Reordered 2026-07-24.
 
-1. 🔐 **Rotate the Railway Redis credential — STILL OPEN, HARD-DATED BEFORE 2026-08-05.**
-   *(Re-confirmed open 2026-07-25.)* The current password was **exposed in a chat transcript**.
+1. 🔐 **Rotate the Railway Redis credential — STILL OPEN. The 2026-08-05 hard date has PASSED.**
+   *(Re-confirmed open 2026-07-25; re-confirmed still open and now OVERDUE 2026-08-10 — deferred by
+   decision to post-fair, not forgotten. This is the one outstanding security item; it does not
+   expire by being deferred, and the exposure window grows every day it waits.)*
+   The current password was **exposed in a chat transcript**.
    Railway has **no in-place rotation**: the fix is delete the Redis service and reprovision, then
    update `REDIS_URL` in Vercel *and* the Railway worker. **Not a config edit — a
    delete-and-reprovision**, so it has downtime and cannot be done in five minutes on the day.
@@ -581,6 +642,37 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
    lists 17 vendors when **3** are transactable *(re-measured; was 2)*. Which number a customer
    should see: the connected count. Flipping it is a business decision; visible in `/api/health.flags`.
 11. **Rename `RECONCILER_BACKSTOP_ENABLED`** — it gates Pattern N, not the payout backstops.
+
+### Parked 2026-08-09/10 — post-fair backlog (small items; item 17 is the root of 12 and today's cancel fix)
+
+12. **RTDB handler hardening.** `app/fair/[fairSlug]/order/[orderId]/page.tsx:72-79` patches
+    per-vendor status **only** when the push carries a `vendorId`; master-level pushes from
+    `reconcileMasterStatus` (`lib/reconcile-order-status.ts:704`) do not, so any master-level
+    transition leaves `vendorOrderStatuses` stale on the live path. Cancel was today's instance and
+    is fixed at the optimistic layer only. Frontend-only, but it sits on the live-update path — held
+    until the fair is over.
+13. **Vendor "Decline Order?" dialog** (`app/vendor/[fairSlug]/dashboard/page.tsx:1239`) — "a full
+    refund will be issued automatically" is false; decline routes to `refundVendorPortion` with no
+    `waiveFee` (`app/api/orders/[id]/vendor-status/route.ts:222`), so the 10% is kept. **The third
+    UI surface to describe a refund wrongly** — fix as a class, not a string (see 17).
+14. **CancelModal destructive styling.** Red `ExclamationTriangleIcon` + `bg-red-500` confirm button
+    render on **both** branches (`components/order/OrderComponents.tsx`), including the one where the
+    user is only asking the organizer to review a request. Copy is fixed; the visual still shouts.
+15. **In-app post-accept refund request ("option (c)").** Today a customer whose vendor has accepted
+    has **no in-app path** — the button hides (`SingleOrderTracking.tsx:44`,
+    `MultiOrderTracking.tsx:39`) and they must contact support. Re-enabling it means editing
+    `canCancel` in both tracking components, which makes a money-adjacent flow routinely reachable —
+    real customer value, wants the fair over and eyes on it.
+16. **Dead-constants cleanup + the `0.90` literal.** Remove or wire the 8 non-by-design dead exports
+    listed in §4; at minimum make `app/admin/[eventSlug]/runners/page.tsx:114` import
+    `RUNNER_MIN_COMPLETION_RATE` instead of hardcoding `0.90`.
+17. **THE REFACTOR: collapse order-status representations to one read path.** Master `Order.status`
+    vs per-vendor `vendorOrderStatuses[].status` vs `liveStatus`, plus two different
+    `TERMINAL_STATUSES` sets — the two tracking views read *different* representations, so a writer
+    that updates one is silently stale on the other. Full write-up in `PROJECT_INVARIANTS.md`
+    (through-line section). **This is the root of item 12, item 13's class, and the 2026-08-09
+    cancel bug** — highest leverage on this list, and the only one that is a real refactor with
+    tests rather than a patch.
 
 ## 7. Known partials and open questions
 

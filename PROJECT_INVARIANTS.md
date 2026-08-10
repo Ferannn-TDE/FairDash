@@ -55,6 +55,8 @@ add a guard that fails if a second copy reappears.** Confirmed instances, each n
 | the 2026-07-16/17 pollution cohort | `lib/pollution-cohort.ts` (`POLLUTED_TRANSFER_IDS`) | `scripts/pollution-cohort-guard.ts` |
 | comment-stripping before a guard scans | `_strip-comments.ts` (`stripComments`) | <!-- guard: none — the one definition exists and new guards import it, but FIVE legacy copies remain by design until the conversion job runs. A no-second-implementation assertion would fail today, so declaring this guarded would itself be the optimistic-doc drift this file exists to prevent. See the note below the table. --> **unguarded — declared, see below** |
 | BullMQ queue namespace (producer + consumer) | `lib/queues.ts:58` (`getQueuePrefix`) | <!-- guard: none — the single source is real, but its INPUT is an env var spanning two deployments (Vercel producer, Railway consumer). A repo scanner cannot see config divergence. Operational check only: scripts/step-b-inspect.ts. --> **unguarded — declared, see below** |
+| FAQ answers (page + landing section) | `app/_components/faq-content.ts` (`FAQ_CATEGORIES`) — read by `app/faq/page.tsx:4` and `app/_components/FAQSection.tsx:8` | <!-- guard: none needed — the array is a plain typed export with exactly two importers, and a third renderer would import it too. There is no second copy to drift from. --> **n/a — one array, two renderers** |
+| "what a refund returns to the customer" | `lib/process-refund.ts:9-10` (money model: subtotal slice only; the 10% service fee is NEVER refunded, decision B) | <!-- guard: none — the enforcing code is single-sourced, but the UI PROSE describing it is hand-written per surface and a scanner cannot tell a correct sentence from a wrong one. Owed: a shared helper (see "Copy drifts like derivations do"). --> **unguarded — copy surfaces owed, see below** |
 
 **⛔ `POLLUTED_TRANSFER_IDS` IS PERMANENT AND LOAD-BEARING IN THREE PLACES — DO NOT PRUNE IT AS
 FINISHED CLEANUP.**
@@ -95,6 +97,37 @@ in the real file. The regex form blanks the comment and preserves position, whic
 `no-second-implementation` assertion would fail today and **must not be added yet** — declaring it
 guarded now would be exactly the drift-by-optimistic-doc this file exists to prevent. The entry is
 listed as partial rather than omitted so the debt is visible and countable.
+
+**⚠️ ORDER STATUS HAS FRAGMENTED INTO THREE REPRESENTATIONS — the largest un-collapsed instance of
+this bug class. The refactor is OWED, not done.** "What state is this order in" is answered by three
+separate copies that drift against each other:
+
+| Representation | Where |
+|---|---|
+| master `Order.status` | the row; read as `order.status` (`components/order/SingleOrderTracking.tsx:54`) |
+| per-vendor `vendorOrderStatuses[].status` | the row set; the tracking view derives EVERYTHING from `[0]` (`SingleOrderTracking.tsx:40`) |
+| `liveStatus` (client state, RTDB-fed) | `app/fair/[fairSlug]/order/[orderId]/page.tsx:26`; what `MultiOrderTracking.tsx:34` reads |
+
+The two tracking views read **different ones** — Single reads per-vendor, Multi reads `liveStatus` —
+so a writer that updates only one is correct on one screen and silently stale on the other. That is
+not hypothetical: 2026-08-09 a single-vendor cancel updated master + `liveStatus` but not the
+per-vendor rows, so a cancel that fully succeeded server-side left the screen on `PLACED` until a
+hard refresh (fixed at `page.tsx:114`, commit `985fa47`). The same gap exists on the live path — the
+RTDB handler only patches per-vendor status when the push carries a `vendorId`
+(`page.tsx:72-79`), and master-level pushes from `reconcileMasterStatus` do not
+(`lib/reconcile-order-status.ts:704`) — so nothing arrives later to correct it either.
+
+**The set that decides "is this terminal" is itself duplicated**, in two variants with different
+members: `lib/order-status.ts:28` (`COMPLETED_STATUSES` + `FAILED_STATUSES`) and
+`components/order/helpers.ts:43` (`FAILED_STATUSES` only). Both are named `TERMINAL_STATUSES`. The
+narrow one is what the tracking views import, so "terminal" means different things in `lib/` and in
+`components/order/`. `helpers.ts:43` at least DERIVES from the canonical list rather than
+re-listing it (a re-inlined copy missing `REFUNDED` previously made refunded orders render "Cannot
+cancel — vendor is preparing"; `scripts/cancel-label-guard.ts` pins that it stays derived).
+
+**The fix is a refactor, not a patch: collapse how the tracking surfaces read status to ONE path.**
+It needs tests and is deliberately deferred — listed here so the debt is visible and countable, and
+so the next per-screen status bug is recognised as this class rather than fixed as a one-off.
 
 **The one derivation whose "single source" spans a boundary a guard cannot reach.**
 `getQueuePrefix()` (`lib/queues.ts:58`) is genuinely single-sourced — all three construction sites
@@ -313,6 +346,26 @@ by a durable DB flag (not by Stripe's expiring idempotency key alone).
   is a single-source + a guard, and the guard asserts the _cause_ is structurally impossible.
 - **Prose has no drift-guard.** When a surface explains a number, COMPUTE the explanation from the
   same math; when a fix lands, grep for stale prose (comments/copy/docs) in the same commit.
+- **Copy drifts like derivations do — money/policy copy must be checked against the ENFORCING code.**
+  Customer-facing prose is the same two-copies-one-lies class as code, and it is worse, because a
+  wrong sentence compiles. 2026-08-09: three hand-written UI surfaces each described what a refund
+  returns, none had read `lib/process-refund.ts:9-10`, and all three were wrong the same way —
+  `app/_components/faq-content.ts` ("free" cancel), `components/order/OrderComponents.tsx`
+  (CancelModal, "full refund"), and `app/vendor/[fairSlug]/dashboard/page.tsx:1239` ("a full refund
+  will be issued automatically" — **still unfixed**). Two of them additionally quoted constants that
+  are DEFINED but wired to nothing (`ORDER_CANCELLATION_FEE_USD`, `HOME_DELIVERY_GPS_RADIUS_M`), so
+  the copy promised a $5 fee never charged and a GPS check no code performs. **Rule: before writing a
+  number or a policy into UI copy, find the line that ENFORCES it — a constant's existence is not
+  evidence the platform does it.** ⚠️ **OWED, not built:** a shared "what a refund returns" helper
+  every dialog pulls from. Until it exists, a fifth surface can get this wrong.
+- **Gate a derived value against the set the VIEW imports, and give the probe a negative control.**
+  A fix whose value isn't in the set the view actually reads compiles, passes review, and changes
+  nothing on screen — the failure shape is invisible. 2026-08-09 (single-vendor cancel): verifying
+  `REFUNDED ∈ TERMINAL_STATUSES` had to resolve `components/order/helpers.ts:43` (what
+  `SingleOrderTracking.tsx:18` imports — `FAILED_STATUSES` only), **not** `lib/order-status.ts:28`
+  (`COMPLETED` + `FAILED`, broader). The probe asserted `includes('REFUNDED') === true` **and**
+  `includes('PLACED') === false`, because a membership check with no negative twin cannot tell a
+  correct set from one that matches everything.
 - **Verify deploys by content fingerprint, not logs.** `/api/health` returns a build `commit` field
   baked at build time and a worker heartbeat; a served response's shape is the fingerprint
   (`app/api/health/route.ts`, `lib/health.ts`).
