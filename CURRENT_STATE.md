@@ -1069,15 +1069,81 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
   inventory meanwhile, so a *new* table cannot appear quietly.
 
 - **Fix 3's race is NARROWED BY NOTHING — closure is Pattern X, deliberately. POST-FAIR proper fix.**
-  `lib/process-refund.ts:241` now reads `paidRow || earning.status === 'paid'`, but **both signals
-  are written AFTER the Stripe transfer** (`process-payout.ts:406` transfer → `:420` Payout row →
-  `:445` earning), so a refund landing in the ~500ms window still decides CASE 1 and leaves the
-  transfer standing. **The proper fix is a nullable `Payout.stripeTransferId` + a pre-transfer
-  pending row** (migration). It was NOT done now because the alternative — reserving the earning
-  pre-transfer via a new `'paying'` status — ripples a new vocabulary through
-  `computeLedgerBreakdown` (a `'paying'` row silently drops out of payable), `classifyVendorSlice`,
-  and Patterns C/D/S/T, and a row stuck in `'paying'` after a crash would be invisible to every
-  reader. **Detected-reliably beat made-impossible-by-a-rushed-state-machine.**
+  `lib/process-refund.ts:241-243` reads `paidRow || earning.status === 'paid'`, but **both signals
+  are written AFTER the Stripe transfer** (`process-payout.ts:505` transfer → `:519` Payout row →
+  `:545` earning), so a refund landing in the ~500ms window still decides CASE 1 and leaves the
+  transfer standing. Both parties hold the money. *(Line numbers corrected 2026-08-11 — the
+  previously recorded `:406/:420/:445` had drifted.)*
+
+  #### ⛔ THE RECORDED FIX WAS WRONG. Do not build it. (superseded 2026-08-11)
+
+  This entry used to say *"the proper fix is a nullable `Payout.stripeTransferId` + a pre-transfer
+  pending row"*, on the reasoning that it avoided the `'paying'`-status ripple. **Two analyses on
+  2026-08-11 proved that approach is WORSE THAN THE STATUS QUO.** It is kept here, marked rejected,
+  rather than deleted — it is the obvious fix, and a reader who finds no trace of it will re-derive
+  it and ship it.
+
+  1. **It DESTROYS AN EXISTING SELF-HEAL — the disqualifying flaw.** Today a crash between `:505`
+     and `:519` leaves a real transfer with no `Payout` row, and that orphan *reclaims itself*:
+     Pattern C (`reconciler.ts:596`) builds `paid` as `new Set(ord.payouts.map(p => p.vendorId))`,
+     so a vendor with no Payout row is **absent** from it → C re-enqueues → `classifyVendorSlice`
+     still reads `'accrued'` → `transfers.create` fires with the deterministic key
+     `payout_${orderId}_${vendorId}` (`:514`) → **Stripe returns the ORIGINAL transfer** and the
+     Payout row finally lands. A pre-transfer pending row puts that vendor *into* C's `paid` set,
+     C stops re-enqueueing, and the orphan that heals itself today becomes permanently invisible.
+     It does not merely inherit the `'paying'` flaw — it *creates* that flaw where none exists.
+  2. **It leaks into four `Payout` readers**, three of which need filters added and kept correct
+     forever: Pattern C (`reconciler.ts:596`, no filter at all), Pattern X (`reconciler.ts:1650`),
+     `vendor-earnings.ts:128` (a pending row wins the `.find` and renders as **`'settled'`** —
+     money shown as paid that never moved), and `transfer-existence.ts:117` (no `{ not: null }`
+     filter, unlike its two siblings at `:120`/`:121`, so a null id reads as `missing` → **a false
+     positive in the guard whose entire job is catching fabricated transfers**).
+  3. **It needs a payout-writer re-key.** `@@unique([orderId, vendorId], map: "uq_payout_order_vendor")`
+     already exists (`schema.prisma:826`), so a pending row occupies that key and the
+     `upsert({ where: { stripeTransferId } })` at `:519` would attempt a CREATE → **P2002**.
+
+  #### ✅ THE VERIFIED SHAPE — a marker on `VendorEarning`, not `Payout`
+
+  - **A nullable `VendorEarning.transferAttemptedAt`**, set immediately before
+    `stripe.transfers.create` (`process-payout.ts:505`).
+  - **Invisible by construction, not by remembering.** All 12 `VendorEarning` reads — 9 direct
+    (`reverse-accrual.ts:40`, `payout-failure-marker.ts:140`, `admin-money.ts:198`,
+    `process-payout.ts:262,376`, `reconciler.ts:412,1365,1666`,
+    `app/api/admin/events/[id]/money/route.ts:35`) and 3 nested (`process-refund.ts:142`,
+    `reconciler.ts:587,1308`) — use **explicit `select`**; zero `include`, zero select-all.
+    Verified exhaustively 2026-08-11. **Pattern C reads `Payout`, so the self-heal above stays
+    intact** — that is the whole advantage, and it is why this shape is additive rather than
+    subtractive.
+  - **The refund CASE decision is the ONLY new reader** (`process-refund.ts:241-243`): when
+    `transferAttemptedAt && !paidRow`, the transfer *may* have landed — resolve it against Stripe
+    with `transfers.list({ transfer_group })` matched on `metadata.vendorId`. Both handles already
+    exist: `transfer_group` is on the charge the refund **already retrieves** at
+    `process-refund.ts:210`, and `metadata: { orderId, vendorId }` is set on every transfer at
+    `process-payout.ts:512`.
+  - **Fail-safe = refuse to decide.** If Stripe is unreachable, **HALT the refund** and retry —
+    never assume CASE 2, which cannot reverse without Stripe anyway and would just leak under
+    another name. Same idiom the file already uses: `RefundReconciliationError` (`:172`) halts on
+    an ambiguous identity under the rule *"never refund ambiguous money."*
+  - **Scope: ~3 files** (schema, `process-payout`, `process-refund`) + tests + a guard.
+    **No new sweep pattern. No reconciler change.**
+
+  **Why no DB marker alone can close this:** a marker records *intent, not outcome* — it cannot
+  distinguish "transfer never sent" from "transfer sent, crashed before recording," which is the
+  exact question the refund must answer. **Only Stripe knows.** The resolution step is mandatory
+  in *any* shape; the marker's job is only to say *"ask."*
+
+  **Not yet traced** (implementation detail — none of it can change the shape): the marker write's
+  atomicity relative to `:505`, the full resolution-branch logic, the >24h idempotency-key
+  interaction, and the guard design.
+
+  **Pre-existing and orthogonal to both shapes:** Pattern C is windowed on `completedAt` ≥ 24h and
+  Stripe idempotency keys also expire at 24h, so an orphan outside that window either never heals
+  or, if re-enqueued late, **double-pays on an expired key**. That is true today. The marker does
+  not cause it, but it is the natural hook for a check-Stripe-before-retry that would close it.
+
+  **Still not urgent.** The race needs a ~500ms window *and* a concurrent refund, Pattern X detects
+  it after the fact, and the money is test-mode. **Detected-reliably beat
+  made-impossible-by-a-rushed-state-machine** — and now it also beats made-worse-by-the-obvious-fix.
 
 - **Audit corrections — the second-pass audit was wrong in two ways that must not be re-inherited.**
   1. Its cited line for the TOCTOU (`app/api/orders/[id]/status/route.ts:324`) was a **DEAD PATH** —
