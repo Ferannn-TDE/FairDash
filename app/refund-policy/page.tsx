@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { EnvelopeIcon } from '@heroicons/react/24/outline'
 import MarketplaceNavbar from '../_components/MarketplaceNavbar'
+import { CONTACT_EMAIL, RESPONSE_TIME_LONG, contactMailto } from '@/lib/contact-info'
 
 export const metadata = { title: 'Refund Policy — FairSynq' }
 
@@ -19,7 +20,7 @@ const POLICY_SECTIONS = [
   },
   {
     heading: 'How To Request Help',
-    body: 'Email us at contact@fairsynq.com or message us on Facebook with your order number and a description of the issue. We aim to respond within one business day.',
+    body: `Email us at ${CONTACT_EMAIL} or message us on Facebook with your order number and a description of the issue. We aim to respond ${RESPONSE_TIME_LONG}.`,
   },
 ]
 
@@ -57,7 +58,7 @@ export default function RefundPolicyPage() {
               </p>
               <div className="flex flex-wrap gap-3">
                 <a
-                  href="mailto:contact@fairsynq.com"
+                  href={contactMailto()}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neon-pink text-white text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors"
                 >
                   <EnvelopeIcon className="w-4 h-4" />
