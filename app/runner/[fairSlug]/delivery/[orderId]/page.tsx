@@ -6,6 +6,7 @@ import { useWakeLock } from './useWakeLock'
 import Link from 'next/link'
 import { ChevronLeft, Car, MapPin, Phone, CheckSquare, Square, Package, Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { toastError } from '@/lib/toast-error'
 import { formatDeliveryAddressLines, deliveryMapsQuery, toDeliveryAddress as addr } from '@/lib/delivery-address'
 import { downscaleImage } from '@/lib/downscale-image'
 import { UPLOAD_MAX_MB, isWithinUploadCap } from '@/lib/upload-limits'
@@ -144,7 +145,7 @@ export default function DeliveryPage() {
         setOrder(o => (o ? { ...o, collectedAt: json.data.collectedAt ?? new Date().toISOString() } : o))
         if (!json.data.alreadyCollected) toast.success('Collected from vendor')
       } else {
-        toast.error(json.error || json.message || 'Could not mark collected — try again')
+        toastError(json.error?.code, 'Couldn’t mark this collected — please try again')
       }
     } catch {
       toast.error('Could not mark collected — check your connection and retry')
@@ -168,7 +169,7 @@ export default function DeliveryPage() {
         toast.success('Released back to the pool')
         router.push(`/runner/${fairSlug}/dashboard`)
       } else {
-        toast.error(json.error || json.message || 'Could not release — try again')
+        toastError(json.error?.code, 'Couldn’t release this delivery — please try again')
       }
     } catch {
       toast.error('Could not release — check your connection and retry')
@@ -192,7 +193,7 @@ export default function DeliveryPage() {
         setOrder(o => (o ? { ...o, returnRequestedAt: json.data.returnRequestedAt ?? new Date().toISOString() } : o))
         toast.success('Return requested — waiting for the vendor to confirm')
       } else {
-        toast.error(json.error || json.message || 'Could not request a return — try again')
+        toastError(json.error?.code, 'Couldn’t request a return — please try again')
       }
     } catch {
       toast.error('Could not request a return — check your connection and retry')

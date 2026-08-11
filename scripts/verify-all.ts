@@ -64,6 +64,9 @@ const SUITES: Suite[] = [
   // direct-to-Supabase proof photo — actually set on the bucket, which is the only place that
   // path can be capped at all.
   { group: 'security', name: 'upload-cap',             file: 'scripts/upload-cap-guard.ts' },
+  // No error toast renders a raw exception, a schema name, or an internal id — and the two sites
+  // allowed to show server text must SAY SO at the site, so permission is never inherited.
+  { group: 'security', name: 'toast-leak',             file: 'scripts/toast-leak-guard.ts' },
   { group: 'security', name: 'vendor-public-leak',     file: 'scripts/vendor-public-leak-test.ts' },
   { group: 'security', name: 'vendor-detail-status-gate', file: 'scripts/vendor-detail-status-gate-test.ts' },
 
@@ -97,6 +100,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'cancel-label-guard',     file: 'scripts/cancel-label-guard.ts' },
   { group: 'correctness', name: 'active-shape-guard',     file: 'scripts/active-shape-guard.ts' },
   { group: 'correctness', name: 'delivery-progress',      file: 'scripts/delivery-progress-guard.ts' },
+  { group: 'correctness', name: 'order-view',             file: 'scripts/order-view-guard.ts' },
   { group: 'correctness', name: 'delivery-address',       file: 'scripts/delivery-address-guard.ts' },
   { group: 'correctness', name: 'ready-lane-eviction',    file: 'scripts/ready-lane-eviction-guard.ts' },
   { group: 'correctness', name: 'delivered-timeline',     file: 'scripts/delivered-timeline-guard.ts' },

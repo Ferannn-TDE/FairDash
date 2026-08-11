@@ -70,8 +70,15 @@ export function handleApiError(err: unknown) {
   if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002') {
     const target = (err as { meta?: { target?: unknown } }).meta?.target
     const fields = Array.isArray(target) ? (target as string[]).join(', ') : String(target ?? 'unknown')
+    // THE FIELD NAME STAYS IN THE LOG, NOT THE RESPONSE. Naming the colliding column was added
+    // because its absence cost a live debugging session — that reasoning was right, and the log
+    // still carries it. What was wrong was the DESTINATION: `meta.target` is a Prisma field or
+    // constraint name, so the client-facing copy was shipping schema internals to whoever hit a
+    // duplicate. With 30 unique constraints and every route funnelling through here, an organizer
+    // creating a fair with a taken slug read "conflicting field(s): urlSlug" — our column name, in
+    // a toast. The user cannot act on a column name; they can act on "that's already taken".
     console.error('[API Error] Unique constraint violation (P2002) on:', fields)
-    return apiError(`Already exists — conflicting field(s): ${fields}`, 409, 'UNIQUE_CONSTRAINT')
+    return apiError("That's already taken — please use a different value.", 409, 'UNIQUE_CONSTRAINT')
   }
 
   if (err instanceof Error) {

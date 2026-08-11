@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
     const { allowed, headers: rlHeaders } = await enforceRateLimit(ip, 'orderCreate', { failClosed: true })
     if (!allowed) {
       return NextResponse.json(
-        { error: 'Too many requests. Please slow down.' },
+        { success: false, error: { message: 'Too many requests. Please slow down.', code: 'RATE_LIMITED' } },
         { status: 429, headers: rlHeaders }
       )
     }
@@ -427,8 +427,25 @@ export async function POST(req: NextRequest) {
 
     // Per-vendor subtotal breakdown (cents) — lets the payout worker / Stripe
     // dashboard see the split source without trusting the client. The worker is
-    // authoritative from the DB; this is belt-and-suspenders. Max 5 vendors/order
-    // keeps this well under Stripe's 500-char metadata value limit.
+    // authoritative from the DB; this is belt-and-suspenders.
+    //
+    // ⚠️ N IS BOUNDED BY THE 20-ITEM CAP ABOVE (`items.length > 20`, :113), NOT by a vendor cap.
+    // This comment used to claim "Max 5 vendors/order keeps this well under Stripe's 500-char
+    // metadata value limit" — but MAX_VENDORS_PER_ORDER is DEAD (lib/constants.ts:157; its only
+    // appearance in the repo is its own definition), so nothing enforces 5. Since each vendor
+    // needs at least one item, the real bound is N ≤ 20.
+    //
+    // BOTH N-scaling metadata values overflow before that bound: with 25-char cuids,
+    // `vendorSubtotalCents` passes 500 chars at N=15 and `vendorIds` at N=20. Stripe then
+    // rejects the PaymentIntent. That FAILS CLOSED — paymentIntents.create (:465) throws before
+    // any Order row or money exists, so it is a broken checkout, never a money bug. Measured
+    // 2026-08-11; the largest multi-vendor order ever placed is N=4 (and N=2 for every in-model
+    // one), so the reachable N=15..20 band has never been approached.
+    //
+    // IF N EVER MATTERS, the fix is to DROP vendorSubtotalCents from PI metadata — not to add a
+    // cap. The worker is authoritative from the DB (above), so this value is belt-and-suspenders;
+    // removing it deletes the only failure mode that scales with N, and is strictly simpler than
+    // enforcing a limit. See CURRENT_STATE §7.
     const vendorSubtotalCents: Record<string, number> = {}
     for (const l of lineItems) {
       vendorSubtotalCents[l.vendorId] = (vendorSubtotalCents[l.vendorId] ?? 0) + Math.round(l.subtotal * 100)

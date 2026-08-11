@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { PackageCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { toastError } from '@/lib/toast-error'
 
 // Vendor RETURNS-TO-CONFIRM (Commit 2, U5). A runner collected an order, couldn't deliver, and
 // asked to hand it back — it moves to the pool only when THIS vendor confirms possession. Keyed
@@ -40,7 +41,7 @@ export default function VendorReturnsCard({ vendorId }: { vendorId: string | nul
       const res = await fetch(`/api/orders/${orderId}/confirm-return`, { method: 'POST' })
       const json = await res.json()
       if (res.ok && json.success) { toast.success('Return confirmed — back to the pool'); await load() }
-      else toast.error(json.error || json.message || 'Could not confirm the return')
+      else toastError(json.error?.code, 'Couldn’t confirm the return — please try again')
     } catch { toast.error('Network error — try again') } finally { setConfirming(null) }
   }
 

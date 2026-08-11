@@ -24,7 +24,16 @@ export async function POST(
 
     const { allowed, headers: rlHeaders } = await enforceRateLimit(`collect:${userId}`, 'vendorStatus')
     if (!allowed) {
-      return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+      // ONE ENVELOPE. This branch used to return `{ error: '<string>' }` while every other exit
+      // in this file returns apiError's `{ error: { message, code } }`. That single inconsistency
+      // taught three call sites to write `toast.error(json.error || …)`, which is truthy for the
+      // OBJECT shape too — so on every non-429 failure they handed React a plain object and the
+      // error path rendered nothing. The odd shape was the root cause, so it is fixed here rather
+      // than worked around there.
+      return NextResponse.json(
+        { success: false, error: { message: 'Too many requests — slow down.', code: 'RATE_LIMITED' } },
+        { status: 429, headers: rlHeaders },
+      )
     }
 
     const dbUser = await db.user.findUnique({ where: { clerkId: userId }, select: { id: true } })
