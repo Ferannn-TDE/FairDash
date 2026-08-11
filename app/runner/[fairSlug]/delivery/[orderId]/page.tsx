@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { ChevronLeft, Car, MapPin, Phone, CheckSquare, Square, Package, Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { toastError } from '@/lib/toast-error'
+import ConfirmModal from '@/app/_components/ui/ConfirmModal'
 import { formatDeliveryAddressLines, deliveryMapsQuery, toDeliveryAddress as addr } from '@/lib/delivery-address'
 import { downscaleImage } from '@/lib/downscale-image'
 import { UPLOAD_MAX_MB, isWithinUploadCap } from '@/lib/upload-limits'
@@ -48,6 +49,11 @@ export default function DeliveryPage() {
   const [collecting, setCollecting] = useState(false)
   const [releasing, setReleasing] = useState(false)
   const [requesting, setRequesting] = useState(false)
+  // Which custody escape is awaiting confirmation. ONE modal drives both, because they are the
+  // same question asked twice ("give this order up?") and two booleans could both be true.
+  // Replaced two `window.confirm()` calls — a runner standing at a door got an unstyled grey OS
+  // box on an otherwise themed screen, and a native dialog blocks the whole tab while it's up.
+  const [confirmAction, setConfirmAction] = useState<'release' | 'return' | null>(null)
   // Live-location share (Phase 1): 'sharing' once a fix has POSTed OK.
   const [geoStatus, setGeoStatus] = useState<'off' | 'sharing' | 'denied' | 'unavailable'>('off')
   const [lastSharedAt, setLastSharedAt] = useState<number | null>(null)
@@ -160,7 +166,6 @@ export default function DeliveryPage() {
   // longer yours, so leave the screen.
   async function release() {
     if (!order || pickedUp || releasing) return
-    if (!window.confirm('Release this delivery back to the pool? Another runner can then claim it.')) return
     setReleasing(true)
     try {
       const res = await fetch(`/api/orders/${orderId}/release`, { method: 'POST' })
@@ -174,7 +179,11 @@ export default function DeliveryPage() {
     } catch {
       toast.error('Could not release — check your connection and retry')
     } finally {
+      // Closed HERE, not before the fetch: the modal has to stay up for `loading` to mean
+      // anything. Closing on click would flash it shut and leave the screen looking idle
+      // while the request was still in flight — exactly the feedback gap the native dialog had.
       setReleasing(false)
+      setConfirmAction(null)
     }
   }
 
@@ -184,7 +193,6 @@ export default function DeliveryPage() {
   // truth), so a failure stays retryable, never a false "return requested".
   async function requestReturn() {
     if (!order || !pickedUp || order.returnRequestedAt || requesting) return
-    if (!window.confirm('Ask the vendor to take this order back? You keep the food until they confirm.')) return
     setRequesting(true)
     try {
       const res = await fetch(`/api/orders/${orderId}/request-return`, { method: 'POST' })
@@ -199,6 +207,7 @@ export default function DeliveryPage() {
       toast.error('Could not request a return — check your connection and retry')
     } finally {
       setRequesting(false)
+      setConfirmAction(null)
     }
   }
 
@@ -358,7 +367,7 @@ export default function DeliveryPage() {
       {/* Pre-collection escape: hand it back to the pool (only before you've collected). */}
       {!pickedUp && (
         <button
-          onClick={release}
+          onClick={() => setConfirmAction('release')}
           disabled={releasing}
           className="w-full text-center text-xs text-text-gray hover:text-white transition-colors bg-transparent border-0 disabled:opacity-50 cursor-pointer"
         >
@@ -424,11 +433,35 @@ export default function DeliveryPage() {
 
       {/* Post-collection escape: can't deliver → ask the vendor to take it back (U3). */}
       {pickedUp && !order.returnRequestedAt && (
-        <button onClick={requestReturn} disabled={requesting}
+        <button onClick={() => setConfirmAction('return')} disabled={requesting}
           className="w-full text-center text-xs text-text-gray hover:text-white transition-colors bg-transparent border-0 disabled:opacity-50 cursor-pointer">
           {requesting ? 'Requesting…' : "Can't deliver? Ask the vendor to take it back"}
         </button>
       )}
+
+      {/* ── The custody-escape confirmation (shared ConfirmModal, 8th+ adopter) ──────────────
+          Both copies state the CONSEQUENCE rather than restating the button. 'warning', not
+          'destructive': neither is a one-way door — a released order can be re-claimed (by
+          anyone, including this runner), and a return only takes effect once the VENDOR
+          confirms. Red would overstate both. `loading` is wired to the existing in-flight
+          flags, so the confirm button reads "Working…" and both buttons disable during the
+          request — which the native dialog could not do at all, since it closed the instant
+          you clicked and left the screen looking idle. */}
+      <ConfirmModal
+        open={confirmAction !== null}
+        title={confirmAction === 'release' ? 'Release this delivery?' : 'Ask the vendor to take it back?'}
+        message={
+          confirmAction === 'release'
+            ? 'This returns the delivery to the pool. Another runner can claim it, and you keep no part of the fee.'
+            : `You keep the food until ${order.vendor?.name ?? 'the vendor'} confirms the handback. Nothing changes on the order until they do.`
+        }
+        confirmLabel={confirmAction === 'release' ? 'Release it' : 'Request return'}
+        cancelLabel="Never mind"
+        variant="warning"
+        loading={confirmAction === 'release' ? releasing : requesting}
+        onConfirm={() => { if (confirmAction === 'release') release(); else requestReturn() }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   )
 }
