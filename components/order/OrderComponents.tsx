@@ -14,6 +14,7 @@ import {
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import type { Order, VendorGroup } from './types'
 import { VENDOR_ACCEPT_TIMEOUT_MINUTES } from '@/lib/constants'
+import { RESPONSE_TIME } from '@/lib/contact-info'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -761,7 +762,7 @@ export function SupportModal({ isOpen, onClose, order, view, vendors }: {
           </div>
         </div>
         <p className="text-[#A1A1A1] text-xs leading-relaxed mb-4">
-          Our team typically responds within a few hours. Your order ID is pre-filled in the email for faster support.
+          Our team typically responds {RESPONSE_TIME}. Your order ID is pre-filled in the email for faster support.
         </p>
         <div className="space-y-2">
           <a

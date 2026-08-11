@@ -9,19 +9,12 @@ import MarketplaceNavbar from './_components/MarketplaceNavbar'
 import FairCard from './_components/FairCard'
 import HowItWorksSection from './_components/HowItWorksSection'
 import FAQSection from './_components/FAQSection'
+import ContactSection from './_components/ContactSection'
+import { FacebookIcon } from '@/components/icons/FacebookIcon'
+import { FACEBOOK_URL, contactMailto } from '@/lib/contact-info'
 import { type PublicFairCard } from '@/lib/fair-view'
 import { useUser } from '@clerk/clerk-react'
 import { useRole } from './_contexts/RoleContext'
-
-// ── Facebook icon (heroicons has no social icons) ─────────────────────────────
-
-function FacebookIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-    </svg>
-  )
-}
 
 // ── Role cards section ────────────────────────────────────────────────────────
 
@@ -272,14 +265,14 @@ function SiteFooter() {
             </p>
             <div className="mt-5 flex items-center gap-2.5">
               <a
-                href="mailto:contact@fairsynq.com"
+                href={contactMailto()}
                 aria-label="Email us"
                 className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-neon-pink/10 hover:border-neon-pink/20 transition-all duration-200 group/icon"
               >
                 <EnvelopeIcon className="w-4 h-4 text-gray-500 group-hover/icon:text-neon-pink transition-colors" />
               </a>
               <a
-                href="https://facebook.com/fairsynq"
+                href={FACEBOOK_URL}
                 aria-label="Facebook"
                 className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-neon-pink/10 hover:border-neon-pink/20 transition-all duration-200 group/icon"
                 target="_blank"
@@ -454,6 +447,9 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
 
         {/* ── FAQ ── */}
         <FAQSection />
+
+        {/* ── Contact — same "need help?" family as the FAQ, so it sits with it ── */}
+        <ContactSection />
 
         {/* ── Final CTA ── */}
         <FinalCTABanner />
