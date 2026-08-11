@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const { allowed, headers: rlHeaders } = await enforceRateLimit(rlKey, 'publicRoutes')
     if (!allowed) {
       return NextResponse.json(
-        { error: 'Too many requests. Please slow down.' },
+        { success: false, error: { message: 'Too many requests. Please slow down.', code: 'RATE_LIMITED' } },
         { status: 429, headers: rlHeaders },
       )
     }

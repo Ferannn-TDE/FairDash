@@ -64,6 +64,9 @@ const SUITES: Suite[] = [
   // direct-to-Supabase proof photo — actually set on the bucket, which is the only place that
   // path can be capped at all.
   { group: 'security', name: 'upload-cap',             file: 'scripts/upload-cap-guard.ts' },
+  // No error toast renders a raw exception, a schema name, or an internal id — and the two sites
+  // allowed to show server text must SAY SO at the site, so permission is never inherited.
+  { group: 'security', name: 'toast-leak',             file: 'scripts/toast-leak-guard.ts' },
   { group: 'security', name: 'vendor-public-leak',     file: 'scripts/vendor-public-leak-test.ts' },
   { group: 'security', name: 'vendor-detail-status-gate', file: 'scripts/vendor-detail-status-gate-test.ts' },
 

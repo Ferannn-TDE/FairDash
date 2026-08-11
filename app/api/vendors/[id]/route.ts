@@ -23,7 +23,7 @@ export async function GET(
     const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
     const { allowed } = await enforceRateLimit(ip, 'publicRoutes')
     if (!allowed) {
-      return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
+      return NextResponse.json({ success: false, error: { message: 'Too many requests.', code: 'RATE_LIMITED' } }, { status: 429 })
     }
 
     const { id } = await params
