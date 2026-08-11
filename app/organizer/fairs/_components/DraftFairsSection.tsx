@@ -57,7 +57,11 @@ export default function DraftFairsSection() {
       await qc.invalidateQueries({ queryKey: ['organizer-fair-drafts'] })
       await qc.invalidateQueries({ queryKey: ['organizer-fairs-sidebar'] })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete draft')
+      // The raw error stays in the console; the user gets a sentence. `err.message` here is
+      // usually the server's, but on a 502 the HTML error page fails res.json() and it becomes
+      // `Unexpected token '<'…` — which told the organizer nothing and looked broken.
+      console.error('[DraftFairs] delete failed', err)
+      toast.error('Couldn’t delete that draft — please try again')
     } finally {
       setDeleting(null)
       setConfirming(null)

@@ -244,7 +244,8 @@ export default function CreateFairPage() {
       toast.success(asDraft ? 'Draft saved' : 'Fair published')
       router.push('/organizer/fairs')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create fair')
+      console.error('[FairCreate] save failed', err)
+      toast.error('Couldn’t save this fair — please try again')
     } finally {
       setSubmitting(false)
     }

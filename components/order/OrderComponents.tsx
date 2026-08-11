@@ -12,20 +12,19 @@ import {
   TruckIcon,
 } from '@heroicons/react/24/outline'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
-import type { Order, VendorGroup, VendorOrderStatus } from './types'
+import type { Order, VendorGroup } from './types'
 import { VENDOR_ACCEPT_TIMEOUT_MINUTES } from '@/lib/constants'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
-  STATUS_TO_STEP,
-  TERMINAL_STATUSES,
-  VENDOR_STATUS_TO_STEP,
   VENDOR_STEPS,
   STEPS,
   buildVendorGroups,
 } from './helpers'
 import { StatusPill } from '@/components/ui/StatusPill'
 import { getStatusConfig } from '@/lib/order-status-config'
+import { isCompleted as isCompletedStatus, isFailed as isFailedStatus } from '@/lib/order-status'
+import type { OrderView, VendorLaneView } from '@/lib/order-view'
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
@@ -111,16 +110,16 @@ export function VendorStatusBadge({ status }: { status: string }) {
   return <StatusPill status={status} />
 }
 
-export function VendorProgressSteps({ status }: { status: string }) {
-  if (status === 'DECLINED') {
+export function VendorProgressSteps({ lane }: { lane: VendorLaneView }) {
+  if (lane.failed) {
     return (
       <div className="flex items-center gap-1 mt-2">
         <div className="flex-1 h-0.5 rounded-full bg-red-400/30" />
       </div>
     )
   }
-  const step = VENDOR_STATUS_TO_STEP[status] ?? 0
-  const isCompleted = status === 'COMPLETED'
+  const step = lane.step
+  const isCompleted = lane.status === 'COMPLETED'
   return (
     <div className="flex items-center gap-px mt-2">
       {VENDOR_STEPS.map((_, idx) => {
@@ -163,19 +162,26 @@ export function VendorStatusMessage({ status, boothNumber }: { status: string; b
 
 export function MultiVendorSummaryHeader({
   vendorGroups,
-  vendorStatuses,
+  perVendor,
 }: {
   vendorGroups: VendorGroup[]
-  vendorStatuses: VendorOrderStatus[]
+  /** Lanes from the ONE derivation, keyed by vendorId. Never a raw VendorOrderStatus[]. */
+  perVendor: Map<string, VendorLaneView>
 }) {
-  const getStatus = (vid: string) => vendorStatuses.find(s => s.vendorId === vid)?.status ?? 'PLACED'
-  const statuses = vendorGroups.map(g => getStatus(g.vendorId))
+  const PLACEHOLDER_LANE: VendorLaneView = {
+    status: 'PLACED', label: 'Order Placed', dotColor: 'bg-amber-400', step: 0, failed: false,
+  }
+  const getLane = (vid: string) => perVendor.get(vid) ?? PLACEHOLDER_LANE
+  const lanes = vendorGroups.map(g => getLane(g.vendorId))
 
-  const allCompleted = statuses.every(s => s === 'COMPLETED')
-  const allDeclined  = statuses.every(s => s === 'DECLINED')
-  const allTerminal  = statuses.every(s => ['COMPLETED', 'DECLINED'].includes(s))
-  const readyCount   = statuses.filter(s => ['READY', 'COMPLETED'].includes(s)).length
-  const hasReady     = statuses.some(s => s === 'READY')
+  const allCompleted = lanes.every(l => l.status === 'COMPLETED')
+  // `failed`, not `=== 'DECLINED'`: a lane can also die as REFUNDED (the accept-timeout
+  // auto-cancel) or CANCELLED (a lane close). Those used to fall through to "In Progress"
+  // on an order where nothing was in progress.
+  const allDeclined  = lanes.every(l => l.failed)
+  const allTerminal  = lanes.every(l => l.status === 'COMPLETED' || l.failed)
+  const readyCount   = lanes.filter(l => ['READY', 'COMPLETED'].includes(l.status)).length
+  const hasReady     = lanes.some(l => l.status === 'READY')
 
   const aggregateLabel =
     allCompleted  ? 'All Done' :
@@ -205,11 +211,9 @@ export function MultiVendorSummaryHeader({
       </div>
       <div className="space-y-3.5">
         {vendorGroups.map(group => {
-          const vs = getStatus(group.vendorId)
-          const step = VENDOR_STATUS_TO_STEP[vs] ?? 0
+          const lane = getLane(group.vendorId)
+          const { status: vs, step, dotColor } = lane
           const isCompleted = vs === 'COMPLETED'
-          const isDeclined  = vs === 'DECLINED'
-          const dotColor = getStatusConfig(vs).dotColor
 
           return (
             <div key={group.vendorId} className="flex items-center gap-3">
@@ -219,7 +223,7 @@ export function MultiVendorSummaryHeader({
                   <span className="text-white text-sm font-medium truncate">{group.vendorName}</span>
                   <VendorStatusBadge status={vs} />
                 </div>
-                {isDeclined ? (
+                {lane.failed ? (
                   <div className="mt-1.5 h-0.5 rounded-full bg-red-400/20" />
                 ) : (
                   <div className="flex items-center gap-px mt-1.5">
@@ -269,8 +273,11 @@ export function SingleVendorProgress({
   status: string
   progressWidth?: string
 }) {
-  const isCompleted = status === 'COMPLETED' || status === 'DELIVERED'
-  const isDeclined  = status === 'CANCELLED' || status === 'DECLINED'
+  // The canonical predicates, not a local pair. The old `=== 'CANCELLED' || === 'DECLINED'`
+  // missed REFUNDED / UNCOLLECTED / UNDELIVERABLE, so those drew a partial progress bar on an
+  // order that had already died.
+  const isCompleted = isCompletedStatus(status)
+  const isDeclined  = isFailedStatus(status)
   // Caller can pass a pre-computed width (same liveStatus variable as the badge)
   // so both elements are guaranteed to be in sync with a single source of truth.
   const fillWidth   = progressWidth ?? PROGRESS_WIDTH[status] ?? '10%'
@@ -304,15 +311,18 @@ export function SingleVendorProgress({
 
 // ─── OrderItemsCard ───────────────────────────────────────────────────────────
 
-export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMultiVendor: boolean }) {
+export function OrderItemsCard({ order, view, isMultiVendor }: { order: Order; view: OrderView; isMultiVendor: boolean }) {
   const groups = buildVendorGroups(order.orderItems)
 
   return (
     <div className="space-y-3">
       {groups.map(group => {
-        const vendorStatus = order.vendorOrderStatuses?.find(
-          s => s.vendorId === group.vendorId
-        )?.status ?? order.status
+        // The lane, from the ONE derivation. This used to be a fourth hand-rolled spelling of
+        // "this vendor's status" (`find(vendorId)?.status ?? order.status`) — a different
+        // fallback from the three others in this tree.
+        const lane = view.perVendor.get(group.vendorId)
+          ?? { status: view.displayStatus, label: view.displayStatus, dotColor: 'bg-white/40', step: 0, failed: false }
+        const vendorStatus = lane.status
 
         return (
           <div key={group.vendorId} className="bg-[#1A1A1A] border border-white/5 rounded-2xl overflow-hidden">
@@ -331,7 +341,7 @@ export function OrderItemsCard({ order, isMultiVendor }: { order: Order; isMulti
               </div>
               {isMultiVendor && (
                 <>
-                  <VendorProgressSteps status={vendorStatus} />
+                  <VendorProgressSteps lane={lane} />
                   <VendorStatusMessage status={vendorStatus} boothNumber={group.boothNumber} />
                 </>
               )}
@@ -436,7 +446,7 @@ export function TimelineRow({
 
 // ─── OrderMetaCard ────────────────────────────────────────────────────────────
 
-export function OrderMetaCard({ order, isMultiVendor }: { order: Order; isMultiVendor: boolean }) {
+export function OrderMetaCard({ order, view, isMultiVendor }: { order: Order; view: OrderView; isMultiVendor: boolean }) {
   const isDelivery = order.fulfillmentType === 'HOME_DELIVERY'
   const isCurbside = order.fulfillmentType === 'CURBSIDE'
   const hasAddress = isDelivery && order.deliveryStreet
@@ -519,7 +529,7 @@ export function OrderMetaCard({ order, isMultiVendor }: { order: Order; isMultiV
                     {vs.readyAt     && <TimelineRow label="Ready for Pickup" time={vs.readyAt}     small />}
                     {vs.completedAt && <TimelineRow label="Completed"        time={vs.completedAt} small green />}
                     {vs.declinedAt  && <TimelineRow label="Cancelled"        time={vs.declinedAt}  small red />}
-                    {vs.status === 'PLACED' && (
+                    {view.perVendor.get(vs.vendorId)?.status === 'PLACED' && (
                       <p className="text-white/20 text-xs italic">Awaiting response…</p>
                     )}
                   </div>
@@ -536,8 +546,10 @@ export function OrderMetaCard({ order, isMultiVendor }: { order: Order; isMultiV
                     {/* Delivered keys on STATUS (like the progress bar), not on completedAt —
                         which is null on DELIVERED orders on purpose. Timestamp = the
                         RunnerEarning accrual time (the honest delivery time); if that's absent
-                        (legacy rows with no earning), the milestone still shows, untimed. */}
-                    {order.status === 'DELIVERED' && (
+                        (legacy rows with no earning), the milestone still shows, untimed.
+                        Reads the derived milestone, not order.status, so the timeline and the
+                        progress bar cannot disagree about whether the food arrived. */}
+                    {view.timeline.delivered && (
                       order.runnerEarning?.createdAt
                         ? <TimelineRow label="Delivered" time={order.runnerEarning.createdAt} small green />
                         : <p className="text-[0.6875rem] text-emerald-400">Delivered</p>
@@ -608,17 +620,24 @@ export function StatusBanner({ order, status }: { order: Order; status: string }
 // ─── CancelModal ──────────────────────────────────────────────────────────────
 
 export function CancelModal({
-  isOpen, onClose, onConfirm, loading, orderStatus,
+  isOpen, onClose, onConfirm, loading, needsApproval,
 }: {
-  isOpen: boolean; onClose: () => void; onConfirm: () => void; loading: boolean; orderStatus: string
+  isOpen: boolean; onClose: () => void; onConfirm: () => void; loading: boolean
+  /**
+   * Post-accept the API refuses a self-cancel and files a RefundRequest for the organizer
+   * (app/api/orders/[id]/cancel/route.ts:92-99) — so this branch is about APPROVAL, not a fee.
+   * It replaced `feeApplies`, which gated on ORDER_CANCELLATION_FEE_USD: a constant with zero
+   * call sites that is never charged. Reachable only by race (the button hides once a vendor
+   * accepts), but the copy it showed was false in every direction.
+   *
+   * Now passed as `!view.canCancel` rather than recomputed from a status string here. The old
+   * `orderStatus !== 'PLACED'` test was fed `liveStatus` — a PER-VENDOR value on multi-vendor
+   * orders — so one vendor accepting could show the refund-request copy to a customer whose
+   * order was still fully cancellable.
+   */
+  needsApproval: boolean
 }) {
   if (!isOpen) return null
-  // Post-accept the API refuses a self-cancel and files a RefundRequest for the organizer
-  // (app/api/orders/[id]/cancel/route.ts:92-99) — so this branch is about APPROVAL, not a fee.
-  // It replaced `feeApplies`, which gated on ORDER_CANCELLATION_FEE_USD: a constant with zero
-  // call sites that is never charged. Reachable only by race (the button hides once a vendor
-  // accepts), but the copy it showed was false in every direction.
-  const needsApproval = orderStatus !== 'PLACED'
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
@@ -665,22 +684,27 @@ export function CancelModal({
 
 // ─── SupportModal ─────────────────────────────────────────────────────────────
 
-export function SupportModal({ isOpen, onClose, order, vendors }: {
+export function SupportModal({ isOpen, onClose, order, view, vendors }: {
   isOpen: boolean
   onClose: () => void
   order: Order
+  view: OrderView
   vendors?: { name: string; status: string }[]
 }) {
   if (!isOpen) return null
 
   const shortId = order.id.slice(-8).toUpperCase()
+  // The status the CUSTOMER is looking at, so the support ticket describes the same order
+  // state they're describing. order.status could be a step behind the view on the delivery
+  // arm (where the headline is derived, not stored).
+  const displayStatus = view.displayStatus
   const isMulti = vendors && vendors.length > 1
   const vendorNames = isMulti
     ? vendors!.map(v => v.name).join(', ')
     : order.vendor.name
   const subject = encodeURIComponent(`Order #${shortId} — Support Request`)
   const body = encodeURIComponent(
-    `Hi FairSynq Support,\n\nI need help with Order #${shortId}.\n\nOrder ID: ${order.id}\nVendor(s): ${vendorNames}\nStatus: ${order.status}\nTotal: $${(order.total ?? 0).toFixed(2)}\n\nDescription of issue:\n`
+    `Hi FairSynq Support,\n\nI need help with Order #${shortId}.\n\nOrder ID: ${order.id}\nVendor(s): ${vendorNames}\nStatus: ${displayStatus}\nTotal: $${(order.total ?? 0).toFixed(2)}\n\nDescription of issue:\n`
   )
 
   return (
@@ -729,7 +753,7 @@ export function SupportModal({ isOpen, onClose, order, vendors }: {
 
           <div className="flex justify-between text-sm">
             <span className="text-[#A1A1A1]">Status</span>
-            <span className="text-white">{order.status.charAt(0) + order.status.slice(1).toLowerCase()}</span>
+            <span className="text-white">{displayStatus.charAt(0) + displayStatus.slice(1).toLowerCase()}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#A1A1A1]">Total</span>

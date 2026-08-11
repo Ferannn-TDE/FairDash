@@ -11,6 +11,8 @@ import SingleOrderTracking from '@/components/order/SingleOrderTracking'
 import MultiOrderTracking from '@/components/order/MultiOrderTracking'
 import RunnerLocationBanner from '@/components/order/RunnerLocationBanner'
 import { buildVendorGroups } from '@/components/order/helpers'
+import { deriveOrderView } from '@/lib/order-view'
+import { isFailedVendorLane } from '@/lib/order-derive'
 import type { Order } from '@/components/order/types'
 
 export default function OrderTrackingPage() {
@@ -23,7 +25,6 @@ export default function OrderTrackingPage() {
   const [loading, setLoading]           = useState(true)
   const [error, setError]               = useState<string | null>(null)
   const [cancelling, setCancelling]     = useState(false)
-  const [liveStatus, setLiveStatus]     = useState<string>('')
   const [stableEventId, setStableEventId]     = useState<string | null>(null)
   const [stableCustomerId, setStableCustomerId] = useState<string | null>(null)
   const [showCancelModal, setShowCancelModal]   = useState(false)
@@ -44,7 +45,6 @@ export default function OrderTrackingPage() {
       .then(json => {
         if (json?.success) {
           setOrder(json.data)
-          setLiveStatus(json.data.status)
           setStableEventId(json.data.eventId)
           setStableCustomerId(json.data.customerId)
         } else {
@@ -67,18 +67,33 @@ export default function OrderTrackingPage() {
         const statusRef = ref(db, `fairs/${stableEventId}/customerOrders/${stableCustomerId}/${orderId}`)
         const handler = onValue(statusRef, snap => {
           const data = snap.val() as { status: string; vendorId?: string } | null
-          if (data?.status) {
-            setLiveStatus(data.status)
-            setOrder(prev => {
-              if (!prev) return prev
-              const updatedVendorStatuses = data.vendorId
-                ? (prev.vendorOrderStatuses ?? []).map(vs =>
-                    vs.vendorId === data.vendorId ? { ...vs, status: data.status } : vs
-                  )
-                : prev.vendorOrderStatuses
-              return { ...prev, status: data.status, vendorOrderStatuses: updatedVendorStatuses }
-            })
-          }
+          if (!data?.status) return
+          // ── THE CUSTOMER NODE CARRIES TWO VOCABULARIES — BRANCH, NEVER BLEND ──────────
+          // Four writers push here, and they do NOT mean the same thing by `status`:
+          //   • WITH a vendorId  → api/orders/[id]/vendor-status:260 — ONE VENDOR'S lane.
+          //   • WITHOUT          → place-order:133, reconcileMasterStatus:704,
+          //                        order-worker:103 — the MASTER status.
+          // This used to be collapsed into a single `setLiveStatus(data.status)` plus a
+          // master overwrite, so a per-vendor value became the order's headline: vendor A
+          // declining on a two-vendor order rendered the WHOLE order cancelled while
+          // vendor B was still cooking (B1). The branch is the fix — a push that names a
+          // vendor may only ever move that vendor's lane, and can no longer touch master.
+          //
+          // TODO(channel-split): the honest fix is server-side — stop pushing per-vendor
+          // semantics onto the customer channel at all. Tracked as its own follow-up; it's
+          // a route edit and doesn't belong in a display-only change.
+          setOrder(prev => {
+            if (!prev) return prev
+            if (data.vendorId) {
+              return {
+                ...prev,
+                vendorOrderStatuses: (prev.vendorOrderStatuses ?? []).map(vs =>
+                  vs.vendorId === data.vendorId ? { ...vs, status: data.status } : vs
+                ),
+              }
+            }
+            return { ...prev, status: data.status }
+          })
         })
         unsubscribe = () => firebaseOff(statusRef, 'value', handler)
       }).catch(() => {})
@@ -91,7 +106,6 @@ export default function OrderTrackingPage() {
         .then(json => {
           if (json?.success) {
             setOrder(json.data)
-            setLiveStatus(json.data.status)
             if (TERMINAL.has(json.data.status) && pollingRef.current) {
               clearInterval(pollingRef.current)
               pollingRef.current = null
@@ -111,28 +125,34 @@ export default function OrderTrackingPage() {
     try {
       const res = await fetch(`/api/orders/${orderId}/cancel`, { method: 'PATCH' })
       if (res.ok) {
-        // vendorOrderStatuses must be patched too, not just the master status:
-        // SingleOrderTracking derives EVERYTHING it shows — isCancelled, canCancel, the
-        // timeline — from vendorOrderStatuses[0].status (SingleOrderTracking.tsx:40-44),
-        // not from order.status or liveStatus. Setting only the master left the view on
-        // PLACED, so a successful cancel looked like nothing had happened until a reload.
-        // REFUNDED is what the server actually writes for a pre-accept cancel
-        // (cancel/route.ts:84 → refundVendorPortion) and is terminal for the view
-        // (FAILED_STATUSES, lib/order-status.ts:17), so isCancelled flips.
+        // ── OPTIMISTIC CANCEL — patch the DATA, let the view re-derive ────────────────
+        // This is the 985fa47 fix folded into the new representation rather than left as
+        // a special case. It used to set order.status, liveStatus AND every vendor lane
+        // by hand, because each surface read a different one of those and missing any one
+        // left the screen on PLACED after a successful cancel. Now there is exactly one
+        // thing to get right: the two fields deriveOrderView reads. It recomputes
+        // isCancelled / canCancel / the banner from them, so a display state cannot be
+        // forgotten here again.
+        //
+        // REFUNDED (not CANCELLED) is what the server actually writes to the lanes for a
+        // pre-accept cancel (cancel/route.ts:84 → refundVendorPortion). Lanes that had
+        // ALREADY failed keep their own value — a vendor who declined before the cancel
+        // stays DECLINED, and is not relabelled as the customer's refund.
         setOrder(prev => prev ? {
           ...prev,
           status: 'CANCELLED',
           cancelledAt: new Date().toISOString(),
-          vendorOrderStatuses: (prev.vendorOrderStatuses ?? []).map(vs => ({ ...vs, status: 'REFUNDED' })),
+          vendorOrderStatuses: (prev.vendorOrderStatuses ?? []).map(vs =>
+            isFailedVendorLane(vs.status) ? vs : { ...vs, status: 'REFUNDED' }
+          ),
         } : prev)
-        setLiveStatus('CANCELLED')
         setShowCancelModal(false)
         toast.success('Order cancelled. Refund is on the way.')
       } else if (res.status === 409) {
         setShowCancelModal(false)
         const refresh = await fetch(`/api/orders/${orderId}`)
         const refreshJson = await refresh.json()
-        if (refreshJson?.success) { setOrder(refreshJson.data); setLiveStatus(refreshJson.data.status) }
+        if (refreshJson?.success) setOrder(refreshJson.data)
         toast.error('This order can no longer be cancelled — the vendor has started preparing it.')
       } else {
         toast.error('Could not cancel — please contact support')
@@ -223,8 +243,19 @@ export default function OrderTrackingPage() {
 
   if (!order) return null
 
+  // THE one derivation for this page. Every surface below renders from `view` — none of
+  // them reads order.status, a vendorOrderStatuses row, or a live-pushed value directly.
+  const view = deriveOrderView({
+    masterStatus:      order.status,
+    vendorStatuses:    order.vendorOrderStatuses ?? [],
+    fulfillmentType:   order.fulfillmentType,
+    runnerId:          order.runnerId,
+    collectedAt:       order.collectedAt,
+    estimatedReadyAt:  order.estimatedReadyAt ?? null,
+  })
+
   const sharedProps = {
-    order, liveStatus, fairSlug, cancelling,
+    order, view, fairSlug, cancelling,
     showCancelModal, setShowCancelModal,
     showSupportModal, setShowSupportModal,
     onCancel: handleCancel,
@@ -236,7 +267,7 @@ export default function OrderTrackingPage() {
     <RunnerLocationBanner
       orderId={orderId}
       fulfillmentType={order.fulfillmentType}
-      status={liveStatus}
+      status={view.displayStatus}
     />
   )
   return (

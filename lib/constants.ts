@@ -153,6 +153,22 @@ export const POST_EVENT_REPORT_HOURS = 48
 /**
  * Maximum number of distinct vendors allowed in a single order.
  * Playbook Quick Ref: "Max vendors per order: 5"
+ *
+ * ⚠️ NOT ENFORCED — DEAD AS OF 2026-08-11. This declaration is its ONLY appearance in the repo:
+ * nothing reads it at add-to-cart (`app/_contexts/FairCartContext.tsx` addItem has no
+ * vendor-count logic) and nothing reads it at order creation (`app/api/orders/route.ts`). Do NOT
+ * assume it gates a cart.
+ *
+ * What actually bounds N is the 20-ITEM cap at `app/api/orders/route.ts:113`; since each vendor
+ * needs at least one item, N ≤ 20.
+ *
+ * Left dead deliberately, not wired up. The money math is exact at any N — splitStripeFee's
+ * largest-remainder split reconciles to the cent (verified to N=100, including fee < N), and all
+ * 138 in-model multi-vendor orders reconcile exactly, 88 of them in mixed terminal states. The
+ * real max ever placed is N=4. Enforcing a limit nobody approaches, on math that does not drift,
+ * would be solving a non-problem. The one N-scaling failure mode is Stripe metadata overflow at
+ * N≈15, which fails closed — see the note at `app/api/orders/route.ts:428` for why the fix there
+ * is dropping the metadata, not adding a cap.
  */
 export const MAX_VENDORS_PER_ORDER = 5
 

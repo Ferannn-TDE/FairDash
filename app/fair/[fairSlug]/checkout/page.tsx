@@ -141,7 +141,18 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
       })
 
       if (error) {
-        toast.error(error.message ?? 'Payment failed — please try again')
+        // REVIEWED INTENTIONAL EXCEPTION (scripts/toast-leak-guard.ts allowlist).
+        // Stripe writes card_error and validation_error for the CARDHOLDER — "Your card was
+        // declined", "Your card's expiry date is in the past" — and no generic sentence of ours
+        // is more useful than that. Every OTHER error type is written for the integrator:
+        // api_error, invalid_request_error and friends carry internal decline codes and
+        // payment_intent / setup_intent ids, which say nothing to a customer and should not be
+        // on their screen at the moment they are trying to pay.
+        const cardholderFacing = error.type === 'card_error' || error.type === 'validation_error'
+        if (!cardholderFacing) console.error('[Checkout] Stripe error', error.type, error.code)
+        toast.error(
+          (cardholderFacing && error.message) || 'Payment failed — please try again',
+        )
         return
       }
 
@@ -437,10 +448,13 @@ export default function CheckoutPage() {
 
       const json = await res.json()
       if (!json.success) {
+        // REVIEWED INTENTIONAL EXCEPTION (scripts/toast-leak-guard.ts allowlist).
         // Surface the SERVER'S OWN sentence. A generic "failed to create order" hides the one
         // thing the customer can act on — that the fair isn't open yet (FAIR_NOT_OPEN names the
         // dates), or which address field is missing. Field-named address errors attach to their
         // inputs via the shared validator's field map; everything else becomes a readable toast.
+        // This route's messages are written for customers; that is what makes it an exception and
+        // not a leak. It is reviewed here, deliberately, rather than allowed by default anywhere.
         const message: string | undefined = json.error?.message
         const fields = (json.error?.details as { fields?: DeliveryAddressError[] } | undefined)?.fields
         if (fields?.length) {

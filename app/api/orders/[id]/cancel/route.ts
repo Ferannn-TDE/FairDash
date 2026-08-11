@@ -44,7 +44,7 @@ export async function PATCH(
 
     const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? clerkId
     const { allowed } = await enforceRateLimit(ip, 'refund', { failClosed: false })
-    if (!allowed) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    if (!allowed) return NextResponse.json({ success: false, error: { message: 'Too many requests', code: 'RATE_LIMITED' } }, { status: 429 })
 
     const body = await req.json().catch(() => ({})) as { vendorId?: string; reason?: string }
     const reason = body.reason ? String(body.reason).slice(0, 300) : 'Customer requested cancellation'
