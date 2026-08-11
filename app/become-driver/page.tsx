@@ -258,8 +258,9 @@ export default function BecomeDriverPage() {
           ? 'Application submitted! Your runner account is awaiting admin approval.'
           : "Application submitted! We'll be in touch within 2–3 business days.",
       )
-    } catch (err: any) {
-      toast.error(err.message || 'Could not submit application')
+    } catch (err: unknown) {
+      console.error('[BecomeDriver] submit failed', err)
+      toast.error('Couldn’t submit your application — please try again')
     } finally {
       setSubmitting(false)
     }

@@ -23,7 +23,7 @@ export async function POST(
 
     const { allowed, headers: rlHeaders } = await enforceRateLimit(`confirm-return:${clerkId}`, 'vendorStatus')
     if (!allowed) {
-      return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+      return NextResponse.json({ success: false, error: { message: 'Too many requests — slow down.', code: 'RATE_LIMITED' } }, { status: 429, headers: rlHeaders })
     }
 
     const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })

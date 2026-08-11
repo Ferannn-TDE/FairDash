@@ -40,7 +40,7 @@ export async function PATCH(
       if (!testId) return apiError('Unauthorized', 401, 'UNAUTHORIZED')
       const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${testId}`, 'vendorStatus')
       if (!allowed) {
-        return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+        return NextResponse.json({ success: false, error: { message: 'Too many requests — slow down.', code: 'RATE_LIMITED' } }, { status: 429, headers: rlHeaders })
       }
       return NextResponse.json({ ok: true }, { status: 200 })
     }
@@ -49,7 +49,7 @@ export async function PATCH(
 
     const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-status:${clerkId}`, 'vendorStatus')
     if (!allowed) {
-      return NextResponse.json({ error: 'Too many requests — slow down.' }, { status: 429, headers: rlHeaders })
+      return NextResponse.json({ success: false, error: { message: 'Too many requests — slow down.', code: 'RATE_LIMITED' } }, { status: 429, headers: rlHeaders })
     }
 
     const orderId = (await params).id

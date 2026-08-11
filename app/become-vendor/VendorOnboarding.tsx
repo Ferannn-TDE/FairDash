@@ -491,12 +491,15 @@ export default function VendorOnboarding() {
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
-        throw new Error(json?.error ?? 'Registration failed')
+        // `error` is the envelope OBJECT, so the old `json?.error` produced Error("[object
+        // Object]"). Only the console reads this now, but a useless log is its own bug.
+        throw new Error(json?.error?.message ?? 'Registration failed')
       }
       toast.success('Application submitted!')
       setStep(4) // success step (was 8)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Something went wrong.')
+      console.error('[VendorOnboarding] submit failed', err)
+      toast.error('Couldn’t submit your application — please try again.')
     } finally {
       setIsSubmitting(false)
     }

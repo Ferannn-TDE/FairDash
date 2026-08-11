@@ -4,6 +4,7 @@ import { useState, useEffect, use, useCallback } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, PackageX, PhoneCall, Store, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { toastError } from '@/lib/toast-error'
 
 // ─── Admin STRANDED escalation ─────────────────────────────────────────────────
 // The strand clocks (Pattern V) flag stuck custody; this surface shows the HANDLE next to each
@@ -55,7 +56,7 @@ export default function AdminStrandedPage({ params: paramsPromise }: { params: P
       const res = await fetch(`/api/admin/events/${params.eventSlug}/orders/${orderId}/release`, { method: 'POST' })
       const json = await res.json()
       if (res.ok && json.success) { toast.success('Released back to the pool'); await load() }
-      else toast.error(json.error || json.message || 'Could not release')
+      else toastError(json.error?.code, 'Couldn’t release that delivery — please try again')
     } catch { toast.error('Network error — try again') } finally { setReleasing(null) }
   }
 

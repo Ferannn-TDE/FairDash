@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import toast from 'react-hot-toast'
+import { toastError } from '@/lib/toast-error'
 import { useClerk } from '@clerk/clerk-react'
 import {
   BuildingStorefrontIcon,
@@ -274,7 +275,8 @@ export default function VendorSettingsPage() {
       if (!json.success) throw new Error(json.error?.message ?? 'Failed to save')
       toast.success('Profile updated')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save profile')
+      console.error('[VendorSettings] profile save failed', err)
+      toast.error('Couldn’t save your profile — please try again')
     } finally {
       setSaving(false)
     }
@@ -303,7 +305,8 @@ export default function VendorSettingsPage() {
       if (!json.success) throw new Error(json.error?.message ?? 'Failed to save')
       toast.success('Hours saved')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save hours')
+      console.error('[VendorSettings] hours save failed', err)
+      toast.error('Couldn’t save your hours — please try again')
     } finally {
       setSavingHours(false)
     }
@@ -341,11 +344,18 @@ export default function VendorSettingsPage() {
       form.append('file', file)
       const res  = await fetch(`/api/vendors/${vendorId}/documents`, { method: 'POST', body: form })
       const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message ?? 'Upload failed')
+      if (!json.success) {
+        // The route's own codes (FILE_TOO_LARGE / INVALID_MIME) carry the useful copy; anything
+        // else gets the fallback rather than a server sentence. Same toastId, so the pending
+        // "Uploading…" toast is replaced rather than stacked.
+        toastError(json.error?.code, 'Couldn’t upload that document — please try again', { id: toastId })
+        return
+      }
       setDocs(json.data.documents)
       toast.success('Document uploaded', { id: toastId })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed', { id: toastId })
+      console.error('[VendorSettings] document upload failed', err)
+      toast.error('Couldn’t upload that document — please try again', { id: toastId })
     } finally {
       setUploadingDoc(null)
     }

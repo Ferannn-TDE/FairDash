@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server'
 // Implementation: Part 4
 export async function PATCH() {
   return NextResponse.json(
-    { error: 'Not implemented — coming in Part 4 (Driver system)' },
+    { success: false, error: { message: 'Not implemented — coming in Part 4 (Driver system)', code: 'NOT_IMPLEMENTED' } },
     { status: 501 }
   )
 }
