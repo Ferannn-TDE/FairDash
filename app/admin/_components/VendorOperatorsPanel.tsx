@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle, CreditCard, Store, XCircle, Clock, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, CheckCircle, CreditCard, Store, XCircle, Clock, ShieldAlert, X } from 'lucide-react'
 import ApprovalQueue, { type ApprovalItem } from './ApprovalQueue'
 import { formatAuditTimestamp } from '@/lib/audit-time'
 
@@ -258,24 +258,31 @@ export default function VendorOperatorsPanel() {
 function RowActions({ op, onDone }: { op: Operator; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // The refuse form, revealed in-row. Replaced a window.prompt() whose OS text box covered the
+  // operator you were deciding about — and threw the typed reason away on any failure. Same
+  // shape as the sibling admin panels (OrganizersPanel.tsx:100, OrganizerControl.tsx:22).
+  const [confirming, setConfirming] = useState(false)
+  const [reason, setReason] = useState('')
 
   if (op.approvalStatus === 'PENDING') return null // handled by the queue above
 
   async function act(action: 'approve' | 'reject') {
-    let reason: string | undefined
-    if (action === 'reject') {
-      reason = window.prompt('Why is this operator being refused? They will be shown this.')?.trim()
-      if (!reason) return
-    }
+    // A refusal is shown to the operator, so it must carry a reason. The confirm button is
+    // disabled without one; this stays as the backstop.
+    const why = reason.trim()
+    if (action === 'reject' && !why) return
     setBusy(true); setErr(null)
     try {
       const res = await fetch(`/api/admin/vendor-members/${op.id}/${action}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: action === 'reject' ? JSON.stringify({ reason }) : undefined,
+        body: action === 'reject' ? JSON.stringify({ reason: why }) : undefined,
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json.success) { setErr(json.error?.message ?? `Could not ${action}`); return }
+      // Close only on success — a failed refuse keeps the form and the typed reason, so it can
+      // be retried rather than re-written.
+      setConfirming(false); setReason('')
       onDone()
     } catch {
       setErr('Network error')
@@ -285,23 +292,65 @@ function RowActions({ op, onDone }: { op: Operator; onDone: () => void }) {
   }
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
-      {op.approvalStatus === 'REJECTED' ? (
-        <button
-          onClick={() => act('approve')} disabled={busy}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/25 transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <CheckCircle className="w-3.5 h-3.5" /> {busy ? 'Admitting…' : 'Admit anyway'}
-        </button>
-      ) : (
-        <button
-          onClick={() => act('reject')} disabled={busy}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 text-xs font-semibold hover:bg-red-500/25 transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <XCircle className="w-3.5 h-3.5" /> {busy ? 'Refusing…' : 'Refuse operator'}
-        </button>
+    <div className="mt-4">
+      {!confirming && (
+        <div className="flex flex-wrap items-center gap-2">
+          {op.approvalStatus === 'REJECTED' ? (
+            <button
+              onClick={() => act('approve')} disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/25 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <CheckCircle className="w-3.5 h-3.5" /> {busy ? 'Admitting…' : 'Admit anyway'}
+            </button>
+          ) : (
+            <button
+              onClick={() => { setConfirming(true); setReason(''); setErr(null) }} disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 text-xs font-semibold hover:bg-red-500/25 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <XCircle className="w-3.5 h-3.5" /> Refuse operator
+            </button>
+          )}
+          {err && <span className="text-xs text-red-400 font-inter">⚠ {err}</span>}
+        </div>
       )}
-      {err && <span className="text-xs text-red-400 font-inter">⚠ {err}</span>}
+
+      {/* THE REASON IS SHOWN TO THE OPERATOR — see VendorOperatorGateScreen — so a refusal
+          without one is unauditable and the confirm stays disabled until it's written. */}
+      {confirming && (
+        <div className="pt-4 border-t border-white/10">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold">
+              Refuse this operator — they are shown this reason
+            </p>
+            <button
+              onClick={() => { setConfirming(false); setReason('') }}
+              className="text-text-gray hover:text-white cursor-pointer bg-transparent border-0"
+              aria-label="Cancel refusal"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            rows={2}
+            autoFocus
+            placeholder="Required — why is this operator being refused? (they see this)"
+            className="w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-red-500/50 transition-colors resize-none placeholder:text-[#444]"
+          />
+
+          <button
+            onClick={() => act('reject')}
+            disabled={busy || !reason.trim()}
+            className="mt-2 w-full py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-0"
+          >
+            {busy ? 'Refusing…' : reason.trim() ? 'Confirm refusal' : 'A reason is required'}
+          </button>
+
+          {err && <p className="mt-2 text-xs text-red-400 font-inter">⚠ {err}</p>}
+        </div>
+      )}
     </div>
   )
 }
