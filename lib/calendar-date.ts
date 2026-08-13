@@ -86,3 +86,57 @@ export function fromPickerDate(date: Date | null | undefined): CalendarDateStrin
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISPLAY — for surfaces rendering a date the PICKER owns
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ These live here, beside the adapter, for one reason: a summary that formats
+// the same value a different way is exactly how the off-by-one comes back. The
+// obvious `new Date('2026-08-03').toLocaleDateString()` shifts back a day in every
+// America/* zone, so a "pretty" panel would read Aug 2 while the grid it sits next
+// to highlights Aug 3 — the worst version of the bug, because the calendar looks
+// right and only the readout lies.
+//
+// Everything below formats from `toPickerDate`'s LOCAL Date — the exact object the
+// grid renders — so the two cannot disagree by construction.
+//
+// Static name tables, NOT date-fns `format`: the containment guard forbids importing
+// it, and this module must stay dependency-free so the round-trip guard can prove it
+// without mounting a calendar.
+//
+// (For a fair date rendered ANYWHERE ELSE in the app — a public page, an admin list —
+// use lib/event-date.ts. That reads the stored UTC carrier and is the right tool when
+// there is no picker involved. This is the picker's own summary.)
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
+
+/** 'YYYY-MM-DD' → 'Mon, Aug 3, 2026'. Empty string when there is nothing to show. */
+export function formatCalendarDate(value: CalendarDateString | null | undefined): string {
+  const d = toPickerDate(value)
+  if (!d) return ''
+  return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+}
+
+/**
+ * Inclusive day count across a range: Aug 3 → Aug 3 is 1 day, Aug 3 → Aug 25 is 23.
+ *
+ * ⚠️ NOT `(to - from) / 86400000`. Both Dates are LOCAL midnight, so a range spanning a
+ * DST transition is 22.958… or 23.042… days and any rounding choice is wrong somewhere —
+ * measured: Mar 1 → Mar 24 2026 in America/Chicago floors to 22, losing a day. Normalising
+ * the calendar parts through Date.UTC removes the offset entirely and the subtraction is
+ * exact integer days.
+ */
+export function calendarDayCount(
+  start: CalendarDateString | null | undefined,
+  end: CalendarDateString | null | undefined,
+): number | null {
+  const a = toPickerDate(start)
+  const b = toPickerDate(end)
+  if (!a || !b) return null
+  const ms = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
+    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())
+  const days = ms / 86_400_000
+  return days < 0 ? null : days + 1 // inclusive of both endpoints
+}

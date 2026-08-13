@@ -97,13 +97,6 @@ function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
           value={{ start: data.startDate, end: data.endDate }}
           onChange={v => onChange({ ...data, startDate: v.start, endDate: v.end })}
         />
-        <p className="mt-1.5 text-xs font-inter text-[#666]">
-          {data.startDate && data.endDate
-            ? `${data.startDate} → ${data.endDate}`
-            : data.startDate
-              ? `${data.startDate} → pick an end date`
-              : 'Pick the first and last day of the fair.'}
-        </p>
       </div>
       <FormInput label="Address" name="address" value={data.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St" required />
       <div className="grid grid-cols-3 gap-4">
