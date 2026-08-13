@@ -76,13 +76,9 @@ const DAY_BUTTON =
 function EndpointCard({ label, date, placeholder }: { label: string; date: string; placeholder: string }) {
   const filled = date !== ''
   return (
-    <div
-      className={`rounded-xl border bg-bg-card px-3.5 py-3 border-l-2 transition-colors ${
-        filled ? 'border-white/10 border-l-neon-pink' : 'border-white/[0.06] border-l-white/10'
-      }`}
-    >
-      <p className="text-[0.625rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>
-      <p className={`text-sm font-inter ${filled ? 'text-white font-medium' : 'text-text-gray/50 italic'}`}>
+    <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3.5 transition-colors">
+      <p className="text-[0.625rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">{label}</p>
+      <p className={`text-sm font-inter ${filled ? 'text-white' : 'text-text-gray/50 italic'}`}>
         {filled ? date : placeholder}
       </p>
     </div>
@@ -111,7 +107,12 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
   const nothingPicked = startLabel === '' && endLabel === ''
 
   return (
-    <div className="inline-flex flex-col lg:flex-row gap-4 rounded-2xl border border-white/10 bg-[#0a0a0a] p-4">
+    // w-full, NOT inline-flex: every consumer drops this into a column of `w-full` inputs
+    // (organizer's FormInput inside max-w-2xl, admin's INPUT inside a SectionCard), and an
+    // inline-flex box shrinks to its content — which is why the picker stopped short of the
+    // address field beneath it. Filling the column is what makes the form read as one width,
+    // and it adapts to each page's own column rather than hard-coding a size.
+    <div className="w-full flex flex-col lg:flex-row gap-4 rounded-2xl border border-white/10 bg-[#0a0a0a] p-4">
       <DayPicker
         mode="range"
         selected={selected}
@@ -126,7 +127,9 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
         disabled={disabled}
         showOutsideDays
         classNames={{
-          root: 'text-white',
+          // shrink-0: the grid has a natural size (7 × 2.25rem) and must not be squeezed when
+          // the summary column shares the row — the summary flexes, the calendar does not.
+          root: 'text-white shrink-0',
           months: 'flex flex-col',
           month: 'space-y-3',
 
@@ -180,7 +183,7 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
 
           This lives in the COMPONENT, not the call sites: the same readout was pasted into
           both consumers, which is how two summaries of one value start disagreeing. */}
-      <div className="lg:w-56 shrink-0 flex flex-col gap-2 lg:border-l lg:border-t-0 border-t border-white/[0.06] lg:pl-4 pt-4 lg:pt-0">
+      <div className="flex-1 min-w-0 flex flex-col gap-2.5 lg:border-l lg:border-t-0 border-t border-white/[0.06] lg:pl-4 pt-4 lg:pt-0">
         {nothingPicked ? (
           <div className="flex-1 flex items-center justify-center rounded-xl border border-dashed border-white/10 px-3 py-6">
             <p className="text-xs text-text-gray/60 font-inter text-center leading-relaxed">
