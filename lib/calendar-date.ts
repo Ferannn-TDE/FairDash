@@ -109,6 +109,82 @@ export function fromPickerDate(date: Date | null | undefined): CalendarDateStrin
 // use lib/event-date.ts. That reads the stored UTC carrier and is the right tool when
 // there is no picker involved. This is the picker's own summary.)
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENT DATE BOUNDS — creation vs editing, which are NOT the same rule
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ THE LOCKOUT THIS PREVENTS. Creating a fair forbids past dates: you cannot schedule an
+// event that already happened. Applying that same floor to the EDIT form would be a trap — a
+// fair that has already started has a start date in the past BY DEFINITION, so a floor of
+// "today" greys out its own dates and, with navigation hard-stopped at the same boundary,
+// leaves an admin unable to reach or re-pick the dates of a LIVE event. Same for a fair
+// scheduled beyond the creation horizon.
+//
+// So the two are separate functions rather than one function with a flag, and the edit bounds
+// WIDEN around whatever the record already holds. They live here — pure, dependency-free —
+// so `scripts/date-bounds-guard.ts` can assert the no-lockout property directly instead of it
+// resting on a comment in a form component.
+
+export interface DateBounds {
+  minDate: Date
+  maxDate: Date
+  defaultMonth: Date
+}
+
+/** Local midnight today. Never `new Date(string)` — see the header. */
+function startOfToday(now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+/**
+ * Month arithmetic, so Oct + 3 rolls the year. A day absent from the target month
+ * (Aug 31 → Nov 31) rolls forward one day, which is harmless for a ceiling.
+ */
+function monthsAhead(months: number, now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth() + months, now.getDate())
+}
+
+/** How far ahead a fair may be scheduled at CREATION time. */
+export const CREATION_HORIZON_MONTHS = 3
+
+/**
+ * CREATION: no past dates, hard horizon. `existingStart` is only used to choose the opening
+ * month when resuming a draft — a stale draft dated in the past does NOT widen the floor,
+ * because it must be re-dated before it can be published.
+ */
+export function creationDateBounds(existingStart?: CalendarDateString | null, now = new Date()): DateBounds {
+  const today = startOfToday(now)
+  const draftStart = toPickerDate(existingStart)
+  return {
+    minDate: today,
+    maxDate: monthsAhead(CREATION_HORIZON_MONTHS, now),
+    defaultMonth: draftStart && draftStart >= today ? draftStart : today,
+  }
+}
+
+/**
+ * EDITING: bounds widen to include the record's own dates, so they are ALWAYS reachable —
+ * that is the no-lockout guarantee. Still floors at today for a normal upcoming fair, so an
+ * admin cannot wander back years for no reason.
+ */
+export function editDateBounds(
+  existingStart?: CalendarDateString | null,
+  existingEnd?: CalendarDateString | null,
+  now = new Date(),
+): DateBounds {
+  const today = startOfToday(now)
+  const horizon = monthsAhead(CREATION_HORIZON_MONTHS, now)
+  const start = toPickerDate(existingStart)
+  const end = toPickerDate(existingEnd)
+  return {
+    minDate: start && start < today ? start : today,
+    maxDate: end && end > horizon ? end : horizon,
+    // DayPicker opens on the CURRENT month by default, so editing any fair not happening this
+    // month made you navigate to find its own dates.
+    defaultMonth: start ?? today,
+  }
+}
+
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
