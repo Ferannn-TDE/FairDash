@@ -1,7 +1,12 @@
 'use client'
 
 import { DayPicker, type DateRange } from 'react-day-picker'
-import { toPickerDate, fromPickerDate } from '@/lib/calendar-date'
+import {
+  toPickerDate,
+  fromPickerDate,
+  formatCalendarDate,
+  calendarDayCount,
+} from '@/lib/calendar-date'
 
 /**
  * The shared event date-range picker — one themed calendar, used by every surface that sets a
@@ -62,6 +67,28 @@ const DAY_BUTTON =
   'hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-neon-pink/60 ' +
   'disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:bg-transparent cursor-pointer'
 
+/**
+ * One endpoint of the range. `date` is the already-formatted string (formatting happens in
+ * lib/calendar-date, never here), so this component cannot introduce a second date derivation.
+ * An unfilled endpoint renders a muted prompt rather than an empty box — the panel always says
+ * what it is waiting for.
+ */
+function EndpointCard({ label, date, placeholder }: { label: string; date: string; placeholder: string }) {
+  const filled = date !== ''
+  return (
+    <div
+      className={`rounded-xl border bg-bg-card px-3.5 py-3 border-l-2 transition-colors ${
+        filled ? 'border-white/10 border-l-neon-pink' : 'border-white/[0.06] border-l-white/10'
+      }`}
+    >
+      <p className="text-[0.625rem] uppercase tracking-wide text-text-gray font-semibold mb-1">{label}</p>
+      <p className={`text-sm font-inter ${filled ? 'text-white font-medium' : 'text-text-gray/50 italic'}`}>
+        {filled ? date : placeholder}
+      </p>
+    </div>
+  )
+}
+
 export default function DateRangePicker({ value, onChange, fromDate, toDate }: Props) {
   const selected: DateRange | undefined = (() => {
     const from = toPickerDate(value.start)
@@ -76,8 +103,15 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
     ? [...(before ? [{ before }] : []), ...(after ? [{ after }] : [])]
     : undefined
 
+  // Formatted ONCE here, from the same strings the grid renders, via the adapter's own
+  // formatter. Nothing below re-derives a date.
+  const startLabel = formatCalendarDate(value.start)
+  const endLabel = formatCalendarDate(value.end)
+  const dayCount = calendarDayCount(value.start, value.end)
+  const nothingPicked = startLabel === '' && endLabel === ''
+
   return (
-    <div className="inline-block rounded-2xl border border-white/10 bg-[#0a0a0a] p-4">
+    <div className="inline-flex flex-col lg:flex-row gap-4 rounded-2xl border border-white/10 bg-[#0a0a0a] p-4">
       <DayPicker
         mode="range"
         selected={selected}
@@ -138,6 +172,37 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
             'bg-neon-pink/10 [&_button]:rounded-none [&_button]:text-white [&_button]:hover:bg-white/10',
         }}
       />
+
+      {/* ── Range summary ───────────────────────────────────────────────────────────────
+          Beside the calendar on lg+, beneath it on narrow screens (a phone has no room for
+          two columns, and the calendar is the thing you interact with, so it stays first).
+          The `lg:` border flips from top to left with the direction of the stack.
+
+          This lives in the COMPONENT, not the call sites: the same readout was pasted into
+          both consumers, which is how two summaries of one value start disagreeing. */}
+      <div className="lg:w-56 shrink-0 flex flex-col gap-2 lg:border-l lg:border-t-0 border-t border-white/[0.06] lg:pl-4 pt-4 lg:pt-0">
+        {nothingPicked ? (
+          <div className="flex-1 flex items-center justify-center rounded-xl border border-dashed border-white/10 px-3 py-6">
+            <p className="text-xs text-text-gray/60 font-inter text-center leading-relaxed">
+              Select fair dates
+              <span className="block mt-1 text-text-gray/40">Click a start day, then an end day</span>
+            </p>
+          </div>
+        ) : (
+          <>
+            <EndpointCard label="Start" date={startLabel} placeholder="—" />
+            <EndpointCard label="End" date={endLabel} placeholder="Pick an end date" />
+            {/* Only once BOTH ends exist — a duration next to a half-made range would be
+                describing something the user hasn't finished choosing. */}
+            {dayCount !== null && (
+              <p className="text-xs text-text-gray font-inter text-center pt-0.5">
+                <span className="text-neon-pink font-semibold tabular-nums">{dayCount}</span>
+                {dayCount === 1 ? ' day' : ' days'}
+              </p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }

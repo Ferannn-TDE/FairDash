@@ -172,13 +172,6 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
                 value={{ start: startDate, end: endDate }}
                 onChange={v => { setStartDate(v.start); setEndDate(v.end) }}
               />
-              <p className="mt-1.5 text-xs text-[#666]">
-                {startDate && endDate
-                  ? `${startDate} → ${endDate}`
-                  : startDate
-                    ? `${startDate} → pick an end date`
-                    : 'Pick the first and last day of the event.'}
-              </p>
             </Field>
           </div>
         </SectionCard>

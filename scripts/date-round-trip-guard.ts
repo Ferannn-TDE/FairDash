@@ -28,7 +28,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { toPickerDate, fromPickerDate } from '../lib/calendar-date'
+import { toPickerDate, fromPickerDate, formatCalendarDate, calendarDayCount } from '../lib/calendar-date'
 
 /** The zones that actually decide this: two west of UTC, UTC itself, two east. */
 const ZONES = ['America/Chicago', 'America/Los_Angeles', 'UTC', 'Asia/Tokyo', 'Australia/Sydney']
@@ -70,6 +70,35 @@ if (process.env.RT_TZ_CHILD === '1') {
   }
   if (fromPickerDate(undefined) !== '' || fromPickerDate(new Date(NaN)) !== '') {
     failures.push('fromPickerDate did not return "" for empty/invalid')
+  }
+
+  // [4] DISPLAY MATCHES THE GRID. The picker's summary panel formats the same value the
+  // calendar highlights; if they disagree the calendar looks right and only the readout
+  // lies, which is the hardest version of this bug to notice. The naive
+  // `new Date(s).toLocaleDateString()` says "Aug 2" for '2026-08-03' in every America/* zone.
+  for (const s of DATES) {
+    const label = formatCalendarDate(s)
+    const day = Number(s.split('-')[2])
+    const labelDay = Number(label.match(/ (\d+),/)?.[1])
+    if (labelDay !== day) failures.push(`display ${s} → "${label}" names day ${labelDay}, grid shows ${day}`)
+  }
+  if (formatCalendarDate('') !== '' || formatCalendarDate('2026-02-30') !== '') {
+    failures.push('formatCalendarDate did not return "" for empty/invalid')
+  }
+
+  // [5] DURATION IS EXACT ACROSS DST. Local-midnight subtraction gives 22.958… days for a
+  // 23-day March range in America/Chicago — measured — so the count is normalised through
+  // Date.UTC. Inclusive of both endpoints.
+  const durations: [string, string, number | null][] = [
+    ['2026-08-03', '2026-08-25', 23],
+    ['2026-08-03', '2026-08-03', 1],   // single-day fair
+    ['2026-03-01', '2026-03-24', 24],  // spans US spring-forward
+    ['2026-10-25', '2026-11-08', 15],  // spans US fall-back
+    ['2026-08-25', '2026-08-03', null], // inverted → null, never a negative
+  ]
+  for (const [a, b, want] of durations) {
+    const got = calendarDayCount(a, b)
+    if (got !== want) failures.push(`duration ${a}→${b} = ${got}, expected ${want}`)
   }
 
   if (failures.length) {
