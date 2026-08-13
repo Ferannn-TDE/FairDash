@@ -130,7 +130,16 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
           // shrink-0: the grid has a natural size (7 × 2.25rem) and must not be squeezed when
           // the summary column shares the row — the summary flexes, the calendar does not.
           root: 'text-white shrink-0',
-          months: 'flex flex-col',
+          // ⚠️ `relative` IS LOAD-BEARING — without it month navigation is silently broken.
+          // `nav` below is position:absolute (that is how the library floats the arrows over
+          // the centred caption), and this element is its intended anchor: the library's own
+          // stylesheet says `.rdp-months { position: relative }`. But `classNames` REPLACES the
+          // rdp- class rather than adding to it, and we deliberately do not import
+          // react-day-picker/style.css — so that rule never reached the DOM. The nav then
+          // anchored to whatever positioned ancestor existed further up the page and rendered
+          // OFF the calendar entirely: the arrows were not disabled, they were somewhere else,
+          // so BOTH forward and backward paging were unreachable.
+          months: 'relative flex flex-col',
           month: 'space-y-3',
 
           // ── Caption + navigation ──────────────────────────────────────────────────────
@@ -183,7 +192,12 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
 
           This lives in the COMPONENT, not the call sites: the same readout was pasted into
           both consumers, which is how two summaries of one value start disagreeing. */}
-      <div className="flex-1 min-w-0 flex flex-col gap-2.5 lg:border-l lg:border-t-0 border-t border-white/[0.06] lg:pl-4 pt-4 lg:pt-0">
+      {/* max-w-xs below lg: once the layout stacks, the parent is a flex COLUMN, so the cross
+          axis is width and `align-items: stretch` (the default) pulls these cards to the full
+          container width. flex-1 only governs the main axis, so it is not what stretches them.
+          Capping the width when stacked keeps the cards reading as fields rather than banners;
+          at lg+ the cap lifts and the column flexes beside the calendar as before. */}
+      <div className="flex-1 min-w-0 max-w-xs lg:max-w-none flex flex-col gap-2.5 lg:border-l lg:border-t-0 border-t border-white/[0.06] lg:pl-4 pt-4 lg:pt-0">
         {nothingPicked ? (
           <div className="flex-1 flex items-center justify-center rounded-xl border border-dashed border-white/10 px-3 py-6">
             <p className="text-xs text-text-gray/60 font-inter text-center leading-relaxed">
