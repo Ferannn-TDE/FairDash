@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use, useCallback } from 'react'
 import { CheckCircleIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
+import DateRangePicker from '@/app/_components/ui/DateRangePicker'
 
 const INPUT = 'w-full bg-[#0f0f0f] border border-white/10 rounded-xl px-4 py-3 text-white text-sm font-inter outline-none focus:border-[#FF0077] transition-colors placeholder:text-[#444]'
 
@@ -162,14 +163,16 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
             <Field label="Event Name">
               <input type="text" value={name} onChange={e => setName(e.target.value)} className={INPUT} />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Start Date">
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={INPUT} />
-              </Field>
-              <Field label="End Date">
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={INPUT} />
-              </Field>
-            </div>
+            {/* One range picker for both dates. Same 'YYYY-MM-DD' strings into the same
+                state, so the PATCH body at :94 is byte-identical to what the native inputs
+                sent — and the server's end<start check (admin-event-settings.ts:53) is now
+                also unreachable by construction, since a range cannot be inverted. */}
+            <Field label="Event Dates">
+              <DateRangePicker
+                value={{ start: startDate, end: endDate }}
+                onChange={v => { setStartDate(v.start); setEndDate(v.end) }}
+              />
+            </Field>
           </div>
         </SectionCard>
 
