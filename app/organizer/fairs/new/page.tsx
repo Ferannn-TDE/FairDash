@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
+import DateRangePicker from '@/app/_components/ui/DateRangePicker'
 import { ChevronLeftIcon } from '@heroicons/react/24/outline'
 
 const STEPS = ['Basic Info', 'Dates & Location', 'Branding', 'Settings', 'Review']
@@ -84,9 +85,18 @@ function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
   const set = (k: keyof FairDraft, v: string) => onChange({ ...data, [k]: v })
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <FormInput label="Start Date" name="startDate" value={data.startDate} onChange={e => set('startDate', e.target.value)} type="date" required />
-        <FormInput label="End Date" name="endDate" value={data.endDate} onChange={e => set('endDate', e.target.value)} type="date" required />
+      {/* One range picker replaces the two native date inputs. It writes the SAME
+          'YYYY-MM-DD' strings into the SAME state keys, so the submit at :232 and the
+          draft-load at :199 are untouched — and picking the range gives start ≤ end for
+          free, which two independent inputs never enforced. */}
+      <div className="mb-5">
+        <label className="block text-xs font-inter text-[#888] uppercase tracking-wider mb-1.5">
+          Fair Dates <span className="text-[#FF0077]">*</span>
+        </label>
+        <DateRangePicker
+          value={{ start: data.startDate, end: data.endDate }}
+          onChange={v => onChange({ ...data, startDate: v.start, endDate: v.end })}
+        />
       </div>
       <FormInput label="Address" name="address" value={data.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St" required />
       <div className="grid grid-cols-3 gap-4">
