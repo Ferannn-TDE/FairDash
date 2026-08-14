@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import DateRangePicker from '@/app/_components/ui/DateRangePicker'
+import { creationDateBounds } from '@/lib/calendar-date'
 import { ChevronLeftIcon } from '@heroicons/react/24/outline'
 
 const STEPS = ['Basic Info', 'Dates & Location', 'Branding', 'Settings', 'Review']
@@ -83,6 +84,14 @@ function Step1({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
 
 function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) => void }) {
   const set = (k: keyof FairDraft, v: string) => onChange({ ...data, [k]: v })
+
+  // Creation rule (no past, hard 3-month horizon) lives in lib/calendar-date beside the edit
+  // rule, so the two can be compared — and so date-bounds-guard can assert the EDIT form never
+  // locks an admin out of a running fair. Computed once per mount: a stable identity keeps
+  // DayPicker from re-clamping its month on every keystroke elsewhere in the form.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const { minDate, maxDate, defaultMonth } = useMemo(() => creationDateBounds(data.startDate), [])
+
   return (
     <div>
       {/* One range picker replaces the two native date inputs. It writes the SAME
@@ -96,6 +105,9 @@ function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
         <DateRangePicker
           value={{ start: data.startDate, end: data.endDate }}
           onChange={v => onChange({ ...data, startDate: v.start, endDate: v.end })}
+          minDate={minDate}
+          maxDate={maxDate}
+          defaultMonth={defaultMonth}
         />
       </div>
       <FormInput label="Address" name="address" value={data.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St" required />

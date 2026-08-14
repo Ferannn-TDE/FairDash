@@ -51,14 +51,25 @@ interface Props {
   value: DateRangeValue
   onChange: (value: DateRangeValue) => void
   /**
-   * Earliest selectable day, 'YYYY-MM-DD'. Days before it are disabled.
-   * ⚠️ Deliberately NOT wired to DayPicker's `min`/`max` — in `mode="range"` those are the
-   * number of DAYS the range may span, not date bounds. A date passed there would silently
-   * mean something else entirely.
+   * Earliest selectable day. Omit for no lower bound.
+   *
+   * ⚠️ NAMED minDate, NOT fromDate. react-day-picker v8 had props LITERALLY called
+   * `fromDate`/`toDate` that meant navigation bounds, so reusing those names here — on props
+   * that feed the `disabled` matcher — invites someone to assume v8 semantics. That family of
+   * assumption is what produced the nav bug in this very component.
+   *
+   * ⚠️ AND NOT DayPicker's `min`/`max`: in `mode="range"` those are the NUMBER OF DAYS a range
+   * may span, not date bounds. Passing a Date there silently means something else entirely.
    */
-  fromDate?: string
-  /** Latest selectable day, 'YYYY-MM-DD'. */
-  toDate?: string
+  minDate?: Date
+  /** Latest selectable day. Omit for no upper bound. */
+  maxDate?: Date
+  /**
+   * Month the calendar opens on. Defaults to the CURRENT month when omitted, which is wrong
+   * for an edit form: opening on today forces the user to navigate to reach dates they
+   * already chose. Pass the record's own start date there.
+   */
+  defaultMonth?: Date
 }
 
 /** One cell: a square, centred, hover-lit day button. */
@@ -85,18 +96,24 @@ function EndpointCard({ label, date, placeholder }: { label: string; date: strin
   )
 }
 
-export default function DateRangePicker({ value, onChange, fromDate, toDate }: Props) {
+export default function DateRangePicker({ value, onChange, minDate, maxDate, defaultMonth }: Props) {
   const selected: DateRange | undefined = (() => {
     const from = toPickerDate(value.start)
     if (!from) return undefined
     return { from, to: toPickerDate(value.end) }
   })()
 
-  // `disabled` (a matcher), NOT min/max — see the Props note above.
-  const before = toPickerDate(fromDate)
-  const after = toPickerDate(toDate)
-  const disabled = before || after
-    ? [...(before ? [{ before }] : []), ...(after ? [{ after }] : [])]
+  // ── Bounds are enforced TWICE, deliberately ────────────────────────────────────────────
+  // `disabled` greys out-of-range days; startMonth/endMonth stop the nav arrows at the
+  // boundary. Using only `disabled` would let you page into months where every single day is
+  // dead, which reads as a broken calendar rather than a limit. Using only the month bounds
+  // would leave selectable days in the boundary month that are actually out of range.
+  //
+  // Each matcher is added only when its bound exists — `{ before: undefined }` is not "no
+  // lower bound", it is a matcher with an undefined field, and an omitted bound must mean
+  // genuinely unconstrained.
+  const disabled = minDate || maxDate
+    ? [...(minDate ? [{ before: minDate }] : []), ...(maxDate ? [{ after: maxDate }] : [])]
     : undefined
 
   // Formatted ONCE here, from the same strings the grid renders, via the adapter's own
@@ -125,6 +142,9 @@ export default function DateRangePicker({ value, onChange, fromDate, toDate }: P
           })
         }}
         disabled={disabled}
+        startMonth={minDate}
+        endMonth={maxDate}
+        defaultMonth={defaultMonth}
         showOutsideDays
         classNames={{
           // shrink-0: the grid has a natural size (7 × 2.25rem) and must not be squeezed when

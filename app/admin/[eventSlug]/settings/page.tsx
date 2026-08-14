@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, use, useCallback } from 'react'
+import { useState, useEffect, use, useCallback, useMemo } from 'react'
 import { CheckCircleIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import DateRangePicker from '@/app/_components/ui/DateRangePicker'
+import { editDateBounds } from '@/lib/calendar-date'
 
 const INPUT = 'w-full bg-[#0f0f0f] border border-white/10 rounded-xl px-4 py-3 text-white text-sm font-inter outline-none focus:border-[#FF0077] transition-colors placeholder:text-[#444]'
 
@@ -127,6 +128,15 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
 
   const saving = saveState === 'saving'
 
+  // ⚠️ EDIT bounds, NOT creation bounds — they widen around the fair's existing dates so a
+  // running or already-started fair stays editable. The rule and the no-lockout proof live in
+  // lib/calendar-date + scripts/date-bounds-guard; do not inline a "today" floor here.
+  const { minDate, maxDate, defaultMonth } = useMemo(
+    () => editDateBounds(startDate, endDate),
+    [startDate, endDate],
+  )
+
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -171,6 +181,9 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
               <DateRangePicker
                 value={{ start: startDate, end: endDate }}
                 onChange={v => { setStartDate(v.start); setEndDate(v.end) }}
+                minDate={minDate}
+                maxDate={maxDate}
+                defaultMonth={defaultMonth}
               />
             </Field>
           </div>
