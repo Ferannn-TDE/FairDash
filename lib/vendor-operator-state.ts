@@ -19,6 +19,48 @@
 /** Mirrors the shared Prisma `ApprovalStatus` enum. Pinned to schema.prisma by the guard. */
 export type VendorApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
 
+/** Mirrors the Prisma `VendorStatus` enum. Pinned to schema.prisma by the guard. */
+export type VendorBoothStatus = 'PENDING' | 'ACTIVE' | 'PAUSED' | 'SUSPENDED' | 'REJECTED'
+
+/**
+ * THE BOOTH AXIS — "may this booth trade right now". The second of the two independent
+ * questions (schema.prisma:374 spells out the pair); this file's other half answers the
+ * operator axis, "may this human operate it". Neither implies the other.
+ *
+ * ACTIVE and nothing else. That is already the de-facto rule in three server places —
+ * order creation (app/api/orders/route.ts:249), the public vendor read
+ * (app/api/vendors/[id]/route.ts:93), and readiness (lib/vendor-readiness.ts:108) — and the
+ * vendor dashboard's online toggle states it in prose ("usable ONLY when status === ACTIVE",
+ * lib/vendor-online-state.ts:8). It lives HERE now so the server gate and the client badge
+ * name the same rule instead of four hand-rolled comparisons that can drift apart.
+ *
+ * ⚠️ NOT the same question as vendorReady() (lib/vendor-readiness.ts:35). That is the (c) bar —
+ * ACTIVE *plus* Stripe *plus* a menu — which decides whether CUSTOMERS can see and order from
+ * the booth. This decides whether the booth's own operator may act as a live booth. A booth can
+ * pass this and fail that (approved, no menu yet); do not substitute one for the other.
+ */
+export function boothMayOperate(status: string): boolean {
+  return status === 'ACTIVE'
+}
+
+/**
+ * Why a booth may not operate, worded for its own operator. Null when it may.
+ *
+ * PENDING is deliberately NOT phrased as a fault: `Vendor.status` DEFAULTS to PENDING
+ * (schema.prisma:249), so every booth that ever existed passed through it while its operator
+ * was still filling the application in. "Not approved yet" is the honest reading, not "refused".
+ */
+export function boothOperatingMessage(status: string): string | null {
+  if (boothMayOperate(status)) return null
+  switch (status) {
+    case 'PENDING':   return 'This booth is still awaiting approval, so it cannot trade yet.'
+    case 'PAUSED':    return 'This booth has been paused by the organizer — contact them to be reactivated.'
+    case 'SUSPENDED': return 'This booth has been suspended — contact the organizer.'
+    case 'REJECTED':  return 'This booth’s application was declined, so it cannot trade.'
+    default:          return 'This booth is not in an operating state.'
+  }
+}
+
 /** ADMITTED → the portal. AWAITING/DECLINED → the gate screen. */
 export type VendorOperatorState = 'ADMITTED' | 'AWAITING' | 'DECLINED'
 
@@ -98,7 +140,11 @@ export function vendorOperatorState(memberships: VendorOperatorFacts[]): VendorO
  * hand a stranger the portal by naming a fair correctly. The segment count is the whole defence.
  *
  * NOTE these are PAGES. The vendor API routes are not under app/vendor/ and are not gated by
- * this door at all — re-verifying the accept-verb server-side is step 4, deliberately not here.
+ * this door at all — the server-side re-verification is requireVendorMayOperate() in lib/auth.ts
+ * (step 4, now built). It gates ACTING as a booth: the order lifecycle
+ * (orders/[id]/vendor-status) and the online/busy verbs (vendors/[id] PATCH). The routes behind
+ * the two carve-out pages — vendors/[id]/stripe/*, vendors/[id]/documents — are deliberately
+ * NOT gated by it, for the same deadlock reason the carve-out exists. Keep them that way.
  */
 export const VENDOR_GATE_CARVE_OUT_SEGMENTS = ['onboarding', 'settings'] as const
 
@@ -138,11 +184,19 @@ export type VendorNavKey = (typeof VENDOR_PORTAL_NAV_KEYS)[number] | VendorCarve
  * set the door allows and the same set the gate screen links to, by construction rather than by
  * a third hand-written list. Nothing that re-enters the portal.
  *
- * ⚠️ THIS CLOSES THE VISIBLE PATH, NOT THE GATE. Typing /vendor/<slug>/dashboard, or a history
- * back/forward, still reaches the dashboard shell, because no layout-level change can survive a
- * soft navigation. Only a per-request check on the vendor APIs closes that, which is the
- * accept-verb step. Do not read this function as an authorization boundary; it decides what is
- * OFFERED, and the API decides what is SERVED.
+ * ⚠️ THIS CLOSES THE VISIBLE PATH, NOT THE GATE. A history back/forward, or a soft navigation
+ * from a carve-out page, still reaches the dashboard shell, because no layout-level change can
+ * survive a soft navigation. (A TYPED URL does not: that is a hard request, the layout re-runs,
+ * and the door refuses it — scripts/vendor-operator-gate-test.ts pins that.) Do not read this
+ * function as an authorization boundary; it decides what is OFFERED, and the API decides what
+ * is SERVED.
+ *
+ * WHAT SERVES IS NOW REAL: requireVendorMayOperate() (lib/auth.ts) refuses a non-admitted
+ * operator on the action verbs, so reaching the shell no longer means being able to use it.
+ * This function is therefore back to being what it looks like — navigation polish. If a product
+ * decision later wants Dashboard visible to a pending operator, changing THIS is safe; changing
+ * VENDOR_GATE_CARVE_OUT_SEGMENTS is not — that constant is also the door's allowlist
+ * (isVendorGateCarveOut) and the gate screen's exit set, so adding a key there opens the page.
  */
 export function vendorShellNavKeys(state: VendorOperatorState): readonly VendorNavKey[] {
   return state === 'ADMITTED' ? VENDOR_PORTAL_NAV_KEYS : VENDOR_GATE_CARVE_OUT_SEGMENTS

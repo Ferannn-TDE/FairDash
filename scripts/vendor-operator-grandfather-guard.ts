@@ -22,9 +22,11 @@
  *   [3] THE MIGRATION TEXT — the grandfather UPDATE, the four columns and the index are all
  *       still in the migration file. This is the assertion that survives a regenerated
  *       migration, which is the actual regression path.
- *   [4] ENFORCEMENT REACH — which sites read approvalStatus. Retired as an inertness pin in
- *       step 3 (a conscious act, as its original note asked) and CONVERTED rather than deleted:
- *       the door must now read it, and the accept path must still not, until step 4.
+ *   [4] ENFORCEMENT REACH — which sites read approvalStatus. Began life as an INERTNESS pin
+ *       (nothing reads it yet), flipped at step 3 (the door reads it) and again at step 4 (the
+ *       accept-verb gate refuses on it). Now fully positive: it asserts enforcement EXISTS and
+ *       is SHARED rather than copied per route. Inverting this block was always the plan — it
+ *       was converted instead of deleted at each step precisely so the boundary kept a pin.
  *
  * HONEST LIMITATION: run against the local test database, [2]'s population is this suite's OWN
  * fixtures — the test DB has no real operators. The guard proves the probe works and that the
@@ -158,29 +160,47 @@ async function main() {
     assert(!/ALTER TABLE "Vendor"\b/.test(sql) && !/UPDATE "Vendor"\b/.test(sql),
       '⛔ the migration does NOT touch Vendor (the BOOTH axis stays untouched — two independent axes)')
 
-    // ── [4] PARTIAL INERTNESS — step 1's contract, as amended by step 3 ───────────
-    // This block's original note said to DELETE it when the door gate ships. Converted instead,
-    // because deleting it would also drop the STEP-4 boundary it pins. Step 3 ended inertness at
-    // exactly ONE site — the portal door — and the remaining sites must still be inert until the
-    // accept-verb re-verification lands. So the layout flips to a POSITIVE assertion and the
-    // rest keep their negative one.
-    console.log('\n[4] the door ENFORCES (step 3); the step-4 sites are still inert')
+    // ── [4] ENFORCEMENT REACH — inertness is OVER; the arc is complete ────────────
+    // This block has now flipped twice, which was the point of converting it rather than
+    // deleting it: step 3 turned the DOOR positive, step 4 turns the API sites positive. What it
+    // pins from here is the opposite of what it started as — the grandfather UPDATE now protects
+    // live operators against a gate that really does refuse, so losing that UPDATE (a regenerated
+    // migration) would lock four real operators out of a fair rather than merely out of a nav.
+    // That is why [3] above matters more now than it did when this file was written.
+    console.log('\n[4] every enforcement site reads approvalStatus (steps 3 AND 4 shipped)')
     assert(/approvalStatus/.test(readFileSync('app/vendor/layout.tsx', 'utf8')),
-      'app/vendor/layout.tsx DOES read approvalStatus — the grandfather now has something to protect against')
-    for (const f of ['lib/vendor-auth-cache.ts', 'app/api/orders/[id]/vendor-status/route.ts']) {
-      assert(!/approvalStatus/.test(readFileSync(f, 'utf8')), `${f} does not read approvalStatus (step 4, not yet)`)
-    }
+      'app/vendor/layout.tsx reads approvalStatus — the door (step 3)')
+    assert(/approvalStatus/.test(readFileSync('lib/vendor-auth-cache.ts', 'utf8')),
+      'lib/vendor-auth-cache.ts carries approvalStatus — the payload no longer means "membership exists" alone (step 4)')
+
+    // The ACCEPT VERB. Deliberately asserted on the CALL, not on the word "approvalStatus":
+    // the order route enforces by calling the shared gate, and must NOT grow its own copy of the
+    // rule. Checking for the field name here would pass on a hand-rolled second implementation,
+    // which is the drift this arc exists to prevent.
+    const orderRoute = readFileSync('app/api/orders/[id]/vendor-status/route.ts', 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    assert(/requireVendorMayOperate\(/.test(orderRoute),
+      'the order lifecycle route calls requireVendorMayOperate (step 4)')
+    assert(!/approvalStatus/.test(orderRoute),
+      '…and does NOT read approvalStatus itself — enforcement is shared, not copied')
+
     // lib/auth.ts is NOT scanned wholesale — it legitimately reads approvalStatus for the
-    // ORGANIZER gate (requireOrganizerAuth). The step-1 claim is narrower and so is the check:
-    // the VENDOR helper specifically does not consult it.
+    // ORGANIZER gate (requireOrganizerAuth), and now for the vendor gate too. The checks stay
+    // narrow and per-function so they keep saying something.
     const authSrc = readFileSync('lib/auth.ts', 'utf8')
     const vendorAuthFn = authSrc.slice(
       authSrc.indexOf('export async function requireVendorAuth'),
       authSrc.indexOf('export async function requireOrganizerAuth'),
     )
     assert(vendorAuthFn.length > 0, 'requireVendorAuth located in lib/auth.ts (probe anchor still valid)')
-    assert(!/approvalStatus/.test(vendorAuthFn), 'requireVendorAuth does not read approvalStatus (enforcement is a later commit)')
-    assert(/approvalStatus/.test(authSrc), 'lib/auth.ts DOES still read approvalStatus elsewhere — the organizer gate is untouched by this step')
+    // STILL NEGATIVE, AND STILL CORRECT. requireVendorAuth proves membership EXISTS; it is used
+    // by the carve-out routes a gated operator must keep reaching (Stripe Connect, documents), so
+    // folding the approval check into it would rebuild the deadlock the carve-out prevents.
+    // Admittance is enforced by requireVendorMayOperate at the action verbs instead.
+    assert(!/approvalStatus/.test(vendorAuthFn),
+      'requireVendorAuth still does NOT check approval — it guards the carve-out routes too, which must stay reachable')
+    assert(/export async function requireVendorMayOperate\(/.test(authSrc),
+      'the accept-verb gate exists in lib/auth.ts (step 4)')
 
     console.log(`\n── RESULT: ${pass} passed, ${fail} failed ──`)
   } finally {

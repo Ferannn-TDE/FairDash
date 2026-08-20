@@ -69,6 +69,21 @@ export interface VendorAuthPayload {
   userId:   string
   vendorId: string
   role:     string
+  /**
+   * OPERATOR ADMITTANCE — "may this human operate this booth" (VendorMember.approvalStatus).
+   * Present so a caller holding a payload can SEE the axis; membership existence used to be the
+   * only thing this object carried, which is why every route that held one authorised on
+   * "is attached to a booth" and nothing else.
+   *
+   * ⚠️ DO NOT AUTHORISE AN ACTION OFF THIS FIELD. It is cached for up to 10 minutes
+   * (ttlForRole, 'owner'), so a just-rejected operator's copy still reads APPROVED for that
+   * long. The write path invalidates (admin vendor-members approve/reject both call
+   * invalidateVendorAuth), which makes the cached value correct in the normal case but not
+   * fail-closed if an invalidation is ever missed or Redis is down. The enforcement gate,
+   * requireVendorMayOperate() in lib/auth.ts, deliberately re-reads BOTH axes from the DB on
+   * every request for the same reason app/vendor/layout.tsx refuses to read through this cache.
+   */
+  approvalStatus: string
 }
 
 // ─── Request-level WeakMap ────────────────────────────────────────────────────
@@ -83,8 +98,13 @@ function getRequestMap(req: object): Map<string, VendorAuthPayload | null> {
 
 // ─── Cache key ────────────────────────────────────────────────────────────────
 
+// ⚠️ BUMP THE VERSION WHEN VendorAuthPayload GAINS OR LOSES A FIELD. Entries written by the
+// previous deploy survive in Redis for up to ttlForRole() seconds, and they carry the OLD shape:
+// after adding approvalStatus, a v1 entry deserialises with that field `undefined`. Anything
+// reading it would see "not APPROVED" and refuse an approved operator for ten minutes after
+// every deploy. v1 → v2 makes the old entries unreachable instead of subtly wrong.
 function cacheKey(userId: string, vendorId: string): string {
-  const prefix = _testKeyPrefix ?? 'v1:vendor-auth'
+  const prefix = _testKeyPrefix ?? 'v2:vendor-auth'
   return `${prefix}:${userId}:${vendorId}`
 }
 
@@ -136,7 +156,7 @@ export async function getVendorAuth(
     const promise = (async (): Promise<VendorAuthPayload | null> => {
       const member = await db.vendorMember.findFirst({
         where:  { userId, vendorId },
-        select: { id: true, userId: true, vendorId: true, role: true },
+        select: { id: true, userId: true, vendorId: true, role: true, approvalStatus: true },
       })
 
       // 3. Write cache

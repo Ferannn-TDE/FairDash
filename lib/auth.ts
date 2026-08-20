@@ -5,6 +5,7 @@ import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
 import { hasRole, hasStrictAdminRole } from './roles'
 import { organizerSuspensionError } from './organizer-suspension'
 import { organizerApprovalError } from './organizer-approval'
+import { boothOperatingMessage, vendorOperatorState } from './vendor-operator-state'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -142,6 +143,80 @@ export async function requireVendorMembershipById(
   const membership = await getVendorAuth(user.id, vendorId, req)
   if (!membership) throw new ApiError('Access denied', 403, 'FORBIDDEN')
   return { clerkId, userId: user.id, membership }
+}
+
+/**
+ * THE ACCEPT-VERB GATE — "may this human act as this booth, right now".
+ *
+ * The step the portal door was written against and that had never been built: the door
+ * (app/vendor/layout.tsx) decides what is OFFERED, this decides what is SERVED. Until it
+ * existed, EVERY vendor authorisation in the codebase asked one question — "is this person
+ * attached to a booth at all" (requireVendorAuth's `select: { id: true }`, and getVendorAuth's
+ * payload, which did not carry either status). So a PENDING or REJECTED operator who reached
+ * the buttons could work a booth normally, and hiding the nav entry was all that stopped them.
+ * That is a UI affordance standing in for authorisation.
+ *
+ * TWO INDEPENDENT AXES, BOTH ENFORCED, DISTINCT CODES (schema.prisma:368 explains the pair):
+ *   VendorMember.approvalStatus  — may this HUMAN operate this booth  → VENDOR_OPERATOR_NOT_APPROVED
+ *   Vendor.status                — may this BOOTH trade              → VENDOR_BOOTH_NOT_OPERATING
+ * Neither implies the other, so checking one leaves the other's hole open. Separate codes
+ * because the two produce different advice: "wait for your admittance review" vs "your booth is
+ * paused, contact the organizer".
+ *
+ * 🔑 READ FRESH, DELIBERATELY NOT THROUGH getVendorAuth — same reasoning as the door, and it
+ * applies harder here. That cache holds a membership for 600s at role 'owner' (every operator on
+ * this fair is an 'owner'), so routing this through it would let a just-rejected operator keep
+ * taking money-bearing actions for ~10 minutes. It would also cache the BOOTH axis, which
+ * nothing invalidates: an organizer pausing a booth expects that to bite immediately, the way
+ * the A6 organizer kill-switch does. One indexed lookup per action verb is the price.
+ *
+ * PER-BOOTH, AND STRICTER THAN THE DOOR ON PURPOSE. vendorOperatorState() is fed the ONE
+ * membership for the booth being acted on, not the whole set, so an operator APPROVED at booth A
+ * and PENDING at booth B is refused at B. The door's "one APPROVED membership admits you to the
+ * portal" is a deliberate simplification for navigation (see its comment); it must not extend to
+ * acting on a specific booth's orders and money. This is the per-fair refinement that comment
+ * defers, applied at the layer that actually knows which booth is being asked for.
+ *
+ * SCOPE — this gates ACTING, never BECOMING APPROVABLE. The carve-out
+ * (VENDOR_GATE_CARVE_OUT_SEGMENTS) exists so a gated operator can still reach onboarding and
+ * settings to fix whatever is holding their application up, and Stripe Connect is launched from
+ * there. Those live on their own routes (vendors/[id]/stripe/*, vendors/[id]/documents) and are
+ * deliberately NOT wired to this gate — refusing them would rebuild the deadlock the carve-out
+ * was built to prevent: refused for being incomplete, then locked out of the only screens that
+ * complete it. Do not "finish the job" by adding this to those routes.
+ *
+ * Callers prove membership first (requireVendorAuth / requireVendorMembership*); this asks the
+ * second question about a membership already established, and re-reads it fail-closed.
+ */
+export async function requireVendorMayOperate(userId: string, vendorId: string): Promise<void> {
+  const member = await db.vendorMember.findFirst({
+    where:  { userId, vendorId },
+    select: {
+      approvalStatus:  true,
+      rejectionReason: true,
+      vendor: { select: { status: true } },
+    },
+  })
+  // Membership was proven by the caller; a miss here means it vanished mid-request (or the
+  // caller resolved a different booth). Fail closed rather than falling through to the checks.
+  if (!member) throw new ApiError('Access denied', 403, 'FORBIDDEN')
+
+  // Axis 1 — the operator. Worded by the SAME pure function the gate screen renders from, so
+  // the 403 and the screen cannot drift into two different accounts of the same refusal. This
+  // is the use vendorOperatorState's `message` field was written for (see its comment).
+  const operator = vendorOperatorState([{
+    approvalStatus:  member.approvalStatus as 'PENDING' | 'APPROVED' | 'REJECTED',
+    rejectionReason: member.rejectionReason,
+  }])
+  if (operator.state !== 'ADMITTED') {
+    throw new ApiError(operator.message!, 403, 'VENDOR_OPERATOR_NOT_APPROVED')
+  }
+
+  // Axis 2 — the booth.
+  const boothProblem = boothOperatingMessage(member.vendor.status)
+  if (boothProblem) {
+    throw new ApiError(boothProblem, 403, 'VENDOR_BOOTH_NOT_OPERATING')
+  }
 }
 
 /** Require auth + admin role. Returns Clerk userId.

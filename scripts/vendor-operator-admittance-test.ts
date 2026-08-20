@@ -138,7 +138,14 @@ async function main() {
     const member = await prisma.vendorMember.create({
       data: { vendorId: vendor.id, userId: operator.id, role: 'owner', approvalStatus: 'PENDING' },
     })
-    const EXPECTED_KEY = `v1:vendor-auth:${operator.id}:${vendor.id}`
+    // The cache-key prefix is VERSIONED and bumps whenever VendorAuthPayload changes shape
+    // (v1 → v2 when approvalStatus was added in step 4). Read it from the source rather than
+    // hard-coding it: a stale literal here fails as "approve did not invalidate", which points
+    // the next reader at the invalidation logic instead of at the rename that actually broke it.
+    const cachePrefix = readFileSync('lib/vendor-auth-cache.ts', 'utf8')
+      .match(/_testKeyPrefix\s*\?\?\s*'([^']+)'/)?.[1]
+    assert(Boolean(cachePrefix), `the cache-key prefix is readable from lib/vendor-auth-cache.ts (got ${cachePrefix ?? 'nothing'})`)
+    const EXPECTED_KEY = `${cachePrefix}:${operator.id}:${vendor.id}`
 
     // ── [0] BASELINE / PROBE FLOOR ────────────────────────────────────────────────
     // Before any 403 below is allowed to mean anything, prove this route can succeed at all.
@@ -226,22 +233,29 @@ async function main() {
     await callApprove(member.id)
     assert(delKeys.includes(EXPECTED_KEY), `approve DELETED the membership key (saw: ${delKeys.join(', ') || 'none'})`)
 
-    // ── [7] 🔌 NO LONGER INERT AT THE DOOR — step 3 shipped ───────────────────────
-    // Converted rather than deleted (this block's note said to delete it): the step-4 sites it
-    // also pins are still inert, and dropping that pin would let the accept-verb gate land
-    // unnoticed. What step 2 called "inert" is now true of everything EXCEPT the portal door.
-    console.log('\n[7] the portal door reads approvalStatus (step 3); the accept path does not (step 4)')
+    // ── [7] 🔌 INERTNESS IS OVER — steps 3 AND 4 have shipped ─────────────────────
+    // This block began as "nothing reads approvalStatus yet", flipped at step 3 (the door), and
+    // flips again here at step 4 (the accept verb). Keeping it converted rather than deleted is
+    // what gave each step a pin to land against; from now on it asserts that what these admin
+    // approve/reject routes WRITE is something the platform actually ENFORCES — which is the
+    // only reason a write to this column is worth auditing.
+    console.log('\n[7] what these routes write is enforced — at the door (step 3) and the verbs (step 4)')
     assert(/approvalStatus/.test(readFileSync('app/vendor/layout.tsx', 'utf8')),
-      'app/vendor/layout.tsx reads approvalStatus — these routes now change what an operator can reach')
-    for (const f of ['lib/vendor-auth-cache.ts', 'app/api/orders/[id]/vendor-status/route.ts']) {
-      assert(!/approvalStatus/.test(readFileSync(f, 'utf8')), `${f} still does not read approvalStatus (step 4)`)
-    }
+      'app/vendor/layout.tsx reads approvalStatus — the door')
     const authSrc = readFileSync('lib/auth.ts', 'utf8')
+    assert(/export async function requireVendorMayOperate\(/.test(authSrc),
+      'lib/auth.ts exposes the accept-verb gate — approving/rejecting now changes what an operator can DO, not just see')
+    const orderRoute = readFileSync('app/api/orders/[id]/vendor-status/route.ts', 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    assert(/requireVendorMayOperate\(/.test(orderRoute),
+      'the order lifecycle is behind that gate — a rejected operator cannot work the booth')
     const vendorAuthFn = authSrc.slice(
       authSrc.indexOf('export async function requireVendorAuth'),
       authSrc.indexOf('export async function requireOrganizerAuth'))
+    // Still negative, and deliberately so — see the matching note in the grandfather guard:
+    // requireVendorAuth also guards the carve-out routes, which a gated operator must keep.
     assert(vendorAuthFn.length > 0 && !/approvalStatus/.test(vendorAuthFn),
-      'requireVendorAuth still does not read approvalStatus (the gate is a later commit)')
+      'requireVendorAuth stays membership-only — the carve-out routes it guards must remain reachable')
 
     // ── [8] roles[] IS NOT TOUCHED ────────────────────────────────────────────────
     console.log('\n[8] admittance never writes roles[] — it is a separate axis from membership')
