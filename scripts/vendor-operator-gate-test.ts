@@ -38,6 +38,8 @@ import {
   VENDOR_PORTAL_NAV_KEYS,
   vendorCarveOutPath,
   vendorShellNavKeys,
+  boothMayOperate,
+  boothOperatingMessage,
   type VendorOperatorFacts,
 } from '../lib/vendor-operator-state'
 
@@ -332,6 +334,82 @@ async function main() {
   const provider = readFileSync('app/vendor/_components/VendorAdmittanceProvider.tsx', 'utf8')
   for (const mod of SERVER_ONLY) {
     assert(!importsServerOnly(provider, mod), `the admittance provider does not import ${mod} (§7)`)
+  }
+
+  // ── [14] the BOOTH axis predicate matches the real enum and is total ───────
+  console.log('\n[14] boothMayOperate/boothOperatingMessage cover every VendorStatus')
+  const boothEnum = schema.match(/enum VendorStatus\s*\{([^}]*)\}/)?.[1] ?? ''
+  const boothValues = boothEnum
+    .split('\n')
+    .map(s => s.trim().split(/\s|\/\//)[0].trim())   // strip the trailing `// comment` on each line
+    .filter(Boolean)
+  assert(boothValues.length === 5, `VendorStatus still has 5 values (got ${boothValues.length}: ${boothValues.join(',')})`)
+  for (const v of boothValues) {
+    assert(stateSrc.includes(`'${v}'`), `'${v}' is named in vendor-operator-state.ts`)
+    // TOTAL, not merely mentioned: every status must resolve to a definite verdict, and every
+    // non-operating one must carry a message. A status that fell through to `null` here would be
+    // a silent admit.
+    if (v === 'ACTIVE') {
+      assert(boothMayOperate(v), 'ACTIVE operates')
+      assert(boothOperatingMessage(v) === null, 'ACTIVE has no refusal message')
+    } else {
+      assert(!boothMayOperate(v), `${v} does NOT operate`)
+      const msg = boothOperatingMessage(v)
+      assert(typeof msg === 'string' && msg.length > 0, `${v} refuses with a non-empty message`)
+    }
+  }
+  // POSITIVE CONTROL on the probe itself: an unknown status must fail CLOSED, not sail through.
+  // Without this, a renamed enum value would quietly become "may operate" and [14] would still
+  // report all-green because it only ever asked about values it already knew.
+  assert(!boothMayOperate('NOT_A_REAL_STATUS'), 'an unknown status fails closed (does not operate)')
+  assert(boothOperatingMessage('NOT_A_REAL_STATUS') !== null, 'an unknown status still gets a refusal message')
+
+  // ── [15] the accept-verb gate is WIRED into both action routes ─────────────
+  // The whole point of step 4. Existence of the helper proves nothing — [15] asserts the two
+  // routes that could previously be driven by a non-admitted operator actually call it.
+  console.log('\n[15] requireVendorMayOperate is called by the action verbs')
+  const authSrc = readFileSync('lib/auth.ts', 'utf8')
+  assert(/export async function requireVendorMayOperate\(/.test(authSrc), 'the gate helper exists')
+  // It must read FRESH. Routing it through the 600s membership cache would keep a just-rejected
+  // operator working for ~10 minutes — the same trap the door refuses at [8].
+  const gateBody = authSrc.slice(authSrc.indexOf('export async function requireVendorMayOperate('))
+    .split('\n}\n')[0]
+  assert(/db\.vendorMember\.findFirst\(/.test(gateBody), 'the gate reads the membership from the DB')
+  assert(!/getVendorAuth\s*\(/.test(gateBody), 'the gate does NOT read through the 600s vendor-auth cache')
+  assert(/vendorOperatorState\(/.test(gateBody), 'the operator axis reuses the shared derivation, not a second rule')
+  assert(/boothOperatingMessage\(/.test(gateBody), 'the booth axis reuses the shared predicate, not a second rule')
+  assert(/VENDOR_OPERATOR_NOT_APPROVED/.test(gateBody) && /VENDOR_BOOTH_NOT_OPERATING/.test(gateBody),
+    'the two axes refuse with DISTINCT codes — one code cannot tell the operator which to fix')
+
+  const ACTION_ROUTES = [
+    'app/api/orders/[id]/vendor-status/route.ts',
+    'app/api/vendors/[id]/route.ts',
+  ] as const
+  for (const route of ACTION_ROUTES) {
+    const src = readFileSync(route, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    assert(/requireVendorMayOperate\(/.test(src), `${route} calls the gate (code, not comment)`)
+  }
+  // NEGATIVE CONTROL on that probe: comment-stripping is what makes the assertion above mean
+  // "calls it" rather than "mentions it". Prove the stripper actually removes a call in prose —
+  // this is the exact trap [13] fell into.
+  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  assert(!/requireVendorMayOperate\(/.test(strip('// requireVendorMayOperate(a, b)\n')),
+    'positive control: the stripper removes a line-commented call, so [15] tests code')
+  assert(!/requireVendorMayOperate\(/.test(strip('/* requireVendorMayOperate(a, b) */\n')),
+    'positive control: the stripper removes a block-commented call too')
+
+  // The carve-out routes must stay UNGATED, or the deadlock the carve-out prevents comes back:
+  // refused for an incomplete application, then locked out of Stripe Connect, which is the only
+  // thing that would complete it.
+  const CARVE_OUT_ROUTES = [
+    'app/api/vendors/[id]/stripe/connect/route.ts',
+    'app/api/vendors/[id]/stripe/onboarding-link/route.ts',
+    'app/api/vendors/[id]/documents/route.ts',
+  ] as const
+  for (const route of CARVE_OUT_ROUTES) {
+    const src = strip(readFileSync(route, 'utf8'))
+    assert(!/requireVendorMayOperate\(/.test(src),
+      `${route} is NOT gated — a gated operator must still be able to become approvable`)
   }
 
   console.log(`\n${'─'.repeat(70)}\n  ${pass} passed, ${fail} failed\n`)

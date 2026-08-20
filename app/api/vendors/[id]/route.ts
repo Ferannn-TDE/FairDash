@@ -4,7 +4,7 @@ import { VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireVendorAuth, getOptionalUserId, hasStrictAdminAuth } from '@/lib/auth'
+import { requireVendorAuth, requireVendorMayOperate, getOptionalUserId, hasStrictAdminAuth } from '@/lib/auth'
 import { ApiError } from '@/lib/api-error'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { enforceRateLimit } from '@/lib/ratelimit'
@@ -141,6 +141,21 @@ export async function PATCH(
     // `status` is intentionally excluded — vendors cannot deactivate themselves.
     // Status changes require admin or organizer auth (see /api/admin/vendors/:id).
     const { isBusy, isOffline, boothNumber, description, name, cuisineType, operatingHours, notificationPrefs } = body
+
+    // ── THE ACCEPT-VERB GATE, SCOPED TO THE OPERATIONAL FIELDS ──────────────────────────────
+    // isOffline/isBusy are how a booth PRESENTS ITSELF TO CUSTOMERS — flipping isOffline false
+    // is the "go online" verb, and :170 below then busts the 'vendors' discovery tag. Acting as
+    // a live booth requires being admitted to operate one: both axes, checked fresh.
+    //
+    // ⚠️ SCOPED ON PURPOSE — DO NOT HOIST THIS ABOVE THE DESTRUCTURE TO COVER THE WHOLE PATCH.
+    // `Vendor.status` DEFAULTS to PENDING (schema.prisma:249), so every booth is PENDING for the
+    // whole of onboarding. A route-wide booth check would 403 the settings page's notification
+    // toggle — the one other caller of this route — for every vendor who has not been approved
+    // yet, i.e. exactly the people the carve-out exists to keep unblocked. The gate belongs on
+    // trading as a booth, not on setting one up.
+    if (isOffline !== undefined || isBusy !== undefined) {
+      await requireVendorMayOperate(user.id, id)
+    }
 
     const vendor = await db.vendor.update({
       where: { id },

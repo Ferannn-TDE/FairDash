@@ -8,7 +8,7 @@ import { refundVendorPortion } from '@/lib/process-refund'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, requireVendorMayOperate } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { logger } from '@/lib/logger'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
@@ -72,6 +72,15 @@ export async function PATCH(
     // Second-level auth: confirm this user is actually a member of that vendor (cache hit)
     const confirmedMember = await getVendorAuth(dbUser.id, vendorId, req)
     if (!confirmedMember) return apiError('Access denied — not a vendor member', 403, 'FORBIDDEN')
+
+    // ── THE ACCEPT-VERB GATE ────────────────────────────────────────────────────────────────
+    // Everything above answers "is this human attached to this booth" — the question this route
+    // asked three times and never followed up. This asks whether they may ACT on it: operator
+    // admitted AND booth trading. Placed before the transition validation so a refusal is
+    // authorisation (403), not a confusing 409 about an order the caller may not touch at all.
+    // Covers the whole lifecycle in one line — accept, decline, prepare, ready — because they
+    // all funnel through this route. Throws; handleApiError renders the 403.
+    await requireVendorMayOperate(dbUser.id, vendorId)
 
     // Load the VendorOrderStatus for this vendor
     const vendorStatus = await db.vendorOrderStatus.findUnique({

@@ -230,7 +230,7 @@ async function test4_cacheKeyScoped() {
 }
 
 async function test5_minimalPayload() {
-  console.log('\nTest 5 — cached payload is minimal (only id/userId/vendorId/role)')
+  console.log('\nTest 5 — cached payload is minimal (only id/userId/vendorId/role/approvalStatus)')
 
   // Ensure key is primed
   await redisDel(testKey(FIXTURE_USER_ID, FIXTURE_VENDOR_ID))
@@ -255,7 +255,12 @@ async function test5_minimalPayload() {
     }
   }
 
-  const allowed = new Set(['id', 'userId', 'vendorId', 'role'])
+  // `approvalStatus` was added DELIBERATELY (operator admittance, step 4): the payload carried
+  // membership existence and nothing else, which is why every route holding one authorised on
+  // "is attached to a booth". It is here to be VISIBLE, not to be authorised from — the gate
+  // (requireVendorMayOperate) re-reads it fresh, because this copy is up to 10 minutes stale.
+  // Keep this set tight: it exists so a future select cannot quietly widen what sits in Redis.
+  const allowed = new Set(['id', 'userId', 'vendorId', 'role', 'approvalStatus'])
   const present = Object.keys(parsed)
   const forbidden = present.filter(k => !allowed.has(k))
   const missing   = [...allowed].filter(k => !present.includes(k))
