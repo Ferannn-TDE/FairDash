@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, use, useCallback } from 'react'
+import { useState, useEffect, useRef, use, useCallback } from 'react'
 import {
   CheckIcon,
   XMarkIcon,
@@ -284,35 +284,113 @@ function RequestCard({
 
 type TabFilter = 'PENDING' | 'ALL'
 
+/** The API route's default take. One constant so the fetch and "Load more" cannot drift. */
+const MENU_REQUESTS_PAGE_SIZE = 50
+/** The API route's hard cap (it clamps take to 100) — a window refresh cannot ask for more. */
+const MENU_REQUESTS_MAX_TAKE = 100
+const POLL_INTERVAL_MS = 30_000
+
+/**
+ * A background refresh re-reads the window that is ALREADY on screen. It must update the rows
+ * it covers and drop nothing: rows the organizer pulled in with "Load more" sit past the
+ * refreshed window and are kept verbatim. Menu requests are never deleted server-side — only
+ * their status moves — so "absent from this response" means "outside this window", never
+ * "gone", and keeping the row is the honest read.
+ *
+ * The list is FIFO (createdAt asc), so anything genuinely new belongs at the tail.
+ */
+function mergeRequests(prev: MenuRequest[], fresh: MenuRequest[]): MenuRequest[] {
+  if (prev.length === 0) return fresh
+  const freshById = new Map(fresh.map(r => [r.id, r]))
+  const merged = prev.map(r => freshById.get(r.id) ?? r)
+  const known = new Set(prev.map(r => r.id))
+  for (const r of fresh) if (!known.has(r.id)) merged.push(r)
+  return merged
+}
+
 export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlug: string }> }) {
   const { fairSlug } = use(params)
 
   const [requests, setRequests] = useState<MenuRequest[]>([])
   const [loading, setLoading]   = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter]     = useState<TabFilter>('PENDING')
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
 
-  const fetchRequests = useCallback((replace = true) => {
-    if (replace) setLoading(true)
-    fetch(`/api/organizer/fairs/${fairSlug}/menu-requests`)
-      .then(r => r.json())
-      .then(json => {
-        if (json.data?.requests) {
-          setRequests(prev => replace ? json.data.requests : [...prev, ...json.data.requests])
-          setNextCursor(json.data.nextCursor ?? null)
-        }
-      })
-      .catch(() => {})
-      .finally(() => { setLoading(false); setLoadingMore(false) })
+  // Holds the in-flight request so the 30s poll cannot stack a second one on top.
+  const inFlightRef = useRef<AbortController | null>(null)
+  // How many rows are on screen — the size of the window a refresh must re-read. Mirrored in a
+  // ref so the poll can read it without re-creating the interval on every list change, and
+  // written in an effect, never during render (scripts/flicker-class-guard.ts [G]).
+  const loadedCountRef = useRef(0)
+  useEffect(() => { loadedCountRef.current = requests.length }, [requests])
+
+  /**
+   * silent = a BACKGROUND refresh: the list stays on screen and only the header icon spins.
+   * The old signature was `replace = true`, which the poll called with no argument — so every
+   * tick raised the full-page skeleton and reset the list to page 1, discarding "Load more".
+   * Same silent/refreshing + AbortController idiom as the fair dashboard (../page.tsx).
+   */
+  const fetchRequests = useCallback(async (silent = false) => {
+    // IN-FLIGHT GUARD — a timer tick must never queue behind a request that is still running;
+    // a user-initiated load supersedes its predecessor rather than being dropped.
+    if (inFlightRef.current) {
+      if (silent) return
+      inFlightRef.current.abort()
+    }
+    const controller = new AbortController()
+    inFlightRef.current = controller
+
+    if (!silent) setLoading(true)
+    else setRefreshing(true)
+
+    // Re-read the window ON SCREEN, not page 1 — rows pulled in with "Load more" must survive
+    // a tick. Both reads happen before the await, so they describe the list as it is now.
+    const take = Math.min(
+      Math.max(loadedCountRef.current, MENU_REQUESTS_PAGE_SIZE),
+      MENU_REQUESTS_MAX_TAKE,
+    )
+    const isFirstFill = loadedCountRef.current === 0
+
+    try {
+      const res = await fetch(
+        `/api/organizer/fairs/${fairSlug}/menu-requests?take=${take}`,
+        { signal: controller.signal },
+      )
+      const json = await res.json()
+      if (!json.data?.requests) return
+      setRequests(prev => mergeRequests(prev, json.data.requests))
+      // nextCursor marks where the ORGANIZER's pagination stopped. Only the first fill and
+      // loadMore may move it; a refresh over already-loaded rows has nothing to say about
+      // what comes after them.
+      if (isFirstFill) setNextCursor(json.data.nextCursor ?? null)
+    } catch {
+      // aborted or offline — the next tick retries. (An aborted request lands here by design.)
+    } finally {
+      // Only the CURRENT request clears the slot AND the indicators: an aborted predecessor
+      // must not release the guard out from under its replacement, nor switch off the spinner
+      // its replacement just switched on. The same check means a request that resolves after
+      // unmount (the cleanup nulls the slot) sets no state at all.
+      if (inFlightRef.current === controller) {
+        inFlightRef.current = null
+        setLoading(false)
+        setRefreshing(false)
+      }
+    }
   }, [fairSlug])
 
-  useEffect(() => { fetchRequests() }, [fetchRequests])
+  useEffect(() => { void fetchRequests(false) }, [fetchRequests])
 
-  // 30s polling for badge freshness
+  // 30s background poll. Silent — the list never blinks; at most the header icon spins.
   useEffect(() => {
-    const id = setInterval(() => fetchRequests(), 30_000)
-    return () => clearInterval(id)
+    const id = setInterval(() => { void fetchRequests(true) }, POLL_INTERVAL_MS)
+    return () => {
+      clearInterval(id)
+      // Navigating away must not leave a request running against a dead page.
+      inFlightRef.current?.abort()
+      inFlightRef.current = null
+    }
   }, [fetchRequests])
 
   function handleReviewed(id: string, status: 'APPROVED' | 'REJECTED') {
@@ -322,11 +400,13 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
   function loadMore() {
     if (!nextCursor || loadingMore) return
     setLoadingMore(true)
-    fetch(`/api/organizer/fairs/${fairSlug}/menu-requests?cursor=${nextCursor}`)
+    fetch(`/api/organizer/fairs/${fairSlug}/menu-requests?take=${MENU_REQUESTS_PAGE_SIZE}&cursor=${nextCursor}`)
       .then(r => r.json())
       .then(json => {
         if (json.data?.requests) {
-          setRequests(prev => [...prev, ...json.data.requests])
+          // Through the same merge: a poll that landed mid-flight may already hold some of
+          // these rows, and appending blind would show them twice.
+          setRequests(prev => mergeRequests(prev, json.data.requests))
           setNextCursor(json.data.nextCursor ?? null)
         }
       })
@@ -358,11 +438,12 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
           </p>
         </div>
         <button
-          onClick={() => fetchRequests()}
-          className="shrink-0 p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
+          onClick={() => { void fetchRequests(true) }}
+          disabled={refreshing}
+          className="shrink-0 p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
           title="Refresh"
         >
-          <ArrowPathIcon className="w-4 h-4 text-white/50" />
+          <ArrowPathIcon className={`w-4 h-4 text-white/50 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
