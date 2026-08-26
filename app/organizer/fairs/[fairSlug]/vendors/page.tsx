@@ -15,15 +15,18 @@ import {
 } from '@heroicons/react/24/outline'
 import { getVendorStatusConfig } from '@/lib/order-status-config'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import {
+  docsCompleteFromPresence,
+  VENDOR_DOC_LABELS,
+  type RequiredVendorDoc,
+} from '@/lib/vendor-documents'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface VendorDocs {
-  foodHandlerPermit: boolean
-  insurance: boolean
-  insuranceExpired: boolean
-  businessLicense: boolean
-}
+// The canonical presence map emitted by lib/fair-vendors.ts, keyed by the SSOT's
+// document keys. No `insuranceExpired` — see lib/vendor-documents.ts for why the
+// bar is presence-only.
+type VendorDocs = Record<RequiredVendorDoc, boolean>
 
 interface Vendor {
   id: string
@@ -56,18 +59,11 @@ const TABS: { key: TabKey; label: string; statuses: string[] }[] = [
 
 // ─── Doc icons ────────────────────────────────────────────────────────────────
 
-function DocBadge({ present, expired, label }: { present: boolean; expired?: boolean; label: string }) {
+function DocBadge({ present, label }: { present: boolean; label: string }) {
   if (!present) {
     return (
       <span title={`${label}: missing`} className="w-5 h-5 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
         <DocumentTextIcon className="w-2.5 h-2.5 text-[#444]" />
-      </span>
-    )
-  }
-  if (expired) {
-    return (
-      <span title={`${label}: expired`} className="w-5 h-5 rounded-full bg-orange-500/15 border border-orange-500/20 flex items-center justify-center">
-        <ExclamationTriangleIcon className="w-2.5 h-2.5 text-orange-400" />
       </span>
     )
   }
@@ -106,8 +102,11 @@ function VendorCard({
   acting: string | null
 }) {
   const isActing = acting === vendor.id
-  const docsComplete = vendor.docs.foodHandlerPermit && vendor.docs.insurance && vendor.docs.businessLicense
-  const docsIssue = !docsComplete || vendor.docs.insuranceExpired
+  // One definition of complete, shared with both approve gates and the checklist.
+  // The old `|| insuranceExpired` term is gone: nothing has ever written
+  // insuranceExpiryDate, so it was always false and never changed this verdict.
+  const docsComplete = docsCompleteFromPresence(vendor.docs)
+  const docsIssue = !docsComplete
 
   return (
     <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-5 hover:border-white/10 transition-all duration-200 group">
@@ -152,9 +151,9 @@ function VendorCard({
       {/* Compliance row: docs + Stripe */}
       <div className="flex items-center gap-3 mb-4">
         <div className="flex items-center gap-1">
-          <DocBadge present={vendor.docs.foodHandlerPermit} label="Food Handler Permit" />
-          <DocBadge present={vendor.docs.insurance} expired={vendor.docs.insuranceExpired} label="Insurance" />
-          <DocBadge present={vendor.docs.businessLicense} label="Business License" />
+          <DocBadge present={vendor.docs.foodHandler}     label={VENDOR_DOC_LABELS.foodHandler} />
+          <DocBadge present={vendor.docs.insurance}       label={VENDOR_DOC_LABELS.insurance} />
+          <DocBadge present={vendor.docs.businessLicense} label={VENDOR_DOC_LABELS.businessLicense} />
         </div>
         <span className="text-[10px] text-[#444] font-inter">docs</span>
 
@@ -241,7 +240,7 @@ function VendorCard({
       {docsIssue && vendor.status !== 'PENDING' && (
         <p className="mt-3 text-[10px] text-orange-400/80 font-inter flex items-center gap-1">
           <ExclamationTriangleIcon className="w-3 h-3 shrink-0" />
-          {vendor.docs.insuranceExpired ? 'Insurance expired' : 'Documents incomplete'}
+          Documents incomplete
         </p>
       )}
     </div>

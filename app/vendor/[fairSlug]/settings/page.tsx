@@ -22,6 +22,11 @@ import {
   uploadTooLargeMessage,
 } from '@/lib/upload-limits'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import {
+  REQUIRED_VENDOR_DOCS,
+  VENDOR_DOC_LABELS,
+  type RequiredVendorDoc,
+} from '@/lib/vendor-documents'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,25 +44,28 @@ const DEFAULT_HOURS: Record<Day, DayHours> = {
   Sun: { open: '10:00', close: '18:00', enabled: false },
 }
 
-const DOC_DEFS = [
-  { key: 'foodHandler',     label: 'Food Handler Permit'  },
-  { key: 'insurance',       label: 'Liability Insurance'  },
-  { key: 'businessLicense', label: 'Business License'     },
-] as const
-type DocKey = typeof DOC_DEFS[number]['key']
+// Keys and labels come from the SSOT (lib/vendor-documents.ts). This list used to
+// carry its own copy — which is how the same document read "Liability Insurance"
+// here and "Insurance Certificate" on the organizer's screen.
+const DOC_DEFS = REQUIRED_VENDOR_DOCS.map(key => ({ key, label: VENDOR_DOC_LABELS[key] }))
+type DocKey = RequiredVendorDoc
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const inputCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40'
 const labelCls = 'block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5'
 
-function SectionCard({ icon: Icon, title, children }: {
+function SectionCard({ id, icon: Icon, title, children }: {
+  // Optional anchor target. The readiness checklist deep-links a blocked vendor to
+  // #documents — without an id they land at the top of a five-section page and have to
+  // hunt. scroll-mt keeps the heading clear of the fixed portal header.
+  id?: string
   icon: React.ComponentType<{ className?: string }>
   title: string
   children: React.ReactNode
 }) {
   return (
-    <div className="bg-bg-card border border-white/[0.06] rounded-2xl overflow-hidden">
+    <div id={id} className="bg-bg-card border border-white/[0.06] rounded-2xl overflow-hidden scroll-mt-24">
       <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-2.5">
         <Icon className="w-4 h-4 text-neon-pink" />
         <h2 className="font-bebas text-base tracking-wide text-white">{title}</h2>
@@ -533,7 +541,7 @@ export default function VendorSettingsPage() {
         </SectionCard>
 
         {/* Documents */}
-        <SectionCard icon={DocumentTextIcon} title="Documents">
+        <SectionCard id="documents" icon={DocumentTextIcon} title="Documents">
           <div className="space-y-3">
             {DOC_DEFS.map(({ key, label }) => {
               const doc       = docs[key]

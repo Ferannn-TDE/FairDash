@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, use } from 'react'
 import { Store, AlertTriangle } from 'lucide-react'
+import { VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
 
 // ─── Types (real /api/admin/events/[id]/vendors shape via getFairVendors) ──────
 
@@ -14,7 +15,7 @@ interface AdminVendor {
   stripeVerified: boolean
   isOffline: boolean
   isBusy: boolean
-  docs: { foodHandlerPermit: boolean; insurance: boolean; insuranceExpired: boolean; businessLicense: boolean }
+  docs: Record<RequiredVendorDoc, boolean>
   orderCount: number
   ordersToday: number
   revenue: number
@@ -176,9 +177,11 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
               <div className="hidden sm:grid grid-cols-2 gap-x-4 gap-y-1 shrink-0 w-52">
                 <ReadyDot met={vendor.stripeVerified} label="Stripe" missingLabel="Stripe payouts" />
                 <ReadyDot met={!vendor.isOffline && vendor.ready} label="Live" missingLabel="Live to customers" />
-                <ReadyDot met={vendor.docs.foodHandlerPermit} label="Permit" missingLabel="Food handler permit" />
-                <ReadyDot met={vendor.docs.insurance && !vendor.docs.insuranceExpired} label="Insurance"
-                  missingLabel={vendor.docs.insuranceExpired ? 'Insurance (expired)' : 'Insurance'} />
+                <ReadyDot met={vendor.docs.foodHandler} label="Permit" missingLabel={VENDOR_DOC_LABELS.foodHandler} />
+                <ReadyDot met={vendor.docs.insurance} label="Insurance" missingLabel={VENDOR_DOC_LABELS.insurance} />
+                {/* Business licence was MISSING from this cluster while its comment above
+                    claimed every requirement was listed. Adding it makes the gap visible. */}
+                <ReadyDot met={vendor.docs.businessLicense} label="License" missingLabel={VENDOR_DOC_LABELS.businessLicense} />
               </div>
 
               {/* ── Revenue: secondary. Before the gates open every value here is $0.00,

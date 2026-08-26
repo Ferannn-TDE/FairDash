@@ -18,6 +18,7 @@
 // fair), so readiness is per-fair.
 
 import { db } from './db'
+import { vendorDocsComplete } from './vendor-documents'
 import { VendorStatus, type Prisma } from '@prisma/client'
 
 // The (c) bar as a Prisma where-fragment. Phase 5's marketplace list/counts filter
@@ -58,7 +59,7 @@ export function readinessWhereIfEnforced(event?: { enforceReadiness?: boolean | 
 }
 
 export interface ReadinessStep {
-  key: 'application' | 'stripe' | 'menu' | 'booth'
+  key: 'application' | 'documents' | 'stripe' | 'menu' | 'booth'
   label: string
   done: boolean
   required: boolean       // counts toward `ready` (booth does not)
@@ -78,6 +79,8 @@ export interface VendorReadiness {
   stripeConnected: boolean
   hasAvailableMenu: boolean
   availableMenuCount: number
+  // Required for APPROVAL (both approve doors), not part of the (c) bar
+  docsComplete: boolean
   // Optional
   boothSet: boolean
   // The verdict — matches readyVendorWhere exactly
@@ -98,6 +101,9 @@ export async function computeVendorReadiness(vendorId: string): Promise<VendorRe
       status: true,
       stripeVerified: true,
       boothNumber: true,
+      foodHandlerPermitPath: true,
+      insurancePath:         true,
+      businessLicensePath:   true,
       event: { select: { urlSlug: true } },
       _count: { select: { menuItems: { where: { isAvailable: true } } } },
     },
@@ -112,14 +118,21 @@ export async function computeVendorReadiness(vendorId: string): Promise<VendorRe
   const availableMenuCount = vendor._count.menuItems
   const hasAvailableMenu = availableMenuCount > 0
   const boothSet = Boolean(vendor.boothNumber && vendor.boothNumber.trim())
+  const docsComplete = vendorDocsComplete(vendor)
 
   // The (c) bar — booth intentionally excluded. Uses the shared predicate so the
   // checklist verdict and the Phase-5 gates share ONE boolean definition.
   const ready = vendorReady({ status: vendor.status, stripeVerified: vendor.stripeVerified, availableMenuCount })
 
   const settings = `/vendor/${fairSlug}/settings`
+  // `documents` is REQUIRED but deliberately NOT part of the (c) bar above: it gates
+  // APPROVAL (both approve doors refuse without it), not orderability. A vendor who is
+  // already ACTIVE was approved under whatever rule applied then, and must not be made
+  // un-ready retroactively. Its route carries the #documents anchor so a blocked vendor
+  // lands on the upload card, not the top of a five-section settings page.
   const steps: ReadinessStep[] = [
     { key: 'application', label: 'Application approved', done: approved, required: true, waiting: pending, route: null },
+    { key: 'documents',   label: 'Upload documents',     done: docsComplete,     required: true,  route: `${settings}#documents` },
     { key: 'stripe',      label: 'Connect payouts',     done: stripeConnected,  required: true,  route: settings },
     { key: 'menu',        label: 'Add your menu',        done: hasAvailableMenu, required: true,  route: `/vendor/${fairSlug}/menu` },
     { key: 'booth',       label: 'Set booth number',     done: boothSet,         required: false, route: settings },
@@ -135,6 +148,7 @@ export async function computeVendorReadiness(vendorId: string): Promise<VendorRe
     stripeConnected,
     hasAvailableMenu,
     availableMenuCount,
+    docsComplete,
     boothSet,
     ready,
     steps,

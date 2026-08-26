@@ -14,6 +14,7 @@ import {
   type VendorDocType,
 } from '@/lib/vendor-document-storage'
 import { ALLOWED_DOC_MIME, assertUploadSize, validateUpload } from '@/lib/upload-limits'
+import { vendorDocsPresence, type VendorDocPaths } from '@/lib/vendor-documents'
 
 const isDocType = (v: unknown): v is VendorDocType =>
   typeof v === 'string' && (DOC_TYPES as readonly string[]).includes(v)
@@ -113,20 +114,21 @@ export async function GET(
  * ({ uploaded, url }) so the settings UI needs no rework — but `url` is now a signed link
  * that expires, not a permanent public one.
  */
-async function signAll(v: {
-  foodHandlerPermitPath: string | null
-  insurancePath: string | null
-  businessLicensePath: string | null
-}) {
+async function signAll(v: VendorDocPaths) {
   const sign = async (path: string | null) => (path ? await signVendorDocumentUrl(path) : null)
   const [foodHandler, insurance, businessLicense] = await Promise.all([
     sign(v.foodHandlerPermitPath),
     sign(v.insurancePath),
     sign(v.businessLicensePath),
   ])
+  // `uploaded` comes from the SSOT rather than a local `!!path`, so this endpoint's
+  // notion of "present" cannot disagree with the approve gates' or the checklist's.
+  // The { uploaded, url } value shape is deliberately unchanged — the settings page
+  // and the onboarding wizard both consume it.
+  const present = vendorDocsPresence(v)
   return {
-    foodHandler:     { uploaded: !!v.foodHandlerPermitPath, url: foodHandler },
-    insurance:       { uploaded: !!v.insurancePath,         url: insurance },
-    businessLicense: { uploaded: !!v.businessLicensePath,   url: businessLicense },
+    foodHandler:     { uploaded: present.foodHandler,     url: foodHandler },
+    insurance:       { uploaded: present.insurance,       url: insurance },
+    businessLicense: { uploaded: present.businessLicense, url: businessLicense },
   }
 }

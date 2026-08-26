@@ -7,6 +7,7 @@ import { requireOrganizerAuth } from '@/lib/auth'
 import { notifyVendorStatusChange } from '@/lib/notify'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
+import { vendorDocsComplete, vendorDocsPresence } from '@/lib/vendor-documents'
 import { VendorStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
@@ -130,13 +131,10 @@ export async function GET(
       // URL to emit. To actually VIEW a document, the organizer calls
       // GET /api/organizer/vendors/[id]/documents, which authorises them and mints a
       // short-lived signed URL (and audit-logs the view).
-      docs: {
-        foodHandlerPermit: !!vendor.foodHandlerPermitPath,
-        insurance:         !!vendor.insurancePath,
-        businessLicense:   !!vendor.businessLicensePath,
-      },
-      insuranceExpiryDate: vendor.insuranceExpiryDate,
-      insuranceExpired: vendor.insuranceExpired,
+      // Built from the SSOT (lib/vendor-documents.ts) so this payload and the list
+      // payload emit the SAME keys. `foodHandlerPermit` is now `foodHandler`, matching
+      // the upload route's DOC_TYPES vocabulary.
+      docs: vendorDocsPresence(vendor),
       // Fair
       fairId: vendor.event.id,
       fairName: vendor.event.name,
@@ -201,6 +199,10 @@ export async function PATCH(
         event: { select: { organizerId: true, name: true } },
         name: true,
         status: true,
+        // Inputs for the docs gate below (PENDING → ACTIVE requires all three).
+        foodHandlerPermitPath: true,
+        insurancePath:         true,
+        businessLicensePath:   true,
       },
     })
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
@@ -242,6 +244,26 @@ export async function PATCH(
         status: vendor.status,
         boothNumber: null,
       })
+    }
+
+    // ── DOCUMENTS GATE — door 1 of 2 ────────────────────────────────────────────
+    // A vendor cannot be APPROVED without every required compliance document on file.
+    // Shares ONE predicate with the platform-admin approve route
+    // (app/api/admin/vendors/[id]/approve), so admin is a second door to the same rule,
+    // not a bypass.
+    //
+    // DELIBERATELY SCOPED TO PENDING → ACTIVE. Reactivate (PAUSED/SUSPENDED → ACTIVE) and
+    // re-approve (REJECTED → ACTIVE) all route through this same handler with
+    // status='ACTIVE'; gating those too would turn "pause a vendor" into a one-way door
+    // for any booth that predates this requirement.
+    if (statusChanging && body.status === VendorStatus.ACTIVE && vendor.status === VendorStatus.PENDING) {
+      if (!vendorDocsComplete(vendor)) {
+        return apiError(
+          `${vendor.name} can't be approved until all required documents are uploaded.`,
+          409,
+          'DOCS_INCOMPLETE',
+        )
+      }
     }
 
     const updated = await db.vendor.update({ where: { id: vendorId }, data })

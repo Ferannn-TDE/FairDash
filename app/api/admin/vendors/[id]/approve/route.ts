@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminAuth } from '@/lib/auth'
+import { vendorDocsComplete } from '@/lib/vendor-documents'
 import { VendorStatus } from '@prisma/client'
 
 // PATCH /api/admin/vendors/[id]/approve
@@ -22,6 +23,22 @@ export async function PATCH(
 
     if (vendor.status !== VendorStatus.PENDING) {
       throw new ApiError('Only PENDING vendors can be approved', 409, 'INVALID_STATUS')
+    }
+
+    // ── DOCUMENTS GATE — door 2 of 2 ────────────────────────────────────────────
+    // The SAME predicate the organizer's approve path uses
+    // (app/api/organizer/vendors/[id] PATCH). A platform admin can approve a vendor the
+    // organizer hasn't, but cannot approve one whose compliance documents are missing —
+    // one rule, two doors, no bypass.
+    //
+    // No status condition needed here: the PENDING check above already guarantees this
+    // is the PENDING → ACTIVE transition, which is the only one gated.
+    if (!vendorDocsComplete(vendor)) {
+      throw new ApiError(
+        `${vendor.name} can't be approved until all required documents are uploaded.`,
+        409,
+        'DOCS_INCOMPLETE',
+      )
     }
 
     let boothNumber: string | undefined

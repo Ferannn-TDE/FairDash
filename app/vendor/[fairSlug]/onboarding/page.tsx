@@ -13,11 +13,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Check, Clock, CreditCard, UtensilsCrossed, MapPin, ChevronRight, AlertCircle, Loader2 } from 'lucide-react'
+import { Check, Clock, CreditCard, UtensilsCrossed, MapPin, ChevronRight, AlertCircle, Loader2, FileText } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 
 interface ReadinessStep {
-  key: 'application' | 'stripe' | 'menu' | 'booth'
+  key: 'application' | 'documents' | 'stripe' | 'menu' | 'booth'
   label: string
   done: boolean
   required: boolean
@@ -41,6 +41,7 @@ interface Readiness {
 
 const STEP_META: Record<ReadinessStep['key'], { icon: typeof Check; blurb: string }> = {
   application: { icon: Check,            blurb: 'Your application to this fair.' },
+  documents:   { icon: FileText,         blurb: 'Required before the organizer can approve you.' },
   stripe:      { icon: CreditCard,       blurb: 'Connect Stripe so we can pay you out after each event.' },
   menu:        { icon: UtensilsCrossed,  blurb: 'Add at least one available item so customers can order.' },
   booth:       { icon: MapPin,           blurb: 'Optional — helps runners and customers find you.' },
@@ -184,7 +185,10 @@ export default function VendorOnboardingChecklist() {
                           href={step.route}
                           className="inline-flex items-center gap-1 px-3 py-2 bg-[#FF0077] text-white text-xs font-semibold rounded-xl hover:bg-[#FF0077]/85 transition-colors no-underline"
                         >
-                          {step.key === 'stripe' ? 'Connect' : step.key === 'menu' ? 'Add menu' : 'Set up'}
+                          {step.key === 'stripe' ? 'Connect'
+                            : step.key === 'menu' ? 'Add menu'
+                            : step.key === 'documents' ? 'Upload'
+                            : 'Set up'}
                           <ChevronRight className="w-3.5 h-3.5" />
                         </Link>
                       )}
