@@ -21,6 +21,11 @@ import {
 import { getVendorStatusConfig } from '@/lib/order-status-config'
 import { OrganizerBreadcrumb } from '@/app/organizer/_components/Breadcrumb'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import {
+  REQUIRED_VENDOR_DOCS,
+  VENDOR_DOC_LABELS,
+  type RequiredVendorDoc,
+} from '@/lib/vendor-documents'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,9 +55,8 @@ interface VendorDetail {
   createdAt: string; lastHeartbeatAt: string | null
   // Presence only — the documents live in a PRIVATE bucket and are fetched as
   // short-lived signed URLs on demand (see viewDoc), never embedded in this payload.
-  docs: { foodHandlerPermit: boolean; insurance: boolean; businessLicense: boolean }
-  insuranceExpiryDate: string | null
-  insuranceExpired: boolean; operatingHours: unknown; boothPhotoUrls: unknown
+  docs: Record<RequiredVendorDoc, boolean>
+  operatingHours: unknown; boothPhotoUrls: unknown
   fairId: string; fairName: string; fairSlug: string
   members: VendorMember[]; menuItems: MenuItem[]; pendingMenuRequests: PendingRequest[]
   orderCount: number; totalRevenue: number; totalPayout: number
@@ -340,19 +344,18 @@ export default function VendorDetailPage({
               Documents
             </h2>
             <div className="divide-y divide-white/[0.04]">
-              {([
-                { key: 'foodHandler' as const,     label: 'Food Handler Permit',   uploaded: vendor.docs?.foodHandlerPermit },
-                { key: 'insurance' as const,       label: 'Insurance Certificate', uploaded: vendor.docs?.insurance,
-                  expired: vendor.insuranceExpired, expiry: vendor.insuranceExpiryDate },
-                { key: 'businessLicense' as const, label: 'Business License',      uploaded: vendor.docs?.businessLicense },
-              ]).map(doc => (
-                <div key={doc.label} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+              {/* Keys, labels and presence all come from the SSOT — this list used to
+                  carry its own labels ("Insurance Certificate" here vs "Liability
+                  Insurance" on the vendor's own settings page) and its own key names. */}
+              {REQUIRED_VENDOR_DOCS.map(key => ({
+                key,
+                label: VENDOR_DOC_LABELS[key],
+                uploaded: vendor.docs[key],
+              })).map(doc => (
+                <div key={doc.key} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <DocumentTextIcon className="w-3.5 h-3.5 text-[#444] shrink-0" />
                     <span className="text-sm text-white font-inter">{doc.label}</span>
-                    {doc.expired && (
-                      <span className="px-1.5 py-0.5 bg-red-500/15 text-red-400 text-[9px] font-bold rounded uppercase shrink-0">Expired</span>
-                    )}
                   </div>
                   {doc.uploaded ? (
                     <button

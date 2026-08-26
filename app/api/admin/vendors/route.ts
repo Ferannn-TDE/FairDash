@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminAuth } from '@/lib/auth'
+import { vendorDocsPresence } from '@/lib/vendor-documents'
 import { VendorStatus } from '@prisma/client'
 
 // GET /api/admin/vendors?eventId=...&status=PENDING|ACTIVE|...
@@ -40,14 +41,22 @@ export async function GET(req: NextRequest) {
         // brokered, audit-logged read (GET /api/organizer/vendors/[id]/documents).
         foodHandlerPermitPath: true,
         insurancePath: true,
-        insuranceExpiryDate: true,
-        insuranceExpired: true,
+        businessLicensePath: true,
         lastHeartbeatAt: true,
         createdAt: true,
       },
     })
 
-    return success({ vendors })
+    // Presence, not paths. This route used to emit the raw *Path columns verbatim —
+    // the only payload in the codebase that did, against the invariant every other one
+    // states — and omitted businessLicense entirely. Now it speaks the same SSOT shape
+    // as every other document surface.
+    return success({
+      vendors: vendors.map(({ foodHandlerPermitPath, insurancePath, businessLicensePath, ...v }) => ({
+        ...v,
+        docs: vendorDocsPresence({ foodHandlerPermitPath, insurancePath, businessLicensePath }),
+      })),
+    })
   } catch (err) {
     return handleApiError(err)
   }

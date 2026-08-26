@@ -7,30 +7,27 @@ import {
   CheckIcon,
   ChevronRightIcon,
   ChevronLeftIcon,
-  LockClosedIcon,
+  DocumentArrowUpIcon,
   CheckCircleIcon,
+  XMarkIcon,
   ShieldCheckIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
+import {
+  ACCEPT_DOC,
+  ALLOWED_DOC_MIME,
+  invalidMimeMessage,
+  isWithinUploadCap,
+  uploadTooLargeMessage,
+} from '@/lib/upload-limits'
+import {
+  REQUIRED_VENDOR_DOCS,
+  VENDOR_DOC_LABELS,
+  type RequiredVendorDoc,
+} from '@/lib/vendor-documents'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface MenuItemData {
-  id: string
-  name: string
-  description: string
-  price: string
-  prepTime: string
-  photo: File | null
-  photoPreview: string | null
-}
-
-interface BoothPhotoData {
-  id: string
-  file: File
-  preview: string
-}
 
 interface FormData {
   businessName: string
@@ -40,13 +37,17 @@ interface FormData {
   cuisineTypes: string[]     // multi-select; joined into the server's cuisineType string on submit
   customCuisine: string      // free text when "Other" is selected
   description: string
-  foodHandlerPermit: File | null
-  liabilityInsurance: File | null
-  menuItems: MenuItemData[]
-  boothPhotos: BoothPhotoData[]
   legalName: string
-  stripeConnected: boolean
 }
+
+/**
+ * Documents chosen in the wizard, held IN MEMORY until the Vendor row exists.
+ *
+ * They cannot be uploaded any earlier: POST /api/vendors/[id]/documents is keyed by
+ * vendor id and gated on membership in a row that does not exist until submit. So the
+ * step collects Files, and handleSubmit uploads them the moment the id comes back.
+ */
+type DocFiles = Record<RequiredVendorDoc, File | null>
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -56,15 +57,24 @@ const CUISINE_OPTIONS = [
   'Fried Food', 'Drinks & Beverages', 'Fair Classics', 'Merchandise', 'Other',
 ]
 
-// Leaned to ONLY what the application persists + the legal gate. The application
-// is "apply to this fair" (business identity); menu, payouts (Stripe), documents,
-// booth, and photos are completed AFTER approval in the guided checklist
-// (/vendor/[fairSlug]/onboarding → real settings/menu pages). The old flow
-// collected those here and silently discarded them (and faked the Stripe step).
+// Business identity + required compliance documents + the legal gate. Menu, payouts
+// (Stripe) and booth are still completed AFTER approval in the guided checklist
+// (/vendor/[fairSlug]/onboarding → real settings/menu pages).
+//
+// DOCUMENTS ARE BACK, AND REAL THIS TIME. An earlier version of this wizard had a
+// document step whose upload box said "Uploaded" over a File that was never sent
+// anywhere (removed in c7e85b6 as dead code). Here the files are held in memory and
+// labelled "Selected" until POST /api/vendors/[id]/documents actually resolves —
+// nothing claims an upload that has not happened. They are collected here because
+// approval now REQUIRES them: both approve doors refuse a docs-incomplete vendor.
+//
+// Step 5 is the success screen and is deliberately not in this list (the progress
+// bar covers the four steps the applicant fills in).
 const STEPS = [
-  { num: 1, label: 'Account',     hardBlock: false },
-  { num: 2, label: 'Application', hardBlock: false },
-  { num: 3, label: 'Agreement',   hardBlock: false },
+  { num: 1, label: 'Account'     },
+  { num: 2, label: 'Application' },
+  { num: 3, label: 'Documents'   },
+  { num: 4, label: 'Agreement'   },
 ]
 
 const VENDOR_TERMS = `FAIRSYNQ VENDOR AGREEMENT
@@ -103,14 +113,19 @@ By typing your full legal name below, you confirm you have read, understood, and
 // whenever VENDOR_TERMS changes.
 const VENDOR_TERMS_VERSION = '2026-01-01'
 
-const INITIAL_ITEM: MenuItemData = { id: '1', name: '', description: '', price: '', prepTime: '', photo: null, photoPreview: null }
-
 const INITIAL: FormData = {
   businessName: '', contactName: '', email: '', phone: '',
   cuisineTypes: [], customCuisine: '', description: '',
-  foodHandlerPermit: null, liabilityInsurance: null,
-  menuItems: [{ ...INITIAL_ITEM }],
-  boothPhotos: [], legalName: '', stripeConnected: false,
+  legalName: '',
+}
+
+const INITIAL_DOCS: DocFiles = { foodHandler: null, insurance: null, businessLicense: null }
+
+/** Per-document guidance shown under each label in the upload step. */
+const DOC_HINTS: Record<RequiredVendorDoc, string> = {
+  foodHandler:     'Current permit or health department certification.',
+  insurance:       'Proof of general liability coverage ($1M per occurrence).',
+  businessLicense: 'Your registered business license.',
 }
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -124,21 +139,6 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
 }
 
 const iCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-white/20'
-
-function HardBlockBanner({ satisfied, label }: { satisfied: boolean; label: string }) {
-  if (satisfied) return (
-    <div className="flex items-center gap-2.5 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-      <CheckCircleIcon className="w-4 h-4 text-emerald-400 shrink-0" />
-      <p className="text-sm text-emerald-400"><span className="font-semibold">{label}</span> — Step unlocked</p>
-    </div>
-  )
-  return (
-    <div className="flex items-center gap-2.5 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-      <LockClosedIcon className="w-4 h-4 text-amber-400 shrink-0" />
-      <p className="text-sm text-amber-400"><span className="font-semibold">{label}</span> — Required to continue</p>
-    </div>
-  )
-}
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
 
@@ -301,6 +301,80 @@ function Step2({ data, update }: { data: FormData; update: (p: Partial<FormData>
   )
 }
 
+// ─── Step 3: Documents ────────────────────────────────────────────────────────
+// Files live in component state until the Vendor row exists. The label says
+// "Selected", never "Uploaded" — the previous incarnation of this step showed
+// "Uploaded" over a File it never sent, and that lie is the reason it was deleted.
+function DocUploadStep({ files, onPick, onClear, uploading }: {
+  files: DocFiles
+  onPick: (k: RequiredVendorDoc, f: File) => void
+  onClear: (k: RequiredVendorDoc) => void
+  uploading: boolean
+}) {
+  // Courtesy pre-checks only — POST /api/vendors/[id]/documents re-checks both, and
+  // that check is the boundary. Constants come from lib/upload-limits.ts so this
+  // message and the route's rejection are the same number by construction.
+  const handle = (k: RequiredVendorDoc, list: FileList | null) => {
+    const f = list?.[0]
+    if (!f) return
+    if (!ALLOWED_DOC_MIME.has(f.type)) { toast.error(invalidMimeMessage(ALLOWED_DOC_MIME)); return }
+    if (!isWithinUploadCap(f.size))    { toast.error(uploadTooLargeMessage()); return }
+    onPick(k, f)
+  }
+
+  return (
+    <div className="bg-bg-card border border-white/10 rounded-2xl p-6 space-y-5">
+      <div>
+        <h2 className="font-bebas text-2xl tracking-wide text-white mb-1">Required Documents</h2>
+        <p className="text-text-gray text-sm">
+          The organizer can&apos;t approve your application until all three are on file.
+        </p>
+      </div>
+
+      {REQUIRED_VENDOR_DOCS.map(key => {
+        const file = files[key]
+        return (
+          <div key={key}>
+            <Label required>{VENDOR_DOC_LABELS[key]}</Label>
+            {!file ? (
+              <label className="group flex flex-col items-center justify-center py-7 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-neon-pink/40 hover:bg-white/[0.02] transition-all">
+                <DocumentArrowUpIcon className="w-7 h-7 text-text-gray group-hover:text-neon-pink transition-colors mb-2" />
+                <p className="text-sm text-text-gray group-hover:text-white transition-colors text-center">
+                  <span className="text-neon-pink font-semibold">Click to upload</span> a PDF or photo
+                </p>
+                <p className="text-xs text-white/25 mt-1">{DOC_HINTS[key]}</p>
+                <input type="file" accept={ACCEPT_DOC} className="hidden" disabled={uploading}
+                  onChange={e => { handle(key, e.target.files); e.target.value = '' }} />
+              </label>
+            ) : (
+              <div className="flex items-center gap-3 px-4 py-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                <CheckCircleIcon className="w-5 h-5 text-emerald-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white font-medium truncate">{file.name}</p>
+                  {/* In memory only — NOT sent yet. Never say "Uploaded" here. */}
+                  <p className="text-xs text-text-gray">{(file.size / 1024).toFixed(0)} KB · Selected</p>
+                </div>
+                {!uploading && (
+                  <button type="button" onClick={() => onClear(key)}
+                    aria-label={`Remove ${VENDOR_DOC_LABELS[key]}`}
+                    className="p-1.5 hover:bg-white/5 rounded-lg transition-colors cursor-pointer bg-transparent border-0">
+                    <XMarkIcon className="w-4 h-4 text-text-gray" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      <p className="text-xs text-text-gray">
+        Files are sent securely when you submit and are visible only to you, your event
+        organizer, and FairSynq staff.
+      </p>
+    </div>
+  )
+}
+
 function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>) => void }) {
   const signed = data.legalName.trim().length >= 3
   return (
@@ -427,7 +501,9 @@ function Step8({ data, eventSlug }: { data: FormData; eventSlug: string | null }
 export default function VendorOnboarding() {
   const [step, setStep] = useState(1)
   const [data, setData] = useState<FormData>(INITIAL)
+  const [docFiles, setDocFiles] = useState<DocFiles>(INITIAL_DOCS)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [fairs, setFairs] = useState<{ slug: string; name: string }[]>([])
   const [eventSlug, setEventSlug] = useState<string | null>(null)
 
@@ -457,10 +533,48 @@ export default function VendorOnboarding() {
     switch (step) {
       case 1: return !!(eventSlug && data.businessName.trim() && data.contactName.trim() && data.email.trim() && data.phone.trim())
       case 2: return !!(cuisineChosen && data.description.trim().length >= 20)
-      case 3: return data.legalName.trim().length >= 3
+      // Every required document must be chosen. Client-side only — the real
+      // enforcement is the approve gate, which refuses a docs-incomplete vendor.
+      case 3: return REQUIRED_VENDOR_DOCS.every(k => docFiles[k] !== null)
+      case 4: return data.legalName.trim().length >= 3
       default: return true
     }
   })()
+
+  const pickDoc  = useCallback((k: RequiredVendorDoc, f: File) => setDocFiles(d => ({ ...d, [k]: f })), [])
+  const clearDoc = useCallback((k: RequiredVendorDoc) => setDocFiles(d => ({ ...d, [k]: null })), [])
+
+  /**
+   * Upload ONE document, with a bounded retry.
+   *
+   * The route takes one file per request (multipart `docType` + `file`), so three
+   * documents are three POSTs. A transient failure mid-onboarding would otherwise leave
+   * a permanent Vendor row that can never be approved, so each file gets three attempts
+   * before the whole submit reports failure.
+   */
+  const uploadOne = async (
+    vendorId: string,
+    docType: RequiredVendorDoc,
+    file: File,
+    attempt = 1,
+  ): Promise<void> => {
+    const form = new FormData()
+    form.append('docType', docType)
+    form.append('file', file)
+    try {
+      const res = await fetch(`/api/vendors/${vendorId}/documents`, { method: 'POST', body: form })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error?.message ?? `Couldn’t upload your ${VENDOR_DOC_LABELS[docType]}`)
+      }
+    } catch (err) {
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 400 * attempt))
+        return uploadOne(vendorId, docType, file, attempt + 1)
+      }
+      throw err
+    }
+  }
 
   const handleSubmit = async () => {
     if (!eventSlug) { toast.error('Please select a fair to apply to.'); return }
@@ -489,19 +603,40 @@ export default function VendorOnboarding() {
           termsVersion: VENDOR_TERMS_VERSION,
         }),
       })
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}))
-        // `error` is the envelope OBJECT, so the old `json?.error` produced Error("[object
-        // Object]"). Only the console reads this now, but a useless log is its own bug.
-        throw new Error(json?.error?.message ?? 'Registration failed')
+      // `error` is the envelope OBJECT, so a bare `json?.error` produces
+      // Error("[object Object]") — read `.error.message`.
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error?.message ?? 'Registration failed')
+
+      // The created vendor's id — previously returned by the route and silently
+      // discarded here. It is the only handle the document uploads have.
+      const vendorId = json?.data?.id as string | undefined
+      if (!vendorId) throw new Error('Registration failed')
+
+      // Uploads happen HERE, after create and BEFORE the success screen. The owner
+      // VendorMember is committed in the SAME transaction as the vendor row, so this
+      // applicant already passes requireVendorMembershipById — no propagation wait.
+      // (The route gates on membership EXISTENCE. If it is ever hardened to
+      // requireVendorMayOperate, these uploads break: the applicant is PENDING on both
+      // the booth and operator axes at this moment.)
+      //
+      // Advancing to the success screen is deferred until every upload resolves — that
+      // screen carries a live "Go to Vendor Portal" link, and showing it mid-upload
+      // invites the applicant to navigate away from files that have not been sent.
+      setUploading(true)
+      for (const key of REQUIRED_VENDOR_DOCS) {
+        const file = docFiles[key]
+        if (file) await uploadOne(vendorId, key, file)
       }
+
       toast.success('Application submitted!')
-      setStep(4) // success step (was 8)
+      setStep(5) // success step
     } catch (err: unknown) {
       console.error('[VendorOnboarding] submit failed', err)
-      toast.error('Couldn’t submit your application — please try again.')
+      toast.error(err instanceof Error ? err.message : 'Couldn’t submit your application — please try again.')
     } finally {
       setIsSubmitting(false)
+      setUploading(false)
     }
   }
 
@@ -509,7 +644,7 @@ export default function VendorOnboarding() {
     <div className="pt-20 min-h-screen pb-20 bg-bg-dark">
       <div className="max-w-[680px] mx-auto px-5 py-10">
 
-        {step < 4 && (
+        {step < 5 && (
           <div className="text-center mb-10">
             <div className="inline-flex items-center justify-center w-14 h-14 bg-neon-pink/10 border border-neon-pink/20 rounded-2xl mb-4 shadow-[0_0_24px_rgba(255,0,119,0.12)]">
               <BuildingStorefrontIcon className="w-7 h-7 text-neon-pink" />
@@ -521,18 +656,19 @@ export default function VendorOnboarding() {
           </div>
         )}
 
-        {step < 4 && <ProgressBar step={step} />}
+        {step < 5 && <ProgressBar step={step} />}
 
         {/* Step content with key for animation re-trigger */}
         <div key={step} className="animate-fadeIn">
           {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} />}
           {step === 2 && <Step2 data={data} update={update} />}
-          {step === 3 && <Step6 data={data} update={update} />}
-          {step === 4 && <Step8 data={data} eventSlug={eventSlug} />}
+          {step === 3 && <DocUploadStep files={docFiles} onPick={pickDoc} onClear={clearDoc} uploading={uploading} />}
+          {step === 4 && <Step6 data={data} update={update} />}
+          {step === 5 && <Step8 data={data} eventSlug={eventSlug} />}
         </div>
 
         {/* Navigation */}
-        {step < 4 && (
+        {step < 5 && (
           <div className="flex justify-between mt-6">
             {step > 1 ? (
               <button onClick={() => setStep(s => s - 1)}
@@ -546,7 +682,7 @@ export default function VendorOnboarding() {
               </Link>
             )}
 
-            {step < 3 ? (
+            {step < 4 ? (
               <button onClick={() => setStep(s => s + 1)} disabled={!canProceed}
                 className="flex items-center gap-2 px-6 py-2.5 bg-neon-pink text-white rounded-xl font-semibold text-sm hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-all cursor-pointer border-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-neon-pink">
                 Continue<ChevronRightIcon className="w-4 h-4" />

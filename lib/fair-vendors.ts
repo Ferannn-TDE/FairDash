@@ -1,5 +1,6 @@
 import { db } from './db'
 import { vendorReady } from './vendor-readiness'
+import { vendorDocsPresence } from './vendor-documents'
 
 export interface FairVendorsOpts {
   take?:   number
@@ -44,8 +45,6 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
       foodHandlerPermitPath: true,
       insurancePath: true,
       businessLicensePath: true,
-      insuranceExpired: true,
-      insuranceExpiryDate: true,
       isOffline: true,
       isBusy: true,
       lastHeartbeatAt: true,
@@ -100,14 +99,11 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
     stripeVerified: v.stripeVerified,
     stripeConnectedAt: v.stripeConnectedAt,
     // Document presence flags — never the paths, and there are no URLs to expose.
-    // (This surface was already correct before the private-bucket rework; it only needed
-    // the renamed columns.)
-    docs: {
-      foodHandlerPermit: !!v.foodHandlerPermitPath,
-      insurance: !!v.insurancePath,
-      insuranceExpired: v.insuranceExpired,
-      businessLicense: !!v.businessLicensePath,
-    },
+    // Built from the SSOT (lib/vendor-documents.ts) so this payload, the vendor-detail
+    // payload, and the vendor's own documents endpoint all emit ONE shape. The former
+    // `foodHandlerPermit` key is now the canonical `foodHandler`, and the always-false
+    // `insuranceExpired` term is gone — see the SSOT header for why presence-only.
+    docs: vendorDocsPresence(v),
     isOffline: v.isOffline,
     isBusy: v.isBusy,
     lastHeartbeatAt: v.lastHeartbeatAt,
