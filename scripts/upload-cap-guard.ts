@@ -335,7 +335,10 @@ async function main() {
   // A config guard that SKIPS when it can't look is a config guard that doesn't exist.
   assert(!!SUPA && !!KEY, 'SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY present (a skip here would be a false green)')
   if (SUPA && KEY) {
-    for (const bucket of ['delivery-proofs', 'vendor-documents', 'runner-documents']) {
+    // menu-images is PUBLIC (menu photos render as plain <img src> on the storefront), but the
+    // size boundary is identical: its uploads are presigned too, so the bucket limit is the
+    // only enforcement there is. Public-vs-private changes who may read it, not how big it may be.
+    for (const bucket of ['delivery-proofs', 'vendor-documents', 'runner-documents', 'menu-images']) {
       const res = await fetch(`${SUPA}/storage/v1/bucket/${bucket}`, {
         headers: { Authorization: `Bearer ${KEY}`, apikey: KEY },
       })
