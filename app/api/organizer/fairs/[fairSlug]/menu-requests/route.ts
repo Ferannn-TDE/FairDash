@@ -34,7 +34,29 @@ export async function GET(
         vendor: { eventId: event.id },
         status: { in: statusFilter },
       },
-      orderBy: { createdAt: 'asc' },  // FIFO — oldest pending first
+      // FIFO — oldest pending first. The `id` tiebreak makes the order TOTAL, and it is
+      // load-bearing for the cursor below, not decoration.
+      //
+      // Prisma compiles `cursor` into a WHERE on the orderBy VALUES — verified against the
+      // emitted SQL, it is literally
+      //     AND "createdAt" >= (SELECT "createdAt" FROM "MenuRequest" WHERE id = $cursor)
+      // and it then slices relative to the cursor row's position WITHIN that result. So with a
+      // non-unique sort key every tied row satisfies the predicate, and the page boundary is
+      // only as stable as the order Postgres happens to return those tied rows in.
+      //
+      // Which is not stable. SQL guarantees no order among ties, and an UPDATE moves a row
+      // under MVCC (a new version is written at the heap tail), so the tie order genuinely
+      // differs between the page-1 and page-2 queries once any row has been touched. Approving
+      // a request IS an update, and approving while paging through the queue is simply how this
+      // screen is used — so the two halves of the bug meet in the ordinary workflow.
+      //
+      // Ties are not hypothetical either: rows written in ONE transaction share that
+      // transaction's timestamp, so a batched submission produces N rows with an IDENTICAL
+      // createdAt. `id` is unique, so appending it fixes the order and makes the cursor exact.
+      //
+      // scripts/menu-request-pagination-guard.ts reproduces the duplicate against the old
+      // single-key sort (approve one row mid-walk) before trusting that this sort is clean.
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take,
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,
