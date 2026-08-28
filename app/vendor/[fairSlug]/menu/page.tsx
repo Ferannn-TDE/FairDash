@@ -6,16 +6,17 @@ import {
   PlusIcon, PencilIcon, TrashIcon, ClockIcon,
   CheckCircleIcon, XCircleIcon, BuildingStorefrontIcon,
   ExclamationTriangleIcon, ClockIcon as PendingIcon,
+  ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
+import { downscaleImage } from '@/lib/downscale-image'
 import {
   ACCEPT_IMAGE,
   ALLOWED_IMAGE_MIME,
   UPLOAD_MAX_MB,
   invalidMimeMessage,
   isWithinUploadCap,
-  uploadTooLargeMessage,
 } from '@/lib/upload-limits'
 
 interface MenuItem {
@@ -42,18 +43,6 @@ interface PendingRequest {
 const inputCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40'
 const labelCls = 'block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1'
 
-/**
- * A blob: URL is an in-memory handle to a file in ONE browser tab. Persisting it produced a
- * link that was broken by the time anyone loaded the page — the menu-image bug. Until a real
- * upload endpoint exists, the preview stays local and the field is submitted empty. The server
- * rejects blob:/data: values too (lib/upload-limits.ts); this keeps the flow from hitting that
- * rejection for something the vendor can't fix.
- */
-function submittableImageUrl(url: string | undefined): string {
-  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return ''
-  return url
-}
-
 const BLANK = {
   name: '', description: '', price: 0, prepTime: 10,
   category: '', imageUrl: '', isAvailable: true,
@@ -61,34 +50,108 @@ const BLANK = {
 
 // ─── Image upload ─────────────────────────────────────────────────────────────
 
-// This picker does NOT upload. It makes a local blob: preview — there is no menu-image upload
-// endpoint yet — and `submittableImageUrl()` below strips that blob: URL before the request
-// goes out, because a blob: reference is dead the moment the tab closes and storing one only
-// ever produced a permanently-broken image link. The size/type checks are here anyway so the
-// picker obeys the same rule as every other upload point the day the real endpoint lands, and
-// so the "Max 4MB" copy is something the app actually honours rather than decoration.
-function ImageUpload({ imageUrl, onChange }: { imageUrl: string; onChange: (url: string) => void }) {
+// This picker UPLOADS ON SELECT. The photo goes to the PUBLIC `menu-images` bucket the moment
+// it is chosen, and `onChange` receives the permanent public url — so what the vendor sees in
+// the preview is the object that is actually stored. It used to hand back a blob: url, which
+// is an in-memory handle to a file in ONE browser tab: dead the moment that tab closes, and
+// stripped to '' before submit, so a photographed menu item silently arrived at the organizer
+// with no photo at all.
+//
+// Upload-on-select rather than hold-the-File-until-submit because the path is VENDOR-scoped
+// and the vendor already exists. (The vendor-documents wizard holds Files precisely because
+// the vendor does NOT exist until create — a different lifecycle, hence a different shape.)
+// It also means a batch of staged items will each already carry a real url before submit.
+//
+// ORDER MATTERS: downscale BEFORE the cap check. A phone photo is routinely 8–12 MB and
+// shrinks to well under 4 MB; checking the original would reject a perfectly good picture for
+// a size it no longer has by the time it is uploaded. Same order as the delivery-proof caller.
+function ImageUpload({ imageUrl, onChange, onUploadingChange }: {
+  imageUrl: string
+  onChange: (url: string) => void
+  onUploadingChange?: (uploading: boolean) => void
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const { vendorId } = useVendorMeta()
+  const [uploading, setUploading] = useState(false)
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
+  function setBusy(next: boolean) {
+    setUploading(next)
+    onUploadingChange?.(next)
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0]
     e.target.value = '' // let the same file be re-picked after a rejection
-    if (!file) return
-    if (!ALLOWED_IMAGE_MIME.has(file.type)) {
+    if (!picked) return
+    if (!ALLOWED_IMAGE_MIME.has(picked.type)) {
       toast.error(invalidMimeMessage(ALLOWED_IMAGE_MIME))
       return
     }
-    if (!isWithinUploadCap(file.size)) {
-      toast.error(uploadTooLargeMessage())
+    if (!vendorId) {
+      toast.error('Still loading your booth — try again in a moment')
       return
     }
-    onChange(URL.createObjectURL(file))
+
+    setBusy(true)
+    try {
+      // Shrink first (best-effort: returns the original if it can't decode), then measure.
+      const file = await downscaleImage(picked)
+      if (!isWithinUploadCap(file.size)) {
+        toast.error(
+          `This photo is still over ${UPLOAD_MAX_MB} MB after compression. ` +
+          'Try a smaller image or a lower camera resolution.',
+          { duration: 8000 },
+        )
+        return
+      }
+
+      const signRes = await fetch('/api/storage/menu-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorId, filename: file.name, contentType: file.type }),
+      })
+      const sign = await signRes.json()
+      if (!sign.success) {
+        toast.error(sign.error?.message ?? 'Could not start the image upload')
+        return
+      }
+
+      // PUT straight to Supabase — token is in the url (no Authorization header).
+      const put = await fetch(sign.data.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type, 'x-upsert': 'true' },
+        body: file,
+      })
+      if (!put.ok) {
+        // The bucket's file_size_limit lands here as a 413 — the one rejection this app cannot
+        // pre-empt, since the bytes never pass through our server.
+        toast.error(
+          put.status === 413
+            ? `Image is too large (limit ${UPLOAD_MAX_MB} MB) — try a smaller one`
+            : 'Image upload failed — check your connection and retry',
+        )
+        return
+      }
+
+      // Store the PUBLIC URL, not the path: this bucket is public and nothing downstream signs.
+      onChange(sign.data.publicUrl)
+      toast.success('Photo uploaded')
+    } catch {
+      toast.error('Image upload failed — check your connection and retry')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div>
       <label className={labelCls}>Item Image</label>
-      {imageUrl ? (
+      {uploading ? (
+        <div className="w-full aspect-[4/3] rounded-xl border-2 border-dashed border-neon-pink/30 bg-neon-pink/[0.03] flex flex-col items-center justify-center gap-2">
+          <ArrowPathIcon className="w-6 h-6 text-neon-pink animate-spin" />
+          <p className="text-sm text-text-gray">Uploading…</p>
+        </div>
+      ) : imageUrl ? (
         <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#0a0a0a] border border-white/[0.06] group">
           <img src={imageUrl} alt="" className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
@@ -118,9 +181,13 @@ function AddItemForm({ categories, onSubmit, onCancel }: {
   onCancel: () => void
 }) {
   const [form, setForm] = useState({ ...BLANK, category: categories[0] ?? '' })
+  // Submitting mid-upload would post an empty imageUrl and lose the photo silently — the
+  // exact failure this build exists to remove.
+  const [uploading, setUploading] = useState(false)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (uploading) { toast.error('Wait for the photo to finish uploading'); return }
     if (!form.name.trim()) { toast.error('Name is required'); return }
     if (form.price <= 0) { toast.error('Price must be greater than 0'); return }
     onSubmit(form)
@@ -132,7 +199,7 @@ function AddItemForm({ categories, onSubmit, onCancel }: {
       <p className="text-amber-400/70 text-xs mb-4">Requires organizer approval before going live.</p>
       <div className="grid grid-cols-2 sm:grid-cols-1 gap-3 mb-3">
         <div className="col-span-2 sm:col-span-1">
-          <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} />
+          <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} onUploadingChange={setUploading} />
         </div>
         <div>
           <label className={labelCls}>Item Name *</label>
@@ -158,7 +225,9 @@ function AddItemForm({ categories, onSubmit, onCancel }: {
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
-        <button type="submit" className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">Submit for Approval</button>
+        <button type="submit" disabled={uploading} className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] disabled:opacity-40 disabled:hover:bg-neon-pink shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">
+          {uploading ? 'Uploading photo…' : 'Submit for Approval'}
+        </button>
       </div>
     </form>
   )
@@ -243,17 +312,23 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
     name: item.name, description: item.description, price: item.price,
     prepTime: item.prepTime, category: item.category, imageUrl: item.imageUrl,
   })
+  const [uploading, setUploading] = useState(false)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <form className="relative bg-[#1c1c1c] border border-white/10 rounded-2xl p-6 w-full max-w-md overflow-y-auto max-h-[90vh]"
         onClick={e => e.stopPropagation()}
-        onSubmit={e => { e.preventDefault(); onSubmit(item.id, form); onClose() }}>
+        onSubmit={e => {
+          e.preventDefault()
+          if (uploading) { toast.error('Wait for the photo to finish uploading'); return }
+          onSubmit(item.id, form)
+          onClose()
+        }}>
         <h3 className="font-bebas text-xl tracking-wide text-white mb-1">Edit Item</h3>
         <p className="text-amber-400/70 text-xs mb-4">Change request requires organizer approval.</p>
         <div className="space-y-3">
-          <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} />
+          <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} onUploadingChange={setUploading} />
           <div>
             <label className={labelCls}>Name</label>
             <input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className={inputCls} />
@@ -280,7 +355,9 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
         </div>
         <div className="flex gap-2 justify-end mt-5">
           <button type="button" onClick={onClose} className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
-          <button type="submit" className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">Submit for Approval</button>
+          <button type="submit" disabled={uploading} className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] disabled:opacity-40 disabled:hover:bg-neon-pink shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">
+            {uploading ? 'Uploading photo…' : 'Submit for Approval'}
+          </button>
         </div>
       </form>
     </div>
@@ -409,7 +486,7 @@ export default function VendorMenuPage() {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, imageUrl: submittableImageUrl(data.imageUrl), vendorId, type: 'ADD' }),
+        body: JSON.stringify({ ...data, vendorId, type: 'ADD' }),
       })
       const json = await res.json()
       if (json.success) {
@@ -431,10 +508,7 @@ export default function VendorMenuPage() {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vendorId, type: 'EDIT', menuItemId: id, ...updates,
-          ...(updates.imageUrl !== undefined && { imageUrl: submittableImageUrl(updates.imageUrl) }),
-        }),
+        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, ...updates }),
       })
       const json = await res.json()
       if (json.success) {
