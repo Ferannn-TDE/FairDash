@@ -76,6 +76,13 @@ export async function GET(
       id: r.id,
       type: r.type,
       status: r.status,
+      // Which submission this row arrived in. NULL = standalone (a legacy request or a single
+      // add) and must reach the client AS null — the page groups by
+      // `batchId ?? solo:<id>` (lib/menu-requests/group-by-batch.ts), so a dropped or
+      // undefined field would silently collapse every standalone row into one group. The list
+      // stays FLAT on the wire: the cursor is a row id, per-item approve/reject keeps the row
+      // as the unit of action, and grouping is presentational.
+      batchId: r.batchId,
       // Proposed (new) values
       name: r.name,
       description: r.description,
