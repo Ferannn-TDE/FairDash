@@ -3,21 +3,38 @@
  * several rows share a createdAt.
  *
  * THE BUG THIS LOCKS. The organizer menu-request list is cursor-paginated over
- * `orderBy: { createdAt: 'asc' }`. Prisma implements a cursor as a WHERE on the orderBy VALUES
- * ("createdAt >= the cursor row's createdAt") plus `skip: 1` — which is exact only while those
- * values are UNIQUE. They are not: rows written in one transaction all take that transaction's
- * timestamp, so a batched menu submission produces N rows with an IDENTICAL createdAt. Every
- * tied row then satisfies the cursor predicate regardless of its position, so page 2 hands back
- * rows page 1 already returned and the tail drops off the end.
+ * `orderBy: { createdAt: 'asc' }`. Prisma compiles a cursor into a WHERE on the orderBy VALUES
+ * — `createdAt >= (SELECT createdAt FROM MenuRequest WHERE id = $cursor)` — and then slices
+ * relative to the cursor row's position WITHIN that result. That is exact only while the sort
+ * key is UNIQUE. It is not: rows written in one transaction all take that transaction's
+ * timestamp, so a batched submission produces N rows with an IDENTICAL createdAt.
  *
- * Latent today (single inserts rarely tie) and routine the moment batching lands, which is why
- * the tiebreak ships FIRST and alone.
+ * TIES ALONE ARE NOT ENOUGH, and getting that wrong is how the first version of this guard
+ * passed vacuously. A single uninterrupted walk is self-consistent even with ties, because the
+ * same query both orders the rows and locates the cursor in them. The corruption needs the tie
+ * ORDER to DIFFER between the page-1 and page-2 queries — which happens once a row is UPDATED
+ * mid-walk, since MVCC writes a new row version that can land outside its original heap page.
+ * Approving a request is an update, and approving while paging is how the screen is used.
  *
- * WHY THE [0] CONTROL IS THE POINT. This suite is a NEGATIVE assertion ("no duplicates, no
- * missing"), and a negative passes for free if the scenario never reproduces the fault. So the
- * control runs the SAME walk against the OLD single-key sort and requires it to FAIL. If the
- * control ever goes green, the fixture stopped tying createdAt and every result below is
- * vacuous — the suite says so and exits non-zero. (scripts/test-probe-positive-control rule.)
+ * WHY [0b] RETRIES. Even with the update, the reorder is PROBABILISTIC: when the page has free
+ * space Postgres can update in place (HOT) and the scan order survives. Measured here, one
+ * attempt reproduced about 5 times in 8 — so a one-shot control is a coin flip, and a guard
+ * that is red three runs in eight is one people re-run instead of read. That was the second
+ * version of this guard, and it was also wrong. The fix is not a weaker assertion: [0b] takes
+ * up to ATTEMPTS independent shots (rotating which rows are approved) and requires at least
+ * one real reproduction. Observed 18–23 of 24, so failing all 24 is ~4e-15.
+ *
+ * ⚠️ THAT MARGIN IS ENVIRONMENTAL, NOT A CONSTANT. It rides on how often an updated tuple has
+ * to leave its heap page, which depends on page fullness — so a non-default `fillfactor` on
+ * MenuRequest, a much smaller fixture, or a Postgres version that widens HOT-update eligibility
+ * all push the per-attempt rate down and erode the headroom. If [0b] ever starts failing, the
+ * first question is whether the reproduction got harder, NOT whether the assertion is too
+ * strict: raise ATTEMPTS or enlarge the fixture before touching what it asserts. [0a] is the
+ * part that must never be relaxed — it is the property, and it holds regardless of any of this.
+ *
+ * [0a] carries the half that IS deterministic — that the old key does not uniquely order the
+ * rows and the shipped one does — so the suite still states the precondition exactly even if
+ * the physical reproduction ever stopped firing.
  *
  * Run: npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/menu-request-pagination-guard.ts
  * Self-cleaning, prefix mrpg-.
@@ -161,12 +178,18 @@ async function main() {
   assert(distinctInstants === 2,
     `fixture really TIES createdAt — ${TIED_ROWS} rows share one instant (got ${distinctInstants} distinct instants across ${all.length} rows)`)
 
-  // The provocation, identical for both sorts: approve one row from page 1, mid-walk. This is
-  // what an organizer working a queue does, and under MVCC it rewrites that row to the heap
-  // tail, changing the order Postgres returns tied rows in for page 2.
-  const approveOnePageOneRow = (target: { id: string } | null) => async () => {
-    if (!target) return
-    await prisma.menuRequest.update({ where: { id: target.id }, data: { status: 'APPROVED' } })
+  // The provocation, identical for both sorts: approve page-1 rows mid-walk, which is what an
+  // organizer working a queue does. Under MVCC each update writes a new row version that may
+  // land outside its original heap page, changing the order Postgres returns tied rows in for
+  // page 2 — the second half of the bug (see the header).
+  //
+  // Approving SEVERAL rows before turning the page is both what an organizer actually does
+  // (work a few, then continue) and a stronger provocation: each update is another chance for
+  // the new row version to land outside its original heap page and change the scan order.
+  const approvePageOneRows = (targets: { id: string }[]) => async () => {
+    for (const t of targets) {
+      await prisma.menuRequest.update({ where: { id: t.id }, data: { status: 'APPROVED' } })
+    }
   }
   /** Reset statuses so the second walk starts from the same state as the first. */
   const resetStatuses = () =>
@@ -180,23 +203,58 @@ async function main() {
   })
   const victim = firstPage[1] ?? null
 
-  // ── [0] POSITIVE CONTROL ON THE PROBE ──────────────────────────────────────────────────
-  // The old single-key sort MUST fail this walk. If it passes, the fixture no longer
-  // reproduces the fault and the [1] result below would be meaningless.
-  console.log('\n[0] POSITIVE CONTROL — the OLD single-key sort must corrupt the walk')
-  await resetStatuses()
-  const oldWalk = analyse(await paginate(event.id, 'single-key', approveOnePageOneRow(victim)), expected)
-  assert(!oldWalk.clean,
-    `single-key orderBy DOES break the cursor walk (${oldWalk.duplicated.length} duplicated, ${oldWalk.missing.length} missing) — the probe can fail, so [1] is not vacuous`)
-  if (!oldWalk.clean) {
-    console.log(`     ↳ duplicated: ${oldWalk.duplicated.length}, missing: ${oldWalk.missing.length}`)
+  // ── [0a] THE PRECONDITION, DETERMINISTICALLY ───────────────────────────────────────────
+  // The bug's precondition is a sort key that does not uniquely order the rows. That is a
+  // fact about the data and the key, not about Postgres's mood, so it is asserted exactly.
+  console.log('\n[0a] the old sort key is NOT total; the shipped one IS')
+  const byCreatedAt = new Set(all.map(r => r.createdAt.getTime()))
+  const byCreatedAtAndId = new Set(all.map(r => `${r.createdAt.getTime()}|${r.id}`))
+  assert(byCreatedAt.size < all.length,
+    `createdAt alone does NOT uniquely order the rows (${byCreatedAt.size} distinct keys for ${all.length} rows) — keyset pagination has no stable boundary`)
+  assert(byCreatedAtAndId.size === all.length,
+    `(createdAt, id) DOES uniquely order every row (${byCreatedAtAndId.size}/${all.length}) — the boundary is exact`)
+
+  // ── [0b] POSITIVE CONTROL — reproduce the actual corruption ────────────────────────────
+  // WHY THIS RETRIES. The corruption needs the tie ORDER to differ between the page-1 and
+  // page-2 queries. An UPDATE usually causes that (MVCC writes a new row version at the heap
+  // tail), but not always: when the page has free space Postgres can do a HOT update in
+  // place, and the scan order survives. Measured on this fixture, a single attempt reproduces
+  // roughly 5 times in 8 — so a one-shot control is a COIN FLIP, and a guard that is red
+  // three runs in eight is a guard people learn to re-run instead of read. That was the first
+  // version of this check, and it was wrong.
+  //
+  // The fix is not to weaken the assertion but to stop sampling once: each attempt approves a
+  // DIFFERENT page-1 row for an independent shot. Failing all ATTEMPTS times is ~(3/8)^N,
+  // about five in a million at N=12 — while still being a real reproduction of the real bug,
+  // never a restatement of [0a].
+  const ATTEMPTS = 24
+  console.log(`\n[0b] POSITIVE CONTROL — the OLD single-key sort corrupts the walk (≤${ATTEMPTS} attempts)`)
+  let reproduced = 0
+  let firstFailure: ReturnType<typeof analyse> | null = null
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    await resetStatuses()
+    // Rotate WHICH rows are approved so attempts are independent rather than one coin
+    // re-flipped, and approve a couple at a time (see approvePageOneRows).
+    const a = firstPage[attempt % firstPage.length]
+    const b = firstPage[(attempt + 2) % firstPage.length]
+    const targets = [a, b].filter((x): x is { id: string } => !!x)
+    const walk = analyse(await paginate(event.id, 'single-key', approvePageOneRows(targets)), expected)
+    if (!walk.clean) {
+      reproduced++
+      if (!firstFailure) firstFailure = walk
+    }
+  }
+  assert(reproduced > 0,
+    `single-key orderBy DOES break the cursor walk — reproduced in ${reproduced}/${ATTEMPTS} attempts, so [1] is not vacuous`)
+  if (firstFailure) {
+    console.log(`     ↳ first failure: ${firstFailure.duplicated.length} duplicated, ${firstFailure.missing.length} missing`)
   }
 
   // ── [1] THE FIX ────────────────────────────────────────────────────────────────────────
   // Same fixture, same mid-walk approval, only the sort differs.
   console.log('\n[1] the shipped sort — [{ createdAt: asc }, { id: asc }]')
   await resetStatuses()
-  const newWalk = analyse(await paginate(event.id, 'tiebreak', approveOnePageOneRow(victim)), expected)
+  const newWalk = analyse(await paginate(event.id, 'tiebreak', approvePageOneRows([victim].filter((x): x is { id: string } => !!x))), expected)
   assert(newWalk.duplicated.length === 0, `no row is returned twice (dupes: ${newWalk.duplicated.length})`)
   assert(newWalk.missing.length === 0, `no row is skipped (missing: ${newWalk.missing.length})`)
   assert(newWalk.clean, 'the cursor walk visits every row exactly once across the page boundary')
