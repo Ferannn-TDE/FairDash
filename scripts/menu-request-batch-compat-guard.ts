@@ -27,6 +27,12 @@ import { config } from 'dotenv'
 import { testPrisma } from '../lib/test-db'
 config({ path: '.env.local' })
 
+import { readFileSync } from 'node:fs'
+// THE SHIPPED DEFINITION, imported — not a copy. This guard previously declared its own
+// `groupKey` because the helper did not exist yet; asserting a rule against a private
+// re-statement of that rule proves only that the copy agrees with itself.
+import { batchGroupKey, groupIntoBatches } from '../lib/menu-requests/group-by-batch'
+
 const prisma = testPrisma()
 
 const PFX = 'mrbc-'
@@ -39,16 +45,9 @@ function assert(cond: boolean, label: string) {
   else { fail++; console.log(`  ❌ ${label}`) }
 }
 
-/**
- * The grouping RULE, written here exactly as lib/menu-requests/group-by-batch.ts will define
- * it. Duplicated deliberately and only until that helper exists (next step), at which point
- * this guard imports it instead — a rule asserted against a private copy of itself proves
- * nothing. Tracked as the one intentional duplication in this arc.
- */
-const groupKey = (r: { id: string; batchId: string | null }) => r.batchId ?? `solo:${r.id}`
-
+/** Group count, via the SHIPPED helper. */
 function groupCount(rows: { id: string; batchId: string | null }[]): number {
-  return new Set(rows.map(groupKey)).size
+  return groupIntoBatches(rows).length
 }
 
 async function cleanup() {
@@ -171,6 +170,60 @@ async function main() {
   assert(realRows.every(r => r.batchId === null), 'every row in the fixture fair is null-batched')
   assert(groupCount(realRows) === realRows.length,
     `${realRows.length} legacy rows produce ${realRows.length} groups, not 1`)
+
+  // ── [5] THE SHIPPED HELPER'S OWN CONTRACT ──────────────────────────────────────────────
+  // [4] uses the helper through groupCount, which only sees the COUNT. These assert the shape
+  // the organizer page will actually render from.
+  console.log('\n[5] the helper reports the shape the page renders')
+  const mixed = [
+    { id: 'r1', batchId: null },
+    { id: 'r2', batchId: sharedId },
+    { id: 'r3', batchId: sharedId },
+    { id: 'r4', batchId: null },
+  ]
+  const groups = groupIntoBatches(mixed)
+  assert(groups.length === 3, 'mixed list → 3 groups')
+  assert(groups[0].isBatch === false && groups[0].batchId === null && groups[0].rows.length === 1,
+    'a standalone row is a 1-row group, isBatch false, batchId null (renders with no wrapper)')
+  assert(groups[1].isBatch === true && groups[1].batchId === sharedId && groups[1].rows.length === 2,
+    'the batch is one group of 2 with its id (renders one wrapper)')
+  assert(groups.map(g => g.rows[0].id).join(',') === 'r1,r2,r4',
+    'groups appear in first-appearance order — FIFO reading order survives grouping')
+  assert(groups[1].rows.map(r => r.id).join(',') === 'r2,r3',
+    'rows keep their relative order inside a group')
+
+  // A batch split across a pagination boundary still lands in ONE group.
+  const straddled = groupIntoBatches([
+    { id: 's1', batchId: sharedId },
+    { id: 's2', batchId: null },
+    { id: 's3', batchId: sharedId },
+  ])
+  assert(straddled.length === 2 && straddled[0].rows.length === 2,
+    'non-adjacent rows of one batch still group together (a batch may straddle a page)')
+
+  // The side door `?? ` alone would leave open.
+  const blankIds = groupIntoBatches([
+    { id: 'b1', batchId: '' },
+    { id: 'b2', batchId: '   ' },
+  ])
+  assert(blankIds.length === 2 && blankIds.every(g => g.batchId === null),
+    'empty / whitespace batchId is treated as STANDALONE, not grouped together')
+  assert(batchGroupKey({ id: 'z', batchId: null }) === 'solo:z',
+    'batchGroupKey exposes the same rule for single-row keying')
+
+  // ── [6] ISOMORPHIC — the helper is safe for the client bundle ───────────────────────────
+  // The organizer page (a client component) imports this module, so any import reachable from
+  // it lands in the browser bundle. A server-only import would break that consumer at page
+  // load without failing one assertion above — the client-bundler gate hole, exactly.
+  console.log('\n[6] the helper imports nothing (safe in a client bundle)')
+  const helperSrc = readFileSync('lib/menu-requests/group-by-batch.ts', 'utf8')
+  const IMPORT = /^\s*import\s/m
+  assert(IMPORT.test("import { db } from '@/lib/db'"),
+    '[0] positive control: the scanner DOES detect an import statement')
+  assert(!IMPORT.test('export function batchGroupKey(row: BatchGroupable): string {'),
+    '[0] baseline: the scanner does NOT fire on an ordinary export')
+  assert(!IMPORT.test(helperSrc),
+    'group-by-batch.ts has ZERO imports — nothing server-only can ride into the client bundle')
 
   console.log(`\n${'─'.repeat(66)}`)
   if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
