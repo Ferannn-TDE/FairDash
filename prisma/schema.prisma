@@ -469,6 +469,18 @@ model MenuRequest {
   menuItemId String?
   menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
 
+  // ONE SUBMISSION. A vendor who stages several items and sends them together gets one cuid
+  // written across all of that submission's rows. NULL means STANDALONE — a legacy request or
+  // a single add — never "the null batch"; the grouping helper keys null rows individually so
+  // they can never collapse together (lib/menu-requests/group-by-batch.ts).
+  //
+  // No FK and no batch table, deliberately. VendorEarning.batchId points at OrganizerPayout
+  // because that batch is a real record holding a stripeTransferId and its own status — it is
+  // the idempotency anchor for a money move. Here approval stays PER ITEM, so a batch owns no
+  // state at all and a table would be a row containing nothing but its own id. This is a
+  // correlation key, minted server-side so a client can neither forge nor collide one.
+  batchId String?
+
   // Review
   reviewedBy String?
   reviewedAt DateTime?
@@ -479,6 +491,7 @@ model MenuRequest {
 
   @@index([vendorId])
   @@index([status])
+  @@index([batchId])
 }
 
 enum MenuRequestType {
