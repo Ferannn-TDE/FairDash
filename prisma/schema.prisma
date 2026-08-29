@@ -430,7 +430,32 @@ model MenuItem {
   variantGroup String? // e.g. "Bagna Cauda"  — null means standalone item
   variantLabel String? // e.g. "Small", "Medium" — null means standalone item
 
-  isAvailable Boolean @default(true) // Sold-out toggle
+  isAvailable Boolean @default(true) // Sold-out toggle — TEMPORARY absence, still a live item
+
+  // TAKEN OFF THE MENU. A THIRD state, not a second meaning for isAvailable.
+  //
+  // Until this column existed, the vendor's trash button and the sold-out toggle wrote the SAME
+  // field (isAvailable: false), so "removed" was an alias for "sold out" and the trash button
+  // was structurally incapable of expressing removal. The three states are now distinct and
+  // must never collapse into one another on any surface:
+  //     available  isAvailable: true,  removedAt: null
+  //     sold out   isAvailable: false, removedAt: null      ← temporary, still on the menu
+  //     removed    removedAt: <date>                        ← off the menu; isAvailable moot
+  //
+  // SOFT, UNIFORMLY, for ordered and never-ordered items alike. Not a policy we merely chose:
+  // OrderItem.menuItemId (below) declares no onDelete, so it is RESTRICT and Postgres REFUSES
+  // to delete an item any order references. A hard delete would also SetNull
+  // MenuRequest.menuItemId, severing the audit trail from the request that minted the item. One
+  // path, not two — the same "two copies of one derivation" smell this codebase keeps finding,
+  // and worst of all on a destructive operation.
+  //
+  // REVERSIBLE BY CONSTRUCTION: restore is `removedAt = null`. The column supports undo whether
+  // or not a restore button ships, because removal-without-undo is a data-loss cliff a vendor
+  // reaches by misclick.
+  //
+  // The single customer-read chokepoint is lib/menu/getGroupedMenuItems.ts — the predicate
+  // `removedAt: null` belongs there, not copied per surface.
+  removedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -442,6 +467,7 @@ model MenuItem {
 
   @@index([vendorId])
   @@index([isAvailable])
+  @@index([removedAt])
 }
 
 // ============================================================================
