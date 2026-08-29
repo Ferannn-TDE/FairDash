@@ -12,6 +12,21 @@ import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { downscaleImage } from '@/lib/downscale-image'
 import {
+  STAGE_BUTTON_LABEL,
+  addStaged,
+  buildSubmitBody,
+  optimisticRowsFor,
+  reconcileAfterSubmit,
+  removeStaged,
+  rollbackOptimistic,
+  rowsFromSubmitResponse,
+  submitButtonLabel,
+  trayHeading,
+  trayHint,
+  updateStaged,
+  type StagedItem,
+} from '@/lib/menu-requests/staging'
+import {
   ACCEPT_IMAGE,
   ALLOWED_IMAGE_MIME,
   UPLOAD_MAX_MB,
@@ -175,10 +190,15 @@ function ImageUpload({ imageUrl, onChange, onUploadingChange }: {
 
 // ─── Add item form ────────────────────────────────────────────────────────────
 
-function AddItemForm({ categories, onSubmit, onCancel }: {
+// `submitLabel` is a prop, not a constant, because this form's action changed meaning: it now
+// ADDS TO THE TRAY rather than submitting for approval. The EditItemModal below keeps its own
+// wording — editing a live menu item really does submit a change request, so the two must not
+// share a caption.
+function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
   categories: string[]
   onSubmit: (item: typeof BLANK) => void
   onCancel: () => void
+  submitLabel: string
 }) {
   const [form, setForm] = useState({ ...BLANK, category: categories[0] ?? '' })
   // Submitting mid-upload would post an empty imageUrl and lose the photo silently — the
@@ -195,8 +215,10 @@ function AddItemForm({ categories, onSubmit, onCancel }: {
 
   return (
     <form onSubmit={handleSubmit} className="bg-bg-card border border-neon-pink/25 rounded-2xl p-5 mb-6">
-      <h3 className="font-bebas text-lg tracking-wide text-white mb-1">New Menu Item</h3>
-      <p className="text-amber-400/70 text-xs mb-4">Requires organizer approval before going live.</p>
+      <h3 className="font-bebas text-lg tracking-wide text-white mb-1">Add an item</h3>
+      <p className="text-text-gray text-xs mb-4">
+        This goes into your submission — nothing is sent until you submit it.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-1 gap-3 mb-3">
         <div className="col-span-2 sm:col-span-1">
           <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} onUploadingChange={setUploading} />
@@ -225,8 +247,15 @@ function AddItemForm({ categories, onSubmit, onCancel }: {
       </div>
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
-        <button type="submit" disabled={uploading} className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] disabled:opacity-40 disabled:hover:bg-neon-pink shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">
-          {uploading ? 'Uploading photo…' : 'Submit for Approval'}
+        {/* SECONDARY on purpose. The neon-pink primary belongs to the tray's submit control —
+            two buttons of equal weight, one saying "add" and one saying "submit", is the
+            overload this relabel exists to remove. Different words AND different weight. */}
+        <button
+          type="submit"
+          disabled={uploading}
+          className="flex items-center gap-1.5 px-5 py-2 bg-white/5 border border-white/15 text-white rounded-xl text-sm font-semibold hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
+        >
+          {uploading ? 'Uploading photo…' : <><PlusIcon className="w-4 h-4" />{submitLabel}</>}
         </button>
       </div>
     </form>
@@ -403,6 +432,8 @@ export default function VendorMenuPage() {
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [staged, setStaged] = useState<StagedItem[]>([])
+  const [submitting, setSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MenuItem | null>(null)
   const [unavailableTarget, setUnavailableTarget] = useState<MenuItem | null>(null)
@@ -480,24 +511,77 @@ export default function VendorMenuPage() {
     }
   }
 
-  async function handleAdd(data: typeof BLANK) {
-    if (!vendorId) return
+  // ── STAGING ────────────────────────────────────────────────────────────────
+  // "Add Item" no longer submits — it puts the item in the tray, and one explicit
+  // "Submit" sends whatever is staged. One mental model, and the tray is always an honest
+  // picture of what has not been sent yet.
+  //
+  // A LONE ADD IS STILL A STANDALONE REQUEST. buildSubmitBody sends one item through the
+  // SINGLE form, so it is written with batchId null exactly as before — a solo add does not
+  // become a one-item "submission" wrapped in a batch card downstream.
+  function handleStage(data: typeof BLANK) {
+    setStaged(prev => addStaged(prev, {
+      name: data.name,
+      description: data.description,
+      price: data.price,
+      prepTime: data.prepTime,
+      category: data.category,
+      imageUrl: data.imageUrl,
+    }, `stage_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`))
+    setShowAdd(false)
+    toast.success('Added to your submission')
+  }
+
+  /** Editing a STAGED item is local — the item does not exist server-side, so no request. */
+  function handleEditStaged(stageId: string, patch: Partial<StagedItem>) {
+    setStaged(prev => updateStaged(prev, stageId, patch))
+  }
+
+  async function handleSubmitStaged() {
+    if (!vendorId || staged.length === 0 || submitting) return
+    setSubmitting(true)
+
+    // N optimistic rows in, all at once. They carry temp ids so the reconcile can tell them
+    // from real ones no matter what the server returns.
+    const temps = optimisticRowsFor(
+      staged,
+      i => `${Date.now()}_${i}`,
+      new Date().toISOString(),
+    )
+    const tempIds = temps.map(t => t.id)
+    setPendingRequests(prev => [...temps, ...prev] as PendingRequest[])
+
     try {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, vendorId, type: 'ADD' }),
+        body: JSON.stringify(buildSubmitBody(vendorId, staged)),
       })
       const json = await res.json()
+
       if (json.success) {
-        setShowAdd(false)
-        setPendingRequests(prev => [{ id: json.data.id, type: 'ADD', status: 'PENDING', name: data.name, menuItemId: null, menuItem: null, createdAt: json.data.createdAt }, ...prev])
-        toast.success('Add request submitted — awaiting organizer approval')
+        const rows = rowsFromSubmitResponse(json.data)
+        setPendingRequests(prev => reconcileAfterSubmit(prev, tempIds, rows) as PendingRequest[])
+        setStaged([])
+        toast.success(
+          rows.length === 1
+            ? 'Request submitted — awaiting organizer approval'
+            : `${rows.length} items submitted — awaiting organizer approval`,
+        )
       } else {
-        toast.error(json.error?.message ?? 'Failed to submit request')
+        // ALL-OR-NOTHING, ON BOTH SIDES OF THE WIRE. The route wrote nothing, so every
+        // optimistic row goes — together. And the TRAY IS LEFT INTACT: the vendor's next move
+        // is to fix the item the error names and resubmit the same set, which is impossible if
+        // submitting cleared their work. Clearing it partially would be worse still, leaving
+        // the tray disagreeing with a server that has nothing.
+        setPendingRequests(prev => rollbackOptimistic(prev, tempIds) as PendingRequest[])
+        toast.error(json.error?.message ?? 'Failed to submit — your items are still here')
       }
     } catch {
-      toast.error('Failed to submit request')
+      setPendingRequests(prev => rollbackOptimistic(prev, tempIds) as PendingRequest[])
+      toast.error('Failed to submit — your items are still here')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -578,7 +662,92 @@ export default function VendorMenuPage() {
         </div>
       )}
 
-      {showAdd && <AddItemForm categories={categories} onSubmit={handleAdd} onCancel={() => setShowAdd(false)} />}
+      {/* Staging tray — what has been assembled but not yet sent.
+          RENDERS WHENEVER THE FORM IS OPEN, not only once something is staged. The empty tray
+          is the only place a vendor learns that items collect before being sent; gating it on
+          staged.length > 0 is what made batching invisible on a fresh form. */}
+      {(showAdd || staged.length > 0) && (
+        <div className="bg-bg-card border border-neon-pink/25 rounded-2xl p-5 mb-6">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h3 className="font-bebas text-lg tracking-wide text-white">
+                {trayHeading(staged.length)}
+              </h3>
+              <p className="text-text-gray text-xs mt-0.5">{trayHint(staged.length)}</p>
+            </div>
+            {!showAdd && (
+              <button
+                onClick={() => setShowAdd(true)}
+                disabled={submitting}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-xs font-semibold hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                <PlusIcon className="w-3.5 h-3.5" />
+                Add another
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-2 mb-4">
+            {staged.map(s => (
+              <div key={s.stageId} className="flex items-center gap-3 bg-[#0f0f0f] border border-white/[0.06] rounded-xl px-3 py-2.5">
+                {s.imageUrl
+                  ? <img src={s.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                  : <div className="w-10 h-10 rounded-lg bg-white/5 shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-semibold truncate">{s.name}</p>
+                  <p className="text-text-gray text-xs">${s.price.toFixed(2)} · {s.category || 'Uncategorised'}</p>
+                </div>
+                <input
+                  type="number" min="0.01" step="0.01" value={s.price}
+                  onChange={e => handleEditStaged(s.stageId, { price: parseFloat(e.target.value) || 0 })}
+                  disabled={submitting}
+                  title="Edit price (not sent until you submit)"
+                  className="w-24 bg-bg-dark border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs outline-none focus:border-neon-pink transition-colors disabled:opacity-40"
+                />
+                <button
+                  onClick={() => setStaged(prev => removeStaged(prev, s.stageId))}
+                  disabled={submitting}
+                  title="Remove from submission"
+                  className="shrink-0 p-2 rounded-lg text-text-gray hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors cursor-pointer"
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* The submit control exists only when there is something to send — an empty tray
+              must not offer "Submit 0 items". */}
+          {staged.length > 0 && (
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setStaged([])}
+                disabled={submitting}
+                className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                Discard all
+              </button>
+              {/* THE primary action of this page, and the ONLY control that says "approval". */}
+              <button
+                onClick={handleSubmitStaged}
+                disabled={submitting}
+                className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] disabled:opacity-40 shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer"
+              >
+                {submitting ? 'Submitting…' : submitButtonLabel(staged.length)}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {showAdd && (
+        <AddItemForm
+          categories={categories}
+          onSubmit={handleStage}
+          onCancel={() => setShowAdd(false)}
+          submitLabel={STAGE_BUTTON_LABEL}
+        />
+      )}
+
 
       {loading ? (
         <div className="space-y-3">
