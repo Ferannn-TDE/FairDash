@@ -1,0 +1,32 @@
+-- RESTORE — a fourth MenuRequestType, so putting an item back on the menu travels the same
+-- road that took it off.
+--
+-- WHY A REQUEST TYPE AND NOT A VENDOR BUTTON. Setting MenuItem.removedAt is ORGANIZER-gated:
+-- only the approval route writes it, behind requireOrganizerAuth + resolveOwnedFair. Meanwhile
+-- /api/menu-items/[id]/availability is vendor-direct — but for isAvailable ONLY. If a vendor
+-- could clear removedAt themselves, they would unilaterally undo an organizer's menu decision.
+-- So restore mirrors removal exactly: the vendor REQUESTS, the organizer APPROVES.
+--
+-- APPEND-ONLY HISTORY. The original DELETE request stays APPROVED forever and a RESTORE is a
+-- second, separate row, so the trail reads "removed (approved), then restored (approved)" — two
+-- events. Reversing a removal must not rewrite the record that it happened.
+--
+-- ── THE POSTGRES WRINKLE, and why this migration adds the value and NOTHING else ────────────
+-- `ALTER TYPE ... ADD VALUE` could not run inside a transaction block before PG 12, and even on
+-- 12+ the new label may not be USED in the same transaction that adds it. Prisma runs each
+-- migration in a transaction, so a migration that both added RESTORE and, say, backfilled rows
+-- to it would fail. This one only adds the label; the first code able to WRITE a RESTORE row
+-- ships in a later commit, in a different transaction entirely. Verified by applying the whole
+-- chain to a torn-down empty database with `migrate deploy`.
+--
+-- 🔌 INERT ON ARRIVAL, and provably so: lib/menu-requests/validate-item.ts still declares
+-- MENU_REQUEST_TYPES = ['ADD','EDIT','DELETE'], so POST /api/menu-requests rejects type
+-- 'RESTORE' as "Invalid type". The label exists in the database and nothing can create a row
+-- carrying it until that list grows. No existing row changes; there is nothing to backfill.
+--
+-- NON-DESTRUCTIVE: an additive enum label. scripts/safe-migrate.ts applies it without
+-- CONFIRM_DEPLOY_ORDERING — its DESTRUCTIVE set is RENAME/DROP only. Note the one-way property
+-- of Postgres enums: a label cannot be dropped, so this is forward-only by nature.
+
+-- AlterEnum
+ALTER TYPE "MenuRequestType" ADD VALUE 'RESTORE';

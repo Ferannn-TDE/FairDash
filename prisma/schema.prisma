@@ -524,6 +524,18 @@ enum MenuRequestType {
   ADD
   EDIT
   DELETE
+  // Put a REMOVED item back on the menu (clears MenuItem.removedAt).
+  //
+  // A fourth type rather than a vendor-direct write, because removal is ORGANIZER-gated: the
+  // approval route holds requireOrganizerAuth, while /api/menu-items/[id]/availability is
+  // vendor-direct for isAvailable only. If a vendor could clear removedAt themselves they would
+  // unilaterally undo an organizer's menu decision — so restore travels the same road removal
+  // did: the vendor REQUESTS, the organizer APPROVES.
+  //
+  // It also keeps the history append-only. The original DELETE request stays APPROVED forever;
+  // a RESTORE request is a second, separate row. The audit trail reads "removed (approved), then
+  // restored (approved)" — two events — rather than a mutation that erases the removal.
+  RESTORE
 }
 
 enum MenuRequestStatus {
