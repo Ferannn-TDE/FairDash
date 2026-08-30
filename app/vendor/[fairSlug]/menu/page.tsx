@@ -47,12 +47,23 @@ interface MenuItem {
 
 interface PendingRequest {
   id: string
-  type: 'ADD' | 'EDIT' | 'DELETE'
+  type: 'ADD' | 'EDIT' | 'DELETE' | 'RESTORE'
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   name: string | null
   menuItemId: string | null
   menuItem: { name: string } | null
   createdAt: string
+}
+
+/** An item taken off the menu. Vendor-only: the complement of the active list. */
+interface RemovedItem {
+  id: string
+  name: string
+  price: number
+  category: string
+  imageUrl: string | null
+  isAvailable: boolean
+  removedAt: string
 }
 
 const inputCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40'
@@ -433,6 +444,9 @@ export default function VendorMenuPage() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [staged, setStaged] = useState<StagedItem[]>([])
+  const [removed, setRemoved] = useState<RemovedItem[]>([])
+  const [showRemoved, setShowRemoved] = useState(false)
+  const [restoring, setRestoring] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MenuItem | null>(null)
@@ -444,8 +458,10 @@ export default function VendorMenuPage() {
     Promise.all([
       fetch(`/api/vendors/${vendorId}/menu`).then(r => r.json()),
       fetch(`/api/menu-requests?vendorId=${vendorId}`).then(r => r.json()),
+      fetch(`/api/vendors/${vendorId}/menu/removed`).then(r => r.json()),
     ])
-      .then(([menuJson, reqJson]) => {
+      .then(([menuJson, reqJson, removedJson]) => {
+        if (removedJson.success) setRemoved(removedJson.data.items as RemovedItem[])
         if (menuJson.success) {
           const flat: MenuItem[] = []
           for (const group of menuJson.data ?? []) {
@@ -606,6 +622,39 @@ export default function VendorMenuPage() {
     }
   }
 
+  // RESTORE — a REQUEST, not a direct write. Removal is organizer-approved, so undoing it is
+  // too; a vendor-direct restore would let a booth unilaterally reverse an organizer's menu
+  // decision. This files a RESTORE MenuRequest exactly as removal files a DELETE one, and the
+  // item stays off the menu until the organizer approves it.
+  //
+  // History appends: the original DELETE request keeps its APPROVED status and this is a new
+  // row, so the trail reads "removed (approved) → restored (approved)".
+  async function handleRequestRestore(item: RemovedItem) {
+    if (!vendorId || restoring) return
+    setRestoring(item.id)
+    try {
+      const res = await fetch('/api/menu-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorId, type: 'RESTORE', menuItemId: item.id }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        setPendingRequests(prev => [{
+          id: json.data.id, type: 'RESTORE', status: 'PENDING', name: item.name,
+          menuItemId: item.id, menuItem: { name: item.name }, createdAt: json.data.createdAt,
+        }, ...prev])
+        toast.success('Restore request submitted — awaiting organizer approval')
+      } else {
+        toast.error(json.error?.message ?? 'Failed to submit request')
+      }
+    } catch {
+      toast.error('Failed to submit request')
+    } finally {
+      setRestoring(null)
+    }
+  }
+
   async function handleDelete(item: MenuItem) {
     if (!vendorId) return
     try {
@@ -650,6 +699,74 @@ export default function VendorMenuPage() {
           Add Item
         </button>
       </div>
+
+      {/* ── REMOVED ITEMS ────────────────────────────────────────────────────────────────
+          A SEPARATE, COLLAPSED section — not inline in the active list, which stays a clean
+          picture of what is actually on the menu. The tradeoff (restore is one click away, a
+          removal is less visible) is deliberate.
+
+          Never the sold-out chip: a removed item is a THIRD state, and showing it as sold out
+          is exactly the collapse MenuItem.removedAt exists to undo. */}
+      {removed.length > 0 && (
+        <div className="mb-5">
+          <button
+            onClick={() => setShowRemoved(v => !v)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 bg-white/[0.03] border border-white/[0.07] rounded-xl text-left hover:bg-white/[0.06] transition-colors cursor-pointer"
+          >
+            <TrashIcon className="w-4 h-4 text-text-gray shrink-0" />
+            <span className="text-white/70 text-sm font-semibold">
+              Removed from menu · {removed.length}
+            </span>
+            <span className="text-text-gray text-xs ml-auto">
+              {showRemoved ? 'Hide' : 'Show'}
+            </span>
+          </button>
+
+          {showRemoved && (
+            <div className="mt-2 space-y-2">
+              {removed.map(item => {
+                const pendingRestore = pendingRequests.some(
+                  r => r.type === 'RESTORE' && r.menuItemId === item.id && r.status === 'PENDING',
+                )
+                return (
+                  <div key={item.id} className="flex items-center gap-3 bg-[#0f0f0f] border border-white/[0.06] rounded-xl px-3 py-2.5">
+                    {item.imageUrl
+                      ? <img src={item.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0 opacity-50" />
+                      : <div className="w-10 h-10 rounded-lg bg-white/5 shrink-0" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-white/60 text-sm font-semibold truncate">{item.name}</p>
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[0.6rem] font-bold uppercase tracking-wider bg-white/[0.06] text-text-gray border border-white/10">
+                          Removed
+                        </span>
+                      </div>
+                      <p className="text-text-gray text-xs">
+                        ${item.price.toFixed(2)} · {item.category}
+                        {item.isAvailable === false && ' · was sold out'}
+                      </p>
+                    </div>
+                    {pendingRestore ? (
+                      <span className="shrink-0 text-amber-400/80 text-xs font-semibold px-3">
+                        Restore pending
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleRequestRestore(item)}
+                        disabled={restoring === item.id}
+                        title="Request that the organizer put this back on the menu"
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white/80 rounded-lg text-xs font-semibold hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
+                      >
+                        <ArrowPathIcon className={`w-3.5 h-3.5 ${restoring === item.id ? 'animate-spin' : ''}`} />
+                        {restoring === item.id ? 'Requesting…' : 'Request restore'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pending requests banner */}
       {pendingCount > 0 && (

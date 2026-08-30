@@ -7,6 +7,7 @@ import { uniqueVendorSlug } from '@/lib/vendor-slug'
 import { logger } from '@/lib/logger'
 import { syncUserRoleMetadata } from '@/lib/role-sync'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { SELLABLE } from '@/lib/menu/on-menu'
 
 // GET /api/vendors?eventSlug=springfield-fair-2026&page=1&limit=20
 // Returns active, online vendors for a given event. When ENFORCE_VENDOR_READINESS
@@ -45,7 +46,7 @@ export async function GET(req: Request) {
         skip,
         take: limit,
         include: {
-          _count: { select: { menuItems: { where: { isAvailable: true } } } },
+          _count: { select: { menuItems: { where: SELLABLE } } },
         },
         orderBy: { name: 'asc' },
       }),

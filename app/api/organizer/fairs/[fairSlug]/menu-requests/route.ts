@@ -67,6 +67,10 @@ export async function GET(
           select: {
             id: true, name: true, description: true, price: true,
             category: true, prepTime: true, imageUrl: true, isAvailable: true,
+            // A RESTORE request is approved AGAINST an item currently off the menu, so the
+            // organizer needs to see WHEN it was removed to judge the request. Without it the
+            // card would be a bare "RESTORE" with no body — approving blind.
+            removedAt: true,
           },
         },
       },

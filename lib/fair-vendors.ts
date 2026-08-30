@@ -1,6 +1,7 @@
 import { db } from './db'
 import { vendorReady } from './vendor-readiness'
 import { vendorDocsPresence } from './vendor-documents'
+import { SELLABLE } from './menu/on-menu'
 
 export interface FairVendorsOpts {
   take?:   number
@@ -48,7 +49,7 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
       isOffline: true,
       isBusy: true,
       lastHeartbeatAt: true,
-      _count: { select: { menuItems: { where: { isAvailable: true } } } },
+      _count: { select: { menuItems: { where: SELLABLE } } },
     },
   })
 

@@ -5,6 +5,7 @@ import Stripe from 'stripe'
 import { FulfillmentType, EventStatus, VendorStatus, OrderStatus } from '@prisma/client'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { db } from '@/lib/db'
+import { SELLABLE } from '@/lib/menu/on-menu'
 import { stripe } from '@/lib/stripe'
 import { validateDeliveryAddress } from '@/lib/delivery-address'
 import { deriveEventLiveState, formatEventDateRange } from '@/lib/event-date'
@@ -229,7 +230,13 @@ export async function POST(req: NextRequest) {
     const uniqueVendorIds = [...new Set(items.map(i => i.vendorId))]
     const vendors = await db.vendor.findMany({
       where: { id: { in: uniqueVendorIds } },
-      include: { _count: { select: { menuItems: { where: { isAvailable: true } } } } },
+      // READINESS COUNTS ITEMS THAT ARE ACTUALLY ON THE MENU. `...ON_MENU` excludes removed
+      // items, which has a real consequence worth stating: a vendor who removes their LAST
+      // available item drops below the readiness bar and goes offline to customers. That is
+      // correct — a booth with nothing live should not be orderable — but it is a state change
+      // that happens as a SIDE EFFECT of a removal, so it is asserted by the removal guard
+      // rather than left to surface as "why did I vanish mid-fair?".
+      include: { _count: { select: { menuItems: { where: SELLABLE } } } },
     })
 
     if (vendors.length !== uniqueVendorIds.length) {
@@ -294,6 +301,18 @@ export async function POST(req: NextRequest) {
           `Menu item ${mi.name} does not belong to the specified vendor`,
           400,
           'MENU_ITEM_VENDOR_MISMATCH'
+        )
+      }
+      // REMOVED IS CHECKED BEFORE SOLD-OUT, and answers differently. A cart lives in the
+      // customer's localStorage and can name an item taken off the menu days ago; telling them
+      // it is "currently unavailable" would promise it comes back. The lookup above is
+      // deliberately NOT filtered on removedAt — resolving the row is what lets us say which
+      // item is gone by name instead of returning an opaque MENU_ITEM_NOT_FOUND.
+      if (mi.removedAt !== null) {
+        throw new ApiError(
+          `${mi.name} is no longer on the menu`,
+          409,
+          'ITEM_REMOVED'
         )
       }
       if (!mi.isAvailable) {

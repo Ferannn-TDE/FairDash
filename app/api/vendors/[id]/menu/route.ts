@@ -6,6 +6,7 @@ import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { getOptionalUserId } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
+import { SELLABLE } from '@/lib/menu/on-menu'
 
 // GET /api/vendors/:id/menu
 // Returns pre-grouped menu items for a single vendor. Grouping is server-side.
@@ -25,7 +26,7 @@ export async function GET(
       where: await resolveVendorWhere(id, fairSlug),
       select: {
         id: true, isOffline: true, status: true, stripeVerified: true,
-        _count: { select: { menuItems: { where: { isAvailable: true } } } },
+        _count: { select: { menuItems: { where: SELLABLE } } },
       },
     })
 

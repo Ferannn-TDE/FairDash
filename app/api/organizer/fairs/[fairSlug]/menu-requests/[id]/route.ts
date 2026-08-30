@@ -8,6 +8,7 @@ import { requireOrganizerAuth } from '@/lib/auth'
 import { getRealtimeDb } from '@/lib/firebase-admin'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { logger } from '@/lib/logger'
+import { assertNeverRequestType, type MenuRequestTypeInput } from '@/lib/menu-requests/validate-item'
 
 // PATCH /api/organizer/fairs/[fairSlug]/menu-requests/[id]
 // { action: 'APPROVE' | 'REJECT', reason?: string }
@@ -46,9 +47,17 @@ export async function PATCH(
     const vendorId = menuRequest.vendor.id
     const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
 
-    // Apply change if approved
+    // Apply change if approved.
+    //
+    // EXHAUSTIVE BY CONSTRUCTION. This was an if/else-if chain over ADD/EDIT/DELETE, and adding
+    // a fourth type left RESTORE matching nothing: the request would flip to APPROVED having
+    // written NOTHING, and organizer and vendor would both believe the change had happened.
+    // The chain is now a switch closed by assertNeverRequestType, so a FIFTH type fails `tsc`
+    // here rather than falling through to approval theatre at runtime.
     if (action === 'APPROVE') {
-      if (menuRequest.type === 'ADD') {
+      const requestType: MenuRequestTypeInput = menuRequest.type
+      switch (requestType) {
+      case 'ADD': {
         if (!menuRequest.name || menuRequest.price === null || !menuRequest.category) {
           return apiError('Malformed ADD request — missing required fields', 422, 'UNPROCESSABLE')
         }
@@ -64,7 +73,9 @@ export async function PATCH(
             isAvailable: true,
           },
         })
-      } else if (menuRequest.type === 'EDIT') {
+        break
+      }
+      case 'EDIT': {
         if (!menuRequest.menuItemId) return apiError('EDIT request missing menuItemId', 422, 'UNPROCESSABLE')
         await db.menuItem.update({
           where: { id: menuRequest.menuItemId },
@@ -77,12 +88,48 @@ export async function PATCH(
             ...(menuRequest.imageUrl    !== null && { imageUrl: menuRequest.imageUrl }),
           },
         })
-      } else if (menuRequest.type === 'DELETE') {
+        break
+      }
+      case 'DELETE': {
         if (!menuRequest.menuItemId) return apiError('DELETE request missing menuItemId', 422, 'UNPROCESSABLE')
+        // REMOVED, not sold out. This used to write `isAvailable: false`, which is the
+        // sold-out flag — so approving a removal produced an item that read as temporarily
+        // unavailable and stayed on the menu. removedAt is the state that actually means
+        // "taken off the menu", and it is reversible (removedAt = null restores).
+        //
+        // The row is kept deliberately: OrderItem's FK to MenuItem is RESTRICT, so an ordered
+        // item cannot be deleted at all, and a hard delete would SET NULL the MenuRequest that
+        // minted it, severing this very audit trail.
         await db.menuItem.update({
           where: { id: menuRequest.menuItemId },
-          data: { isAvailable: false },
+          data: { removedAt: new Date() },
         })
+        break
+      }
+      case 'RESTORE': {
+        if (!menuRequest.menuItemId) return apiError('RESTORE request missing menuItemId', 422, 'UNPROCESSABLE')
+        // BACK ON THE MENU. Only removedAt is cleared — isAvailable is deliberately untouched,
+        // so an item that was SOLD OUT when it was removed comes back sold out rather than
+        // being silently put back on sale. Removal and the sold-out flag are different axes.
+        //
+        // This write lives HERE, behind requireOrganizerAuth, and nowhere else: removal is an
+        // organizer decision, so undoing it has to be one too. The vendor-direct availability
+        // route may write isAvailable and must never touch removedAt.
+        //
+        // History APPENDS. This does not reopen or edit the DELETE request that removed the
+        // item — that row stays APPROVED forever, and this RESTORE is a separate row, so the
+        // trail reads "removed (approved) → restored (approved)": two events, and the fact of
+        // the removal is never rewritten.
+        await db.menuItem.update({
+          where: { id: menuRequest.menuItemId },
+          data: { removedAt: null },
+        })
+        break
+      }
+      default:
+        // Unreachable while the switch is exhaustive. If a fifth MenuRequestType is ever added
+        // without a case here, THIS line fails to compile — which is the whole point.
+        assertNeverRequestType(requestType)
       }
 
       revalidateTag(`vendor-menu-${vendorId}`, 'default')

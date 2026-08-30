@@ -563,8 +563,13 @@ export default function VendorDetailPage({
                 {vendor.pendingMenuRequests.map(req => (
                   <div key={req.id} className="flex items-center justify-between gap-2">
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
-                      req.type === 'ADD' ? 'bg-emerald-500/15 text-emerald-400' :
-                      req.type === 'EDIT' ? 'bg-blue-500/15 text-blue-400' :
+                      // A ternary CHAIN, so TypeScript cannot force a new request type to be
+                      // handled — it just falls through to the last arm. Adding RESTORE without
+                      // this line rendered a restore request as a RED chip, i.e. coloured as a
+                      // removal: the wrong signal on an organizer's screen, and silent.
+                      req.type === 'ADD'     ? 'bg-emerald-500/15 text-emerald-400' :
+                      req.type === 'EDIT'    ? 'bg-blue-500/15 text-blue-400' :
+                      req.type === 'RESTORE' ? 'bg-amber-500/15 text-amber-400' :
                       'bg-red-500/15 text-red-400'}`}>
                       {req.type}
                     </span>
