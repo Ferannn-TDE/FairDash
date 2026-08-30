@@ -20,13 +20,14 @@
 import { db } from './db'
 import { vendorDocsComplete } from './vendor-documents'
 import { VendorStatus, type Prisma } from '@prisma/client'
+import { SELLABLE } from './menu/on-menu'
 
 // The (c) bar as a Prisma where-fragment. Phase 5's marketplace list/counts filter
 // on exactly this, so queries and the readiness function share one definition.
 export const readyVendorWhere = {
   status: VendorStatus.ACTIVE,
   stripeVerified: true,
-  menuItems: { some: { isAvailable: true } },
+  menuItems: { some: SELLABLE },
 } satisfies Prisma.VendorWhereInput
 
 // The (c) bar as an imperative predicate — the mirror of readyVendorWhere for code
@@ -105,7 +106,7 @@ export async function computeVendorReadiness(vendorId: string): Promise<VendorRe
       insurancePath:         true,
       businessLicensePath:   true,
       event: { select: { urlSlug: true } },
-      _count: { select: { menuItems: { where: { isAvailable: true } } } },
+      _count: { select: { menuItems: { where: SELLABLE } } },
     },
   })
   if (!vendor) return null

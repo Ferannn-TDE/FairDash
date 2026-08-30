@@ -12,6 +12,7 @@ import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
 import { callerMayViewInactiveVendor } from '@/lib/vendor-visibility'
+import { SELLABLE } from '@/lib/menu/on-menu'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -57,7 +58,10 @@ export async function GET(
         // It is stripped from the response — see the destructure at the return.
         stripeVerified: true,
         menuItems: {
-          where: { isAvailable: true },
+          // SELLABLE, not a bare isAvailable: this list is BOTH the customer's menu payload and
+          // (via .length below) the readiness count, so a removed item here would be served to
+          // a customer AND would keep an empty vendor looking ready.
+          where: SELLABLE,
           orderBy: { category: 'asc' },
           select: {
             id: true,

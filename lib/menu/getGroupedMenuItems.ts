@@ -2,6 +2,7 @@
 const { unstable_cache } = require('next/cache') as { unstable_cache: typeof import('next/cache').unstable_cache }
 import { db } from '@/lib/db'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { ON_MENU } from './on-menu'
 
 export interface MenuVariant {
   id: string
@@ -25,7 +26,7 @@ export interface GroupedMenuItem {
 
 async function _getGroupedMenuItemsByVendor(vendorId: string): Promise<GroupedMenuItem[]> {
   const items = await db.menuItem.findMany({
-    where: { vendorId },
+    where: { vendorId, ...ON_MENU },
     select: {
       id: true,
       name: true,
@@ -109,7 +110,7 @@ async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMe
   const vendorIds = event.vendors.map((v) => v.id)
 
   const items = await db.menuItem.findMany({
-    where: { vendorId: { in: vendorIds } },
+    where: { vendorId: { in: vendorIds }, ...ON_MENU },
     select: {
       id: true,
       name: true,

@@ -18,8 +18,23 @@
 
 import { UploadRejection, assertSafeImageUrl } from '../upload-limits'
 
-export const MENU_REQUEST_TYPES = ['ADD', 'EDIT', 'DELETE'] as const
+export const MENU_REQUEST_TYPES = ['ADD', 'EDIT', 'DELETE', 'RESTORE'] as const
 export type MenuRequestTypeInput = (typeof MENU_REQUEST_TYPES)[number]
+
+/**
+ * Exhaustiveness check. Call it where every request type must be handled — the compiler
+ * narrows the union to `never` only when nothing is left, so a FIFTH type added later fails
+ * `tsc` at every such site instead of falling silently through to "do nothing".
+ *
+ * That silent fall-through is not hypothetical: adding RESTORE left the approval route's
+ * ADD/EDIT/DELETE chain unmatched, which would have flipped a request to APPROVED having
+ * written nothing — approval theatre, where organizer and vendor both believe the restore
+ * happened. Making the missing case a BUILD failure is worth more than any guard that has to
+ * remember to look.
+ */
+export function assertNeverRequestType(value: never): never {
+  throw new Error(`Unhandled menu request type: ${String(value)}`)
+}
 
 /**
  * The most items one submission may carry.
@@ -86,8 +101,9 @@ export function validateMenuRequestItem(item: MenuRequestItemInput): ItemRejecti
     }
   }
 
-  if ((type === 'EDIT' || type === 'DELETE') && !menuItemId) {
-    return reject('menuItemId is required for EDIT/DELETE')
+  // EDIT, DELETE and RESTORE all name an EXISTING item; only ADD invents one.
+  if (type !== 'ADD' && !menuItemId) {
+    return reject(`menuItemId is required for ${type}`)
   }
 
   // A menu request is copied verbatim onto the MenuItem at approval time, so an unvalidated

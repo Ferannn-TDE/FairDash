@@ -110,11 +110,14 @@ async function main() {
 
   // The API half: the shared validator still refuses it, so nothing can mint one through the
   // route. This is what makes the label inert rather than merely unused.
-  const rejection = validateMenuRequestItem({ type: 'RESTORE', menuItemId: item.id })
-  assert(rejection?.message === 'Invalid type',
-    `the write route still REFUSES type RESTORE (got: ${rejection?.message ?? 'ACCEPTED'}) — inert until step 3`)
-  assert(!(MENU_REQUEST_TYPES as readonly string[]).includes('RESTORE'),
-    'MENU_REQUEST_TYPES does not list RESTORE yet — step 3 adds it')
+  // STEP-3 INVERSION: the label is now live. The write route ACCEPTS a well-formed RESTORE,
+  // and still refuses a malformed one — the type being real does not relax its validation.
+  assert(validateMenuRequestItem({ type: 'RESTORE', menuItemId: item.id }) === null,
+    'the write route now ACCEPTS a well-formed RESTORE request')
+  assert(validateMenuRequestItem({ type: 'RESTORE' })?.message === 'menuItemId is required for RESTORE',
+    'and still REFUSES a RESTORE with no menuItemId — it names an existing item, like EDIT and DELETE')
+  assert((MENU_REQUEST_TYPES as readonly string[]).includes('RESTORE'),
+    'MENU_REQUEST_TYPES lists RESTORE')
   // [0] control: the validator DOES accept a real type, so the refusal above is about RESTORE.
   assert(validateMenuRequestItem({ type: 'DELETE', menuItemId: item.id }) === null,
     '[0] positive control: a DELETE request still validates — the validator is not refusing everything')
@@ -136,12 +139,14 @@ async function main() {
   // the approval route: RESTORE falls through ADD/EDIT/DELETE, so the request would flip to
   // APPROVED having written nothing. Unreachable today because [2] proves the API cannot mint
   // one — but asserted, so step 3 landing without the branch is RED rather than silent.
-  console.log('\n[4] PIN: no approval branch handles RESTORE yet (step 3 must invert this)')
+  console.log('\n[4] the approval route HANDLES RESTORE (step-2 pin, inverted by step 3)')
   const approvalSrc = readFileSync('app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts', 'utf8')
-  assert(/menuRequest\.type === 'DELETE'/.test(approvalSrc),
+  assert(/case 'DELETE'/.test(approvalSrc),
     "[0] positive control: the scanner DOES find the existing DELETE branch")
-  assert(!/menuRequest\.type === 'RESTORE'/.test(approvalSrc),
-    'the approval route has NO RESTORE branch — the gap is real, and closed off only by [2]')
+  assert(/case 'RESTORE'/.test(approvalSrc),
+    'the approval route has a RESTORE branch — no fall-through to approval theatre')
+  assert(/assertNeverRequestType/.test(approvalSrc),
+    'and the switch is exhaustive, so a FIFTH type fails tsc instead of falling through')
 
   console.log(`\n${'─'.repeat(72)}`)
   if (fail === 0) console.log(`  ${pass} passed, 0 failed`)

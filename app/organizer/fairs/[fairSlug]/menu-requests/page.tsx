@@ -18,11 +18,13 @@ interface CurrentItem {
   category: string
   prepTime: number | null
   imageUrl: string | null
+  isAvailable: boolean
+  removedAt: string | null
 }
 
 interface MenuRequest {
   id: string
-  type: 'ADD' | 'EDIT' | 'DELETE'
+  type: 'ADD' | 'EDIT' | 'DELETE' | 'RESTORE'
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   name: string | null
   description: string | null
@@ -39,10 +41,13 @@ interface MenuRequest {
 
 // ── Type badge ────────────────────────────────────────────────────────────────
 
+// Keyed by the request-type union, so a new MenuRequestType fails `tsc` here until it is given
+// a badge — the same "make the missing case a build error" lever the approval route uses.
 const TYPE_CONFIG: Record<MenuRequest['type'], { label: string; cls: string }> = {
-  ADD:    { label: 'New Item',  cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/20' },
-  EDIT:   { label: 'Edit',      cls: 'bg-blue-500/15   text-blue-400    border-blue-400/20'    },
-  DELETE: { label: 'Remove',    cls: 'bg-red-500/15    text-red-400     border-red-400/20'     },
+  ADD:     { label: 'New Item', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-400/20' },
+  EDIT:    { label: 'Edit',     cls: 'bg-blue-500/15    text-blue-400    border-blue-400/20'    },
+  DELETE:  { label: 'Remove',   cls: 'bg-red-500/15     text-red-400     border-red-400/20'     },
+  RESTORE: { label: 'Restore',  cls: 'bg-amber-500/15   text-amber-400   border-amber-400/20'   },
 }
 
 function timeAgo(isoDate: string): string {
@@ -211,7 +216,35 @@ function RequestCard({
             <div className="min-w-0">
               <p className="text-white/80 text-sm font-inter font-semibold">{req.currentItem.name}</p>
               <p className="text-white/40 text-xs font-inter">${req.currentItem.price.toFixed(2)} · {req.currentItem.category}</p>
-              <p className="text-red-400/60 text-[0.6875rem] font-inter mt-1">This item will be marked unavailable</p>
+              <p className="text-red-400/60 text-[0.6875rem] font-inter mt-1">This item will come off the menu</p>
+            </div>
+          </div>
+        )}
+
+        {/* RESTORE — show what is coming BACK, and when it left.
+            A RESTORE is approved against an item currently off the menu, so the card must carry
+            enough for that judgement: which item, what it costs, how long it has been gone, and
+            whether it returns sold out. A bare "Restore" badge with no body would be an empty
+            shell the organizer approves blind. */}
+        {req.type === 'RESTORE' && req.currentItem && (
+          <div className="flex gap-3 bg-amber-500/5 border border-amber-500/10 rounded-lg p-3">
+            {req.currentItem.imageUrl ? (
+              <img src={req.currentItem.imageUrl} alt="" className="w-12 h-12 object-cover rounded-md border border-white/10 shrink-0" />
+            ) : (
+              <div className="w-12 h-12 rounded-md bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                <PhotoIcon className="w-4 h-4 text-white/20" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-white/80 text-sm font-inter font-semibold">{req.currentItem.name}</p>
+              <p className="text-white/40 text-xs font-inter">
+                ${req.currentItem.price.toFixed(2)} · {req.currentItem.category}
+                {req.currentItem.removedAt && ` · removed ${timeAgo(req.currentItem.removedAt)}`}
+              </p>
+              <p className="text-amber-400/70 text-[0.6875rem] font-inter mt-1">
+                This item will go back on the menu
+                {req.currentItem.isAvailable === false && ' — still marked sold out'}
+              </p>
             </div>
           </div>
         )}

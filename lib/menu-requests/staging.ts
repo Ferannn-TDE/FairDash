@@ -32,7 +32,7 @@ export interface StagedItem {
 /** A row in the vendor's "pending approval" list. Mirrors the page's PendingRequest. */
 export interface PendingRow {
   id: string
-  type: 'ADD' | 'EDIT' | 'DELETE'
+  type: 'ADD' | 'EDIT' | 'DELETE' | 'RESTORE'
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   name: string | null
   menuItemId: string | null

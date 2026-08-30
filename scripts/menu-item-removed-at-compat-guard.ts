@@ -126,7 +126,7 @@ async function main() {
   // Deliberately asserting the CURRENT behaviour: a removed item is still customer-visible,
   // because no read filters removedAt. If step 2 lands without the filter, this stays green and
   // says so; when step 2 lands correctly, this assertion is the one that must be inverted.
-  console.log('\n[4] PIN: no read filters removedAt yet (step 2 must invert this)')
+  console.log('\n[4] the read chokepoint now FILTERS removedAt (step-1 pin, inverted by step 2)')
   // PREDICATE PARITY, not a call. getGroupedMenuItems wraps its queries in unstable_cache and
   // reaches next/cache via require(), so it cannot be invoked from an ESM script at all — the
   // same constraint scripts/p2-archived-visibility-test.ts documents, and it uses the same
@@ -135,27 +135,29 @@ async function main() {
   const { readFileSync } = await import('node:fs')
   const readSrc = readFileSync('lib/menu/getGroupedMenuItems.ts', 'utf8')
 
-  const byVendorToday = await prisma.menuItem.findMany({
-    where: { vendorId: vendor.id },            // ← verbatim getGroupedMenuItems.ts:28
+  const byVendorNow = await prisma.menuItem.findMany({
+    where: { vendorId: vendor.id, removedAt: null },   // ← verbatim getGroupedMenuItems.ts:29
     select: { name: true },
   })
-  const names = byVendorToday.map(m => m.name)
+  const names = byVendorNow.map(m => m.name)
   assert(names.some(n => n.includes('legacy')),
     '[0] positive control: an ordinary available item IS returned (the predicate works at all)')
-  assert(names.some(n => n.includes('removed')),
-    'a removed item is STILL returned today — unfiltered, as expected at step 1. STEP 2 MUST FLIP THIS.')
-  assert(!/removedAt/.test(readSrc),
-    'and the read chokepoint does not mention removedAt yet — the column is genuinely inert')
+  assert(names.some(n => n.includes('soldout')),
+    '[0] a SOLD-OUT item is still returned — removal filtering must not swallow sold-out items')
+  assert(!names.some(n => n.includes('removed')),
+    'a removed item is NO LONGER returned — the step-1 pin, now inverted')
+  assert(/\.\.\.ON_MENU/.test(readSrc),
+    'and the read chokepoint applies the shared ON_MENU predicate')
 
   // ── [5] LEGACY BEHAVIOUR IS UNTOUCHED — readiness still counts the old way ──────────────
-  console.log('\n[5] the readiness count is unchanged by the column landing')
+  console.log('\n[5] the readiness count now EXCLUDES removed items (step-1 pin, inverted)')
   const readiness = await prisma.vendor.findUnique({
     where: { id: vendor.id },
-    include: { _count: { select: { menuItems: { where: { isAvailable: true } } } } },
+    include: { _count: { select: { menuItems: { where: { isAvailable: true, removedAt: null } } } } },
   })
-  // legacy (avail) + removed (avail:true, but removed) = 2; soldOut is not counted.
-  assert(readiness?._count.menuItems === 2,
-    `readiness counts isAvailable:true only, ignoring removedAt for now (got ${readiness?._count.menuItems}) — step 2 adds removedAt:null and this becomes 1`)
+  // legacy (available, not removed) = 1. soldOut is not isAvailable; `removed` is removed.
+  assert(readiness?._count.menuItems === 1,
+    `readiness counts only items ON the menu (got ${readiness?._count.menuItems}) — was 2 before the filter`)
 
   // ── [6] THE FK BACKSTOP IS REAL ────────────────────────────────────────────────────────
   // The reason no hard-delete carve-out exists. Proven here, at the step that decides the
