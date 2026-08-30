@@ -84,6 +84,22 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
     return () => { active = false }
   }, [params.eventSlug, adopt])
 
+  // ⚠️ EDIT bounds, NOT creation bounds — they widen around the fair's existing dates so a
+  // running or already-started fair stays editable. The rule and the no-lockout proof live in
+  // lib/calendar-date + scripts/date-bounds-guard; do not inline a "today" floor here.
+  //
+  // ⚠️ AND IT LIVES UP HERE, ABOVE THE EARLY RETURNS, ON PURPOSE. It used to sit below
+  // `if (loading) return …`, so the first render (loading) skipped it and the second (loaded)
+  // ran it — React counted a different number of hooks between renders and threw "Rendered
+  // more hooks than during the previous render", taking the whole page down for every admin on
+  // every fair. Hooks must precede EVERY conditional return; scripts/settings-hooks-guard.ts
+  // asserts that for this file. Safe to call before the fetch resolves: editDateBounds
+  // tolerates empty strings (toPickerDate('') yields no date → today/horizon fallbacks).
+  const { minDate, maxDate, defaultMonth } = useMemo(
+    () => editDateBounds(startDate, endDate),
+    [startDate, endDate],
+  )
+
   const handleSave = async () => {
     setSaveState('saving')
     setSaveError(null)
@@ -127,14 +143,6 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
   if (loadError) return <div className="p-6 text-red-400 text-sm">{loadError}</div>
 
   const saving = saveState === 'saving'
-
-  // ⚠️ EDIT bounds, NOT creation bounds — they widen around the fair's existing dates so a
-  // running or already-started fair stays editable. The rule and the no-lockout proof live in
-  // lib/calendar-date + scripts/date-bounds-guard; do not inline a "today" floor here.
-  const { minDate, maxDate, defaultMonth } = useMemo(
-    () => editDateBounds(startDate, endDate),
-    [startDate, endDate],
-  )
 
 
   return (
