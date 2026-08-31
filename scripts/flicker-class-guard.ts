@@ -193,6 +193,86 @@ for (const { file, constant, label } of PAGED_LISTS) {
     `${label}: the page is DERIVED from the cursor stack, not counted on click`)
 }
 
+// ── [H] A SUPERSEDED REQUEST MUST NOT CLEAR THE LOADING FLAG (9th instance) ──────────────
+// The organizer fair dashboard flashed "Fair not found or access denied." on first mount. Its
+// not-found branch was already correct (`!loading && !event`, loading starts true) — the fault
+// was in the fetch's `finally`, which guarded the in-flight SLOT on request identity but ran
+// setLoading(false)/setRefreshing(false) UNCONDITIONALLY. An aborted predecessor therefore
+// switched loading off while its successor was still in flight, and for that one render the
+// not-found branch was true: a failure state shown during a transition, which is this class
+// exactly — a plausible-but-wrong answer rendered before the data arrives.
+//
+// It reached production because it was deferred once as "unreachable — the only non-silent call
+// is mount". That counted CALL SITES and missed the ABORT PATH, which reaches the same finally
+// with no second non-silent call. So the rule is structural rather than remembered: in any file
+// holding an inFlightRef, EVERY state write in the finally sits inside the identity check.
+console.log('\n[H] a superseded request clears nothing — indicators live inside the identity check')
+
+const IN_FLIGHT_PAGES = [
+  { file: 'app/organizer/fairs/[fairSlug]/page.tsx',               label: 'organizer fair dashboard' },
+  { file: 'app/organizer/fairs/[fairSlug]/menu-requests/page.tsx', label: 'organizer menu requests' },
+]
+
+const GUARDED_FINALLY =
+  /if \(inFlightRef\.current === controller\) \{[^}]*inFlightRef\.current = null[^}]*setLoading\(false\)[^}]*setRefreshing\(false\)[^}]*\}/
+const UNGUARDED_FINALLY =
+  /if \(inFlightRef\.current === controller\) inFlightRef\.current = null\s*\n\s*setLoading\(false\)/
+
+assert(UNGUARDED_FINALLY.test(
+  '      if (inFlightRef.current === controller) inFlightRef.current = null\n      setLoading(false)'),
+  '[0] positive control: the scanner DOES flag the old unconditional shape (the one that shipped)')
+assert(!UNGUARDED_FINALLY.test(
+  '      if (inFlightRef.current === controller) {\n        inFlightRef.current = null\n        setLoading(false)\n      }'),
+  '[0] baseline: it does NOT flag the fixed block form')
+assert(GUARDED_FINALLY.test(
+  'if (inFlightRef.current === controller) {\n  inFlightRef.current = null\n  setLoading(false)\n  setRefreshing(false)\n}'),
+  '[0] positive control: the fixed-shape scanner matches a correct finally')
+
+for (const { file, label } of IN_FLIGHT_PAGES) {
+  const src = readFileSync(file, 'utf8')
+  assert(!UNGUARDED_FINALLY.test(src),
+    `${label}: no unconditional setLoading beside the identity check`)
+  assert(GUARDED_FINALLY.test(src),
+    `${label}: slot reset AND both indicators sit INSIDE the identity check`)
+}
+
+// ── [H2] BOTH HALVES: it must not flash, and it must STILL show not-found ────────────────
+// The over-correction is as bad as the bug: deleting setLoading(false), or weakening the
+// not-found branch, would stop the flash by making a genuinely bad slug spin forever. Half 1
+// is the fix; half 2 is what stops the "fix" from being a suppression.
+console.log('\n[H2] the fix does not over-correct into never showing not-found')
+
+const dashSrc = readFileSync('app/organizer/fairs/[fairSlug]/page.tsx', 'utf8')
+
+assert(/if \(!loading && !event\) \{/.test(dashSrc),
+  'the not-found branch still exists and still gates on (!loading && !event) — a real bad slug still errors')
+assert(/Fair not found or access denied/.test(dashSrc),
+  'and the error text is still reachable — the fix did not delete the failure state')
+assert(/inFlightRef\.current === controller\)\s*\{[\s\S]{0,200}?setLoading\(false\)/.test(dashSrc),
+  'setLoading(false) still RUNS for the current request — the fix is not "never stop loading"')
+
+type Slot = { current: symbol | null }
+function settle(slot: Slot, controller: symbol, state: { loading: boolean }) {
+  if (slot.current === controller) { slot.current = null; state.loading = false }
+}
+const slot: Slot = { current: null }
+const state = { loading: false }
+// Read through a function so TypeScript's control-flow analysis cannot narrow `loading` to a
+// literal and fold these assertions into compile-time constants — tsc flagged exactly that
+// ("types 'true' and 'false' have no overlap"), which would have meant they proved nothing at
+// runtime. A guard the compiler can fold is not a guard.
+const loadingNow = (s: { loading: boolean }) => s.loading
+
+const A = Symbol('A'); slot.current = A; state.loading = true      // mount starts A
+slot.current = null                                                // cleanup aborts A
+const B = Symbol('B'); slot.current = B; state.loading = true      // effect re-runs, starts B
+settle(slot, A, state)                                             // A's abort lands
+assert(loadingNow(state) === true,
+  'a SUPERSEDED request leaves loading TRUE — no render can hit the not-found branch while B is in flight')
+settle(slot, B, state)                                             // B resolves
+assert(loadingNow(state) === false,
+  '[0] positive control: the CURRENT request DOES clear loading — the page does not spin forever')
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

@@ -187,11 +187,31 @@ export default function FairDashboardPage() {
     } catch {
       // silently fail on background refresh (an aborted request lands here too, by design)
     } finally {
-      // Only the CURRENT request clears the slot. An aborted predecessor must not release the
-      // guard out from under its replacement, or the stack it exists to prevent comes back.
-      if (inFlightRef.current === controller) inFlightRef.current = null
-      setLoading(false)
-      setRefreshing(false)
+      // Only the CURRENT request clears the slot AND the indicators. An aborted predecessor must
+      // not release the guard out from under its replacement (or the request stack this exists
+      // to prevent comes back), nor switch off a spinner its replacement just switched on.
+      //
+      // ⚠️ THE INDICATORS WERE OUTSIDE THIS CHECK, AND IT WAS A USER-VISIBLE BUG. The slot was
+      // guarded; setLoading(false)/setRefreshing(false) ran for EVERY request, including an
+      // aborted predecessor. Sequence: mount starts request A → the poll effect's cleanup fires
+      // and aborts A → the effect re-runs and starts request B → A's abort lands in the catch
+      // above and reaches this finally → loading went false while B was still in flight and
+      // `event` was still null → for that one render `!loading && !event` was true and the page
+      // flashed "Fair not found or access denied" before the real content arrived.
+      //
+      // ⚠️ AND IT WAS DEFERRED ONCE AS "UNREACHABLE — its only non-silent call is mount". That
+      // reasoning counted CALL SITES and missed the ABORT PATH, which reaches this finally with
+      // no second non-silent call at all. React StrictMode double-mounts in development, so the
+      // effect cleanup supplies the abort on every mount. Do not re-defer it on that argument.
+      //
+      // Gating all three writes on the identity also means a request that resolves AFTER unmount
+      // (the cleanup nulls the slot) sets no state at all. Same shape as
+      // app/organizer/fairs/[fairSlug]/menu-requests/page.tsx, where this was fixed first.
+      if (inFlightRef.current === controller) {
+        inFlightRef.current = null
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [fairSlug])
 
