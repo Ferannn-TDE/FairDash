@@ -224,6 +224,38 @@ function main() {
   assert(/from '\.\/group-by-batch'/.test(src),
     'and it DOES import the batch grouper — composition is visible in the source, not just the behaviour')
 
+  // ── [8] THE PAGE RENDERS THROUGH THE HELPER, AND THE MERGE IS UNTOUCHED ────────────────
+  // Structural half of step 2. [1]-[7] prove the arrangement; these prove the PAGE uses it and
+  // that grouping stayed presentational — the risk in this step is not the grouping maths, it
+  // is grouping quietly reaching into the fetch/merge machinery the flicker fix stabilised.
+  console.log('\n[8] the organizer page groups presentationally over the merged list')
+  const pageRaw = readFileSync('app/organizer/fairs/[fairSlug]/menu-requests/page.tsx', 'utf8')
+  const pageCode = pageRaw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n')
+
+  assert(/groupByVendor\(filtered\)/.test(pageCode),
+    'the page groups the FILTERED, already-merged list — not the raw fetch response')
+  assert(!/groupIntoBatches/.test(pageCode),
+    'the page does NOT call groupIntoBatches itself — the batch layer is reached only through groupByVendor')
+  assert(/setRequests\(prev => mergeRequests\(prev, json\.data\.requests\)\)/.test(pageCode),
+    'mergeRequests is still the id-keyed merge, called unchanged — grouping did not touch the flicker fix')
+  assert((pageCode.match(/mergeRequests\(prev, json\.data\.requests\)/g) ?? []).length === 2,
+    'both the poll and loadMore still go through that same merge (2 call sites)')
+
+  // Per-item approval survives grouping: a batch renders N cards, each with its own control.
+  assert(/g\.isBatch \?/.test(pageCode),
+    'the render branches on isBatch — batches get a wrapper, standalones do not')
+  assert(/<BatchWrapper[\s\S]{0,200}?group=\{g\}/.test(pageCode),
+    'the wrapper receives the batch GROUP')
+  assert(/rows\.map\(req => \([\s\S]{0,120}?<RequestCard/.test(pageCode),
+    'and renders one RequestCard PER ROW inside it — approval stays per item, not per batch')
+  assert(!/onApproveBatch|approveAll|batchApprove/i.test(pageCode),
+    'no batch-level approve control was introduced — grouping is a view, not a new verb')
+  // [0] control: the scanner can see a string that IS present, so the negatives above are not
+  // passing merely because the regexes never match anything.
+  assert(/<RequestCard/.test(pageCode), '[0] positive control: the scanner DOES find RequestCard in the page')
+
   console.log(`\n${'─'.repeat(72)}`)
   if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
   else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

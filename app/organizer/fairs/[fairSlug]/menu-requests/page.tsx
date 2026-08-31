@@ -9,6 +9,8 @@ import {
   PhotoIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
+import { groupByVendor } from '@/lib/menu-requests/group-by-vendor'
+import type { BatchGroup } from '@/lib/menu-requests/group-by-batch'
 
 interface CurrentItem {
   id: string
@@ -26,6 +28,8 @@ interface MenuRequest {
   id: string
   type: 'ADD' | 'EDIT' | 'DELETE' | 'RESTORE'
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  /** The submission this row arrived in; null = standalone. Projected by the read route. */
+  batchId: string | null
   name: string | null
   description: string | null
   price: number | null
@@ -313,6 +317,71 @@ function RequestCard({
   )
 }
 
+// ── Batch wrapper ─────────────────────────────────────────────────────────────
+
+/**
+ * One SUBMISSION: the N items a vendor staged and sent together, drawn as a single unit.
+ *
+ * The wrapper is presentational only — every row inside keeps its OWN Approve/Reject, because
+ * approval is per item and always was. Grouping shows the organizer that these arrived
+ * together; it does not turn them into one decision.
+ *
+ * Collapsed by default once a submission gets large, so a batch of 20 does not bury the rest of
+ * the queue — but a small batch stays open, since collapsing two items only adds a click.
+ */
+function BatchWrapper({
+  group,
+  fairSlug,
+  onReviewed,
+}: {
+  group: BatchGroup<MenuRequest>
+  fairSlug: string
+  onReviewed: (id: string, status: 'APPROVED' | 'REJECTED') => void
+}) {
+  const COLLAPSE_ABOVE = 4
+  const [open, setOpen] = useState(group.rows.length <= COLLAPSE_ABOVE)
+
+  const rows = group.rows
+  const pending = rows.filter(r => r.status === 'PENDING').length
+  const decided = rows.length - pending
+  // The submission's own time — every row shares it, so the first is the submission's.
+  const submittedAt = rows[0]?.createdAt
+
+  return (
+    <div className="border border-neon-pink/20 bg-neon-pink/[0.02] rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+      >
+        <QueueListIcon className="w-4 h-4 text-neon-pink/70 shrink-0" />
+        <span className="text-white/80 text-xs font-semibold font-inter">
+          Submitted together · {rows.length} items
+        </span>
+        {submittedAt && (
+          <span className="text-white/30 text-[0.6875rem] font-inter">{timeAgo(submittedAt)}</span>
+        )}
+        {/* Progress through a batch the organizer is part-way into reviewing. */}
+        {decided > 0 && (
+          <span className="text-white/40 text-[0.6875rem] font-inter">
+            · {decided} of {rows.length} reviewed
+          </span>
+        )}
+        <span className="ml-auto text-white/40 text-[0.6875rem] font-inter shrink-0">
+          {open ? 'Collapse' : 'Expand'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-2 pb-2 space-y-2">
+          {rows.map(req => (
+            <RequestCard key={req.id} req={req} fairSlug={fairSlug} onReviewed={onReviewed} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 type TabFilter = 'PENDING' | 'ALL'
@@ -451,6 +520,11 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
     ? requests.filter(r => r.status === 'PENDING')
     : requests
 
+  // Presentational arrangement over the merged+filtered list. Not memoised: the list is at
+  // most MENU_REQUESTS_MAX_TAKE rows and grouping is a single pass, so a useMemo here would buy
+  // nothing and add a dependency array to keep correct.
+  const vendorGroups = groupByVendor(filtered)
+
   const pendingCount = requests.filter(r => r.status === 'PENDING').length
 
   const TABS: { key: TabFilter; label: string }[] = [
@@ -523,14 +597,38 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
         </div>
       ) : (
         <>
-          <div className="space-y-3">
-            {filtered.map(req => (
-              <RequestCard
-                key={req.id}
-                req={req}
-                fairSlug={fairSlug}
-                onReviewed={handleReviewed}
-              />
+          {/* VENDOR → BATCH → ITEM. Purely presentational: groupByVendor arranges the ALREADY
+              MERGED list at render time, so mergeRequests stays id-keyed and untouched, and
+              RequestCard is passed the same row it always was. Approval remains PER ITEM —
+              grouping shows a submission, it does not make it one decision. */}
+          <div className="space-y-5">
+            {vendorGroups.map(vg => (
+              <div key={vg.vendorId}>
+                <div className="flex items-baseline gap-2 mb-2 px-1">
+                  <h3 className="text-white text-sm font-semibold font-inter truncate">{vg.vendorName}</h3>
+                  {vg.pendingCount > 0 && (
+                    <span className="shrink-0 text-amber-400/80 text-[0.6875rem] font-inter">
+                      {vg.pendingCount} pending
+                    </span>
+                  )}
+                  <div className="flex-1 h-px bg-white/[0.06]" />
+                </div>
+
+                <div className="space-y-3">
+                  {vg.groups.map(g => (
+                    g.isBatch ? (
+                      <BatchWrapper key={g.key} group={g} fairSlug={fairSlug} onReviewed={handleReviewed} />
+                    ) : (
+                      <RequestCard
+                        key={g.key}
+                        req={g.rows[0]}
+                        fairSlug={fairSlug}
+                        onReviewed={handleReviewed}
+                      />
+                    )
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 
