@@ -102,6 +102,12 @@ export interface SweepOptions {
    * reconciler — honest actor — replacing any one-off script.
    */
   patternTEnabled?: boolean
+  /**
+   * Run Pattern X this sweep. Default true (every sweep — the pre-cadence behaviour). The worker
+   * sets it from lib/pattern-x-cadence.ts (WORKER_PATTERN_X_INTERVAL_MS): X is ~97% of a sweep's
+   * DB egress and is a backstop, so it may run on a slower interval than the rest.
+   */
+  runPatternX?: boolean
 }
 
 const DEFAULTS = {
@@ -163,6 +169,12 @@ export interface SweepSummary {
   ambiguousSkipped: number
   /** Non-zero repairs ⇒ a real-time path is leaking. Surfaced, never hidden. */
   backstopWarnings: string[]
+  /**
+   * Pattern X this sweep: 'ran' (completed), 'skipped' (not due under its cadence), or
+   * 'not-reached' (due, but the sweep aborted before X finished — the cadence stays due).
+   * Optional only so hand-built summaries in older guards still type-check; the sweep always sets it.
+   */
+  patternX?: 'ran' | 'skipped' | 'not-reached'
 }
 
 // Post-placement, non-terminal states an order can sit in (Pattern B).
@@ -226,6 +238,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     opts.backstopEnabled ?? (process.env.RECONCILER_BACKSTOP_ENABLED === 'true')
   const patternTEnabled =
     opts.patternTEnabled ?? (process.env.RECONCILER_PATTERN_T_ENABLED === 'true')
+  const runPatternX = opts.runPatternX ?? true
 
   const startedAt = new Date()
   const windowStart = new Date(startedAt.getTime() - windowHours * 3600_000)
@@ -244,6 +257,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     suppressed: [],
     ambiguousSkipped: 0,
     backstopWarnings: [],
+    patternX: runPatternX ? 'not-reached' : 'skipped',
   }
 
   try {
@@ -279,7 +293,10 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternU(sum, { maxPerPattern })
     await patternV(sum, { maxPerPattern })
     await patternW(sum, { maxPerPattern, dryRun })
-    await patternX(sum, { scanCeiling, maxPerPattern, dryRun, windowStart })
+    if (runPatternX) {
+      await patternX(sum, { scanCeiling, maxPerPattern, dryRun, windowStart })
+      sum.patternX = 'ran'
+    }
   } catch (err) {
     logger.error('[Reconciler] Sweep aborted mid-run', { error: String(err) })
     sum.alerted.push(`SWEEP ABORTED: ${err instanceof Error ? err.message : String(err)}`)
@@ -456,7 +473,7 @@ export function formatSweepSummary(sum: SweepSummary, ledger: LedgerBreakdown): 
     : ''
   return `[Reconciler] SUMMARY repaired=${total}${nonZero ? ` [${nonZero}]` : ''} ${ledgerStr}${perEvent} ` +
     `alerts=${sum.alerted.length} suppressed=${sum.suppressed.length} ` +
-    `ambiguousSkipped=${sum.ambiguousSkipped} dryRun=${sum.dryRun} ${sum.durationMs}ms`
+    `ambiguousSkipped=${sum.ambiguousSkipped}${sum.patternX ? ` patternX=${sum.patternX}` : ''} dryRun=${sum.dryRun} ${sum.durationMs}ms`
 }
 
 // ─── PATTERN A — Paid in Stripe, not fully placed (boundary 1) ───────────────

@@ -13,6 +13,8 @@
  *   [7] a failed sweep releases the slot (one bad sweep can't wedge every later one)
  *   [8] source shape: the worker actually USES the config, keeps bullmq as the rollback path,
  *       stops the sweep before closing, and shuts down idempotently
+ *   [9] Pattern X cadence: default every sweep, hourly skips correctly, boot run, bad values
+ *       fall back, aborted sweeps don't advance the clock, summary + config line report it
  *
  * Each negative assertion has a positive control on the PROBE first (the fake clock really
  * fires ticks; the runner really runs), so a skip can't pass vacuously.
@@ -22,6 +24,8 @@
 import { readFileSync } from 'node:fs'
 import { readWorkerConfig, formatWorkerConfig, WORKER_CONFIG_DEFAULTS } from '../lib/worker-config'
 import { createSweepRunner } from '../lib/sweep-runner'
+import { createIntervalGate } from '../lib/pattern-x-cadence'
+import { formatSweepSummary, type SweepSummary } from '../lib/reconciler'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -189,6 +193,59 @@ async function main() {
   assert(close.indexOf('sweepRunner?.stop()') > -1 && close.indexOf('sweepRunner?.stop()') < close.indexOf('worker.close()'),
     'close() stops the sweep BEFORE closing the BullMQ worker')
   assert(/if \(shuttingDown\) return shuttingDown/.test(idx), 'shutdown is idempotent (a second SIGTERM does not race a second close)')
+
+  // ── [9] Pattern X cadence ─────────────────────────────────────────────────────
+  console.log('\n[9] Pattern X on its own interval (WORKER_PATTERN_X_INTERVAL_MS)')
+  assert(readWorkerConfig({}).config.patternXIntervalMs === 0, 'default is 0 = every sweep (today)')
+  assert(readWorkerConfig({ WORKER_PATTERN_X_INTERVAL_MS: '3600000' }).config.patternXIntervalMs === 3_600_000, '3600000 is read')
+  assert(readWorkerConfig({ WORKER_PATTERN_X_INTERVAL_MS: '0' }).config.patternXIntervalMs === 0, 'explicit 0 is valid (every sweep)')
+  for (const badX of ['-1', 'hourly', '1.5', '3600000ms']) {
+    const r = readWorkerConfig({ WORKER_PATTERN_X_INTERVAL_MS: badX })
+    assert(r.config.patternXIntervalMs === 0 && r.warnings.some(w => w.includes('WORKER_PATTERN_X_INTERVAL_MS')),
+      `bad value "${badX}" → default 0 (every sweep) + a warning`)
+  }
+  assert(formatWorkerConfig(readWorkerConfig({ WORKER_PATTERN_X_INTERVAL_MS: '3600000' }).config).includes('patternXIntervalMs=3600000'),
+    'the [Worker] config line carries patternXIntervalMs')
+  assert(formatWorkerConfig(readWorkerConfig({}).config).includes('patternXIntervalMs=0(every sweep)'), 'and says "every sweep" for the default')
+
+  {
+    // Default: due on every sweep, including back-to-back ones.
+    const g = createIntervalGate(0); let ran = 0
+    for (let i = 0; i < 5; i++) { const t = i * 120_000; if (g.due(t)) { ran++; g.markRan(t) } }
+    assert(ran === 5, `interval 0: X ran on all 5 sweeps (${ran}/5)`)
+  }
+  {
+    // Hourly, sweeps every 120s for 2h01m: boot + at 60m + at 120m.
+    const H = 3_600_000; const g = createIntervalGate(H); const ranAt: number[] = []
+    for (let t = 0; t <= 2 * H + 60_000; t += 120_000) { if (g.due(t)) { ranAt.push(t); g.markRan(t) } }
+    assert(ranAt[0] === 0, 'X runs on the FIRST sweep after boot')
+    assert(ranAt.length === 3 && ranAt[1] === H && ranAt[2] === 2 * H, `3600000: ran at ${ranAt.map(t => t / 60_000 + 'm').join(', ')} (expect 0m, 60m, 120m)`)
+    // Positive control on the skip: right before the hour it is NOT due, at the hour it IS.
+    const g2 = createIntervalGate(H); g2.markRan(0)
+    assert(!g2.due(H - 120_000) && g2.due(H), 'skips at 58m, due again at 60m (the skip is real, not vacuous)')
+  }
+  {
+    // An aborted sweep (X due but not completed) must not advance the clock.
+    const g = createIntervalGate(3_600_000)
+    assert(g.due(0), 'boot: due'); /* sweep aborts before X completes → no markRan */
+    assert(g.due(120_000) && g.lastRanAt() === null, 'after an aborted sweep X is STILL due on the next one (no hour lost)')
+  }
+  {
+    const base = { startedAt: '', finishedAt: '', durationMs: 1, dryRun: false, patternEEnabled: false, backstopEnabled: false,
+      scanned: { stripePIs: 0, completedOrders: 0, activeOrders: 0, pendingOrders: 0, unresolvedHolds: 0 },
+      repaired: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, G: 0, H: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0, O: 0, P: 0, Q: 0, R: 0, S: 0, T: 0, X: 0 },
+      details: {} as SweepSummary['details'], alerted: [], suppressed: [], ambiguousSkipped: 0, backstopWarnings: [] }
+    const ledger = { all: { payableCents: 0, paidCents: 0, cancelledCents: 0 }, byEvent: [], readable: true }
+    assert(formatSweepSummary({ ...base, patternX: 'skipped' }, ledger).includes('patternX=skipped'), 'sweep summary says patternX=skipped')
+    assert(formatSweepSummary({ ...base, patternX: 'ran' }, ledger).includes('patternX=ran'), 'sweep summary says patternX=ran')
+  }
+  const rec = readFileSync('lib/reconciler.ts', 'utf8')
+  assert(/const runPatternX = opts\.runPatternX \?\? true/.test(rec), 'reconciler defaults runPatternX to true (every sweep)')
+  assert(/if \(runPatternX\) \{\s*await patternX\(sum[^\n]*\n\s*sum\.patternX = 'ran'/.test(rec), "patternX() is called ONLY when runPatternX, and 'ran' is set only after it completes")
+  assert(/patternX: runPatternX \? 'not-reached' : 'skipped'/.test(rec), "a due-but-unfinished X reads 'not-reached', never 'ran'")
+  assert(/createIntervalGate\(config\.patternXIntervalMs\)/.test(w), 'worker builds the gate from config')
+  assert(/runReconciliationSweep\(\{ runPatternX: patternXGate\.due\(decidedAt\) \}\)/.test(w), 'worker passes the gate decision into the sweep')
+  assert(/if \(sum\.patternX === 'ran'\) patternXGate\.markRan\(decidedAt\)/.test(w), "worker advances the clock only when X actually ran")
 
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} worker-throttle-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)

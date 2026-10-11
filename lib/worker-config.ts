@@ -34,6 +34,11 @@ export interface WorkerConfig {
   drainDelaySec: number
   stalledIntervalMs: number
   lockDurationMs: number
+  /**
+   * How often the sweep runs Pattern X (lib/pattern-x-cadence.ts). 0 = every sweep, the
+   * pre-cadence behaviour. Pattern X is ~97% of a sweep's DB egress; 3600000 runs it hourly.
+   */
+  patternXIntervalMs: number
 }
 
 export const WORKER_CONFIG_DEFAULTS: WorkerConfig = {
@@ -42,6 +47,7 @@ export const WORKER_CONFIG_DEFAULTS: WorkerConfig = {
   drainDelaySec: 5,
   stalledIntervalMs: 30_000,
   lockDurationMs: 30_000,
+  patternXIntervalMs: 0,
 }
 
 /** Floors: below these a value is almost certainly a unit mistake (seconds typed as ms). */
@@ -50,6 +56,7 @@ const FLOORS = {
   drainDelaySec: 1,
   stalledIntervalMs: 5_000,
   lockDurationMs: 5_000,
+  patternXIntervalMs: 0, // 0 is meaningful (every sweep); any positive value is a real interval
 } as const
 
 function readInt(
@@ -85,6 +92,7 @@ export function readWorkerConfig(env: Record<string, string | undefined>): { con
       drainDelaySec:     readInt(env, 'WORKER_DRAIN_DELAY_SEC',     d.drainDelaySec,     FLOORS.drainDelaySec,     warnings),
       stalledIntervalMs: readInt(env, 'WORKER_STALLED_INTERVAL_MS', d.stalledIntervalMs, FLOORS.stalledIntervalMs, warnings),
       lockDurationMs:    readInt(env, 'WORKER_LOCK_DURATION_MS',    d.lockDurationMs,    FLOORS.lockDurationMs,    warnings),
+      patternXIntervalMs: readInt(env, 'WORKER_PATTERN_X_INTERVAL_MS', d.patternXIntervalMs, FLOORS.patternXIntervalMs, warnings),
     },
     warnings,
   }
@@ -94,6 +102,7 @@ export function readWorkerConfig(env: Record<string, string | undefined>): { con
 export function formatWorkerConfig(c: WorkerConfig): string {
   return (
     `[Worker] config scheduler=${c.scheduler} sweepIntervalMs=${c.sweepIntervalMs} ` +
-    `drainDelaySec=${c.drainDelaySec} stalledIntervalMs=${c.stalledIntervalMs} lockDurationMs=${c.lockDurationMs}`
+    `drainDelaySec=${c.drainDelaySec} stalledIntervalMs=${c.stalledIntervalMs} lockDurationMs=${c.lockDurationMs} ` +
+    `patternXIntervalMs=${c.patternXIntervalMs}${c.patternXIntervalMs === 0 ? '(every sweep)' : ''}`
   )
 }

@@ -51,6 +51,7 @@ import { payoutFailureFinality } from '../lib/payout-failure-finality'
 import { WORKER_COMMIT } from '../lib/health'
 import { readWorkerConfig, formatWorkerConfig } from '../lib/worker-config'
 import { createSweepRunner } from '../lib/sweep-runner'
+import { createIntervalGate } from '../lib/pattern-x-cadence'
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -782,7 +783,17 @@ export function startOrderWorker() {
   for (const w of configWarnings) console.warn(`[Worker] config WARNING: ${w}`)
   console.warn(formatWorkerConfig(config))
 
-  sweepRunner = createSweepRunner({ run: () => runReconciliationSweep(), intervalMs: config.sweepIntervalMs })
+  // Pattern X on its own cadence (WORKER_PATTERN_X_INTERVAL_MS; 0 = every sweep). Due on the first
+  // sweep after boot; the clock advances only when X actually completed, so an aborted sweep retries.
+  const patternXGate = createIntervalGate(config.patternXIntervalMs)
+  sweepRunner = createSweepRunner({
+    run: async () => {
+      const decidedAt = Date.now()
+      const sum = await runReconciliationSweep({ runPatternX: patternXGate.due(decidedAt) })
+      if (sum.patternX === 'ran') patternXGate.markRan(decidedAt)
+    },
+    intervalMs: config.sweepIntervalMs,
+  })
 
   const worker = new Worker<JobData>(
     ORDER_QUEUE_NAME,
