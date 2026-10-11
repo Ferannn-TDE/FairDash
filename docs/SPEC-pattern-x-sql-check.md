@@ -60,10 +60,7 @@ the rows.
 
 ## Known equivalence traps
 
-- **Multiple refunds per key.** Today `refundBy` is a `Map`, so the last COMPLETED refund returned
-  wins and X1 depends on database row order. The lateral join above picks an unreversed refund
-  first, which can raise an X1 that today's code misses. Decide which is correct (an unreversed
-  completed refund should alert) and record it; the equivalence test must name this case.
+- **Multiple refunds per key** can't happen: `Refund` has `@@unique([orderId, vendorId])` (`uq_refund_order_vendor`), so each key has at most one refund.
 - **Scan ceiling.** Today the ceiling counts all payouts; after the change it counts anomalies only.
   The "SCAN CEILING HIT" alert keeps its meaning (rows not examined), but fires far later.
 - **`netAmount` is a float.** Keep `Math.round(netAmount * 100)` in JavaScript, not in SQL.
