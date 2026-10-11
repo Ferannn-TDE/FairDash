@@ -8,7 +8,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { computeHealth } from '../lib/health'
+import { computeHealth, resolveWorkerStaleSec, DEFAULT_WORKER_STALE_SEC } from '../lib/health'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -17,6 +17,9 @@ const NOW = new Date('2026-07-21T12:00:00Z').getTime()
 const agoSec = (s: number) => new Date(NOW - s * 1000).toISOString()
 
 function main() {
+  // The default-threshold sections below must not inherit an ambient override.
+  delete process.env.HEALTH_WORKER_STALE_SEC
+
   // ── [1] all healthy + a fresh sweep ─────────────────────────────────────────
   console.log('[1] everything up + a fresh heartbeat → ok')
   const h1 = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(30), nowMs: NOW })
@@ -121,6 +124,34 @@ function main() {
     'the worker logs a boot line at console.WARN — console.log is stripped under NODE_ENV=production on Railway')
   assert(/\[Worker\] boot'[\s\S]{0,60}commit: WORKER_COMMIT/.test(workerSrc),
     'and the boot line carries the SHA — the seam a redeploy leaves in the logs')
+
+  // ── [11] the stale threshold — 180s DEFAULT pinned, HEALTH_WORKER_STALE_SEC honoured ─────
+  // The heartbeat is written once per sweep; when WORKER_SWEEP_INTERVAL_MS rises (Upstash
+  // throttle) the threshold must follow or a healthy-but-slower worker reads as dead.
+  console.log('\n[11] stale threshold: 180s default, overridable by HEALTH_WORKER_STALE_SEC')
+  assert(DEFAULT_WORKER_STALE_SEC === 180, 'the default is still 180s (3× the default 60s sweep)')
+  assert(resolveWorkerStaleSec({}) === 180, 'unset → 180')
+  assert(resolveWorkerStaleSec({ HEALTH_WORKER_STALE_SEC: '' }) === 180, 'empty → 180')
+  // POSITIVE CONTROL first: with the default, a 300s-old heartbeat IS stale — so the override
+  // below is shown to CHANGE the verdict, not to agree with one that was already 'ok'.
+  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(300), nowMs: NOW }).worker.status === 'stale',
+    'control: 300s with the default threshold → stale')
+  process.env.HEALTH_WORKER_STALE_SEC = '360'
+  try {
+    assert(resolveWorkerStaleSec() === 360, 'HEALTH_WORKER_STALE_SEC=360 is read from process.env')
+    assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(300), nowMs: NOW }).worker.status === 'ok',
+      'with 360: 300s → ok (the env var changed the verdict)')
+    assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(360), nowMs: NOW }).worker.status === 'ok', 'with 360: 360s boundary → ok')
+    const s361 = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(361), nowMs: NOW })
+    assert(s361.worker.status === 'stale' && s361.status === 'degraded', 'with 360: 361s → stale + degraded')
+  } finally {
+    delete process.env.HEALTH_WORKER_STALE_SEC
+  }
+  for (const bad of ['abc', '0', '-5', '12.5', 'Infinity']) {
+    assert(resolveWorkerStaleSec({ HEALTH_WORKER_STALE_SEC: bad }) === 180, `invalid "${bad}" → 180 (never "never stale")`)
+  }
+  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale',
+    'after the override is cleared, 181s is stale again (no leaked state)')
 
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} health-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)

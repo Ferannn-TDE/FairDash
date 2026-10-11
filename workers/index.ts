@@ -46,10 +46,16 @@ const workers = [
   startOrderWorker(),
 ]
 
-async function shutdown() {
-  console.log('[Workers] Graceful shutdown...')
-  await Promise.all(workers.map(w => w.close()))
-  process.exit(0)
+// Idempotent: a second SIGTERM/SIGINT while we wait on an in-flight sweep must not start a
+// second close() race or exit early. close() waits for the sweep to finish (order-worker.ts).
+let shuttingDown: Promise<void> | null = null
+function shutdown() {
+  if (shuttingDown) return shuttingDown
+  console.warn('[Workers] Graceful shutdown — finishing any in-flight sweep and active jobs first')
+  shuttingDown = Promise.all(workers.map(w => w.close()))
+    .then(() => { console.warn('[Workers] Shutdown complete'); process.exit(0) })
+    .catch(err => { console.error('[Workers] Shutdown error:', err); process.exit(1) })
+  return shuttingDown
 }
 
 process.on('SIGTERM', shutdown)

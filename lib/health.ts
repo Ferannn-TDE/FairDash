@@ -16,7 +16,21 @@ import { db } from './db'
  */
 
 const HEARTBEAT_KEY = 'fairsynq:heartbeat:reconcile-sweep'
-const WORKER_STALE_SEC = 180 // 3× the 60s sweep — a missed sweep or two is noise; sustained silence is not
+/**
+ * Worker-stale threshold. DEFAULT 180s = 3× the default 60s sweep — a missed sweep or two is
+ * noise; sustained silence is not. The heartbeat is written once per sweep, so when the worker's
+ * WORKER_SWEEP_INTERVAL_MS is raised this MUST follow (HEALTH_WORKER_STALE_SEC on Vercel, ~3× the
+ * interval) or a healthy-but-slower worker reads as dead. Read at call time, so it is testable.
+ * An invalid value falls back to the default — never to "never stale", which would re-open
+ * "a dead worker looks like a calm day".
+ */
+export const DEFAULT_WORKER_STALE_SEC = 180
+export function resolveWorkerStaleSec(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.HEALTH_WORKER_STALE_SEC
+  if (raw === undefined || raw.trim() === '') return DEFAULT_WORKER_STALE_SEC
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_WORKER_STALE_SEC
+}
 
 /**
  * THE WORKER'S OWN FINGERPRINT — a SECOND key, deliberately NOT folded into the one above.
@@ -77,12 +91,15 @@ export function computeHealth(input: {
   /** Absent/undefined ⇒ pre-fingerprint worker or unreadable Redis; reported as null. */
   workerCommit?: string | null
   nowMs?: number
+  /** Defaults to resolveWorkerStaleSec(process.env). */
+  staleSec?: number
 }): HealthReport {
   const now = input.nowMs ?? Date.now()
+  const staleSec = input.staleSec ?? resolveWorkerStaleSec()
   const parsed = input.lastSweepAt ? new Date(input.lastSweepAt).getTime() : NaN
   const ageSec = Number.isFinite(parsed) ? Math.round((now - parsed) / 1000) : null
   const worker = {
-    status: (ageSec == null ? 'unknown' : ageSec <= WORKER_STALE_SEC ? 'ok' : 'stale') as 'ok' | 'stale' | 'unknown',
+    status: (ageSec == null ? 'unknown' : ageSec <= staleSec ? 'ok' : 'stale') as 'ok' | 'stale' | 'unknown',
     lastSweepAt: ageSec == null ? null : input.lastSweepAt,
     ageSec,
     // NOT gated on liveness: a STALE worker's last-known SHA is precisely what you want when
@@ -102,7 +119,14 @@ function redisClient(): IORedis | null {
   if (!url) return null
   // ioredis parses rediss:// (TLS) from the scheme — proven against Upstash. Fail fast: no
   // retry storms, no offline queue, short connect timeout, so a health check can never hang.
-  return new IORedis(url, { maxRetriesPerRequest: 1, lazyConnect: true, connectTimeout: 3000, enableOfflineQueue: false })
+  // enableReadyCheck:false + disableClientInfo:true — Upstash bills per command, and on connect
+  // ioredis otherwise sends INFO + two CLIENT SETINFO this one-shot client never needs. Measured:
+  // 6 commands → 3 per heartbeat / health check (AUTH + the real work). The first real command
+  // still proves the connection, so a dead Redis is still 'unreachable'.
+  return new IORedis(url, {
+    maxRetriesPerRequest: 1, lazyConnect: true, connectTimeout: 3000, enableOfflineQueue: false,
+    enableReadyCheck: false, disableClientInfo: true,
+  })
 }
 
 /** Best-effort: the sweep stamps its heartbeat. A heartbeat write must NEVER break the sweep. */

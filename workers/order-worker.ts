@@ -49,6 +49,8 @@ import { reconcileMasterStatus } from '../lib/reconcile-order-status'
 import { recordPayoutFailure as recordPayoutFailureShared, describeFailureCause } from '../lib/payout-failure-marker'
 import { payoutFailureFinality } from '../lib/payout-failure-finality'
 import { WORKER_COMMIT } from '../lib/health'
+import { readWorkerConfig, formatWorkerConfig } from '../lib/worker-config'
+import { createSweepRunner } from '../lib/sweep-runner'
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -723,56 +725,27 @@ async function recordPayoutFailure(job: Job<JobData>, finality?: string, err?: u
 }
 
 /**
- * reconcile-sweep (recurring, ~60s)
+ * reconcile-sweep (recurring — WORKER_SWEEP_INTERVAL_MS, default 60s)
  * Periodic backstop: compares Stripe (money-truth) against the DB (state-truth)
  * and self-heals pipeline leaks the real-time paths missed — all via existing
  * idempotent functions (lib/reconciler.ts). Pattern E (auto-cancel of stuck
  * PLACED orders) is detect-and-alert by default; it only acts when
  * RECONCILER_PATTERN_E_ENABLED=true.
+ *
+ * SELF-OVERLAP GUARD: lives in lib/sweep-runner.ts — ONE runner instance per process, shared by
+ * the timer (WORKER_SWEEP_SCHEDULER=timer) and the BullMQ repeat job (=bullmq), so no two sweeps
+ * ever run in parallel in either mode, or across a mode switch. See that file for why BullMQ's
+ * concurrency-5 repeat can otherwise meet its own successor, and why `concurrency: 1` is the
+ * wrong fix (worker-wide in 5.76.8 — it would serialise all 13 handlers behind the sweep).
  */
-/**
- * SELF-OVERLAP GUARD — a sweep must never run concurrently with itself.
- *
- * WHY IT CAN: the worker runs at `concurrency: 5`, and BullMQ 5.76.8 schedules the NEXT
- * repeat when the current job is PICKED UP, not when it finishes (`worker.js:539-547`,
- * `jobScheduler.upsertJobScheduler` on the fetch path). So a sweep that outruns its 60s
- * interval meets its own successor with four free concurrency slots — BullMQ does not skip it.
- * Two reconcilers on the same rows has never been exercised, and the monotonic fixed-point
- * guarantees were never designed under it.
- *
- * WHY NOT `concurrency: 1`: that is worker-wide in this version (no per-job-name concurrency —
- * checked `interfaces/worker-options.d.ts`), and would serialise all 13 handlers behind the
- * ~14s sweep. Payouts and timeouts would queue behind reconciliation. Wrong trade.
- *
- * SCOPE — an in-process flag, honest about its limit: it makes self-overlap impossible within
- * ONE worker process, which is the deployment today (a single Railway service). It would NOT
- * hold across replicas; scaling the worker horizontally requires promoting this to a Redis
- * lock (SET NX PX) before it is safe. Named here so that change is not made unknowingly.
- *
- * Skips rather than queues: a delayed duplicate sweep has no value — the next tick is 60s away
- * and will see the same state. The skip is logged, never silent.
- */
-let sweepInFlight = false
+let sweepRunner: ReturnType<typeof createSweepRunner> | null = null
 
 async function handleReconcile(_job: Job<JobData>) {
-  if (sweepInFlight) {
-    console.warn(
-      '[Worker] reconcile-sweep SKIPPED — the previous sweep is still running. ' +
-      'The sweep is exceeding its 60s interval; profile it (CURRENT_STATE §6).',
-    )
+  if (!sweepRunner) {
+    console.error('[Worker] reconcile-sweep job arrived before the sweep runner exists — skipped')
     return
   }
-  sweepInFlight = true
-  const startedAt = Date.now()
-  try {
-    await runReconciliationSweep()
-  } finally {
-    sweepInFlight = false
-    const ms = Date.now() - startedAt
-    if (ms > 60_000) {
-      console.error(`[Worker] reconcile-sweep took ${ms}ms — LONGER THAN ITS 60s INTERVAL. Overlap is being prevented by the guard, meaning sweeps are now being dropped.`)
-    }
-  }
+  await sweepRunner.runOnce('bullmq')
 }
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
@@ -801,6 +774,15 @@ export function startOrderWorker() {
   }
 
   const connection = buildConnectionOptions(redisUrl)
+
+  // ── Throttle config (lib/worker-config.ts) — every default is the pre-throttle value ──
+  // console.WARN for the same reason as the boot seam below: console.log is stripped under
+  // NODE_ENV=production on Railway, and this line is how a human confirms the env vars took.
+  const { config, warnings: configWarnings } = readWorkerConfig(process.env)
+  for (const w of configWarnings) console.warn(`[Worker] config WARNING: ${w}`)
+  console.warn(formatWorkerConfig(config))
+
+  sweepRunner = createSweepRunner({ run: () => runReconciliationSweep(), intervalMs: config.sweepIntervalMs })
 
   const worker = new Worker<JobData>(
     ORDER_QUEUE_NAME,
@@ -853,7 +835,12 @@ export function startOrderWorker() {
     // Without this, a set TEST_REDIS_PREFIX leaves the worker consuming 'bull:'
     // while every job is enqueued under that prefix — the worker goes deaf to
     // all jobs (payouts, refunds, timeouts). They must always align.
-    { connection, prefix: getQueuePrefix(), concurrency: 5 }
+    {
+      connection, prefix: getQueuePrefix(), concurrency: 5,
+      drainDelay: config.drainDelaySec,
+      stalledInterval: config.stalledIntervalMs,
+      lockDuration: config.lockDurationMs,
+    }
   )
 
   worker.on('completed', async job => {
@@ -919,20 +906,49 @@ export function startOrderWorker() {
     console.error('[Worker] Connection error:', err)
   })
 
-  // ── Recurring reconciliation sweep (~60s) ────────────────────────────────
-  // Attached to the SAME queue/connection as a BullMQ repeatable job. The fixed
-  // jobId + repeat key means re-running the worker never stacks duplicate
-  // schedulers. Pattern E stays detect-and-alert unless RECONCILER_PATTERN_E_ENABLED.
+  // ── Recurring reconciliation sweep ───────────────────────────────────────
+  // Pattern E stays detect-and-alert unless RECONCILER_PATTERN_E_ENABLED.
+  //
+  // FIRST, in both modes: remove every reconcile repeat whose interval is not the one we want.
+  // A legacy repeat is keyed by its `every`, so changing WORKER_SWEEP_INTERVAL_MS (or switching
+  // to timer mode) would otherwise leave the OLD schedule registered and firing forever — and in
+  // timer mode a leftover repeat is precisely the permanently-pending delayed job that pins
+  // BullMQ to its 10s poll floor (lib/worker-config.ts). The shared runner would skip any overlap,
+  // but the Redis cost would silently return. Removing it also removes its pending delayed job.
+  //
+  //   bullmq (default, rollback): repeat every sweepIntervalMs, exactly as before.
+  //   timer:  no repeat at all — one sweep NOW, then every sweepIntervalMs, in-process.
   const schedulerQueue = new Queue(ORDER_QUEUE_NAME, { connection, prefix: getQueuePrefix() })
-  schedulerQueue
-    .add(JOB_RECONCILE, { eventId: '__reconcile__' } as JobData, {
-      repeat: { every: 60_000 },
-      jobId: 'reconcile-sweep',
-      removeOnComplete: 50,
-      removeOnFail: 100,
+  const keepEvery = config.scheduler === 'bullmq' ? config.sweepIntervalMs : null
+  const schedulerReady = schedulerQueue.getRepeatableJobs()
+    .then(async repeats => {
+      for (const r of repeats) {
+        if (r.name !== JOB_RECONCILE) continue
+        if (keepEvery !== null && Number(r.every) === keepEvery) continue
+        await schedulerQueue.removeRepeatableByKey(r.key)
+        console.warn(`[Worker] removed stale reconcile-sweep repeat (every=${r.every}ms) — scheduler=${config.scheduler}`)
+      }
     })
-    .then(() => console.log('[Worker] Reconciliation sweep scheduled (every 60s)'))
-    .catch(e => console.error('[Worker] Failed to schedule reconciliation sweep:', e))
+    .catch(e => console.error('[Worker] Failed to clean stale reconcile-sweep repeats:', e))
+
+  if (config.scheduler === 'bullmq') {
+    schedulerReady
+      .then(() => schedulerQueue.add(JOB_RECONCILE, { eventId: '__reconcile__' } as JobData, {
+        repeat: { every: config.sweepIntervalMs },
+        jobId: 'reconcile-sweep',
+        removeOnComplete: 50,
+        removeOnFail: 100,
+      }))
+      .then(() => console.log(`[Worker] Reconciliation sweep scheduled via BullMQ (every ${config.sweepIntervalMs}ms)`))
+      .catch(e => console.error('[Worker] Failed to schedule reconciliation sweep:', e))
+  } else {
+    // Boot sweep immediately (the runner does it), then the interval. Started AFTER the stale-
+    // repeat cleanup settles so the boot sweep never races a leftover repeat for the slot.
+    void schedulerReady.then(() => {
+      sweepRunner!.start()
+      console.warn(`[Worker] Reconciliation sweep running on in-process timer (boot sweep now, then every ${config.sweepIntervalMs}ms)`)
+    })
+  }
 
   // ── THE BOOT SEAM ────────────────────────────────────────────────────────────────────────
   // console.WARN, not log: Railway runs NODE_ENV=production, where the Next compiler strips
@@ -953,5 +969,14 @@ export function startOrderWorker() {
     JOB_VENDOR_PAYOUT, JOB_RUNNER_PAYOUT, JOB_ORGANIZER_PAYOUT, JOB_REFUND, JOB_RECONCILE,
   ].join(', ')}`)
 
-  return worker
+  // SHUTDOWN ORDER (SIGTERM → workers/index.ts → close()): stop the sweep FIRST — clear the timer,
+  // refuse new sweeps, and wait for an in-flight one to FINISH — then let BullMQ drain its active
+  // jobs, then drop the scheduler connection. A sweep is never cut off by our own shutdown.
+  return {
+    async close() {
+      await sweepRunner?.stop()
+      await worker.close()
+      await schedulerQueue.close()
+    },
+  }
 }
