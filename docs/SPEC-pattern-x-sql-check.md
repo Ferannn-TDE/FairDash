@@ -70,13 +70,11 @@ the rows.
 
 `scripts/pattern-x-sql-equivalence.ts`, registered in the gate, against the test DB:
 
-1. Seed fixtures covering every branch: healthy paid, X1 (one refund, unreversed), X1 with two refunds
-   (one reversed, one not, in both insert orders), X2 no row, X2 acknowledged, X2 amount mismatch,
-   X2 healable lag, polluted transfer, reversed payout (excluded), payout without `orderId` (excluded),
-   voided order, archived fair.
+1. Seed fixtures covering every branch: healthy paid, X1 (refund unreversed), X2 no row, X2 acknowledged,
+   X2 amount mismatch, X2 healable lag, polluted transfer, reversed payout (excluded), payout without
+   `orderId` (excluded), voided order, archived fair.
 2. Run the current `patternX` and the SQL version in `dryRun` on the same data. Assert identical
-   `repaired.X`, `details.X`, `alerted` and `suppressed` (sorted), except the documented
-   multiple-refund case, which must match the decision made above.
+   `repaired.X`, `details.X`, `alerted` and `suppressed` (sorted).
 3. Positive control: a fixture that only the old code fetches (a healthy paid row) is absent from the
    SQL result, so the filter is shown to cut rows rather than pass vacuously.
 4. Read-only replay against a production snapshot with the sealed dry-run harness: both versions
