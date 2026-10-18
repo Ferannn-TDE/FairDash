@@ -304,6 +304,12 @@ export default function CheckoutPage() {
   }, [user])
 
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>({})
+
+  // Early delivery-area feedback (POST /api/orders/delivery-check). ADVISORY: the order route
+  // re-runs the same server decision before any charge, so a skipped or stale check can never
+  // let an out-of-range order through — it only spares the customer filling in the rest first.
+  const [areaCheck, setAreaCheck] = useState<{ state: 'idle' | 'checking' | 'ok' | 'out'; text?: string }>({ state: 'idle' })
+  const areaCheckSeq = useRef(0)
   const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
   const [orderShortId, setOrderShortId] = useState<string | null>(null)
@@ -346,16 +352,44 @@ export default function CheckoutPage() {
     // Places is unreliable on campus/dorm addresses, and a customer who has to correct the
     // city must be able to. `deliveryUnit` is never touched here: address_components has no
     // unit type, so the room/apartment is always the customer's to enter.
-    setForm(prev => ({
-      ...prev,
-      deliveryStreet: place.formatted_address ?? prev.deliveryStreet,
+    const next = {
+      ...form,
+      deliveryStreet: place.formatted_address ?? form.deliveryStreet,
       deliveryCity: get('locality') || get('sublocality') || get('administrative_area_level_2'),
       deliveryState: short('administrative_area_level_1'),
       deliveryZip: get('postal_code'),
-    }))
+    }
+    setForm(next)
+    checkDeliveryArea({ street: next.deliveryStreet, unit: next.deliveryUnit, city: next.deliveryCity, state: next.deliveryState, zip: next.deliveryZip })
     // A successful parse clears any stale per-field errors from a previous manual attempt.
     setFieldErrors(prev => ({ ...prev, deliveryStreet: undefined, deliveryCity: undefined, deliveryState: undefined, deliveryZip: undefined }))
   }
+
+  const checkDeliveryArea = useCallback(async (addr: { street: string; unit: string; city: string; state: string; zip: string }) => {
+    const seq = ++areaCheckSeq.current
+    if (!isSignedIn || !fair.id || validateDeliveryAddress(addr).length > 0) { setAreaCheck({ state: 'idle' }); return }
+    setAreaCheck({ state: 'checking' })
+    try {
+      const res = await fetch('/api/orders/delivery-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: fair.id, ...addr }),
+      })
+      const json = await res.json().catch(() => null)
+      if (seq !== areaCheckSeq.current) return // a newer check superseded this one
+      if (json?.success) {
+        setAreaCheck({ state: 'ok', text: `Within the delivery area (about ${json.data.distanceKm} km from the fair)` })
+      } else if (json?.error?.code === 'OUT_OF_DELIVERY_RANGE' || json?.error?.code === 'ADDRESS_NOT_FOUND') {
+        // This route's sentences are written for customers (the same reviewed exception as the
+        // order route below) — they name the distance and the radius, which is the actionable part.
+        setAreaCheck({ state: 'out', text: json.error.message })
+      } else {
+        setAreaCheck({ state: 'idle' }) // rate-limited / unavailable: say nothing; the order route decides
+      }
+    } catch {
+      if (seq === areaCheckSeq.current) setAreaCheck({ state: 'idle' })
+    }
+  }, [isSignedIn, fair.id])
 
   const validate = () => {
     if (!form.name.trim()) {
@@ -461,6 +495,10 @@ export default function CheckoutPage() {
           setFieldErrors(Object.fromEntries(fields.map(e => [FIELD_INPUT[e.field], e.message])))
           toast.error(message ?? 'Please check the delivery address')
           return
+        }
+        const code: string | undefined = json.error?.code
+        if (code === 'OUT_OF_DELIVERY_RANGE' || code === 'ADDRESS_NOT_FOUND') {
+          setAreaCheck({ state: 'out', text: message })
         }
         toast.error(message ?? 'Failed to create order — please try again')
         return
@@ -681,6 +719,7 @@ export default function CheckoutPage() {
                             onChange={val => {
                               setForm(prev => ({ ...prev, deliveryStreet: val }))
                               setFieldErrors(prev => ({ ...prev, deliveryStreet: undefined }))
+                              setAreaCheck({ state: 'idle' })
                             }}
                             onPlaceSelect={handlePlaceSelect}
                           />
@@ -716,7 +755,8 @@ export default function CheckoutPage() {
                           <input
                             name="deliveryCity"
                             value={form.deliveryCity}
-                            onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryCity: undefined })) }}
+                            onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryCity: undefined })); setAreaCheck({ state: 'idle' }) }}
+                            onBlur={() => checkDeliveryArea({ street: form.deliveryStreet, unit: form.deliveryUnit, city: form.deliveryCity, state: form.deliveryState, zip: form.deliveryZip })}
                             className={`${inputClass} ${fieldErrors.deliveryCity ? 'border-red-500 focus:border-red-500' : ''}`}
                             placeholder="Edwardsville"
                           />
@@ -742,7 +782,8 @@ export default function CheckoutPage() {
                           <input
                             name="deliveryZip"
                             value={form.deliveryZip}
-                            onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryZip: undefined })) }}
+                            onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryZip: undefined })); setAreaCheck({ state: 'idle' }) }}
+                            onBlur={() => checkDeliveryArea({ street: form.deliveryStreet, unit: form.deliveryUnit, city: form.deliveryCity, state: form.deliveryState, zip: form.deliveryZip })}
                             className={`${inputClass} ${fieldErrors.deliveryZip ? 'border-red-500 focus:border-red-500' : ''}`}
                             placeholder="62026"
                             inputMode="numeric"
@@ -751,6 +792,14 @@ export default function CheckoutPage() {
                           {fieldErrors.deliveryZip && <p className="mt-1 text-xs text-red-400">{fieldErrors.deliveryZip}</p>}
                         </div>
                       </div>
+                      {areaCheck.state !== 'idle' && (
+                        <p
+                          role="status"
+                          className={`mt-3 text-xs ${areaCheck.state === 'out' ? 'text-red-400' : areaCheck.state === 'ok' ? 'text-emerald-400' : 'text-[#A1A1A1]'}`}
+                        >
+                          {areaCheck.state === 'checking' ? 'Checking the delivery area…' : areaCheck.text}
+                        </p>
+                      )}
                     </APIProvider>
                   </div>
                 )}

@@ -1,16 +1,19 @@
 import { db } from './db'
 import { VendorStatus } from '@prisma/client'
+import { deliveryAreaConfigured } from './delivery-radius'
 
 export interface GoLiveChecklist {
   hasActiveVendor:    boolean
   hasStripeVendor:    boolean
   hasFulfillmentMode: boolean
   hasCoords:          boolean
+  /** True when home delivery is off, or on with fair coordinates + a radius (lib/delivery-radius). */
+  hasDeliveryArea:    boolean
   canGoLive:          boolean
 }
 
 // The ordered checklist keys, so the gate and the UI iterate the same set.
-export const GO_LIVE_KEYS = ['hasActiveVendor', 'hasStripeVendor', 'hasFulfillmentMode', 'hasCoords'] as const
+export const GO_LIVE_KEYS = ['hasActiveVendor', 'hasStripeVendor', 'hasFulfillmentMode', 'hasCoords', 'hasDeliveryArea'] as const
 
 /**
  * Authorization-agnostic core: a fair's go-live readiness. SINGLE source of truth
@@ -37,12 +40,18 @@ export async function getGoLiveChecklist(
     ? fulfillmentConfig.boothPickupEnabled || fulfillmentConfig.curbsideEnabled || fulfillmentConfig.homeDeliveryEnabled
     : false
   const hasCoords = coords.eventLat !== null && coords.eventLng !== null
+  // Home delivery switched on before the area gate existed would otherwise refuse every order
+  // silently — surface it here, with the same predicate the order route uses.
+  const hasDeliveryArea = !fulfillmentConfig?.homeDeliveryEnabled || deliveryAreaConfigured({
+    eventLat: coords.eventLat, eventLng: coords.eventLng, homeDeliveryRadiusKm: fulfillmentConfig.homeDeliveryRadiusKm,
+  })
 
   return {
     hasActiveVendor,
     hasStripeVendor,
     hasFulfillmentMode,
     hasCoords,
-    canGoLive: hasActiveVendor && hasStripeVendor && hasFulfillmentMode && hasCoords,
+    hasDeliveryArea,
+    canGoLive: hasActiveVendor && hasStripeVendor && hasFulfillmentMode && hasCoords && hasDeliveryArea,
   }
 }

@@ -107,6 +107,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'date-fns-containment',   file: 'scripts/date-fns-containment-guard.ts' },
   { group: 'correctness', name: 'date-bounds',            file: 'scripts/date-bounds-guard.ts' },
   { group: 'correctness', name: 'delivery-address',       file: 'scripts/delivery-address-guard.ts' },
+  { group: 'correctness', name: 'delivery-radius',        file: 'scripts/delivery-radius-guard.ts' },
   { group: 'correctness', name: 'ready-lane-eviction',    file: 'scripts/ready-lane-eviction-guard.ts' },
   { group: 'correctness', name: 'delivered-timeline',     file: 'scripts/delivered-timeline-guard.ts' },
   { group: 'correctness', name: 'vehicle-snapshot',       file: 'scripts/vehicle-snapshot-guard.ts' },

@@ -348,7 +348,7 @@ export default function FulfillmentConfigPage() {
                       className={INPUT}
                     />
                   </Field>
-                  <Field label="Max Radius (km)">
+                  <Field label="Delivery radius (km, straight-line from the fair)">
                     <input
                       type="number"
                       step="0.5"

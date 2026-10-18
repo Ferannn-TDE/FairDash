@@ -592,6 +592,13 @@ model Order {
   deliveryCity   String?
   deliveryState  String? // 2-letter code, from administrative_area_level_1 when autocomplete fires
   deliveryZip    String?
+  // Server-geocoded from the address above (lib/delivery-radius.ts) — never from the browser.
+  // NULL on orders placed before radius enforcement. deliveryGeoPrecision is Google's
+  // location_type: ROOFTOP / RANGE_INTERPOLATED are a real point; GEOMETRIC_CENTER /
+  // APPROXIMATE mean the pin may be off, and the runner view says so.
+  deliveryLat          Float?
+  deliveryLng          Float?
+  deliveryGeoPrecision String?
 
   // Operator service charge collected at checkout (goes to event operator, not FairSynq)
   serviceCharge Float?

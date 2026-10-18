@@ -30,7 +30,7 @@ const ZERO_STATS: DashboardStats = {
   activeVendors: 0, totalVendors: 0, activeRunners: 0,
 }
 const EMPTY_CHECKLIST: GoLiveChecklist = {
-  hasActiveVendor: false, hasStripeVendor: false, hasFulfillmentMode: false, hasCoords: false, canGoLive: false,
+  hasActiveVendor: false, hasStripeVendor: false, hasFulfillmentMode: false, hasCoords: false, hasDeliveryArea: false, canGoLive: false,
 }
 
 interface DashboardEvent {
@@ -139,6 +139,7 @@ function GoLiveChecklist({
     { label: 'At least 1 vendor with Stripe verified', pass: checklist.hasStripeVendor },
     { label: 'Fulfillment config has ≥1 mode enabled', pass: checklist.hasFulfillmentMode },
     { label: 'Event location coordinates set', pass: checklist.hasCoords },
+    { label: 'Home delivery has a radius (or is off)', pass: checklist.hasDeliveryArea },
   ]
   const canGo = checklist.canGoLive && !busy
 

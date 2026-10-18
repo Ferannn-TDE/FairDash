@@ -8,6 +8,7 @@ import { db } from '@/lib/db'
 import { SELLABLE } from '@/lib/menu/on-menu'
 import { stripe } from '@/lib/stripe'
 import { validateDeliveryAddress } from '@/lib/delivery-address'
+import { decideDeliveryRadius, googleGeocoder } from '@/lib/delivery-radius'
 import { deriveEventLiveState, formatEventDateRange } from '@/lib/event-date'
 import { hasPreviewAccess } from '@/lib/preview-access'
 import { success, apiError } from '@/lib/api-response'
@@ -498,6 +499,28 @@ export async function POST(req: NextRequest) {
       },
     }
 
+    // ── Delivery radius — the LAST check before money exists ─────────────────────
+    // Server geocode of the stored address, straight-line distance from the fair, fail closed on
+    // missing config or an unreachable geocoder (lib/delivery-radius). Placed after every other
+    // validation so a geocode is only spent on an otherwise-valid order, and before
+    // paymentIntents.create so an out-of-range order never charges anyone. The stored
+    // coordinates come from THIS decision, never from the request body.
+    let deliveryGeo: { lat: number; lng: number; precision: string } | null = null
+    if (fulfillmentType === FulfillmentType.HOME_DELIVERY) {
+      const radius = await decideDeliveryRadius(
+        { eventLat: event.eventLat, eventLng: event.eventLng, homeDeliveryRadiusKm: config?.homeDeliveryRadiusKm ?? null },
+        { street: deliveryStreet!.trim(), city: deliveryCity!.trim(), state: deliveryState?.trim() || null, zip: deliveryZip!.trim() },
+        googleGeocoder,
+      )
+      if (!radius.ok) {
+        if (radius.code === 'GEOCODER_UNAVAILABLE' || radius.code === 'DELIVERY_NOT_CONFIGURED') {
+          logger.error('[orders] home delivery refused', { eventId, code: radius.code })
+        }
+        throw new ApiError(radius.message, radius.status, radius.code)
+      }
+      deliveryGeo = { lat: radius.point.lat, lng: radius.point.lng, precision: radius.point.precision }
+    }
+
     const paymentIntent = await stripe.paymentIntents.create(piParams)
 
     // ── 6. Write Order + OrderItems + VendorOrderStatuses atomically ──────────
@@ -528,6 +551,9 @@ export async function POST(req: NextRequest) {
           deliveryCity: deliveryCity?.trim() || null,
           deliveryState: deliveryState?.trim().toUpperCase() || null,
           deliveryZip: deliveryZip?.trim() || null,
+          deliveryLat: deliveryGeo?.lat ?? null,
+          deliveryLng: deliveryGeo?.lng ?? null,
+          deliveryGeoPrecision: deliveryGeo?.precision ?? null,
           stripePaymentIntentId: paymentIntent.id,
           orderItems: {
             create: lineItems.map(item => ({

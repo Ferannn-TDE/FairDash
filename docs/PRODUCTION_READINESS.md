@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 0/34 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 8/34 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/24 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 0/11 |
@@ -69,15 +69,15 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 ### 1.1 Delivery radius enforcement
 `homeDeliveryRadiusKm` exists but nothing reads it at order time, and delivery addresses carry no coordinates.
 
-- [ ] Checkout sends the Places `place_id`. `POST /api/orders` geocodes it **on the server**. Coordinates from the browser are never trusted.
-- [ ] New server-only key `GOOGLE_GEOCODING_API_KEY`, restricted to the Geocoding API (no referrer restriction, never `NEXT_PUBLIC`). The browser Maps key stays referrer-restricted.
-- [ ] Straight-line (haversine) check from `eventLat/eventLng` to the address against `homeDeliveryRadiusKm`, **before** the PaymentIntent is created.
-- [ ] The same check runs when the address is picked at checkout, for early feedback. The order route remains the authority.
-- [ ] Copy says "within X km of the fair (straight-line distance)" in the checkout error and in the radius setting.
-- [ ] Store `deliveryLat/deliveryLng` on the order. No backfill of old orders.
-- [ ] Fail closed on config: home delivery can't be enabled unless the fair has coordinates and a radius. Shown as a fair-readiness item.
-- [ ] Geocoding call has a timeout. If Google is unreachable, the order fails with "We can't verify your address right now. Try pickup or retry."
-- [ ] Test matrix: Springfield fair + Edwardsville address rejected with no PaymentIntent; in-radius accepted; missing `place_id` rejected; fair without coordinates has no home delivery; geocoder timeout rejected.
+- [x] `POST /api/orders` geocodes the stored street/city/state/ZIP **on the server**, pinned to the ZIP (`components=postal_code:…`). Coordinates from the browser are never trusted. *(Changed from `place_id`: checkout keeps fields editable and dorm addresses are often typed, so a `place_id` is often missing or stale.)*
+- [ ] New server-only key `GOOGLE_GEOCODING_API_KEY`, restricted to the Geocoding API (no referrer restriction, never `NEXT_PUBLIC`). The browser Maps key stays referrer-restricted. *(Code reads it and the guard enforces server-only; **you** create it in Google Cloud and set it on Vercel Production + Preview. Until then, home-delivery orders are refused.)*
+- [x] Straight-line (haversine) check from `eventLat/eventLng` to the address against `homeDeliveryRadiusKm`, **before** the PaymentIntent is created.
+- [x] The same check runs when the address is picked at checkout, for early feedback. The order route remains the authority.
+- [x] Copy says "within X km of the fair (straight-line distance)" in the checkout error and in the radius setting.
+- [x] Store `deliveryLat/deliveryLng` on the order, plus `deliveryGeoPrecision` (Google `location_type`); approximate results are accepted and the runner view says "Location approximate". No backfill of old orders.
+- [x] Fail closed on config: home delivery can't be enabled unless the fair has coordinates and a radius. Shown as a fair-readiness item.
+- [x] Geocoding call has a timeout. If Google is unreachable, the order fails with "We can't verify your address right now. Try pickup or retry."
+- [x] Test matrix (`scripts/delivery-radius-guard.ts`, 62 checks, mutation-tested): Springfield fair + Edwardsville address rejected with no PaymentIntent; in-radius accepted; missing `place_id` rejected; fair without coordinates has no home delivery; geocoder timeout rejected.
 
 ### 1.2 Delivery fee on cancel-before-pickup (CURRENT_STATE #18)
 Policy: refund the delivery fee on any cancel where no runner earned anything (no `RunnerEarning`), whoever cancelled. On a multi-vendor order, only when every vendor portion is cancelled. Service fee stays non-refundable.

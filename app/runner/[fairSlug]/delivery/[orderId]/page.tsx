@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import { toastError } from '@/lib/toast-error'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
 import { formatDeliveryAddressLines, deliveryMapsQuery, toDeliveryAddress as addr } from '@/lib/delivery-address'
+import { isApproximate } from '@/lib/geo-precision'
 import { downscaleImage } from '@/lib/downscale-image'
 import { UPLOAD_MAX_MB, isWithinUploadCap } from '@/lib/upload-limits'
 
@@ -29,6 +30,7 @@ interface DeliveryOrder {
   deliveryStreet?: string | null
   deliveryCity?: string | null
   deliveryZip?: string | null
+  deliveryGeoPrecision?: string | null
   vehicleMake?: string | null
   vehicleColor?: string | null
   vehiclePlate?: string | null
@@ -396,6 +398,12 @@ export default function DeliveryPage() {
                   query deliberately drops the unit (it degrades geocoding). */}
               <p className="text-white font-semibold text-sm">{formatDeliveryAddressLines(addr(order))?.line1}</p>
               <p className="text-text-gray text-xs">{formatDeliveryAddressLines(addr(order))?.line2}</p>
+              {/* The server's geocode only got close (Google's GEOMETRIC_CENTER / APPROXIMATE —
+                  typical for a dorm or a new building), so a map pin may sit off the door. The
+                  written address above is the truth; say so rather than let the pin mislead. */}
+              {isApproximate(order.deliveryGeoPrecision) && (
+                <p className="text-amber-400 text-xs mt-1">Location approximate — check the written address and unit.</p>
+              )}
               <a href={`https://maps.google.com/?q=${encodeURIComponent(deliveryMapsQuery(addr(order)) ?? '')}`} target="_blank" rel="noopener noreferrer" className="text-neon-pink text-xs mt-1 inline-block hover:underline">Open Maps</a></div>
           </div>
         )}

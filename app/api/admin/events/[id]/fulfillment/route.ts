@@ -4,6 +4,7 @@ import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { checkRunnerFeeActivation } from '@/lib/runner-fee-gate'
+import { deliveryAreaConfigured } from '@/lib/delivery-radius'
 import { CurbsideMethod } from '@prisma/client'
 
 // GET /api/admin/events/[id]/fulfillment
@@ -97,6 +98,26 @@ export async function PATCH(
           'CURBSIDE_CONFIG_INCOMPLETE'
         )
       }
+    }
+
+    // ── Home-delivery AREA gate ─────────────────────────────────────────────────
+    // Home delivery needs a delivery area: the fair's coordinates and a positive radius. Judged
+    // on the state this write WOULD produce, with the SAME predicate the order route uses
+    // (lib/delivery-radius), so a fair can't be switched on into a state every order refuses.
+    if (body.homeDeliveryRadiusKm != null && (!Number.isFinite(body.homeDeliveryRadiusKm) || body.homeDeliveryRadiusKm <= 0)) {
+      throw new ApiError('homeDeliveryRadiusKm must be a positive number of km', 400, 'VALIDATION_ERROR')
+    }
+    const homeDeliveryWouldBeOn = body.homeDeliveryEnabled ?? existing?.homeDeliveryEnabled ?? false
+    if (homeDeliveryWouldBeOn && !deliveryAreaConfigured({
+      eventLat: event.eventLat,
+      eventLng: event.eventLng,
+      homeDeliveryRadiusKm: body.homeDeliveryRadiusKm !== undefined ? body.homeDeliveryRadiusKm : existing?.homeDeliveryRadiusKm ?? null,
+    })) {
+      throw new ApiError(
+        'Home delivery needs the fair’s coordinates (Settings) and a delivery radius in km (straight-line distance from the fair) before it can be on.',
+        400,
+        'DELIVERY_AREA_INCOMPLETE',
+      )
     }
 
     // ── Runner-fee ACTIVATION gate ──────────────────────────────────────────────
