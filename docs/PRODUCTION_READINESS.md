@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 8/34 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 8/38 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/24 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 0/11 |
@@ -112,6 +112,18 @@ Root cause: `StripeConnectCard` maps "onboarding complete but transfers not acti
 ### 1.5 Tracking map centering (basic fix)
 - [ ] Center on `deliveryLat/Lng` when present, otherwise on the fair coordinates. Never the world view.
 - [ ] No coordinates at all: show no map rather than a globe.
+
+### 1.7 Rate limits that match their policies
+`lib/ratelimit.ts` builds one shared limiter (30/min), so the per-policy numbers in `RATE_LIMITS` are never read.
+
+- [ ] Each policy uses its own limit from `RATE_LIMITS`: login 5/min, refund 5/min, orderCreate 10/min, deliveryCheck 10/min (vendorStatus 30, publicRoutes 60).
+- [ ] Test proving each limit is enforced at its own number (N allowed, N+1 refused, per policy), with a positive control that a different policy's key is unaffected.
+
+### 1.8 Code can't deploy ahead of its migration
+Migrations are applied by hand; Prisma reads every column, so code that ships before its migration breaks every read of that table.
+
+- [ ] `/api/health` reports pending Prisma migrations against the live database (names + count), and is non-200 when any are pending.
+- [ ] A deploy-time or gate check fails when the build's migrations folder has entries the target database hasn't applied; the uptime monitor (2.3) alerts on it.
 
 ### 1.6 Card statement descriptor
 Charges are created on the platform account (separate charges & transfers, no `on_behalf_of`), so the FairSynq prefix appears.
