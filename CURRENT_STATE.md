@@ -27,7 +27,7 @@
   `1a56a8d` (ghost-filter walk — three live revenue violations).
 
 - **The served fingerprint is re-measurable from this shell.** Command that works, verbatim:
-  `curl -s https://fair-synq.vercel.app/api/health`. **This corrects a claim that stood here for
+  `curl -s https://www.fairsynq.com/api/health`. **This corrects a claim that stood here for
   several sessions — that this shell cannot reach prod. It can.** The claim was inherited rather
   than tested: "cannot fetch" is true of *git* (`git ls-remote` → `Permission denied (publickey)`)
   and someone generalised it to "cannot reach prod", which made an easily-measured fact look
@@ -50,7 +50,7 @@
 
   Read them as two facts:
   ```
-  curl -s https://fair-synq.vercel.app/api/health | jq '{web: .commit, worker: .checks.worker}'
+  curl -s https://www.fairsynq.com/api/health | jq '{web: .commit, worker: .checks.worker}'
   ```
   `worker.commit: null` means a worker predating this feature (honestly unknown — never
   guessed, never the web SHA); `"unknown"` means it is running a build with no git provenance.
@@ -673,6 +673,27 @@ legacy `street === city` rows are unchanged and were deliberately not backfilled
     (through-line section). **This is the root of item 12, item 13's class, and the 2026-08-09
     cancel bug** — highest leverage on this list, and the only one that is a real refactor with
     tests rather than a patch.
+
+### Pre-launch known issues (added 2026-10-18)
+
+Found during the www domain check, on a production test order (`cmvdaamtr000214gn4yq71yxo`, fair
+`test-domain-check`) that auto-cancelled after the 10-minute accept timeout. Both match the earlier
+auto-cancelled delivery orders in the database (four on 2026-07-21 and 2026-08-01), so they are
+long-standing, not new.
+
+18. **Auto-cancel keeps the delivery fee.** The refund engine (`lib/process-refund.ts`) refunds only
+    the vendor's food subtotal. On the test order the customer paid $54.49 ($35.00 food, $12.99
+    delivery, $3.00 tip, service fee) and got $35.00 back from the engine; the $3.00 tip came back
+    separately via Pattern R (`lib/tip-refund.ts`). The **$12.99 delivery fee is never refunded**,
+    although nothing was delivered and no runner or organizer earned it. Keeping the service fee is a
+    recorded decision; keeping the delivery fee is not. Needs a policy call (refund it on any
+    cancel before pickup?) and then an engine change with a reconciliation test.
+19. **`Cancellation.refundIssued` stays `false` (and `refundAmount` null) after a refund.** Not a
+    money bug: the columns are deprecated and deliberately no longer written (`workers/order-worker.ts`,
+    `app/api/orders/[id]/cancel/route.ts`); the organizer order route derives both from COMPLETED
+    `Refund` rows. But `GET /api/orders/[id]` still returns the raw `cancellation` row, so any client
+    that reads it sees "no refund". Either drop the columns in a migration or derive them on that
+    route too, before something starts rendering them.
 
 ## 7. Known partials and open questions
 

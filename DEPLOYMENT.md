@@ -4,225 +4,159 @@
 
 | Service | Platform | What it runs |
 |---------|----------|-------------|
-| Frontend + API routes | **Vercel** (free Hobby) | Next.js app — React SPA + all `/api/*` serverless functions |
-| Webhook server + worker | **Render** (free tier) | Express server handling Clerk/Stripe webhooks + BullMQ order-timeout worker |
-| Database | **Supabase** | Existing PostgreSQL instance — no changes needed |
+| Web app, API routes, webhooks | **Vercel** (project `fair-synq`) | Next.js app — every `/api/*` route, including the Stripe, Stripe Connect and Clerk webhooks |
+| Worker | **Railway** | `npm run worker` (`workers/index.ts`) — BullMQ order jobs (accept timeouts, refunds, payouts) and the reconciler sweep |
+| Queue | **Upstash Redis** | BullMQ queue (`REDIS_URL`) and rate limiting (`UPSTASH_REDIS_REST_*`) |
+| Database + storage | **Supabase** | PostgreSQL and the document/photo storage buckets |
+| Auth | **Clerk** | Sign-in for customers, vendors, runners, organizers and admins |
+| Payments | **Stripe** | Separate charges and transfers, Connect payouts to vendors, runners and organizers |
 
-### Why two services?
+### Domains
 
-The Next.js API routes (`/api/orders`, `/api/vendors`, etc.) use `@clerk/nextjs/server` and `next/headers` — APIs that are only available inside the Next.js runtime. Vercel runs them natively as serverless functions.
+- **`https://www.fairsynq.com` is canonical.** `NEXT_PUBLIC_APP_URL` must be exactly this.
+- `fairsynq.com` 308s to www (Vercel domain setting).
+- `fair-synq.vercel.app` 308s to www, path and query kept (host-matched redirects in `vercel.json`).
+- Per-deployment URLs (`fair-synq-<hash>-…vercel.app`) are not redirected and stay behind Vercel
+  deployment protection.
 
-The BullMQ worker (`workers/order-worker.ts`) processes delayed jobs (e.g. marking an uncollected order after 15 minutes) and must run as a **persistent process** — something serverless functions can't do. The webhook handlers are co-located on the same Render service for simplicity.
+### Why a separate worker?
+
+BullMQ delayed jobs (for example the 10-minute vendor accept timeout) and the reconciler sweep need
+a persistent process, which serverless functions are not. The worker shares the database, Redis
+and Stripe credentials with the web app but serves no HTTP traffic. Webhooks are handled by the
+Next.js routes on Vercel; the worker only consumes the jobs those routes enqueue.
 
 ---
 
 ## Prerequisites
 
-- GitHub repo with the FairSynq codebase pushed to `main`
-- [Supabase](https://supabase.com) project already set up (existing DB — do not create a new one)
-- [Clerk](https://clerk.com) application created
-- [Stripe](https://stripe.com) account with Connect enabled
-- [Upstash](https://upstash.com) Redis instance (free tier, for BullMQ)
-- [Firebase](https://firebase.google.com) project with Realtime Database enabled
+- GitHub repo `Ferannn-TDE/FairDash`, deploying from `main`
+- Supabase project (existing DB — do not create a new one)
+- Clerk application
+- Stripe account with Connect enabled
+- Upstash Redis database
+- Firebase project with Realtime Database enabled
+- Google Maps API key (Places autocomplete on checkout)
 
 ---
 
-## Step 1 — Get your Supabase connection strings
+## Step 1 — Database
 
-1. Open [Supabase Dashboard](https://supabase.com/dashboard) → your project
-2. Go to **Settings → Database**
-3. Scroll to **Connection string** section
-4. Copy two strings:
+1. Supabase Dashboard → your project → **Settings → Database → Connection string**.
+2. Copy two strings:
 
-   **Transaction pooler** (for Vercel serverless functions):
+   **Transaction pooler** (Vercel functions) → `DATABASE_URL`:
    ```
    postgresql://postgres.YOURREF:PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true
    ```
 
-   **Direct connection** (for Render persistent server + Prisma migrations):
+   **Direct connection** (Prisma migrations, Railway worker) → `DIRECT_URL`:
    ```
    postgresql://postgres.YOURREF:PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres
    ```
 
-5. Run migrations against the direct URL before deploying:
+3. Run migrations against the direct URL before deploying:
    ```bash
    DIRECT_URL="<direct-url>" DATABASE_URL="<pooler-url>" npx prisma migrate deploy
    ```
 
 ---
 
-## Step 2 — Deploy Frontend to Vercel
+## Step 2 — Vercel (web app)
 
-### 2a. Connect repo
-
-1. Go to [vercel.com/new](https://vercel.com/new)
-2. Import your GitHub repository
-3. Vercel auto-detects Next.js — no framework changes needed
-4. Leave **Build Command** and **Output Directory** as defaults (overridden by `vercel.json`)
-
-### 2b. Set environment variables
-
-In **Project Settings → Environment Variables**, add all variables from the `FRONTEND (VERCEL)` section of `.env.example`:
-
-| Variable | Where to get it |
-|----------|----------------|
-| `NEXT_PUBLIC_APP_URL` | Your Vercel deployment URL (e.g. `https://fairdash.vercel.app`) |
-| `NEXT_PUBLIC_API_URL` | Your Render service URL (e.g. `https://fairdash-api.onrender.com`) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → API Keys |
-| `CLERK_SECRET_KEY` | Clerk Dashboard → API Keys |
-| `CLERK_WEBHOOK_SECRET` | Clerk Dashboard → Webhooks (set after Step 3) |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe Dashboard → Developers → API keys |
-| `STRIPE_SECRET_KEY` | Stripe Dashboard → Developers → API keys |
-| `STRIPE_WEBHOOK_SECRET` | Stripe Dashboard → Webhooks (set after Step 4) |
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Cloud Console → APIs & Services |
-| `NEXT_PUBLIC_FIREBASE_*` | Firebase Console → Project Settings → General |
-| `FIREBASE_PROJECT_ID` | Firebase Console → Project Settings → Service Accounts |
-| `FIREBASE_CLIENT_EMAIL` | Firebase Console → Project Settings → Service Accounts |
-| `FIREBASE_PRIVATE_KEY` | Firebase Console → Generate new private key |
-| `DATABASE_URL` | Supabase **Transaction pooler** URL (port 6543) |
-| `DIRECT_URL` | Supabase **Direct** URL (port 5432) |
-| `REDIS_URL` | Upstash Console → your Redis database |
-
-### 2c. Deploy
-
-Click **Deploy**. Vercel will install dependencies, run `npx prisma generate && next build`, and deploy.
-
----
-
-## Step 3 — Deploy Backend to Render
-
-### 3a. Create web service
-
-1. Go to [dashboard.render.com](https://dashboard.render.com) → **New → Web Service**
-2. Connect your GitHub repository
-3. Configure:
-   - **Name**: `fairdash-api`
-   - **Branch**: `main`
-   - **Runtime**: Node
-   - **Build Command**: `npm install && npx prisma generate`
-   - **Start Command**: `npx ts-node --compiler-options '{"module":"CommonJS"}' server.ts`
-   - **Plan**: Free
-
-   > Alternatively, push `render.yaml` to your repo and use **New → Blueprint** to auto-configure everything.
-
-### 3b. Set environment variables
-
-In the Render service dashboard → **Environment**, add:
+1. Import the repo in Vercel. Next.js is auto-detected; `npm run build` runs
+   `prisma generate && next build`.
+2. **Project Settings → Environment Variables** — add everything in the `FRONTEND (VERCEL)` section
+   of `.env.example`. The ones that are easy to get wrong:
 
 | Variable | Value |
 |----------|-------|
-| `NODE_ENV` | `production` |
-| `DATABASE_URL` | Supabase **transaction pooler** URL (port 6543) |
-| `DIRECT_URL` | Supabase **direct** URL (port 5432) — Render uses this for the persistent connection |
-| `CLERK_SECRET_KEY` | Same as Vercel |
-| `CLERK_WEBHOOK_SECRET` | From Clerk Dashboard → Webhooks |
-| `STRIPE_SECRET_KEY` | Same as Vercel |
-| `STRIPE_WEBHOOK_SECRET` | From Stripe Dashboard → Webhooks |
-| `FIREBASE_PROJECT_ID` | Same as Vercel |
-| `FIREBASE_CLIENT_EMAIL` | Same as Vercel |
-| `FIREBASE_PRIVATE_KEY` | Same as Vercel |
-| `NEXT_PUBLIC_FIREBASE_DATABASE_URL` | Firebase Realtime Database URL |
-| `REDIS_URL` | Upstash Redis URL |
-| `FRONTEND_URL` | Your Vercel URL (e.g. `https://fairdash.vercel.app`) |
+| `NEXT_PUBLIC_APP_URL` | `https://www.fairsynq.com` (no trailing slash). Production only today — preview deploys need their own value or Connect onboarding links throw. |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret of the Stripe platform endpoint (Step 4) |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Signing secret of the Stripe Connect event destination (Step 4) |
+| `CLERK_WEBHOOK_SECRET` | Signing secret of the Clerk webhook (Step 5) |
+| `REDIS_URL` | Upstash `rediss://` URL — the same value as on Railway |
+| `HEALTH_WORKER_STALE_SEC` | `360` — must exceed the worker's sweep interval |
 
-### 3c. Deploy
-
-Click **Create Web Service**. Render will build and deploy. The health check endpoint at `/health` confirms it's running.
+3. **Domains:** add `www.fairsynq.com` and `fairsynq.com` (apex redirects to www).
+4. Deploy. `NEXT_PUBLIC_*` values are baked in at build time, so after changing one, redeploy
+   without the build cache.
 
 ---
 
-## Step 4 — Configure Clerk Webhooks
+## Step 3 — Railway (worker)
 
-1. Open [Clerk Dashboard](https://dashboard.clerk.com) → your application → **Webhooks**
-2. Click **Add Endpoint**
-3. Set **Endpoint URL** to:
-   ```
-   https://fairdash-api.onrender.com/api/webhooks/clerk
-   ```
-4. Subscribe to events: `user.created`, `user.updated`, `user.deleted`
-5. Copy the **Signing Secret** → add it as `CLERK_WEBHOOK_SECRET` in both Vercel and Render
-
----
-
-## Step 5 — Configure Stripe Webhooks
-
-1. Open [Stripe Dashboard](https://dashboard.stripe.com) → **Developers → Webhooks**
-2. Click **Add endpoint**
-3. Set **Endpoint URL** to:
-   ```
-   https://fairdash-api.onrender.com/api/webhooks/stripe
-   ```
-4. Subscribe to events: `payment_intent.succeeded`, `payment_intent.payment_failed`, `transfer.created`, `transfer.paid`
-5. Copy the **Signing secret** → add it as `STRIPE_WEBHOOK_SECRET` in both Vercel and Render
+1. Create a service from the same repo, start command `npm run worker`.
+2. Variables: the shared values listed in the `WORKER (RAILWAY)` section of `.env.example`, plus the
+   `WORKER_*` throttle settings (`timer` scheduler, 120s sweep — sized for the Upstash free tier;
+   see `lib/worker-config.ts`).
+3. Deployment settings: `RAILWAY_DEPLOYMENT_OVERLAP_SECONDS=0` and
+   `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=30`, so two workers never sweep at once during a deploy and
+   the old one finishes its in-flight sweep.
+4. On boot the worker logs a `[Worker] config …` line with every throttle value. Check it after
+   changing a variable.
 
 ---
 
-## Step 6 — Verify everything is connected
+## Step 4 — Stripe webhooks
 
-### Health checks
+Two separate destinations, each with its own signing secret:
+
+| Destination | URL | Secret |
+|-------------|-----|--------|
+| Platform endpoint (v1 snapshot events: `payment_intent.*`, `charge.*` incl. refunds and disputes) | `https://www.fairsynq.com/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` |
+| Connect event destination (v2 thin events: account requirements and capabilities) | `https://www.fairsynq.com/api/stripe/connect-webhook` | `STRIPE_CONNECT_WEBHOOK_SECRET` |
+
+To move a destination to a new URL, **edit it in place** — creating a new one issues a new
+signing secret that no longer matches Vercel.
+
+Also register `www.fairsynq.com` and `fairsynq.com` as payment method domains (Apple Pay, Google
+Pay, Link).
+
+---
+
+## Step 5 — Clerk webhook
+
+Clerk Dashboard → **Webhooks** → endpoint `https://www.fairsynq.com/api/webhooks/clerk`. The
+handler acts on `user.created`, `user.updated`, `user.deleted` and `session.created` and returns
+200 for anything else. Copy the signing secret into
+`CLERK_WEBHOOK_SECRET`. As with Stripe, change the URL in place rather than recreating the endpoint.
+
+---
+
+## Step 6 — Verify
 
 ```bash
-# Render backend
-curl https://fairdash-api.onrender.com/health
-# Expected: {"status":"ok","service":"fairdash-api","timestamp":"..."}
-
-# Vercel frontend
-curl https://fairdash.vercel.app/api/health
-# Expected: {"status":"ok"}
+curl -s https://www.fairsynq.com/api/health | jq '{status, web: .commit, checks, flags}'
 ```
 
-### Database
+Expect `status: "ok"`, `database` and `redis` `ok`, and `worker.status: "ok"` with a recent
+`lastSweepAt`. There are two fingerprints: `.commit` is the web build, `.checks.worker.commit` is
+the Railway worker — check both after a deploy.
 
-```bash
-curl https://fairdash.vercel.app/api/test-db
-# Expected: {"success":true,...}
-```
-
-### Clerk webhook (test from Clerk Dashboard)
-
-Go to Clerk Dashboard → Webhooks → your endpoint → **Send test event** → `user.created`
-Check Render logs for: `[Clerk Webhook] user.created → synced user ...`
-
-### Stripe webhook (test from Stripe Dashboard)
-
-Go to Stripe Dashboard → Webhooks → your endpoint → **Send test webhook** → `payment_intent.succeeded`
-Check Render logs for: `[Stripe Webhook] payment_intent.succeeded → ...`
+Webhooks: send a test event from each dashboard (Stripe, Stripe Connect destination "ping", Clerk)
+and confirm a 200 for the matching path on `www.fairsynq.com` in Vercel's request logs.
 
 ---
 
 ## Troubleshooting
 
-### Render service sleeps after 15 minutes (free tier)
+### Worker shows `stale` on /api/health
 
-The Render free tier spins down inactive services. This is acceptable for the webhook server (Clerk/Stripe will retry failed deliveries), but means the BullMQ worker will be offline during sleep.
-
-**Fix**: Use [UptimeRobot](https://uptimerobot.com) (free) to ping `https://fairdash-api.onrender.com/health` every 10 minutes, keeping the service alive.
-
-### Build fails because `ts-node` or `prisma` not found
-
-The Render build command uses `npm install --include=dev` to ensure `ts-node`, `prisma`, and TypeScript type packages are available even when `NODE_ENV=production`. This is already set in `render.yaml`. If you created the service manually, make sure your **Build Command** is:
-```
-npm install --include=dev && npx prisma generate
-```
+The worker writes a heartbeat to Redis on every sweep. Stale means it has not swept within
+`HEALTH_WORKER_STALE_SEC`: check Railway logs for the boot `[Worker] config` line and sweep
+summaries, and confirm `REDIS_URL` is identical on Vercel and Railway.
 
 ### FIREBASE_PRIVATE_KEY line breaks
 
-Firebase private keys contain literal `\n` characters. When pasting into Render/Vercel, paste the raw key with actual newlines (use the multi-line env var editor) or wrap in quotes: `"-----BEGIN RSA PRIVATE KEY-----\nMII...\n-----END RSA PRIVATE KEY-----\n"`.
+Firebase private keys contain literal `\n` characters. Paste the raw key with real newlines (use the
+multi-line env var editor) or wrap it in quotes:
+`"-----BEGIN RSA PRIVATE KEY-----\nMII...\n-----END RSA PRIVATE KEY-----\n"`.
 
-### CORS errors from frontend
+### Connect onboarding link fails
 
-Check that `FRONTEND_URL` on Render exactly matches your Vercel deployment URL (no trailing slash). If using a custom domain, update `FRONTEND_URL` to the custom domain.
-
-### Prisma migration in CI
-
-Run migrations manually before deploying:
-```bash
-DATABASE_URL="<pooler-url>" DIRECT_URL="<direct-url>" npx prisma migrate deploy
-```
-Or add it to the Render **Build Command**:
-```
-npm install && npx prisma generate && npx prisma migrate deploy
-```
+The onboarding routes build return URLs from `NEXT_PUBLIC_APP_URL` (`lib/app-url.ts`) and throw if
+it is unset — check it is set for the environment you are testing in, then redeploy.
 
 ---
 
@@ -232,7 +166,7 @@ npm install && npx prisma generate && npx prisma migrate deploy
 cp .env.example .env.local
 # Fill in values
 
-npm run dev          # Next.js (frontend + API routes) on localhost:3000
-npm run start:api    # Express server (webhooks + worker) on localhost:8080
-npm run worker       # BullMQ worker only (standalone)
+npm run dev          # Next.js (frontend + API routes + webhooks) on localhost:3000
+npm run worker       # BullMQ worker + reconciler sweep
+npm run gate         # full test gate against the Docker test DB
 ```

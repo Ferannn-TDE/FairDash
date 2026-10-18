@@ -11,14 +11,10 @@
  *  4. workers/order-worker.ts exports startOrderWorker()
  *  5. workers/order-worker.ts has NO top-level worker instantiation outside the export
  *  6. workers/order-worker.ts has NO top-level process.on (moved to workers/index.ts)
- *  7. server.ts has NO startOrderWorker() call
- *  8. server.ts has NO BullMQ Worker import
- *  9. package.json "worker" script points to workers/index.ts
- * 10. package.json "server" script exists (replaces start:api)
- * 11. render.yaml has a "worker" type service
- * 12. render.yaml has a "web" type service
- * 13. render.yaml worker startCommand uses "npm run worker"
- * 14. render.yaml web startCommand uses "npm run server"
+ *  7. package.json "worker" script points to workers/index.ts
+ *
+ * The server.ts and render.yaml checks were removed with those files (the Render service is gone;
+ * webhooks run on Vercel, the worker on Railway).
  */
 
 let passed = 0
@@ -77,20 +73,6 @@ async function main() {
   else
     fail('top-level process.on still present — should be in workers/index.ts')
 
-  // ── server.ts ─────────────────────────────────────────────────────────────
-  console.log('\nserver.ts')
-  const serverSrc = fs.readFileSync(`${base}/server.ts`, 'utf8')
-
-  if (!serverSrc.includes('startOrderWorker'))
-    pass('no startOrderWorker() call')
-  else
-    fail('still calls startOrderWorker() — workers must be isolated')
-
-  if (!serverSrc.includes("from 'bullmq'") && !serverSrc.includes('from "bullmq"'))
-    pass('no BullMQ import')
-  else
-    fail('still imports BullMQ — workers must be isolated')
-
   // ── package.json ──────────────────────────────────────────────────────────
   console.log('\npackage.json')
   const pkg = JSON.parse(fs.readFileSync(`${base}/package.json`, 'utf8'))
@@ -99,35 +81,6 @@ async function main() {
     pass('"worker" script points to workers/index.ts')
   else
     fail(`"worker" script is "${pkg.scripts?.worker}" — should point to workers/index.ts`)
-
-  if (pkg.scripts?.server)
-    pass(`"server" script exists: ${pkg.scripts.server}`)
-  else
-    fail('"server" script missing from package.json')
-
-  // ── render.yaml ───────────────────────────────────────────────────────────
-  console.log('\nrender.yaml')
-  const renderSrc = fs.readFileSync(`${base}/render.yaml`, 'utf8')
-
-  if (renderSrc.includes('type: worker'))
-    pass('render.yaml has a worker-type service')
-  else
-    fail('render.yaml missing worker-type service')
-
-  if (renderSrc.includes('type: web'))
-    pass('render.yaml has a web-type service')
-  else
-    fail('render.yaml missing web-type service')
-
-  if (renderSrc.includes('npm run worker'))
-    pass('worker service uses "npm run worker"')
-  else
-    fail('worker service startCommand is wrong')
-
-  if (renderSrc.includes('npm run server'))
-    pass('web service uses "npm run server"')
-  else
-    fail('web service startCommand is wrong')
 
   console.log('\n' + '─'.repeat(60))
   if (failed === 0) {
