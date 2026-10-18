@@ -14,6 +14,7 @@ import {
   SparklesIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
+import { toastError } from '@/lib/toast-error'
 import {
   ACCEPT_DOC,
   ALLOWED_DOC_MIME,
@@ -26,6 +27,15 @@ import {
   VENDOR_DOC_LABELS,
   type RequiredVendorDoc,
 } from '@/lib/vendor-documents'
+
+const SUBMIT_FALLBACK = 'Couldn’t submit your application — please try again.'
+
+/** A submit failure carrying the server's error CODE (never its message) and our own sentence. */
+class SubmitFailure extends Error {
+  constructor(readonly code: string | undefined, readonly fallback: string) {
+    super(fallback)
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -565,7 +575,7 @@ export default function VendorOnboarding() {
       const res = await fetch(`/api/vendors/${vendorId}/documents`, { method: 'POST', body: form })
       if (!res.ok) {
         const json = await res.json().catch(() => null)
-        throw new Error(json?.error?.message ?? `Couldn’t upload your ${VENDOR_DOC_LABELS[docType]}`)
+        throw new SubmitFailure(json?.error?.code, `Couldn’t upload your ${VENDOR_DOC_LABELS[docType]} — please try again.`)
       }
     } catch (err) {
       if (attempt < 3) {
@@ -606,12 +616,12 @@ export default function VendorOnboarding() {
       // `error` is the envelope OBJECT, so a bare `json?.error` produces
       // Error("[object Object]") — read `.error.message`.
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error?.message ?? 'Registration failed')
+      if (!res.ok) throw new SubmitFailure(json?.error?.code, SUBMIT_FALLBACK)
 
       // The created vendor's id — previously returned by the route and silently
       // discarded here. It is the only handle the document uploads have.
       const vendorId = json?.data?.id as string | undefined
-      if (!vendorId) throw new Error('Registration failed')
+      if (!vendorId) throw new SubmitFailure(undefined, SUBMIT_FALLBACK)
 
       // Uploads happen HERE, after create and BEFORE the success screen. The owner
       // VendorMember is committed in the SAME transaction as the vendor row, so this
@@ -633,7 +643,9 @@ export default function VendorOnboarding() {
       setStep(5) // success step
     } catch (err: unknown) {
       console.error('[VendorOnboarding] submit failed', err)
-      toast.error(err instanceof Error ? err.message : 'Couldn’t submit your application — please try again.')
+      // The user reads a code-mapped or caller-written sentence, never the raw error (lib/toast-error).
+      if (err instanceof SubmitFailure) toastError(err.code, err.fallback)
+      else toastError(undefined, SUBMIT_FALLBACK)
     } finally {
       setIsSubmitting(false)
       setUploading(false)
