@@ -197,6 +197,23 @@ const NETWORK_SUITES = new Set([
   'b4-tip-refund', 'double-pay-guard', 'refund-engine',
 ])
 
+// EXPECTED FAILURES — known-red suites with a reason and an EXPIRY. A list without an expiry
+// becomes permanent, and a permanently red gate trains everyone to ignore it. So every entry is
+// printed on every run, and the gate goes red if an entry is past its date, names no suite, or
+// its suite starts passing (remove the entry). Reading the clock is the point here: the expiry
+// is a real-world deadline, not a property of the data under test.
+const EXPECTED_FAIL: Record<string, { reason: string; until: string }> = {
+  'upload-cap':         { reason: 'no local storage until Phase 2 (docs/PRODUCTION_READINESS.md 2.5)', until: '2026-12-13' },
+  'vendor-doc-privacy': { reason: 'no local storage until Phase 2 (docs/PRODUCTION_READINESS.md 2.5)', until: '2026-12-13' },
+}
+const today = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD, local
+const listProblems: string[] = []
+for (const [name, e] of Object.entries(EXPECTED_FAIL)) {
+  if (!SUITES.some(s => s.name === name)) listProblems.push(`${name}: listed as expected-fail but no such suite`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(e.until)) listProblems.push(`${name}: expiry "${e.until}" is not YYYY-MM-DD`)
+  else if (today > e.until) listProblems.push(`${name}: expected-fail EXPIRED on ${e.until} — fix the suite or move the date on purpose`)
+}
+
 const argv = process.argv.slice(2)
 const fast = argv.includes('--fast')
 let suites = SUITES
@@ -223,6 +240,11 @@ if (!suites.length) {
   process.exit(2)
 }
 console.log(argv.length ? `Running ${suites.length} suite(s): ${argv.join(' ')}` : `Running ALL ${suites.length} suites (batch gate)`)
+const listed = Object.entries(EXPECTED_FAIL)
+if (listed.length) {
+  console.log(`⏸  ${listed.length} EXPECTED-FAIL suite(s) — not counted as failures until their expiry:`)
+  for (const [name, e] of listed) console.log(`     ${name.padEnd(22)} until ${e.until} — ${e.reason}`)
+}
 
 // stderr lines that are known-benign NOISE, not a failure cause — filtered from the failure
 // display so they can't masquerade as the reason (the "[BullMQ] REDIS_URL not set" warn is a
@@ -231,6 +253,8 @@ const BENIGN_STDERR = [/REDIS_URL not set/, /delayed jobs disabled/, /Failed to 
 
 const failed: string[] = []
 const flaky: string[] = []
+const expectedFailed: string[] = []
+const unexpectedPass: string[] = []
 let lastGroup = ''
 
 const runSuite = (file: string) => spawnSync('npx', ['tsx', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -276,7 +300,15 @@ for (const s of suites) {
   // THE VERDICT IS THE EXIT CODE. We do not parse the suite's prose for a pass count —
   // that is exactly the mistake this runner exists to make impossible.
   const ok = res.status === 0
-  if (ok && firstFail) {
+  const expected = EXPECTED_FAIL[s.name]
+  if (expected && ok) {
+    // Fixed suites must leave the list, or the next real regression in them is hidden.
+    unexpectedPass.push(s.name)
+    console.log(`❗ PASSES but is listed as expected-fail — remove it from EXPECTED_FAIL`)
+  } else if (expected) {
+    expectedFailed.push(s.name)
+    console.log(`⏸  expected-fail (until ${expected.until}) — ${expected.reason}`)
+  } else if (ok && firstFail) {
     flaky.push(s.name)
     console.log(`⚠️  passed on RETRY — first run failed (exit ${firstFail.status}); its evidence:`)
     printEvidence(firstFail)
@@ -292,15 +324,23 @@ for (const s of suites) {
 }
 
 console.log(`\n${'═'.repeat(52)}`)
+const counted = suites.length - expectedFailed.length
 if (failed.length === 0) {
-  console.log(`  ✅ ALL ${suites.length} SUITES PASS${fast ? ' (⚡ FAST TIER — network suites NOT run)' : ''}`)
+  console.log(`  ✅ ALL ${counted} COUNTED SUITES PASS${fast ? ' (⚡ FAST TIER — network suites NOT run)' : ''}`)
 } else {
-  console.log(`  ❌ ${failed.length} of ${suites.length} SUITES FAILED: ${failed.join(', ')}`)
+  console.log(`  ❌ ${failed.length} of ${counted} COUNTED SUITES FAILED: ${failed.join(', ')}`)
 }
+if (expectedFailed.length) {
+  console.log(`  ⏸  ${expectedFailed.length} EXPECTED-FAIL (not counted): ${expectedFailed.map(n => `${n} until ${EXPECTED_FAIL[n].until}`).join(', ')}`)
+}
+if (unexpectedPass.length) {
+  console.log(`  ❌ ${unexpectedPass.length} listed as expected-fail but PASS — remove from EXPECTED_FAIL: ${unexpectedPass.join(', ')}`)
+}
+for (const p of listProblems) console.log(`  ❌ ${p}`)
 if (flaky.length) {
   // Flaky ≠ green-and-forgotten: it stays on the summary line every run until someone chases it.
   console.log(`  ⚠️  ${flaky.length} FLAKY (passed only on retry): ${flaky.join(', ')}`)
 }
 console.log(`${'═'.repeat(52)}\n`)
 
-process.exit(failed.length === 0 ? 0 : 1)
+process.exit(failed.length === 0 && unexpectedPass.length === 0 && listProblems.length === 0 ? 0 : 1)
