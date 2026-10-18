@@ -141,10 +141,6 @@ export async function decideDeliveryRadius(
 
 export const GEOCODE_TIMEOUT_MS = 5000
 
-/** Presence only (never the value) — surfaced on /api/health so a missing key is visible, not inferred from 503s. */
-export function geocodingKeyPresent(): boolean {
-  return Boolean(process.env.GOOGLE_GEOCODING_API_KEY)
-}
 const PRECISIONS = new Set<GeoPrecision>(['ROOFTOP', 'RANGE_INTERPOLATED', 'GEOMETRIC_CENTER', 'APPROXIMATE'])
 
 /**
