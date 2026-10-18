@@ -6,7 +6,7 @@
 
 | Phase | Window | Done |
 |---|---|---|
-| 0. Safety close-out | Oct 19 – Oct 25 | 0/4 |
+| 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
 | 1. Money & trust bugs | Oct 26 – Nov 29 | 0/34 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/24 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
@@ -55,9 +55,9 @@ Inside the light-capacity window, if November slips, Phase 3 moves later, not Ph
 
 The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Docker dev stack, `CONFIRM_PROD_DB`). This phase closes the remaining gap.
 
-- [ ] Audit the 42 scripts in `scripts/` that write to the database without importing the guard. Each one either uses `lib/db.ts` or calls the guard directly.
-- [ ] Add a gate check that fails when any script constructs its own `PrismaClient` without the guard.
-- [ ] Record `72582db` + `scripts/prod-db-guard-test.ts` as the proof of isolation.
+- [x] Audit the 42 scripts in `scripts/` that write to the database without importing the guard. Each one either uses `lib/db.ts` or calls the guard directly. *(2026-10-18: all 42 go through `lib/db` or `guardedPrisma`, or are static source scanners that never connect. No raw `pg` clients anywhere; nothing in `tests/` or `app/` builds its own client.)*
+- [x] Add a gate check that fails when any script constructs its own `PrismaClient` without the guard. *(Already existed as `prod-db-guard-test.ts [3]`; tightened so a guard that is only a comment, or is called after the client, fails. Positive-controlled with a planted file.)*
+- [x] Record `72582db` + `scripts/prod-db-guard-test.ts` as the proof of isolation.
 - [ ] **Oct 21:** after the Supabase reset, re-run the bucket settings check on the current project (future staging) and do one upload pass.
 
 **Done when:** the gate check fails on an unguarded fixture script and passes on the real tree. Verified locally.

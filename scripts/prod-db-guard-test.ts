@@ -17,6 +17,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
+import { stripComments } from './_strip-comments'
 import {
   decideDatabaseAccess, decideQueueAccess, isProductionDatabaseUrl, isLocalHost,
   supabaseProjectRef, isDeployedRuntime,
@@ -69,12 +70,21 @@ const SAFE = /assertNotProductionDatabase\(|testPrisma\(|resolveTestDatabaseUrl\
 // test-isolation suite rightly flags any gate suite that does.
 const CTOR = new RegExp('new ' + 'PrismaClient' + '\\s*\\(')
 const CTOR_TEXT = 'new ' + 'PrismaClient()'
-function unguarded(src: string): boolean {
-  return CTOR.test(src) && !SAFE.test(src)
+// Scans CODE, not prose (stripComments), and the guard must come BEFORE the first construction:
+// a guard that is only mentioned in a comment, or called after the client already exists,
+// protects nothing.
+function unguarded(raw: string): boolean {
+  const src = stripComments(raw)
+  const ctorAt = src.search(CTOR)
+  if (ctorAt < 0) return false
+  const guardAt = src.search(SAFE)
+  return guardAt < 0 || guardAt > ctorAt
 }
-// Control on the scanner itself: an unguarded file is flagged, a guarded one is not.
+// Controls on the scanner itself.
 assert(unguarded(`import { PrismaClient } from '@prisma/client'\nconst p = ${CTOR_TEXT}`), 'control: scanner flags an unguarded client')
 assert(!unguarded(`assertNotProductionDatabase('x')\nconst p = ${CTOR_TEXT}`), 'control: scanner accepts a guarded client')
+assert(unguarded(`// assertNotProductionDatabase('x')\nconst p = ${CTOR_TEXT}`), 'control: scanner flags a guard that is only a comment')
+assert(unguarded(`const p = ${CTOR_TEXT}\nassertNotProductionDatabase('x')`), 'control: scanner flags a guard called after the client')
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
