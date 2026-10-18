@@ -9,6 +9,7 @@ import {
   PhotoIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { groupByVendor } from '@/lib/menu-requests/group-by-vendor'
 import type { BatchGroup } from '@/lib/menu-requests/group-by-batch'
 
@@ -393,6 +394,17 @@ const MENU_REQUESTS_MAX_TAKE = 100
 const POLL_INTERVAL_MS = 30_000
 
 /**
+ * The status query string for a tab — the ONE place the filter becomes a URL fragment, so the
+ * poll fetch and the loadMore fetch cannot spell it differently. They are two separate fetches;
+ * wiring the param into one does not wire it into the other, and a loadMore that forgot it
+ * would page UNFILTERED rows into a filtered list — the same result-set mixing the stale-guard
+ * exists to prevent, arriving through the back door.
+ */
+function statusQuery(filter: TabFilter): string {
+  return filter === 'PENDING' ? '&status=PENDING' : ''
+}
+
+/**
  * A background refresh re-reads the window that is ALREADY on screen. It must update the rows
  * it covers and drop nothing: rows the organizer pulled in with "Load more" sit past the
  * refreshed window and are kept verbatim. Menu requests are never deleted server-side — only
@@ -428,6 +440,30 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
   const loadedCountRef = useRef(0)
   useEffect(() => { loadedCountRef.current = requests.length }, [requests])
 
+  // THE QUERY KEY THIS FETCH BELONGS TO. Sending ?status= makes the RESULT SET depend on the
+  // filter, so a response must be able to say which filter it was issued under: a poll fired
+  // under ALL that resolves after a switch to PENDING would otherwise merge unfiltered rows
+  // into a filtered list, producing a list that is neither. The AbortController alone does not
+  // cover this — a request whose response has already arrived can finish parsing after the
+  // abort — so identity is checked as well as concurrency. Same idiom as the orders page.
+  const fetchKeyRef = useRef<TabFilter>('PENDING')
+
+  // ONE COUNT, TWO READERS. pendingCount used to be derived from the loaded rows, which was
+  // already approximate and becomes outright wrong under ?status=: on the PENDING tab it would
+  // count only what is loaded, and on ALL only what happens to be in the window. The badge
+  // route already computes it server-side for the sidebar, so the page reads THE SAME query —
+  // the sidebar badge and this page's count are now the same number by construction, and
+  // invalidating it refreshes both.
+  const qc = useQueryClient()
+  const badgesQuery = useQuery({
+    queryKey: ['organizer-badges', fairSlug],
+    queryFn: async () => {
+      const res = await fetch(`/api/organizer/fairs/${fairSlug}/badges`)
+      const json = await res.json()
+      return (json.data ?? { menuRequests: 0, disputes: 0 }) as { menuRequests: number; disputes: number }
+    },
+  })
+
   /**
    * silent = a BACKGROUND refresh: the list stays on screen and only the header icon spins.
    * The old signature was `replace = true`, which the poll called with no argument — so every
@@ -455,13 +491,23 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
     )
     const isFirstFill = loadedCountRef.current === 0
 
+    // The filter this request is issued under, recorded BEFORE the await so the response can be
+    // matched against whatever filter is current when it lands.
+    const key = filter
+    fetchKeyRef.current = key
+
     try {
       const res = await fetch(
-        `/api/organizer/fairs/${fairSlug}/menu-requests?take=${take}`,
+        `/api/organizer/fairs/${fairSlug}/menu-requests?take=${take}${statusQuery(filter)}`,
         { signal: controller.signal },
       )
       const json = await res.json()
       if (!json.data?.requests) return
+      // A filter moved while this was in flight — DROP it rather than merge one result set into
+      // another. The AbortController does not cover this on its own: a silent poll returns
+      // early instead of aborting, and a response that has already arrived can finish parsing
+      // after an abort. The abort guards CONCURRENCY; this guards result-set IDENTITY.
+      if (fetchKeyRef.current !== key) return
       setRequests(prev => mergeRequests(prev, json.data.requests))
       // nextCursor marks where the ORGANIZER's pagination stopped. Only the first fill and
       // loadMore may move it; a refresh over already-loaded rows has nothing to say about
@@ -480,9 +526,23 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
         setRefreshing(false)
       }
     }
-  }, [fairSlug])
+    // `filter` joins the closure — without it a tab change would keep fetching the old status.
+  }, [fairSlug, filter])
 
-  useEffect(() => { void fetchRequests(false) }, [fetchRequests])
+  // Mount AND filter change — fetchRequests' identity carries `filter`, so one effect covers
+  // both. A filter change is a genuine result-set change, so it clears the list and loads
+  // NON-silently: it earns a skeleton, unlike the background poll.
+  //
+  // loadedCountRef is reset HERE, synchronously, before the fetch reads it. Miss this and the
+  // first request under the new filter sizes its window to the OLD list, isFirstFill reads
+  // false, nextCursor is never set — and "Load more" is silently DEAD under that tab. It is a
+  // page-TWO failure: the first page looks perfect.
+  useEffect(() => {
+    setRequests([])
+    setNextCursor(null)
+    loadedCountRef.current = 0
+    void fetchRequests(false)
+  }, [fetchRequests])
 
   // 30s background poll. Silent — the list never blinks; at most the header icon spins.
   useEffect(() => {
@@ -497,12 +557,18 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
 
   function handleReviewed(id: string, status: 'APPROVED' | 'REJECTED') {
     setRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r))
+    // THE #5 SYMPTOM: the sidebar badge and this page's banner went stale until a hard refresh
+    // after working the queue. The SERVER cache was never the problem — the approval route
+    // already revalidates the `event-badges-<id>` tag. The staleness was client-side: react-query
+    // holds this key for staleTime (30s) and nothing told it the count had moved. One
+    // invalidation, and because the sidebar reads the SAME key both refresh together.
+    void qc.invalidateQueries({ queryKey: ['organizer-badges', fairSlug] })
   }
 
   function loadMore() {
     if (!nextCursor || loadingMore) return
     setLoadingMore(true)
-    fetch(`/api/organizer/fairs/${fairSlug}/menu-requests?take=${MENU_REQUESTS_PAGE_SIZE}&cursor=${nextCursor}`)
+    fetch(`/api/organizer/fairs/${fairSlug}/menu-requests?take=${MENU_REQUESTS_PAGE_SIZE}&cursor=${nextCursor}${statusQuery(filter)}`)
       .then(r => r.json())
       .then(json => {
         if (json.data?.requests) {
@@ -525,10 +591,15 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
   // nothing and add a dependency array to keep correct.
   const vendorGroups = groupByVendor(filtered)
 
-  const pendingCount = requests.filter(r => r.status === 'PENDING').length
+  // FROM THE BADGE ROUTE, NOT THE LOADED LIST. Deriving it from `requests` was already
+  // approximate and becomes outright wrong once ?status= ships: on the Pending tab it would
+  // count only what is loaded, on All only what is in the window — misleading DIFFERENTLY per
+  // tab. null while the query is in flight, so no plausible-but-wrong number is rendered before
+  // the real one arrives (scripts/flicker-class-guard).
+  const pendingCount: number | null = badgesQuery.data?.menuRequests ?? null
 
   const TABS: { key: TabFilter; label: string }[] = [
-    { key: 'PENDING', label: pendingCount > 0 ? `Pending (${pendingCount})` : 'Pending' },
+    { key: 'PENDING', label: pendingCount != null && pendingCount > 0 ? `Pending (${pendingCount})` : 'Pending' },
     { key: 'ALL',     label: 'All Requests' },
   ]
 
@@ -555,7 +626,7 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
       </div>
 
       {/* Pending count banner */}
-      {pendingCount > 0 && filter !== 'PENDING' && (
+      {pendingCount != null && pendingCount > 0 && filter !== 'PENDING' && (
         <button
           onClick={() => setFilter('PENDING')}
           className="w-full mb-5 px-4 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400 text-sm font-semibold font-inter text-left hover:bg-amber-500/15 transition-colors cursor-pointer"

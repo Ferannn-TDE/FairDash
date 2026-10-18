@@ -148,6 +148,7 @@ const SUITES: Suite[] = [
   { group: 'money',       name: 'pollution-cohort',       file: 'scripts/pollution-cohort-guard.ts' },
   { group: 'correctness', name: 'sweep-run-record',      file: 'scripts/sweep-run-record-test.ts' },
   { group: 'correctness', name: 'flicker-class',          file: 'scripts/flicker-class-guard.ts' },
+  { group: 'correctness', name: 'menu-request-filter',    file: 'scripts/menu-request-filter-guard.ts' },
   { group: 'correctness', name: 'admin-dash-resilience',  file: 'scripts/admin-dashboard-resilience-guard.ts' },
   { group: 'correctness', name: 'rtdb-bound',             file: 'scripts/rtdb-bound-guard.ts' },
   { group: 'boundary',    name: 'draft-fair-exclusion', file: 'scripts/draft-fair-exclusion-guard.ts' },
