@@ -136,7 +136,10 @@ interface SeedOpts {
   noCharge?: boolean
   voided?: boolean
   legacyMarker?: boolean
+  /** Defaults to one hour after OWED_BACK_FEE_FROM (fee owed). null = never stamped (legacy). */
+  cancelledAt?: Date | null
 }
+let FEE_FROM = new Date(0)
 /** A cancelled order nobody delivered, with a matching fake Stripe charge (amount = total). */
 async function seedCancelled(eventId: string, vendorId: string, o: SeedOpts) {
   const customer = await mkUser('customer')
@@ -148,7 +151,8 @@ async function seedCancelled(eventId: string, vendorId: string, o: SeedOpts) {
       eventId, customerId: customer.id, vendorId, status: o.status ?? 'CANCELLED', fulfillmentType: o.fulfillment ?? 'HOME_DELIVERY',
       subtotal: food / 100, fairSynqFee: svc / 100, deliveryFee: fee / 100, serviceCharge: sc ? sc / 100 : null, tip: o.tipCents / 100,
       total: totalCents / 100, vendorPayout: food / 100,
-      customerName: 'B4', customerPhone: '+10000000000', cancelledAt: new Date(), cancelledBy: 'customer',
+      customerName: 'B4', customerPhone: '+10000000000', cancelledBy: 'customer',
+      cancelledAt: o.cancelledAt === undefined ? new Date(FEE_FROM.getTime() + 3_600_000) : o.cancelledAt,
       ...(o.noCharge ? {} : { stripeChargeId: chargeId }),
       ...(o.voided ? { voidedAt: new Date(), voidReason: 'test' } : {}),
       ...(o.legacyMarker ? { tipRefundId: `re_legacy_${rand()}`, tipRefundedAt: new Date() } : {}),
@@ -197,6 +201,7 @@ async function main() {
   await installStripeSpy()
   try {
     const T = await import('../lib/tip-refund')
+    FEE_FROM = T.OWED_BACK_FEE_FROM
     const { processTipRefund, reconcileTipRefunds, decideOwedBack, resolveOwedBackHalt, owedBackCandidateWhere } = T
     const ev = await mkEvent(); const ven = await mkVendor(ev.id); const ven2 = await mkVendor(ev.id); const run = await mkRunner(ev.id)
     const inScan = async (id: string) => (await prisma.order.count({ where: { AND: [{ id }, owedBackCandidateWhere()] } })) === 1
@@ -480,6 +485,49 @@ async function main() {
     const r21 = await processTipRefund(o11.order.id)
     assert(r21.outcome === 'halt_resolved' && madeFor(o11.order.id).length === 0, 'direct call → halt_resolved, still no refund')
     assert((await haltOf(o5.order.id))?.resolvedAt === null && await inScan(o5.order.id), "resolving one halt left the other open halt ([5]) alone")
+
+    // ── [22] no retroactive fee refunds ─────────────────────────────────────────
+    console.log('\n[22] cutoff: the fee is owed back only for cancels at or after OWED_BACK_FEE_FROM')
+    const justBefore = new Date(FEE_FROM.getTime() - 1)
+    const o22a = await seedCancelled(ev.id, ven.id, { tipCents: 0, feeCents: 1299, cancelledAt: justBefore })
+    assert(!(await inScan(o22a.order.id)), 'fee-only, cancelled 1 ms before the cutoff → not in the scan')
+    const r22a = await processTipRefund(o22a.order.id)
+    assert(r22a.outcome === 'nothing_owed' && madeFor(o22a.order.id).length === 0, 'direct call → nothing_owed, no refund')
+    const o22b = await seedCancelled(ev.id, ven.id, { tipCents: 300, feeCents: 1299, cancelledAt: justBefore })
+    const r22b = await processTipRefund(o22b.order.id)
+    assert(r22b.outcome === 'refunded' && r22b.amountCents === 300, `tip + fee, cancelled before → tip only, 300¢ (got ${r22b.amountCents})`)
+    assert((await row(o22b.order.id)).deliveryFeeRefundCents === 0, 'deliveryFeeRefundCents = 0 for a pre-cutoff order')
+    const o22c = await seedCancelled(ev.id, ven.id, { tipCents: 0, feeCents: 1299, cancelledAt: null })
+    assert(!(await inScan(o22c.order.id)), 'fee-only with no cancelledAt (legacy) → not in the scan')
+    const o22d = await seedCancelled(ev.id, ven.id, { tipCents: 0, feeCents: 1299, cancelledAt: new Date(FEE_FROM.getTime()) })
+    assert(await inScan(o22d.order.id), 'control: cancelled exactly AT the cutoff → in the scan')
+    const r22d = await processTipRefund(o22d.order.id)
+    assert(r22d.outcome === 'refunded' && r22d.amountCents === 1299, `…and refunds the fee, 1299¢ (got ${r22d.amountCents})`)
+    assert(FEE_FROM.toISOString() === '2026-10-19T00:00:00.000Z', `cutoff is the agreed fixed instant (got ${FEE_FROM.toISOString()})`)
+
+    // ── [23] dry run writes nothing ─────────────────────────────────────────────
+    console.log('\n[23] dry run: reports refund / covered / halt, but writes and refunds NOTHING')
+    const d23r = await seedCancelled(ev.id, ven.id, { tipCents: 300, feeCents: 1000 })
+    const d23c = await seedCancelled(ev.id, ven.id, { tipCents: 300, feeCents: 1000 })
+    addRefund(d23c.chargeId, 1300, { orderId: d23c.order.id, kind: 'owed_back' })
+    const d23h = await seedCancelled(ev.id, ven.id, { tipCents: 300, feeCents: 1000 })
+    charges.get(d23h.chargeId)!.disputed = true
+    const snap = async () => ({
+      refunds: created.length,
+      halts: await prisma.owedBackHalt.count({ where: { eventId: ev.id } }),
+      audits: await prisma.adminMoneyAction.count({ where: { eventId: ev.id } }),
+      markers: await prisma.order.count({ where: { eventId: ev.id, tipRefundId: { not: null } } }),
+    })
+    const before23 = await snap()
+    const dry = await reconcileTipRefunds({ dryRun: true })
+    const after23 = await snap()
+    const res = (id: string) => dry.results?.find(r => r.orderId === id)
+    assert(res(d23r.order.id)?.outcome === 'refunded' && res(d23r.order.id)?.amountCents === 1300 && res(d23r.order.id)?.dryRun === true, 'reports the 1300¢ refund it WOULD make')
+    assert(res(d23c.order.id)?.outcome === 'covered', 'reports covered')
+    assert(res(d23h.order.id)?.outcome === 'halted' && res(d23h.order.id)?.haltReason === 'CHARGE_DISPUTED', 'reports the halt')
+    assert(JSON.stringify(before23) === JSON.stringify(after23), `no refund, halt, audit or marker written (${JSON.stringify(before23)} → ${JSON.stringify(after23)})`)
+    const live23 = await processTipRefund(d23r.order.id)
+    assert(live23.outcome === 'refunded' && created.length === before23.refunds + 1, 'control: the same order run live DOES refund (the dry run was not inert by accident)')
   } finally {
     await cleanup()
   }

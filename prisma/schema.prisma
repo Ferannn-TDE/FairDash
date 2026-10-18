@@ -1909,7 +1909,9 @@ model SweepRun {
 model OwedBackHalt {
   id      String @id @default(cuid())
   orderId String @unique
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Restrict: a money audit record must never vanish with its order. Deleting an order that has
+  // one is refused by the database.
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
   eventId String
 
   /// NO_CHARGE | CHARGE_DISPUTED | REFUND_ROOM_SHORT | ORGANIZER_SHARE_WITHOUT_RUNNER

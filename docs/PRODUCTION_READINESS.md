@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 14/41 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 16/43 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 0/11 |
@@ -85,7 +85,9 @@ Policy: refund the delivery fee on any cancel where no runner earned anything (n
 - [x] Fold the delivery fee into Pattern R (`lib/tip-refund.ts`): one "delivery & tip" refund per order, same gate. New key `owed_back_${orderId}`; `tipRefundId` stays the marker; `deliveryFeeRefundCents` itemizes. Curbside fee included.
 - [x] Key-independent ceiling: read the charge and every refund on it (all pages) from Stripe; refund only tip + fee minus earlier owed-back refunds (by metadata label), and halt if the charge has less room than that. Never a partial refund.
 - [x] Halts are durable (`OwedBackHalt`), shown on the admin money page (banner + "Refunds stopped" tab) until resolved. Admin "Mark resolved" needs a note, writes an audit row, and never refunds.
-- [x] Reconciliation test (`scripts/b4-tip-refund-test.ts`, 77 checks, 19/19 mutations caught): auto-cancelled order refunds food + delivery + tip to the cent; a partially cancelled multi-vendor order refunds no delivery fee; an order with a `RunnerEarning` refunds neither; old tip refund with a lost marker refunds the fee only; >10 and >100 refunds on a charge.
+- [x] No retroactive fee refunds: the fee is owed back only for cancels at or after `OWED_BACK_FEE_FROM` (2026-10-19T00:00Z); earlier cancels keep the tip-only rule. Halt rows use `ON DELETE RESTRICT`.
+- [x] Sealed dry run against production (`scripts/owed-back-dry-run.ts`: read-only Postgres session, Prisma writes and Stripe money calls blocked, controls first). First sweep: 0 orders. Cutoff keeps out 1 historic fee-only order (Italian Fest, Jul 21, $12.99), which the probe confirms would otherwise have been refunded.
+- [x] Reconciliation test (`scripts/b4-tip-refund-test.ts`, 90 checks, 24/24 mutations caught): auto-cancelled order refunds food + delivery + tip to the cent; a partially cancelled multi-vendor order refunds no delivery fee; an order with a `RunnerEarning` refunds neither; old tip refund with a lost marker refunds the fee only; >10 and >100 refunds on a charge.
 - [x] Update `/refund-policy` to state the rule.
 - [x] Known trade-off: a runner who accepted but hadn't picked up gets nothing. Revisit if runners complain.
 - [ ] Apply the migration (`20261019120000_add_owed_back_fee_refund`) to production, then deploy. Needs approval.

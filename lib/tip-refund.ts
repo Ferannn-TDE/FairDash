@@ -38,6 +38,15 @@ import { stripe } from './stripe'
 import { logger } from './logger'
 import { writeMoneyAudit } from './admin-money'
 
+/**
+ * NO RETROACTIVE FEE REFUNDS (decision 2). Before 1.2 the scan only looked at tipped orders, so
+ * a cancelled fee-only order from before this change was never owed anything by the code and
+ * carries no marker. The fee is owed back only when the order was cancelled at or after this
+ * instant; earlier cancels keep the old rule (tip only). A fixed constant, never the clock.
+ * Orders with no cancelledAt are treated as before the cutoff.
+ */
+export const OWED_BACK_FEE_FROM = new Date('2026-10-19T00:00:00Z')
+
 /** Metadata `kind` values that mark a refund as an owed-back refund for metadata.orderId. */
 export const OWED_BACK_KINDS = ['tip_owed_back', 'owed_back'] as const
 export const owedBackIdempotencyKey = (orderId: string) => `owed_back_${orderId}`
@@ -56,7 +65,7 @@ const cents = (v: number | null | undefined) => Math.round((v ?? 0) * 100)
 export function owedBackCandidateWhere(): Prisma.OrderWhereInput {
   return {
     status: 'CANCELLED',
-    OR: [{ tip: { gt: 0 } }, { deliveryFee: { gt: 0 } }],
+    OR: [{ tip: { gt: 0 } }, { deliveryFee: { gt: 0 }, cancelledAt: { gte: OWED_BACK_FEE_FROM } }],
     runnerEarning: { is: null },
     tipRefundId: null,
     voidedAt: null,
@@ -77,6 +86,7 @@ export interface TipRefundPlan {
   orderId: string
   outcome: TipRefundOutcome
   tipCents: number
+  /** The fee part owed back: the order's fee, or 0 when it was cancelled before OWED_BACK_FEE_FROM. */
   deliveryFeeCents: number
   /** tip + fee when outcome 'refund', else 0. Earlier owed-back refunds are subtracted at execute. */
   owedBackCents: number
@@ -89,14 +99,15 @@ export async function planTipRefund(orderId: string): Promise<TipRefundPlan> {
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: {
-      id: true, status: true, tip: true, deliveryFee: true, stripeChargeId: true, tipRefundId: true,
+      id: true, status: true, tip: true, deliveryFee: true, stripeChargeId: true, tipRefundId: true, cancelledAt: true,
       runnerEarning: { select: { id: true } },
     },
   })
   if (!order) throw new Error(`planTipRefund: order ${orderId} not found`)
 
   const tipCents = cents(order.tip)
-  const deliveryFeeCents = cents(order.deliveryFee)
+  const feeOwed = !!order.cancelledAt && order.cancelledAt >= OWED_BACK_FEE_FROM
+  const deliveryFeeCents = feeOwed ? cents(order.deliveryFee) : 0
   const base = {
     orderId: order.id,
     tipCents,
@@ -232,6 +243,9 @@ async function closeOpenHalt(orderId: string, note: string) {
 
 export interface TipRefundResult {
   orderId: string
+  /** Set on a dry run: what a live run would have done. Nothing was written and no refund made. */
+  dryRun?: boolean
+  detail?: string
   outcome:
     | 'refunded' | 'covered' | 'halted' | 'halt_resolved'
     | 'excluded_runner_earned' | 'already_refunded' | 'nothing_owed' | 'not_terminal'
@@ -244,7 +258,8 @@ export interface TipRefundResult {
  * Refund what is still owed back on one order. Throws only on a Stripe/DB failure (the sweep
  * records TIP_REFUND_FAILED and retries next sweep). Every "don't know" path halts, never guesses.
  */
-export async function processTipRefund(orderId: string): Promise<TipRefundResult> {
+export async function processTipRefund(orderId: string, opts?: { dryRun?: boolean }): Promise<TipRefundResult> {
+  const dryRun = opts?.dryRun === true
   const plan = await planTipRefund(orderId)
   if (plan.outcome !== 'refund') return { orderId, outcome: plan.outcome }
 
@@ -267,6 +282,7 @@ export async function processTipRefund(orderId: string): Promise<TipRefundResult
   }
 
   const halt = async (reason: OwedBackHaltReason, detail: string, owedCents: number, roomCents: number | null): Promise<TipRefundResult> => {
+    if (dryRun) return { orderId, outcome: 'halted', haltReason: reason, amountCents: owedCents, detail, dryRun }
     await recordHalt(order, { reason, detail, owedCents, roomCents })
     return { orderId, outcome: 'halted', haltReason: reason }
   }
@@ -300,6 +316,11 @@ export async function processTipRefund(orderId: string): Promise<TipRefundResult
   })
 
   if (decision.kind === 'halt') return halt('REFUND_ROOM_SHORT', decision.detail, decision.owedNetCents, decision.roomCents)
+
+  if (dryRun) {
+    if (decision.kind === 'covered') return { orderId, outcome: 'covered', amountCents: 0, refundId: decision.adoptRefundId, dryRun, detail: `earlier owed-back ${decision.priorOwedBackCents}¢` }
+    return { orderId, outcome: 'refunded', amountCents: decision.amountCents, dryRun, detail: `tip ${plan.tipCents}¢ + fee ${plan.deliveryFeeCents}¢ − earlier ${decision.priorOwedBackCents}¢; room ${decision.roomCents}¢` }
+  }
 
   if (decision.kind === 'covered') {
     const w = await db.order.updateMany({
@@ -347,7 +368,13 @@ export async function processTipRefund(orderId: string): Promise<TipRefundResult
 
 // ─── Reconciler: the trigger (Pattern R delegates here) ───────────────────────
 
+/** The fee part an order owes back, honouring OWED_BACK_FEE_FROM. */
+const owedCentsOf = (o: { tip: number | null; deliveryFee: number | null; cancelledAt: Date | null }) =>
+  cents(o.tip) + (o.cancelledAt && o.cancelledAt >= OWED_BACK_FEE_FROM ? cents(o.deliveryFee) : 0)
+
 export interface TipRefundReconcileSummary {
+  /** Dry run only: one entry per scanned order, saying what a live sweep would do. */
+  results?: TipRefundResult[]
   scanned: number
   refunded: number
   covered: number
@@ -356,28 +383,31 @@ export interface TipRefundReconcileSummary {
   alerts: string[]
 }
 
-export async function reconcileTipRefunds(opts?: { maxPerRun?: number }): Promise<TipRefundReconcileSummary> {
+export async function reconcileTipRefunds(opts?: { maxPerRun?: number; dryRun?: boolean }): Promise<TipRefundReconcileSummary> {
   const max = opts?.maxPerRun ?? 200
+  const dryRun = opts?.dryRun === true
   const owed = await db.order.findMany({
     where: owedBackCandidateWhere(),
-    select: { id: true, eventId: true, tip: true, deliveryFee: true },
+    select: { id: true, eventId: true, tip: true, deliveryFee: true, cancelledAt: true },
     orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
     take: max,
   })
 
-  const summary: TipRefundReconcileSummary = { scanned: owed.length, refunded: 0, covered: 0, halted: 0, excluded: 0, alerts: [] }
+  const summary: TipRefundReconcileSummary = { scanned: owed.length, refunded: 0, covered: 0, halted: 0, excluded: 0, alerts: [], ...(dryRun ? { results: [] } : {}) }
   for (const o of owed) {
     try {
-      const r = await processTipRefund(o.id)
+      const r = await processTipRefund(o.id, { dryRun })
+      summary.results?.push(r)
       if (r.outcome === 'refunded') summary.refunded++
       else if (r.outcome === 'covered') summary.covered++
       else if (r.outcome === 'excluded_runner_earned') summary.excluded++
       else if (r.outcome === 'halted') {
         summary.halted++
-        summary.alerts.push(`owed-back refund HALTED for ${o.id} (${r.haltReason}) — customer owed ${cents(o.tip) + cents(o.deliveryFee)}¢; see the admin money page`)
+        summary.alerts.push(`owed-back refund HALTED for ${o.id} (${r.haltReason}) — customer owed ${owedCentsOf(o)}¢; see the admin money page`)
       }
     } catch (err) {
       summary.alerts.push(`owed-back refund failed for ${o.id}: ${err instanceof Error ? err.message : String(err)}`)
+      if (dryRun) continue
 
       // DURABLE FAILURE MARKER. A failure (Stripe down, read timeout) is retried next sweep with
       // the same key; this row dates it. NEVER Order.tipRefundId: it is the SUCCESS record, and a
@@ -391,7 +421,7 @@ export async function reconcileTipRefunds(opts?: { maxPerRun?: number }): Promis
             payeeType: 'customer',
             payeeId: o.id,
             orderId: o.id,
-            amountCents: cents(o.tip) + cents(o.deliveryFee),
+            amountCents: owedCentsOf(o),
             reason: `owed-back refund failed: ${err instanceof Error ? err.message : String(err)}`,
           },
         )

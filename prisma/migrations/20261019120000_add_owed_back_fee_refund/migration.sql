@@ -21,4 +21,4 @@ CREATE TABLE "OwedBackHalt" (
 CREATE UNIQUE INDEX "OwedBackHalt_orderId_key" ON "OwedBackHalt"("orderId");
 CREATE INDEX "OwedBackHalt_eventId_resolvedAt_idx" ON "OwedBackHalt"("eventId", "resolvedAt");
 
-ALTER TABLE "OwedBackHalt" ADD CONSTRAINT "OwedBackHalt_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "OwedBackHalt" ADD CONSTRAINT "OwedBackHalt_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
