@@ -6,6 +6,7 @@ import { requireAuth } from '@/lib/auth'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { validateDeliveryAddress } from '@/lib/delivery-address'
 import { decideDeliveryRadius, googleGeocoder } from '@/lib/delivery-radius'
+import { logger } from '@/lib/logger'
 
 // POST /api/orders/delivery-check — early feedback at checkout: is this address inside the
 // fair's delivery area?
@@ -57,7 +58,12 @@ export async function POST(req: NextRequest) {
       { street: body.street!.trim(), city: body.city!.trim(), state: body.state?.trim() || null, zip: body.zip!.trim() },
       googleGeocoder,
     )
-    if (!radius.ok) throw new ApiError(radius.message, radius.status, radius.code)
+    if (!radius.ok) {
+      if (radius.code === 'GEOCODER_UNAVAILABLE' || radius.code === 'DELIVERY_NOT_CONFIGURED') {
+        logger.error('[delivery-check] cannot decide', { eventId: body.eventId, code: radius.code, reason: radius.reason })
+      }
+      throw new ApiError(radius.message, radius.status, radius.code)
+    }
 
     // Coordinates are deliberately NOT returned: the client has no use for them, and the order
     // route geocodes again rather than accept a point from the browser.

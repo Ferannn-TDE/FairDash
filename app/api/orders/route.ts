@@ -514,7 +514,7 @@ export async function POST(req: NextRequest) {
       )
       if (!radius.ok) {
         if (radius.code === 'GEOCODER_UNAVAILABLE' || radius.code === 'DELIVERY_NOT_CONFIGURED') {
-          logger.error('[orders] home delivery refused', { eventId, code: radius.code })
+          logger.error('[orders] home delivery refused', { eventId, code: radius.code, reason: radius.reason })
         }
         throw new ApiError(radius.message, radius.status, radius.code)
       }

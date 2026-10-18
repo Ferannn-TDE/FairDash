@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { runHealthChecks } from '@/lib/health'
 import { isVendorReadinessEnforced } from '@/lib/vendor-readiness'
 import { isPreviewBypassEnabled } from '@/lib/preview-access'
+import { geocodingKeyPresent } from '@/lib/delivery-radius'
 
 // GET /api/health — real measurements, not stubs. Returns 200 when healthy, 503 when degraded,
 // so an external dead-man's-switch monitor can watch it directly. The `commit` field remains the
@@ -34,6 +35,9 @@ export async function GET() {
         // drift silently between environments. NOTE this is the FLAG only — access also
         // requires an admin session, which this endpoint does not and cannot report.
         previewBypass: isPreviewBypassEnabled(),
+        // PRESENCE only, never the value: whether this deployment can geocode at all. Home
+        // delivery fails closed without it, so its absence must be visible, not inferred from 503s.
+        geocodingKeyPresent: geocodingKeyPresent(),
       },
     },
     { status: health.status === 'ok' ? 200 : 503 },

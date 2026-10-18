@@ -48,7 +48,9 @@ export type Geocoder = (addr: AddressToGeocode) => Promise<GeocodeResult>
 
 export type RadiusDecision =
   | { ok: true; point: GeoPoint; distanceKm: number; radiusKm: number; approximate: boolean }
-  | { ok: false; code: 'DELIVERY_NOT_CONFIGURED' | 'ADDRESS_NOT_FOUND' | 'GEOCODER_UNAVAILABLE' | 'OUT_OF_DELIVERY_RANGE'; message: string; status: number; distanceKm?: number; radiusKm?: number }
+  | { ok: false; code: 'DELIVERY_NOT_CONFIGURED' | 'ADDRESS_NOT_FOUND' | 'GEOCODER_UNAVAILABLE' | 'OUT_OF_DELIVERY_RANGE'; message: string; status: number; distanceKm?: number; radiusKm?: number
+      /** Operator-facing cause (e.g. "status REQUEST_DENIED", "key not set") — for logs, NEVER for the customer. */
+      reason?: string }
 
 export interface FairDeliveryArea {
   eventLat: number | null
@@ -104,7 +106,7 @@ export async function decideDeliveryRadius(
 
   if (result.kind === 'unavailable') {
     return {
-      ok: false, code: 'GEOCODER_UNAVAILABLE', status: 503,
+      ok: false, code: 'GEOCODER_UNAVAILABLE', status: 503, reason: result.reason,
       message: 'We can’t verify your address right now. Please try again, or choose pickup.',
     }
   }
@@ -138,6 +140,11 @@ export async function decideDeliveryRadius(
 // ─── The real geocoder (Google Geocoding API) ────────────────────────────────
 
 export const GEOCODE_TIMEOUT_MS = 5000
+
+/** Presence only (never the value) — surfaced on /api/health so a missing key is visible, not inferred from 503s. */
+export function geocodingKeyPresent(): boolean {
+  return Boolean(process.env.GOOGLE_GEOCODING_API_KEY)
+}
 const PRECISIONS = new Set<GeoPrecision>(['ROOFTOP', 'RANGE_INTERPOLATED', 'GEOMETRIC_CENTER', 'APPROXIMATE'])
 
 /**
