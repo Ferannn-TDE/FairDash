@@ -162,11 +162,45 @@ it is unset — check it is set for the environment you are testing in, then red
 
 ## Local Development
 
-```bash
-cp .env.example .env.local
-# Fill in values
+**Local processes never touch production by default.** `.env.local` and `.env` point at a Docker
+stack on this machine, and `lib/prod-db-guard.ts` refuses a production database (or a remote job
+queue) in any process that is not running on Vercel or Railway — the dev server, the seed, a local
+worker and every script that builds a database client. The gate suite `prod-db-guard` fails if a
+new script constructs a client without the guard.
 
-npm run dev          # Next.js (frontend + API routes + webhooks) on localhost:3000
-npm run worker       # BullMQ worker + reconciler sweep
-npm run gate         # full test gate against the Docker test DB
+| Local service | Where | Notes |
+|---------------|-------|-------|
+| Postgres | `localhost:54329` (`fairsynq_dev`) | Persistent volume; separate from the gate's test DB on 55432 |
+| Redis (BullMQ queue) | `localhost:56379` | The production queue is consumed by the Railway worker, so local jobs stay here |
+| Upstash-compatible REST | `localhost:58079` | Backs the rate limiter; checkout fails closed without one |
+| Supabase Storage, Firebase | off | Uploads and live push are disabled locally until dev projects exist |
+| Clerk, Stripe, Maps | shared test-mode keys | Clerk webhooks reach production only; the app creates the local User row on first sign-in (`lib/ensure-db-user.ts`) |
+
+```bash
+npm run dev:db:up       # start Postgres + Redis + REST proxy, apply migrations
+npm run dev:db:seed     # load prisma/seed.ts (also: npx prisma db seed)
+npm run dev             # Next.js on localhost:3000
+WORKER_ENABLED=true npm run worker   # optional: a local worker on the local queue
+npm run dev:db:down     # stop, keep data      ·  npm run dev:db:reset  # stop and wipe
+npm run gate            # full test gate (its own throwaway DB on 55432)
 ```
+
+To test Stripe webhooks locally, forward them with `stripe listen --forward-to
+localhost:3000/api/webhooks/stripe` and put the `whsec_…` it prints in `STRIPE_WEBHOOK_SECRET` in
+`.env.local` for that session.
+
+### Switching to production (deliberate operations only)
+
+Production credentials live in `.env.prod.local` (git-ignored, never auto-loaded — Next.js and
+dotenv only read `.env`, `.env.local` and `.env.<NODE_ENV>[.local]`). The only supported way to aim
+a local command at production is the wrapper, with the Supabase project ref typed out:
+
+```bash
+CONFIRM_PROD_DB=<project ref> ./scripts/with-prod-db.sh npx tsx scripts/<operation>.ts
+CONFIRM_PROD_DB=<project ref> ./scripts/with-prod-db.sh npm run migrate
+```
+
+The wrapper exports the production `DATABASE_URL`/`DIRECT_URL` and **clears `REDIS_URL`**, so an
+operation run from a laptop never enqueues into the live queue. Without `CONFIRM_PROD_DB`, or with
+the wrong ref, the guard refuses before any connection is made. Back to local: just run commands
+normally — nothing persists between invocations.

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import { resolveToolingDatabaseUrl } from './test-db'
+import { assertNotProductionDatabase } from './prod-db-guard'
 
 /**
  * PROD-WRITE GUARD — a structural block on the session's recurring failure class: a script or
@@ -150,6 +151,7 @@ export function assertWriteAllowed(model: string, obj: unknown): void {
  * unguarded client, so a dynamic-resolution script can't sidestep this by not mentioning the id.
  */
 export function guardedPrisma() {
+  assertNotProductionDatabase('guardedPrisma', [resolveToolingDatabaseUrl(process.env)])
   const base = new PrismaClient({
     // Was `DIRECT_URL ?? DATABASE_URL`, which resolved to PRODUCTION even under the isolated
     // gate — registered suites (mn-coverage-guard, prod-write-guard-test) were seeding and

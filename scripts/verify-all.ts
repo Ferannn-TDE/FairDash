@@ -29,6 +29,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'sweep-coverage',       file: 'scripts/mn-coverage-guard.ts' },
   { group: 'correctness', name: 'status-write-guard',   file: 'scripts/status-write-guard.ts' },
   { group: 'boundary',    name: 'test-isolation',        file: 'scripts/test-isolation-guard.ts' },
+  { group: 'boundary',    name: 'prod-db-guard',         file: 'scripts/prod-db-guard-test.ts' },
   { group: 'boundary',    name: 'protected-membership',  file: 'scripts/protected-events-membership-guard.ts' },
   // Previously UNREGISTERED and silently red — an unregistered script is one nobody runs,
   // which is exactly how both drifted onto ambient production data without anyone noticing.

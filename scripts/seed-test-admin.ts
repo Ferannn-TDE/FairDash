@@ -3,6 +3,7 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { randomBytes } from 'node:crypto'
 import { STRICT_ADMIN_ROLES } from '../lib/roles'
 
@@ -32,6 +33,7 @@ const pwFlag = args.indexOf('--password')
 const cliPassword = pwFlag !== -1 ? args[pwFlag + 1] : undefined
 const email = args.find((a, i) => !a.startsWith('--') && i !== (pwFlag + 1)) ?? 'testadmin@fairsynq.com'
 
+assertNotProductionDatabase('seed-test-admin.ts')
 const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 
 async function main() {

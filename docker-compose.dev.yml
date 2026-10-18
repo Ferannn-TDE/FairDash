@@ -1,0 +1,64 @@
+# Local development stack — what .env.local points at. Production is never on this machine's
+# default path: the database, the job queue and the rate limiter all run here.
+#
+# Separate from docker-compose.test.yml on purpose: the test DB is wiped by `test:db:down`
+# and reshaped by `db push` on every gate run; this one keeps your dev data between sessions.
+#
+#   npm run dev:db:up      start + wait for health, then apply migrations
+#   npm run dev:db:seed    load prisma/seed.ts into it
+#   npm run dev:db:down    stop (data kept)
+#   npm run dev:db:reset   stop and DESTROY the volumes
+#
+# Ports are deliberately non-default so a stray client on 5432/6379 never finds these.
+
+services:
+  fairsynq-dev-db:
+    image: postgres:16-alpine
+    container_name: fairsynq-dev-db
+    environment:
+      POSTGRES_USER: fairsynq
+      POSTGRES_PASSWORD: fairsynq
+      POSTGRES_DB: fairsynq_dev
+    ports:
+      - "54329:5432"
+    volumes:
+      - fairsynq-dev-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fairsynq -d fairsynq_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # BullMQ queue (REDIS_URL). The production queue is consumed by the Railway worker, so a
+  # local order must never enqueue there.
+  fairsynq-dev-redis:
+    image: redis:7.4-alpine
+    container_name: fairsynq-dev-redis
+    ports:
+      - "56379:6379"
+    volumes:
+      - fairsynq-dev-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Upstash-compatible REST API in front of the local Redis (UPSTASH_REDIS_REST_*). Needed
+  # because POST /api/orders rate-limits fail-CLOSED: with no limiter, local checkout is refused.
+  fairsynq-dev-redis-rest:
+    image: hiett/serverless-redis-http:0.0.10
+    container_name: fairsynq-dev-redis-rest
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: fairsynq-dev-token
+      SRH_CONNECTION_STRING: redis://fairsynq-dev-redis:6379
+    ports:
+      - "58079:80"
+    depends_on:
+      fairsynq-dev-redis:
+        condition: service_healthy
+
+volumes:
+  fairsynq-dev-db-data:
+  fairsynq-dev-redis-data:

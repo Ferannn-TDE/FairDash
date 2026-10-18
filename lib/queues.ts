@@ -13,6 +13,7 @@
  */
 
 import { Queue, ConnectionOptions } from 'bullmq'
+import { decideQueueAccess } from './prod-db-guard'
 import { logger } from './logger'
 
 // ─── Connection ───────────────────────────────────────────────────────────────
@@ -38,6 +39,13 @@ function getConnectionOptions(): ConnectionOptions | null {
   const url = process.env.REDIS_URL
   if (!url) {
     logger.warn('[BullMQ] REDIS_URL not set — delayed jobs disabled')
+    return null
+  }
+  // A local process never enqueues into a remote (production) queue: the Railway worker would
+  // act on it. Refused jobs are not enqueued at all — see lib/prod-db-guard.ts.
+  const access = decideQueueAccess(process.env, url)
+  if (!access.allowed) {
+    logger.error(`[BullMQ] 🛑 REFUSING remote queue: ${access.reason}`)
     return null
   }
   try {

@@ -17,8 +17,10 @@
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { syncUserRoleMetadata } from '../lib/role-sync'
 
+assertNotProductionDatabase('link-user-to-vendor.ts')
 const db = new PrismaClient()
 
 // Explicit targets (override via argv). Confirmed values, not guesses:

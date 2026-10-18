@@ -2,6 +2,7 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { randomBytes } from 'node:crypto'
 
 /**
@@ -34,6 +35,7 @@ const pwFlag = args.indexOf('--password')
 const cliPassword = pwFlag !== -1 ? args[pwFlag + 1] : undefined
 
 const DEMO_MAIL = '@fairsynq.demo' // the marker: every demo row's email ends with this
+assertNotProductionDatabase('seed-demo-organizers.ts')
 const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 
 const now = new Date()

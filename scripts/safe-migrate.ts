@@ -27,6 +27,7 @@
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -47,6 +48,7 @@ function destructiveOps(sql: string): string[] {
 }
 
 async function appliedMigrationNames(): Promise<Set<string>> {
+  assertNotProductionDatabase('safe-migrate.ts')
   const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
   try {
     const rows = await prisma.$queryRawUnsafe<{ migration_name: string }[]>(

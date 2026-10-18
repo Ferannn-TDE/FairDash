@@ -26,8 +26,10 @@
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { setOrderPayoutState } from '../lib/admin-money'
 
+assertNotProductionDatabase('reverse-phantom-accruals.ts')
 const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 
 const EVENT_ID = 'cmni6x63n000011znjwlln5k2' // Italian Fest 2026

@@ -16,8 +16,10 @@
  * Usage: npx tsx scripts/backfill-stranded-placements.ts
  */
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { getRealtimeDb } from '../lib/firebase-admin'
 
+assertNotProductionDatabase('backfill-stranded-placements.ts')
 const db = new PrismaClient()
 
 // Explicit, verified targets (paid orders, status=PLACED, 0 vendor rows).

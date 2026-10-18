@@ -9,7 +9,9 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 
+assertNotProductionDatabase('step0b-post-jul17.ts')
 const db = new PrismaClient()
 const CUT = new Date('2026-07-17T00:00:00.000Z')
 

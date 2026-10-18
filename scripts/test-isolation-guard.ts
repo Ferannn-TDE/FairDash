@@ -129,14 +129,23 @@ const schemaSrc = readFileSync('prisma/schema.prisma', 'utf8')
 assert(/directUrl\s*=\s*env\("DIRECT_URL"\)/.test(schemaSrc),
   'schema.prisma still declares directUrl — so DIRECT_URL must be set for EVERY prisma CLI call')
 
-// Every npm script that invokes the prisma CLI must go through the one wrapper, which sets all
-// three variables from a single value. A script setting only DATABASE_URL is the incident shape.
+// Every npm script that invokes the prisma CLI must go through a LOCAL-PINNED wrapper, which sets
+// the variables from a single value. A script setting only DATABASE_URL is the incident shape.
+// Two wrappers qualify: with-test-db.sh (the gate's DB) and with-dev-db.sh (the dev DB) — both
+// refuse a non-local host. with-prod-db.sh deliberately does NOT qualify for an npm script.
 const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }
 const cliScripts = Object.entries(pkg.scripts).filter(([, v]) => /prisma\s+(migrate|db)\b/.test(v))
-const unwrapped = cliScripts.filter(([, v]) => !v.includes('with-test-db.sh'))
+const unwrapped = cliScripts.filter(([, v]) => !v.includes('with-test-db.sh') && !v.includes('with-dev-db.sh'))
 assert(cliScripts.length > 0, `[0] POSITIVE CONTROL: found ${cliScripts.length} prisma-CLI npm script(s) to check (not vacuous)`)
 assert(unwrapped.length === 0,
-  `every prisma-CLI npm script goes through scripts/with-test-db.sh (unwrapped: ${unwrapped.map(([k]) => k).join(', ') || 'none'})`)
+  `every prisma-CLI npm script goes through a local-pinned wrapper (unwrapped: ${unwrapped.map(([k]) => k).join(', ') || 'none'})`)
+assert(!cliScripts.some(([, v]) => v.includes('with-prod-db.sh')), 'no npm script reaches the prisma CLI through with-prod-db.sh')
+
+const devWrapper = readFileSync('scripts/with-dev-db.sh', 'utf8')
+assert(/export DATABASE_URL="\$DEV_DB" DIRECT_URL="\$DEV_DB"/.test(devWrapper),
+  'the dev wrapper sets DATABASE_URL and DIRECT_URL from one source')
+assert(/REFUSING/.test(devWrapper) && /localhost\|127\.0\.0\.1/.test(devWrapper) && /unset TEST_DATABASE_URL/.test(devWrapper),
+  'the dev wrapper refuses a non-local host and clears TEST_DATABASE_URL')
 
 // The wrapper must set all three, from one value — omitting DIRECT_URL is the exact bug.
 const wrapper = readFileSync('scripts/with-test-db.sh', 'utf8')

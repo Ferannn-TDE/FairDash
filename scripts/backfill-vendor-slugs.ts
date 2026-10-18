@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 
+assertNotProductionDatabase('backfill-vendor-slugs.ts')
 const prisma = new PrismaClient()
 
 function toSlug(name: string): string {

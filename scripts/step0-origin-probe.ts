@@ -8,7 +8,9 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 
+assertNotProductionDatabase('step0-origin-probe.ts')
 const db = new PrismaClient()
 
 async function main() {

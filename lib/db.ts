@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from './prod-db-guard'
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
 
@@ -89,6 +90,9 @@ function buildDatabaseUrl(): string {
 
 function createClient(): PrismaClient {
   const url = buildDatabaseUrl()
+  // A local process (dev server, script, local worker) refuses production unless CONFIRM_PROD_DB
+  // names the project. Inert on Vercel/Railway — see lib/prod-db-guard.ts.
+  assertNotProductionDatabase('lib/db', [url])
   const isDev = process.env.NODE_ENV === 'development'
   const client = new PrismaClient({
     datasources: { db: { url } },

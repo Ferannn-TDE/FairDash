@@ -16,9 +16,7 @@
  */
 
 import { PrismaClient } from '@prisma/client'
-
-/** Hosts that are production. Used to refuse, not to warn. */
-const PRODUCTION_HOST_MARKERS = ['supabase.com', 'supabase.co', 'pooler.supabase']
+import { PRODUCTION_HOST_MARKERS } from './prod-db-guard'
 
 export class TestDatabaseMisconfigured extends Error {
   constructor(message: string) {

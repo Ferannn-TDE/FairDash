@@ -16,9 +16,11 @@ import { config } from 'dotenv'
 config({ path: '.env.local' })
 
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { planRunnerPayout, type RunnerPayoutDecision } from '../lib/runner-payout'
 import { REFUND_WINDOW_MS } from '../lib/constants'
 
+assertNotProductionDatabase('b2-shadow-sweep.ts')
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
 })

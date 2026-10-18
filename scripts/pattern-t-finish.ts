@@ -2,7 +2,9 @@
  *  reconciler-attributed. FINAL positive control: Italian Fest payable = $260.00 exactly. */
 import { config } from 'dotenv'; config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { reverseAccrualForRefundedPortion } from '../lib/reverse-accrual'
+assertNotProductionDatabase('pattern-t-finish.ts')
 const p = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 const EVENT = 'cmni6x63n000011znjwlln5k2', NON_PAYABLE = ['REFUNDED','DECLINED','CANCELLED']
 async function payable() { return (await p.vendorEarning.findMany({ where: { eventId: EVENT, status: 'accrued' }, select: { subtotalCents: true } })).reduce((s,r)=>s+r.subtotalCents,0) }

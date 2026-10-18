@@ -22,8 +22,10 @@
  */
 
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import Stripe from 'stripe'
 
+assertNotProductionDatabase('cleanup-phantom-orders.ts')
 const db = new PrismaClient()
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY)

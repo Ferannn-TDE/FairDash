@@ -1,6 +1,8 @@
 import { PrismaClient, EventStatus, VendorType, VendorStatus } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 
 // CLI scripts use DIRECT_URL (session pooler / port 5432).
+assertNotProductionDatabase('seed.ts')
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
 })

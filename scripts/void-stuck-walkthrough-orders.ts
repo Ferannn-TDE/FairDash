@@ -21,6 +21,8 @@
  */
 import { config } from 'dotenv'; config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
+assertNotProductionDatabase('void-stuck-walkthrough-orders.ts')
 const p = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 
 const IDS = ['cmrmix3ey0007dkqswvrderfi', 'cmrmltq0z000mdkqs8dbxu1fr']

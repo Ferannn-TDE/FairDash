@@ -6,7 +6,9 @@
  */
 import { config } from 'dotenv'; config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { reverseAccrualForRefundedPortion } from '../lib/reverse-accrual'
+assertNotProductionDatabase('pattern-t-dryrun-report.ts')
 const p = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 const NON_PAYABLE = ['REFUNDED', 'DECLINED', 'CANCELLED']
 

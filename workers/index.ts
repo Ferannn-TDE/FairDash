@@ -7,8 +7,7 @@
  * Start via:
  *   npm run worker
  *
- * On Render: deploy as a background worker service pointing to this file.
- * The webhook server (npm run server) must be a SEPARATE service.
+ * Runs on Railway (`npm run worker`). Webhooks are handled by the Next.js routes on Vercel.
  */
 
 import dotenv from 'dotenv'
@@ -30,6 +29,12 @@ if (process.env.WORKER_ENABLED !== 'true') {
   )
   process.exit(0)
 }
+
+// Second gate: a worker on this laptop gets the local dev DB and queue, never production,
+// unless CONFIRM_PROD_DB names the project. Inert on Railway (lib/prod-db-guard.ts).
+const { assertNotProductionDatabase, assertLocalQueue } = await import('../lib/prod-db-guard')
+assertNotProductionDatabase('worker')
+assertLocalQueue('worker')
 
 // Dynamic import AFTER the gate — a static `import` hoists and would load (and run any
 // module-level side effects of) the worker module before the gate executes.

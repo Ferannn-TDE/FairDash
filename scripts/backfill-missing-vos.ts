@@ -26,7 +26,9 @@
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 
+assertNotProductionDatabase('backfill-missing-vos.ts')
 const prisma = new PrismaClient({ datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } } })
 const APPLY = process.argv.includes('--apply')
 

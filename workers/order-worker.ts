@@ -50,6 +50,7 @@ import { recordPayoutFailure as recordPayoutFailureShared, describeFailureCause 
 import { payoutFailureFinality } from '../lib/payout-failure-finality'
 import { WORKER_COMMIT } from '../lib/health'
 import { readWorkerConfig, formatWorkerConfig } from '../lib/worker-config'
+import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { createSweepRunner } from '../lib/sweep-runner'
 import { createIntervalGate } from '../lib/pattern-x-cadence'
 
@@ -58,7 +59,9 @@ import { createIntervalGate } from '../lib/pattern-x-cadence'
 dotenv.config({ path: '.env.local' })
 dotenv.config({ path: '.env' })
 
-// Use DIRECT_URL for the worker — avoids pgBouncer transaction mode restrictions
+// Use DIRECT_URL for the worker — avoids pgBouncer transaction mode restrictions.
+// Locally this refuses production (inert on Railway) — see lib/prod-db-guard.ts.
+assertNotProductionDatabase('worker', [process.env.DIRECT_URL ?? process.env.DATABASE_URL])
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL ?? process.env.DATABASE_URL } },
 })
