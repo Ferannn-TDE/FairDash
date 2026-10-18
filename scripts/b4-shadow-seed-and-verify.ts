@@ -59,12 +59,13 @@ async function mkRunner(eventId: string) { const u = await mkUser('runner'); ret
 // A CANCELLED runner-fulfilled order, tipped, that NO runner ever earned (cancelled
 // pre-delivery → no accrual ran). The tip is the customer-paid order field — a given
 // input, not a derived value — so creating the cancelled state directly is faithful.
-async function seedCancelledTipped(eventId: string, vendorId: string, tipCents: number, opts?: { alreadyRefunded?: boolean }) {
+async function seedCancelledTipped(eventId: string, vendorId: string, tipCents: number, opts?: { alreadyRefunded?: boolean; feeCents?: number }) {
   const customer = await mkUser('customer')
+  const fee = (opts?.feeCents ?? 1000) / 100
   return prisma.order.create({
     data: {
-      eventId, customerId: customer.id, vendorId, status: 'CANCELLED', fulfillmentType: 'HOME_DELIVERY',
-      subtotal: 15, fairSynqFee: 1.5, deliveryFee: 10, tip: tipCents / 100, total: 15 + 1.5 + 10 + tipCents / 100, vendorPayout: 15,
+      eventId, customerId: customer.id, vendorId, status: 'CANCELLED', fulfillmentType: fee > 0 ? 'HOME_DELIVERY' : 'BOOTH_PICKUP',
+      subtotal: 15, fairSynqFee: 1.5, deliveryFee: fee, tip: tipCents / 100, total: 15 + 1.5 + fee + tipCents / 100, vendorPayout: 15,
       customerName: 'B4', customerPhone: '+10000000000', cancelledAt: new Date(), cancelledBy: 'customer',
       stripeChargeId: `ch_${SLUG}${rand()}`,
       ...(opts?.alreadyRefunded ? { tipRefundId: `re_${SLUG}${rand()}`, tipRefundedAt: new Date() } : {}),
@@ -101,16 +102,16 @@ async function main() {
     const owedBack   = await seedCancelledTipped(ev.id, ven.id, 300)                       // → refund 300
     const runnerTip  = await seedDeliveredTipped(ev.id, ven.id, run.id, 500)               // → excluded (runner earned it)
     const refunded   = await seedCancelledTipped(ev.id, ven.id, 300, { alreadyRefunded: true }) // → already_refunded
-    const noTip      = await seedCancelledTipped(ev.id, ven.id, 0)                          // → no_tip
+    const noTip      = await seedCancelledTipped(ev.id, ven.id, 0, { feeCents: 0 })                         // → no_tip
 
     // sanity: the distractor genuinely has a RunnerEarning carrying the tip
     const re = await prisma.runnerEarning.findUnique({ where: { orderId: runnerTip.id }, select: { amountCents: true } })
 
-    console.log('\n[1] owed-back: cancelled + tipped + NO runner earning → would-refund === tipCents')
+    console.log('\n[1] owed-back: cancelled + tipped + NO runner earning → would-refund === tip + delivery fee')
     const p1 = await planTipRefund(owedBack.id)
     assert(p1.outcome === 'refund', 'outcome = refund')
-    assert(p1.owedBackCents === 300, `owed-back = $3.00 (got ${fmt(p1.owedBackCents)})`)
-    assert(p1.owedBackCents === Math.round((owedBack.tip ?? 0) * 100), 'owed-back === the order tipCents to the cent')
+    assert(p1.owedBackCents === 1300, `owed-back = $13.00 (got ${fmt(p1.owedBackCents)})`)
+    assert(p1.owedBackCents === Math.round((owedBack.tip ?? 0) * 100) + Math.round((owedBack.deliveryFee ?? 0) * 100), 'owed-back === tip + delivery fee to the cent')
     assert(!p1.hasRunnerEarning, 'no runner earning (tip belongs to no one)')
 
     console.log('\n[GATE] runner-earned tip → EXCLUDED, never refunded to the customer')
@@ -125,13 +126,13 @@ async function main() {
     assert(p3.outcome === 'already_refunded', 'outcome = already_refunded')
     assert(p3.owedBackCents === 0, 'no second refund would fire')
 
-    console.log('\n[4] cancelled, no tip → nothing')
+    console.log('\n[4] cancelled, no tip and no fee → nothing')
     const p4 = await planTipRefund(noTip.id)
-    assert(p4.outcome === 'no_tip' && p4.owedBackCents === 0, 'outcome = no_tip, nothing owed')
+    assert(p4.outcome === 'nothing_owed' && p4.owedBackCents === 0, 'outcome = nothing_owed')
 
     console.log('\n[totals] only the owed-back order contributes to the refund total')
     const totalOwed = [p1, p2, p3, p4].reduce((s, p) => s + p.owedBackCents, 0)
-    assert(totalOwed === 300, `total would-refund = $3.00 (only the owed-back order; got ${fmt(totalOwed)})`)
+    assert(totalOwed === 1300, `total would-refund = $13.00 (only the owed-back order; got ${fmt(totalOwed)})`)
   } finally {
     await cleanup()
   }

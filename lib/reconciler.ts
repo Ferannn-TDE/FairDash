@@ -39,7 +39,7 @@ import { retryChargebackClawback } from './process-chargeback'
 import { splitRunnerFee } from './payout-split'
 import { reconcileRunnerPayouts } from './runner-payout'
 import { reconcileOrganizerPayouts } from './organizer-payout'
-import { reconcileTipRefunds } from './tip-refund'
+import { reconcileTipRefunds, owedBackCandidateWhere } from './tip-refund'
 import { getOrderQueue, JOB_UNACCEPTED } from './queues'
 import { enqueueJobSafely } from './queue-safe'
 import { VENDOR_ACCEPT_TIMEOUT_MS, REFUND_WINDOW_MS, CURBSIDE_WAIT_TIMEOUT_MS } from './constants'
@@ -1018,20 +1018,19 @@ async function patternL(
     }
   }
 
-  // 2. Tip in limbo: a CANCELLED runner-fulfilled order with a tip but no runner
-  //    earned it → the tip is OWED BACK to the customer, never kept by FairSynq.
-  //    Surface any such tip so it is never silently retained as revenue.
-  // Only alert on the STILL-UNREFUNDED owed-back tips: once Pattern R refunds one
-  // (tipRefundId set) it must go quiet (no double-alerting on resolved tips).
-  const cancelledTipped = await db.order.findMany({
-    where: { status: OrderStatus.CANCELLED, tip: { gt: 0 }, runnerEarning: { is: null }, tipRefundId: null },
-    select: { id: true, tip: true },
+  // 2. Tip or delivery fee in limbo: a CANCELLED runner-fulfilled order that no runner
+  //    earned → tip + fee are OWED BACK to the customer, never kept by FairSynq.
+  // Same scan as Pattern R (owedBackCandidateWhere), so it goes quiet once R refunds one
+  // (tipRefundId set) or an admin resolves its halt.
+  const cancelledOwed = await db.order.findMany({
+    where: owedBackCandidateWhere(),
+    select: { id: true, tip: true, deliveryFee: true },
     orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
-  for (const ord of cancelledTipped) {
+  for (const ord of cancelledOwed) {
     sum.details.L.push(ord.id)
-    sum.alerted.push(`Pattern L: cancelled order ${ord.id} has a ${Math.round((ord.tip ?? 0) * 100)}¢ tip but no runner earned it — OWED BACK to customer (Pattern R executes the refund; alert means not yet refunded)`)
+    sum.alerted.push(`Pattern L: cancelled order ${ord.id} has a ${Math.round((ord.tip ?? 0) * 100)}¢ tip and ${Math.round((ord.deliveryFee ?? 0) * 100)}¢ delivery fee no runner earned — OWED BACK to customer (Pattern R executes the refund; alert means not yet refunded)`)
   }
 }
 
@@ -1249,23 +1248,19 @@ async function patternQ(
 }
 
 // ─── PATTERN R — Tip-refund execution (Part B B4) — the paying sibling of L ────
-// Executes the owed-back tips Pattern L only ALERTED on: a CANCELLED runner-
-// fulfilled order with a tip but NO RunnerEarning → the tip is owed back to the
-// customer (no one earned it). Delegates to reconcileTipRefunds → routes through
-// processTipRefund (idempotent; idempotencyKey tip_refund_${orderId}; policy gate
-// re-checked at execute so a runner-earned tip is NEVER refunded). dryRun counts
-// what WOULD refund without moving money. Pattern L (narrowed to tipRefundId=null)
-// keeps alerting on any R couldn't auto-execute (e.g. no charge).
+// Executes what Pattern L only ALERTS on: a CANCELLED runner-fulfilled order with
+// a tip and/or delivery fee but NO RunnerEarning → both are owed back to the
+// customer. Delegates to reconcileTipRefunds → processTipRefund (ceiling read from
+// Stripe's own refund list; idempotencyKey owed_back_${orderId}; policy gate
+// re-checked at execute). Anything it won't decide becomes an OwedBackHalt shown
+// on the admin money page. dryRun counts what WOULD refund without moving money.
 async function patternR(
   sum: SweepSummary,
   o: { scanCeiling: number; maxPerPattern: number; dryRun: boolean },
 ) {
   if (o.dryRun) {
     const owed = await db.order.findMany({
-      where: {
-        status: OrderStatus.CANCELLED, tip: { gt: 0 },
-        runnerEarning: { is: null }, tipRefundId: null, voidedAt: null,
-      },
+      where: owedBackCandidateWhere(),
       select: { id: true },
       orderBy: [{ placedAt: 'asc' }, { id: 'asc' }],
       take: o.scanCeiling,

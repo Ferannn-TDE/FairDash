@@ -209,6 +209,19 @@ export async function GET(
       //
       // ⚠️ cause.stripeMessage is STRIPE-AUTHORED TEXT. The client MUST render it as text.
       failedPayouts: await findStuckPayouts({ eventId: event.id, legs: ['runner', 'organizer'] }),
+
+      // ── OWED-BACK HALTS (1.2) — a customer is owed their tip + delivery fee and the sweep
+      // refused to refund it (Stripe's records disagree with ours). Every OPEN halt for this fair,
+      // until an admin resolves it with a note. detail is our text; no Stripe-authored strings.
+      owedBackHalts: await db.owedBackHalt.findMany({
+        where: { eventId: event.id, resolvedAt: null },
+        select: {
+          orderId: true, reason: true, detail: true, owedCents: true, roomCents: true,
+          firstHaltedAt: true, lastHaltedAt: true,
+          order: { select: { tip: true, deliveryFee: true, total: true, customerName: true } },
+        },
+        orderBy: { firstHaltedAt: 'asc' },
+      }),
     })
   } catch (err) {
     return handleApiError(err)

@@ -81,11 +81,15 @@ export type AuditPayeeType = PayeeType | 'customer'
 // admin panel reads the payee-facing actions. A heal is neither — it is the reconciler stating
 // that the LEDGER moved, while no money did. Reusing an existing verb would make an audit row
 // claim an action nobody took.
+// OWED_BACK_* (1.2): the owed-back refund refused to move money (HALTED, written once when the
+// halt first appears), found it already refunded at Stripe (COVERED), or an admin closed a halt
+// with a note (HALT_RESOLVED — never a refund). Own strings for the same namespace reason.
 export type MoneyActionType =
   | 'HOLD' | 'RELEASE' | 'CANCEL' | 'FREEZE' | 'UNFREEZE' | 'REFUND'
   | 'PAYOUT_FAILED'
   | 'TIP_REFUND_FAILED'
   | 'LEDGER_HEAL'
+  | 'OWED_BACK_HALTED' | 'OWED_BACK_COVERED' | 'OWED_BACK_HALT_RESOLVED'
 
 export interface AdminMoneyContext {
   /** From requireAdminFairContext — proves platform admin + resolves the fair. */

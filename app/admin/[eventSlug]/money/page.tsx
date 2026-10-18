@@ -70,6 +70,24 @@ interface MoneyView {
   recentAdminActions: AdminAction[]
   /** Reconciler-side payout failures for THIS fair. cause.stripeMessage is Stripe-authored. */
   failedPayouts: FailedPayout[]
+  /** Open owed-back halts: a customer owed tip + delivery fee that the sweep refused to refund. */
+  owedBackHalts?: OwedBackHalt[]
+}
+interface OwedBackHalt {
+  orderId: string
+  reason: string
+  detail: string
+  owedCents: number
+  roomCents: number | null
+  firstHaltedAt: string
+  lastHaltedAt: string
+  order: { tip: number | null; deliveryFee: number | null; total: number; customerName: string | null }
+}
+const HALT_LABEL: Record<string, string> = {
+  REFUND_ROOM_SHORT: 'Refunds on the charge we can’t account for',
+  CHARGE_DISPUTED: 'Charge is disputed',
+  NO_CHARGE: 'No Stripe charge found',
+  ORGANIZER_SHARE_WITHOUT_RUNNER: 'Organizer share recorded without a runner',
 }
 interface FailedPayout {
   leg: 'vendor' | 'runner' | 'organizer'
@@ -345,6 +363,7 @@ type PendingAction =
   | { kind: 'payout'; payeeType: 'vendor' | 'runner' | 'organizer'; action: 'HOLD' | 'RELEASE' | 'CANCEL'; orderId?: string; vendorId?: string; title: string; danger?: boolean }
   | { kind: 'freeze'; payeeType: 'vendor' | 'runner' | 'organizer'; payeeId: string; frozen: boolean; title: string; danger?: boolean }
   | { kind: 'retry-payout'; leg: 'runner' | 'organizer'; id: string; title: string; danger?: boolean }
+  | { kind: 'resolve-owed-back'; orderId: string; title: string; danger?: boolean }
 
 export default function AdminMoneyPage({ params: paramsPromise }: { params: Promise<{ eventSlug: string }> }) {
   const params = use(paramsPromise)
@@ -357,7 +376,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
   // Section nav — the page was one long scroll, so reaching Runners meant passing every vendor
   // row and reaching the audit meant passing both. Purely which SECTION is shown; no data,
   // derivation, or control behavior changes with it.
-  const [section, setSection] = useState<'vendors' | 'runners' | 'organizer' | 'failed' | 'audit'>('vendors')
+  const [section, setSection] = useState<'vendors' | 'runners' | 'organizer' | 'failed' | 'owed' | 'audit'>('vendors')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -384,6 +403,8 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
         ? { payeeType: pending.payeeType, action: pending.action, orderId: pending.orderId, vendorId: pending.vendorId, reason }
         : pending.kind === 'retry-payout'
         ? { leg: pending.leg, id: pending.id, reason }
+        : pending.kind === 'resolve-owed-back'
+        ? { orderId: pending.orderId, reason }
         : { payeeType: pending.payeeType, payeeId: pending.payeeId, frozen: pending.frozen, reason }
       const res = await fetch(url, {
         method: 'POST',
@@ -410,6 +431,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
   // so nothing else that consumes it changes.
   const { vendors, runners, organizer, platformBalance, passiveHolds } = data
   const failedPayouts = data.failedPayouts ?? []
+  const owedBackHalts = data.owedBackHalts ?? []
 
   return (
     <div className="p-6 md:p-4 space-y-6 max-w-[80rem]">
@@ -425,6 +447,26 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
           <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
           <p className="text-red-300 text-xs">{actionError}</p>
         </div>
+      )}
+
+      {/* OWED-BACK HALTS sit above everything: each one is a customer owed money that no
+          automatic path will refund. Shown on every section until resolved. */}
+      {owedBackHalts.length > 0 && (
+        <button
+          onClick={() => setSection('owed')}
+          className="w-full text-left p-4 bg-red-500/10 border border-red-500/40 rounded-2xl flex items-start gap-3 cursor-pointer hover:bg-red-500/15 transition-colors"
+        >
+          <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-red-200 text-sm font-semibold">
+              {owedBackHalts.length === 1 ? '1 customer is' : `${owedBackHalts.length} customers are`} owed a refund that was stopped
+              ({money(owedBackHalts.reduce((t, h) => t + h.owedCents, 0))})
+            </p>
+            <p className="text-red-300/80 text-xs mt-0.5">
+              The tip and delivery fee refund was halted because Stripe’s records don’t match ours. Review each one.
+            </p>
+          </div>
+        </button>
       )}
 
       {/* ── SCOPE BOUNDARY ──────────────────────────────────────────────────────────
@@ -465,6 +507,7 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
           { key: 'runners',   label: 'Runners' },
           { key: 'organizer', label: 'Organizer' },
           { key: 'failed',    label: failedPayouts.length ? `Failed (${failedPayouts.length})` : 'Failed' },
+          { key: 'owed',      label: owedBackHalts.length ? `Refunds stopped (${owedBackHalts.length})` : 'Refunds stopped' },
           { key: 'audit',     label: 'Audit' },
         ] as const).map(t => (
           <button
@@ -756,6 +799,61 @@ export default function AdminMoneyPage({ params: paramsPromise }: { params: Prom
                       Cause not recorded — this marker predates cause capture. Check the worker log for this id.
                     </p>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {section === 'owed' && (
+        <div className="bg-bg-card border border-white/10 rounded-2xl p-6">
+          <div className="flex items-baseline justify-between mb-1">
+            <h2 className="text-white font-bebas text-xl tracking-wide">Refunds stopped</h2>
+            <span className="text-[0.6rem] uppercase tracking-wider text-text-gray font-semibold">this fair only</span>
+          </div>
+          <p className="text-text-gray text-xs mb-5">
+            Cancelled orders where the customer is owed their tip and delivery fee, but the automatic
+            refund stopped because something didn’t add up. Check the charge in Stripe and sort it
+            out there. <span className="text-white">Mark resolved</span> records your note and stops
+            the alert. It never issues a refund.
+          </p>
+
+          {owedBackHalts.length === 0 ? (
+            <p className="text-text-gray text-sm">No stopped refunds.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {owedBackHalts.map(h => (
+                <div key={h.orderId} className="bg-bg-dark border border-red-500/25 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[0.625rem] uppercase tracking-wider font-semibold">
+                          {HALT_LABEL[h.reason] ?? h.reason}
+                        </span>
+                        <span className="text-white font-semibold text-sm">{money(h.owedCents)} owed</span>
+                        <span className="text-text-gray text-xs font-mono truncate">{h.orderId}</span>
+                      </div>
+                      <p className="text-text-gray text-[0.6875rem] mt-1">
+                        {h.order.customerName ? `${h.order.customerName} · ` : ''}
+                        tip {money(Math.round((h.order.tip ?? 0) * 100))} · delivery fee {money(Math.round((h.order.deliveryFee ?? 0) * 100))}
+                        {h.roomCents != null ? ` · refundable at Stripe ${money(h.roomCents)}` : ''}
+                        {` · stopped ${formatAuditTimestamp(h.firstHaltedAt)}`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setPending({
+                        kind: 'resolve-owed-back', orderId: h.orderId,
+                        title: `Mark this stopped refund (${money(h.owedCents)}) resolved? No refund is issued. Say what you did, e.g. "refunded by hand in Stripe".`,
+                      })}
+                      className="px-3.5 py-1.5 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 cursor-pointer shrink-0"
+                    >
+                      Mark resolved
+                    </button>
+                  </div>
+                  <p className="mt-3 pt-3 border-t border-white/10 text-white/80 text-xs leading-relaxed break-words whitespace-pre-wrap">
+                    {h.detail}
+                  </p>
                 </div>
               ))}
             </div>

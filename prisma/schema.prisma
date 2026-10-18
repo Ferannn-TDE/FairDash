@@ -587,11 +587,11 @@ model Order {
   // Validated and rendered through lib/delivery-address.ts — the one definition of a
   // deliverable address (required: street/city/zip) and the one formatter. Nothing on the
   // write path may invent a value to satisfy a validator: a missing field stays NULL.
-  deliveryStreet String?
-  deliveryUnit   String? // apartment / suite / room — Places never supplies it; a dorm needs it
-  deliveryCity   String?
-  deliveryState  String? // 2-letter code, from administrative_area_level_1 when autocomplete fires
-  deliveryZip    String?
+  deliveryStreet       String?
+  deliveryUnit         String? // apartment / suite / room — Places never supplies it; a dorm needs it
+  deliveryCity         String?
+  deliveryState        String? // 2-letter code, from administrative_area_level_1 when autocomplete fires
+  deliveryZip          String?
   // Server-geocoded from the address above (lib/delivery-radius.ts) — never from the browser.
   // NULL on orders placed before radius enforcement. deliveryGeoPrecision is Google's
   // location_type: ROOFTOP / RANGE_INTERPOLATED are a real point; GEOMETRIC_CENTER /
@@ -688,8 +688,12 @@ model Order {
   // ledger-as-record like the runner case). Set when a CANCELLED runner-fulfilled
   // order's tip is owed BACK to the customer (no runner ever earned it). Presence =
   // refunded; the idempotency key tip_refund_${id} + this field prevent double-refund.
-  tipRefundId   String?   @unique
-  tipRefundedAt DateTime?
+  tipRefundId            String?   @unique
+  tipRefundedAt          DateTime?
+  // 1.2 — the owed-back refund now returns the delivery/curbside fee too (no runner earned it).
+  // tipRefundId stays the ONE "owed-back settled" marker (expand/contract: no rename); this is the
+  // fee part of what went back, for the receipt and order page. Null on tip-only legacy refunds.
+  deliveryFeeRefundCents Int?
 
   // Out-of-model exclusion marker. NOT a terminal status (these orders may be
   // COMPLETED/CANCELLED/PLACED in their own right) — a distinct flag meaning
@@ -717,6 +721,7 @@ model Order {
   runnerEarning       RunnerEarning?
   organizerEarning    OrganizerEarning?
   vendorEarnings      VendorEarning[] // N per order (one per payable vendor)
+  owedBackHalt        OwedBackHalt?
 
   @@unique([placedAt, id], map: "uq_order_placed_id")
   @@index([customerId, placedAt(sort: Desc)], map: "idx_order_customer_placed")
@@ -1893,4 +1898,36 @@ model SweepRun {
 
   @@index([startedAt])
   @@index([dryRun, startedAt]) // "real runs, most recent first" is the common read
+}
+
+// 1.2 — an owed-back refund (tip + delivery fee) the sweep REFUSED to make because Stripe's
+// records and ours disagree (unrecorded refunds on the charge, a dispute, no charge, an
+// organizer share with no runner). One row per order. While resolvedAt is null the order is
+// shown on the admin money page and re-checked every sweep (a transient cause clears itself and
+// the refund goes through). An admin resolve closes it with a note: the order then leaves the
+// owed-back scan for good. Resolving NEVER issues a refund.
+model OwedBackHalt {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  eventId String
+
+  /// NO_CHARGE | CHARGE_DISPUTED | REFUND_ROOM_SHORT | ORGANIZER_SHARE_WITHOUT_RUNNER
+  reason    String
+  /// Human-readable cause with the amounts, for the admin view.
+  detail    String
+  /// tip + fee still owed after earlier owed-back refunds (cents).
+  owedCents Int
+  /// What Stripe says can still be refunded (cents); null when the charge could not be read.
+  roomCents Int?
+
+  firstHaltedAt DateTime @default(now())
+  lastHaltedAt  DateTime @default(now())
+
+  resolvedAt     DateTime?
+  /// Clerk id of the admin, or 'reconciler' when the refund later went through on its own.
+  resolvedBy     String?
+  resolutionNote String?
+
+  @@index([eventId, resolvedAt])
 }

@@ -19,6 +19,10 @@ const POLICY_SECTIONS = [
     body: 'We will consider a refund or credit if: (a) your order was never fulfilled by the vendor, (b) you were charged but the vendor was closed, or (c) there was a confirmed billing error. In these cases please contact us within 48 hours of the event.',
   },
   {
+    heading: 'Cancelled Orders',
+    body: 'If a vendor cancels your order, or it is cancelled before a vendor accepts it, you get back the price of the food from that vendor. If the whole order is cancelled before a runner delivers it, you also get back the delivery or curbside fee and any tip. When only part of an order from several vendors is cancelled, the delivery fee and tip stay with the delivery. The FairSynq service fee is not refunded. Refunds go back to the card you paid with and usually take 5–10 business days to appear.',
+  },
+  {
     heading: 'How To Request Help',
     body: `Email us at ${CONTACT_EMAIL} or message us on Facebook with your order number and a description of the issue. We aim to respond ${RESPONSE_TIME_LONG}.`,
   },
@@ -36,7 +40,7 @@ export default function RefundPolicyPage() {
             <h1 className="font-bebas text-5xl sm:text-6xl text-white tracking-wide">
               Refund <span className="text-neon-pink">Policy</span>
             </h1>
-            <p className="mt-3 text-text-gray text-sm">Last updated: January 1, 2026</p>
+            <p className="mt-3 text-text-gray text-sm">Last updated: October 18, 2026</p>
           </div>
         </section>
 

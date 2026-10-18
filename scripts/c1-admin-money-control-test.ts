@@ -519,6 +519,8 @@ async function main() {
       // Returns a FAILED payout to the reconciler's candidate set. It moves no money — the
       // sweep does — but it mutates a money row, so it rides the same chokepoint as the rest.
       'app/api/admin/events/[id]/money/retry-payout/route.ts',
+      // Closes an owed-back halt with a note (1.2). Refunds nothing; mutates a money record.
+      'app/api/admin/events/[id]/money/resolve-owed-back/route.ts',
     ]
     const unexpected = routeFiles.filter(f => !EXPECTED_MONEY_ROUTES.includes(f))
     const missing = EXPECTED_MONEY_ROUTES.filter(f => !routeFiles.includes(f))

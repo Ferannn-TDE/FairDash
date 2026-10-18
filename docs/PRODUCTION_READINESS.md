@@ -7,8 +7,8 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 8/38 |
-| 2. Ops foundation | Nov 2 – Dec 13 | 0/24 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 14/41 |
+| 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 0/11 |
 | 4. Customer portal | Dec 21 – Jan 3 | 0/8 |
@@ -82,10 +82,13 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 ### 1.2 Delivery fee on cancel-before-pickup (CURRENT_STATE #18)
 Policy: refund the delivery fee on any cancel where no runner earned anything (no `RunnerEarning`), whoever cancelled. On a multi-vendor order, only when every vendor portion is cancelled. Service fee stays non-refundable.
 
-- [ ] Fold the delivery fee into Pattern R (`lib/tip-refund.ts`): one "delivery & tip" refund per order, same gate, same idempotency.
-- [ ] Reconciliation test: auto-cancelled order refunds food + delivery + tip to the cent; a partially cancelled multi-vendor order refunds no delivery fee; an order with a `RunnerEarning` refunds neither tip nor delivery fee.
-- [ ] Update `/refund-policy` to state the rule.
-- [ ] Note the known trade-off in the doc: a runner who accepted but hadn't picked up gets nothing. Revisit if runners complain.
+- [x] Fold the delivery fee into Pattern R (`lib/tip-refund.ts`): one "delivery & tip" refund per order, same gate. New key `owed_back_${orderId}`; `tipRefundId` stays the marker; `deliveryFeeRefundCents` itemizes. Curbside fee included.
+- [x] Key-independent ceiling: read the charge and every refund on it (all pages) from Stripe; refund only tip + fee minus earlier owed-back refunds (by metadata label), and halt if the charge has less room than that. Never a partial refund.
+- [x] Halts are durable (`OwedBackHalt`), shown on the admin money page (banner + "Refunds stopped" tab) until resolved. Admin "Mark resolved" needs a note, writes an audit row, and never refunds.
+- [x] Reconciliation test (`scripts/b4-tip-refund-test.ts`, 77 checks, 19/19 mutations caught): auto-cancelled order refunds food + delivery + tip to the cent; a partially cancelled multi-vendor order refunds no delivery fee; an order with a `RunnerEarning` refunds neither; old tip refund with a lost marker refunds the fee only; >10 and >100 refunds on a charge.
+- [x] Update `/refund-policy` to state the rule.
+- [x] Known trade-off: a runner who accepted but hadn't picked up gets nothing. Revisit if runners complain.
+- [ ] Apply the migration (`20261019120000_add_owed_back_fee_refund`) to production, then deploy. Needs approval.
 
 ### 1.3 Refund and order display
 - [ ] Order page shows the tip as its own line. Total = itemized lines.
@@ -164,6 +167,7 @@ You already have delegate access to the GoDaddy account holding fairsynq.com, so
 - [ ] Usage alerts at 70% of every free-tier limit (list in 2.4), set in each provider's dashboard.
 - [ ] Test: stop the Railway worker for ~10 min and confirm the phone alert (expected within 6–9 min with `HEALTH_WORKER_STALE_SEC=360` and a 3-minute check). Restart; confirm the boot sweep and health recover. (Repeated on new production in Phase 9.)
 - [ ] Test: force a 500 on a webhook in a Vercel Preview deploy; confirm the Sentry alert fires.
+- [ ] Owed-back halts (`OwedBackHalt`, from 1.2) go to Sentry as alerts when first raised, so a customer owed money pages you instead of waiting for someone to open the money page.
 
 ### 2.4 Free-tier inventory (`docs/COST-WORKSHEET.md`)
 - [ ] Every free tier we depend on, with its limit, current usage and upgrade trigger: Supabase, Upstash, Railway, Vercel, Clerk, Resend, Zoho, Google Maps/Geocoding/Routes, Sentry, Better Stack.
