@@ -109,7 +109,11 @@ assert(/RUNNER_COMPLETION_MIN_DENOMINATOR/.test(route) && /scored:\s*s\.collecte
 const page = readFileSync('app/admin/[eventSlug]/runners/page.tsx', 'utf8')
 assert(/runner\.scored\s*\?[\s\S]{0,200}CompletionBar/.test(page), 'page renders the bar/percentage ONLY when scored')
 assert(/not enough deliveries/.test(page), 'below the floor the cell reads "not enough deliveries" — not a percentage')
-assert(/r\.scored\s*&&\s*r\.completionRate\s*<\s*0\.9/.test(page), 'the <90% banner predicate requires scored — noise over N<floor can never fire it')
+// The threshold is the named constant (5ed12e6), not a literal — retuning stays one line.
+const BANNER = /r\.scored\s*&&\s*r\.completionRate\s*<\s*RUNNER_MIN_COMPLETION_RATE\b/
+assert(!BANNER.test('runners.some(r => r.completionRate < RUNNER_MIN_COMPLETION_RATE)'), 'control: a banner without `scored` does not match')
+assert(BANNER.test(page), 'the <90% banner predicate requires scored and uses RUNNER_MIN_COMPLETION_RATE — noise over N<floor can never fire it')
+assert(/export const RUNNER_MIN_COMPLETION_RATE = 0\.90?\b/.test(constantsSrc), 'RUNNER_MIN_COMPLETION_RATE is 0.9 in lib/constants (the "<90%" in the copy)')
 assert(!/[<>]=?\s*5\b/.test(page), 'the page carries NO local floor literal (retuning is one line in constants)')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} runner-stats-source-guard: ${pass} passed, ${fail} failed`)
