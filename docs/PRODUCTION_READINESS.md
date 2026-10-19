@@ -48,6 +48,7 @@ Inside the light-capacity window, if November slips, Phase 3 moves later, not Ph
 - **Guards don't read the clock.** Date-dependent tests pin fixed instants.
 - **Every definition of done names its environment:** local Docker stack (anything needing the worker), staging, or production.
 - **Touch each page once.** Audit fixes and design migration happen in the same pass.
+- **Money changes get a sealed production dry run before their first deploy.** Template: `scripts/owed-back-dry-run.ts` (read-only Postgres session, Prisma writes and Stripe money calls blocked, every seal proven by a control first, plus a positive control showing the probe can see real orders). List every order the first live run would touch, with amounts, and get approval on that list before migrating or pushing. 1.2 is why: 77 passing tests missed a retroactive refund that the dry run found.
 
 ---
 
