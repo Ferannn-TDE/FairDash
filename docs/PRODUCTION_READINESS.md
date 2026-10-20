@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 32/43 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 32/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -140,6 +140,24 @@ Charges are created on the platform account (separate charges & transfers, no `o
 - [ ] `statement_descriptor_suffix` set per order. Cleaned to Stripe's rules (22 chars total, no `<>\'"*`). Falls back to the prefix alone. Unit test for the cleaning.
 - [ ] One test-mode charge confirms the descriptor shown in the Stripe dashboard reads `FAIRSYNQ* <FAIR>`.
 
+### 1.9 Roles that match their rows
+Clerk `roles[]` opens the portal doors and the payee rows (OrgMember, VendorMember, Runner) open the gates. 2026-10-19 production had 6 disagreements. Read-only root cause of each:
+
+| Kind | Count | Code path | Still open? |
+|---|---|---|---|
+| Runner row, no `runner` role | 1 | `/api/drivers` minted Runners without syncing roles until 0b300f6 (2026-08-01); never backfilled | Path fixed. Gap: the sync is best-effort and "self-heals on the next sync" has no next sync |
+| Runner row, no `runner` role | 1 | Out-of-band insert on 2026-06-10 (no RunnerApplication; predates any committed runner-create code) | **Yes**: any script/seed/SQL insert skips the sync, including the 9.3 cutover seed |
+| `vendor` / `runner` role, no row | 2 | Optimistic `roles[]` write in `/onboarding` at signup, removed by 0b300f6; both signed up 2026-08-01 within the deploy window; the union sync can never remove a role | Path fixed. Gap: no explicit revoke, so stale claims live forever |
+| DB user, no Clerk user | 1 | `softDeleteClerkUser` tombstone (user had orders; `purged…` clerkId, `.invalid` email) | No: by design; the check should classify it as expected |
+| Clerk user, no DB row | 1 | Signed up 2026-02-24, before the Clerk webhook (2026-03-22) and `/onboarding` (2026-04-18); never returned | Mostly closed. Gap: the webhook silently skips a user with no primary email |
+
+- [ ] Role reconcile: one function that adds every missing payee role from the rows (never removes), run on sign-in and by a worker sweep, so a failed best-effort sync or an out-of-band insert converges.
+- [ ] Explicit revoke, separate from the sync: removes a payee role only when no row backs it; never touches admin-family roles. Used once for the 2 stale claims, with your approval per user.
+- [ ] Every script that creates an OrgMember/VendorMember/Runner (seeds included) goes through the same create-and-sync helper; a gate scan fails on a bare create outside tests.
+- [ ] Clerk webhook logs a warning (not a silent skip) when a user has no primary email; such a user still gets a DB row on first authenticated request.
+- [ ] `role-consistency-check` classifies purge tombstones as expected and exits non-zero on anything else; it runs after the 9.3 seed as a cutover gate.
+- [ ] Tests (test DB + a fake Clerk client): each kind above is created, then shown converged by the reconcile or the revoke, with a positive control that the check sees the mismatch first.
+
 **Done when:** every test above passes in the gate, the descriptor is confirmed on a test charge, and the three payee GIFs are recorded. Worker-dependent flows (refunds, emails from the webhook) are verified on the local Docker stack.
 
 ---
@@ -251,7 +269,7 @@ About 20 pages: landing → fair → menu → checkout → tracking → account.
 - [ ] Audit checklist written (`docs/audit/customer.md`).
 - [x] Fair cards (landing "Happening now & soon" and `/fairs`): uniform height, clamped description, fixed banner, only live/upcoming under "Happening now", ended fairs under Past Events with "View fair", "1 vendor" pluralization, AA badge contrast. Fixed 2026-10-19 via the shared `FairCard`; screenshots at 390px and 1280px taken.
 - [ ] **P1:** opening `/onboarding` writes to Clerk (`publicMetadata.role`, `roles[]` via the organizer bootstrap) and the DB with no user action. It must write only when the user submits something. *(2026-10-19: a page view on localhost changed a real account.)*
-- [ ] Data consistency: users whose Clerk `roles[]` disagrees with their payee rows. Read-only check `scripts/role-consistency-check.ts`. 2026-10-19 production: 4 of 21 compared users mismatch (runner row but no `runner` role: 2; `vendor` role without a row: 1; `runner` role without a row: 1), plus 1 DB user with no Clerk user and 1 Clerk user with no DB row. Decide the repair per kind; the role sync can only add roles.
+- [ ] Data consistency: users whose Clerk `roles[]` disagrees with their payee rows. Read-only check `scripts/role-consistency-check.ts`. 2026-10-19 production: 4 of 21 compared users mismatch (runner row but no `runner` role: 2; `vendor` role without a row: 1; `runner` role without a row: 1), plus 1 DB user with no Clerk user and 1 Clerk user with no DB row. Decide the repair per kind; the role sync can only add roles. Root cause and fixes: 1.9.
 - [ ] Your pass added.
 - [ ] P0/P1 closed.
 - [ ] Pages migrated to tokens and primitives (zero arbitrary values on migrated pages).
