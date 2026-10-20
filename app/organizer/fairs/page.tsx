@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 import { formatEventDate } from '@/lib/event-date'
+import { vendorCountLabel } from '@/lib/fair-view'
 import DraftFairsSection from './_components/DraftFairsSection'
 
 interface Fair {
@@ -80,7 +81,7 @@ export default function OrganizerFairsPage() {
                       </span>
                     </div>
                     <p className="text-xs text-[#666] font-inter truncate mt-0.5">
-                      {formatEventDate(fair.startDate)} · {fair.vendorCount} vendors · {fair.orderCount} orders
+                      {formatEventDate(fair.startDate)} · {vendorCountLabel(fair.vendorCount)} · {fair.orderCount} orders
                     </p>
                     <div className="flex gap-1 mt-1.5 flex-wrap">
                       {fair.enableBoothPickup && (

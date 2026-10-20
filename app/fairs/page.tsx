@@ -2,20 +2,10 @@ import MarketplaceNavbar from '../_components/MarketplaceNavbar'
 import FairCard from '../_components/FairCard'
 import WelcomeBanner from '../_components/WelcomeBanner'
 import { getAllFairsCached } from '@/lib/fairs'
-import { toPublicFairCard, type PublicFairCard, type PublicFairStatus } from '@/lib/fair-view'
+import { toPublicFairCard, partitionFairCards, type PublicFairCard } from '@/lib/fair-view'
 
 export const metadata = {
   title: 'Discover Fairs — FairSynq',
-}
-
-// Only publicly-listed statuses (the endpoint already filters to ACTIVE/UPCOMING;
-// 'completed' kept for the section map in case an INACTIVE fair is ever surfaced).
-const STATUS_ORDER: PublicFairStatus[] = ['active', 'upcoming', 'completed']
-
-const SECTION_LABELS: Record<PublicFairStatus, string> = {
-  active:    'Happening Now',
-  upcoming:  'Coming Soon',
-  completed: 'Past Events',
 }
 
 export default async function FairsPage() {
@@ -27,11 +17,14 @@ export default async function FairsPage() {
     fairs = []
   }
 
-  const grouped = STATUS_ORDER.reduce<Record<string, PublicFairCard[]>>((acc, status) => {
-    const section = fairs.filter(f => f.status === status)
-    if (section.length > 0) acc[status] = section
-    return acc
-  }, {})
+  // Sections by DATE (fairCardState), never the admin status: ended fairs only ever
+  // appear under "Past events", where their card says "View fair".
+  const { live, upcoming, past } = partitionFairCards(fairs)
+  const sections = [
+    { key: 'live', label: 'Happening Now', fairs: live },
+    { key: 'upcoming', label: 'Coming Soon', fairs: upcoming },
+    { key: 'past', label: 'Past Events', fairs: past },
+  ].filter(s => s.fairs.length > 0)
 
   return (
     <>
@@ -55,13 +48,13 @@ export default async function FairsPage() {
             </div>
           ) : (
             /* Grouped sections */
-            Object.entries(grouped).map(([status, section]) => (
-              <section key={status} className="mb-14">
+            sections.map(section => (
+              <section key={section.key} className="mb-14">
                 <h2 className="font-bebas text-2xl text-white tracking-wide mb-6">
-                  {SECTION_LABELS[status as PublicFairStatus] ?? status}
+                  {section.label}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                  {section.map((fair) => (
+                  {section.fairs.map((fair) => (
                     <FairCard key={fair.id} fair={fair} />
                   ))}
                 </div>

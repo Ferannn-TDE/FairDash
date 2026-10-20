@@ -12,7 +12,7 @@ import FAQSection from './_components/FAQSection'
 import ContactSection from './_components/ContactSection'
 import { FacebookIcon } from '@/components/icons/FacebookIcon'
 import { FACEBOOK_URL, contactMailto } from '@/lib/contact-info'
-import { type PublicFairCard } from '@/lib/fair-view'
+import { partitionFairCards, type PublicFairCard } from '@/lib/fair-view'
 import { useUser } from '@clerk/clerk-react'
 import { useRole } from './_contexts/RoleContext'
 
@@ -331,7 +331,8 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
   // has the real list — no client re-fetch, no flash of the empty "Upcoming Fairs"
   // state. Renders once, stable.
   const allFairs    = initialFairs
-  const activeFairs = allFairs.filter(f => f.status === 'active' || f.status === 'upcoming')
+  // Live and upcoming by DATE — an ACTIVE fair whose run has ended is not "happening".
+  const activeFairs = partitionFairCards(allFairs).current
 
   return (
     <>
@@ -424,9 +425,12 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
             </Link>
           </Reveal>
 
+          {activeFairs.length === 0 && (
+            <p className="text-text-gray text-sm">No fairs are live right now. Check back soon.</p>
+          )}
           <Stagger className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
             {activeFairs.map((fair) => (
-              <StaggerItem key={fair.id}>
+              <StaggerItem key={fair.id} className="h-full">
                 <FairCard fair={fair} />
               </StaggerItem>
             ))}

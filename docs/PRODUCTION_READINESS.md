@@ -10,8 +10,8 @@
 | 1. Money & trust bugs | Oct 26 – Nov 29 | 23/43 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
-| 3. Design foundation | Nov 30 – Dec 20 | 0/11 |
-| 4. Customer portal | Dec 21 – Jan 3 | 0/8 |
+| 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
+| 4. Customer portal | Dec 21 – Jan 3 | 1/9 |
 | 5. Email platform | Dec 14 – Jan 10 | 0/20 |
 | 6. Vendor portal + onboarding | Jan 4 – Jan 17 | 0/12 |
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
@@ -221,6 +221,7 @@ Today: 77 pages, two shared UI components, 1,164 one-off Tailwind values. The pa
 - [ ] Primitives: `Modal`, `ConfirmDialog` (states the consequence; money actions name the amount on the button).
 - [ ] Primitives: `Toast`, `EmptyState`, `Skeleton`, `ErrorState`.
 - [ ] Primitives: `Badge`/`StatusPill`, `PageHeader`, `Sheet` (mobile bottom sheet).
+- [x] Primitive: `FairCard` (`app/_components/FairCard.tsx`), the only public fair card (landing and `/fairs`). Equal-height flex column, fixed-ratio banner, 2-line reserved description, bottom-pinned CTA, date-derived status, AA badges. Pinned by `scripts/fair-card-guard.ts`. Migrate it to tokens with the rest.
 - [ ] A primitives showcase page (dev-only).
 - [ ] Lint rule blocking new arbitrary Tailwind values.
 - [ ] Contrast is part of the verification for every migrated page.
@@ -246,6 +247,7 @@ Each portal gets `docs/audit/<portal>.md`, one checkbox row per page × element:
 About 20 pages: landing → fair → menu → checkout → tracking → account.
 
 - [ ] Audit checklist written (`docs/audit/customer.md`).
+- [x] Fair cards (landing "Happening now & soon" and `/fairs`): uniform height, clamped description, fixed banner, only live/upcoming under "Happening now", ended fairs under Past Events with "View fair", "1 vendor" pluralization, AA badge contrast. Fixed 2026-10-19 via the shared `FairCard`; screenshots at 390px and 1280px taken.
 - [ ] Your pass added.
 - [ ] P0/P1 closed.
 - [ ] Pages migrated to tokens and primitives (zero arbitrary values on migrated pages).
