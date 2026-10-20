@@ -21,7 +21,9 @@
     "test:db:migrate": "./scripts/with-test-db.sh npx prisma db push --skip-generate --accept-data-loss",
     "gate": "npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/verify-all.ts",
     "gate:fast": "npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/verify-all.ts --fast",
-    "test:db:deploy": "./scripts/with-test-db.sh npx prisma migrate deploy"
+    "test:db:deploy": "./scripts/with-test-db.sh npx prisma migrate deploy",
+    "predev": "./scripts/with-dev-db.sh npx tsx scripts/migration-drift.ts --warn || true",
+    "db:drift": "./scripts/with-dev-db.sh npx tsx scripts/migration-drift.ts"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",

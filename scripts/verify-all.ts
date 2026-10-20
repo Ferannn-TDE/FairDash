@@ -109,6 +109,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'connect-card',           file: 'scripts/connect-card-state-test.ts' },
   { group: 'correctness', name: 'connect-status',         file: 'scripts/connect-status-test.ts' },
   { group: 'correctness', name: 'role-reconcile',         file: 'scripts/role-reconcile-test.ts' },
+  { group: 'correctness', name: 'migration-drift',        file: 'scripts/migration-drift-guard.ts' },
   { group: 'correctness', name: 'date-round-trip',        file: 'scripts/date-round-trip-guard.ts' },
   { group: 'correctness', name: 'date-fns-containment',   file: 'scripts/date-fns-containment-guard.ts' },
   { group: 'correctness', name: 'date-bounds',            file: 'scripts/date-bounds-guard.ts' },
