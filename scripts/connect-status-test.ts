@@ -239,6 +239,55 @@ async function main() {
     ;(db.vendor as any).findFirst = realFind
     assert(dbDown.status === 500, 'database failure → 500 (Stripe retries)')
 
+    // [5b] The two event types the payout gate depends on, each by its EXACT type string, so
+    // dropping either from HANDLED_CONNECT_EVENTS fails here. The other seven types the live
+    // destination (energetic-serenity) delivers must stay 200-and-ignore with no Stripe read.
+    console.log('[5b] event types the destination delivers')
+    const CAP = 'v2.core.account[configuration.recipient].capability_status_updated'
+    const REQ = 'v2.core.account[requirements].updated'
+    const typed = (type: string, live: () => Promise<unknown>, acctId: string) => wdeps({
+      parse: () => ({ id: `evt_${rand()}`, type }),
+      retrieveAccountId: async () => { retrieves++; return acctId },
+      live: live as any,
+    })
+    // capability_status_updated, transfers ON → closed gate opens.
+    const capOn = await mkPayee('vendor')
+    const capOnRes = await cs.handleConnectWebhook('{}', 'good', 'whsec', typed(CAP, async () => READY, capOn.stripeAccountId!))
+    assert(capOnRes.status === 200 && (await row('vendor', capOn.id)).stripeVerified === true && jobs(JOB_PAYEE_NOTICE, capOn.id).length === 1,
+      `${CAP} (transfers active) → gate opens, one notice job`)
+    // capability_status_updated, transfers OFF → open gate closes, one re-check queued.
+    const capOff = await mkPayee('runner', true)
+    await cs.handleConnectWebhook('{}', 'good', 'whsec', typed(CAP, async () => ({ readyToReceivePayments: false, onboardingComplete: false, dueItems: [] }), capOff.stripeAccountId!))
+    assert((await row('runner', capOff.id)).stripeVerified === false && jobs(JOB_CONNECT_RECHECK, capOff.id).length === 1,
+      `${CAP} (transfers inactive) → gate closes, one re-check job`)
+    // requirements.updated with a blocking item → gate closes; the re-check then records the
+    // plain-English "Stripe needs" line from the same live read the card shows.
+    const reqP = await mkPayee('organizer', true)
+    const NEEDS_DOC = { readyToReceivePayments: false, onboardingComplete: false, dueItems: [{ description: 'individual.verification.document', deadline: 'currently_due' }] }
+    await cs.handleConnectWebhook('{}', 'good', 'whsec', typed(REQ, async () => NEEDS_DOC, reqP.stripeAccountId!))
+    const reqJob = jobs(JOB_CONNECT_RECHECK, reqP.id)
+    assert((await row('organizer', reqP.id)).stripeVerified === false && reqJob.length === 1, `${REQ} (ID document due) → gate closes, one re-check job`)
+    const rc = await cs.handleConnectRecheck(reqJob[0].data, { getStatus: async () => NEEDS_DOC as any })
+    const reqNotice = await prisma.payeeNotice.findFirst({ where: { payeeType: 'organizer', payeeId: reqP.id, kind: 'PAYOUT_NEEDS_ATTENTION' } })
+    assert(rc === 'notice' && (reqNotice?.detail as any)?.needs === 'Stripe needs: ID document',
+      `${REQ} → needs-attention notice reads "Stripe needs: ID document" (got ${JSON.stringify(reqNotice?.detail ?? null)})`)
+    // Positive control for the ignore checks below: the read counter moves for a handled type.
+    const r0 = retrieves
+    await cs.handleConnectWebhook('{}', 'good', 'whsec', typed(REQ, async () => READY, acct))
+    assert(retrieves === r0 + 1, 'control: a handled type reads the event (counter moves)')
+    const IGNORED = [
+      'v2.core.account.created', 'v2.core.account.updated', 'v2.core.account[identity].updated',
+      'v2.core.account[defaults].updated', 'v2.core.account_person.created', 'v2.core.account_person.updated',
+      'v2.core.event_destination.ping',
+    ]
+    for (const type of IGNORED) {
+      const before = retrieves
+      const r = await cs.handleConnectWebhook('{}', 'good', 'whsec', typed(type, async () => { throw new Error('must not read') }, acct))
+      assert(r.status === 200 && retrieves === before, `${type} → 200, ignored, nothing read`)
+    }
+    assert(cs.HANDLED_CONNECT_EVENTS.has(CAP) && cs.HANDLED_CONNECT_EVENTS.has(REQ) && cs.HANDLED_CONNECT_EVENTS.size === 3,
+      'handled set = capability_status_updated + requirements.updated + configuration.recipient.updated')
+
     console.log('[6] money gate — real runner executor')
     const { processRunnerPayout } = await import('../lib/runner-payout')
     await prisma.fulfillmentConfig.create({ data: { eventId: ev.id, homeDeliveryEnabled: true, homeDeliveryFee: 10, runnerFeePercent: 50 } })
