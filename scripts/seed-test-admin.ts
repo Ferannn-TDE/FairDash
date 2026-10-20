@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
@@ -53,6 +54,7 @@ async function main() {
   const generated = !cliPassword && !process.env.TEST_ADMIN_PASSWORD
   const password = cliPassword ?? process.env.TEST_ADMIN_PASSWORD ?? `Adm!${randomBytes(12).toString('base64url')}`
 
+  assertNotProductionClerk('seed-test-admin.ts')
   const clerk = createClerkClient({ secretKey: secret })
 
   // ── Clerk user: reuse if present, else create with the password. ────────────

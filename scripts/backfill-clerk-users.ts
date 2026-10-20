@@ -3,6 +3,7 @@
  * Run with: npx tsx scripts/backfill-clerk-users.ts
  */
 import { clerkClient } from '@clerk/nextjs/server'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { db } from '../lib/db'
 import { ensureOrganizerBootstrap } from '../lib/organizer-bootstrap'
 
@@ -10,6 +11,7 @@ const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type AppRole = (typeof VALID_ROLES)[number]
 
 async function main() {
+  assertNotProductionClerk('backfill-clerk-users.ts')
   const client = await clerkClient()
   let offset = 0
   const limit = 100

@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
@@ -10,6 +11,7 @@ import { ADMIN_ROLES } from '../lib/roles'
 //   npx tsx scripts/migrate-admin-to-roles.ts
 
 async function main() {
+  assertNotProductionClerk('migrate-admin-to-roles.ts')
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
   const admins = ADMIN_ROLES as readonly string[]
 

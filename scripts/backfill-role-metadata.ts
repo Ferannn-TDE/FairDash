@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
@@ -11,6 +12,7 @@ import { syncUserRoleMetadata } from '../lib/role-sync'
 //   npx tsx scripts/backfill-role-metadata.ts
 
 async function main() {
+  assertNotProductionClerk('backfill-role-metadata.ts')
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
   const users = await db.user.findMany({ select: { id: true, email: true, clerkId: true } })
   console.log(`Backfilling role metadata for ${users.length} users…\n`)

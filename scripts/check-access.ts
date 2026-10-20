@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
@@ -7,6 +8,7 @@ import { db } from '../lib/db'
 const EMAIL = process.argv[2] ?? 'feranmidyro@gmail.com'
 
 async function main() {
+  assertNotProductionClerk('check-access.ts')
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
   const list = await clerk.users.getUserList({ emailAddress: [EMAIL] })
   const cu = list.data[0]

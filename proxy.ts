@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse, type NextRequest, type NextFetchEvent } from 'next/server'
+import { decideClerkAccess } from '@/lib/prod-clerk-guard'
 
 // Routes that require authentication (/api/webhooks is intentionally excluded)
 const isProtectedRoute = createRouteMatcher([
@@ -71,6 +72,12 @@ const clerkHandler = clerkMiddleware(async (auth, req) => {
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
   if (!process.env.CLERK_SECRET_KEY) {
     return NextResponse.next()
+  }
+  // A local dev server with the production Clerk keys serves nothing: one page view could
+  // write to a real user (lib/prod-clerk-guard.ts). Inert on Vercel/Railway.
+  const clerkAccess = decideClerkAccess(process.env)
+  if (!clerkAccess.allowed) {
+    return new NextResponse(`REFUSING: ${clerkAccess.reason}\n`, { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } })
   }
   return clerkHandler(request, event)
 }

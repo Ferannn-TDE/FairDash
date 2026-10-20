@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
@@ -18,6 +19,7 @@ async function main() {
     throw new Error(`role must be one of: ${ADMIN_ROLES.join(', ')}`)
   }
 
+  assertNotProductionClerk('revoke-admin.ts')
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
   const list = await clerk.users.getUserList({ emailAddress: [EMAIL] })
   const user = list.data[0]

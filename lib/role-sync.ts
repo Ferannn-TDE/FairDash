@@ -1,12 +1,16 @@
 import { createClerkClient } from '@clerk/backend'
 import { db } from './db'
+import { assertNotProductionClerk } from './prod-clerk-guard'
 
 // Use @clerk/backend directly (not @clerk/nextjs/server's clerkClient) so this
 // helper works identically in API routes AND in standalone scripts — the
 // nextjs wrapper can't resolve CLERK_SECRET_KEY outside Next's runtime.
 let _clerk: ReturnType<typeof createClerkClient> | null = null
 function getClerk() {
-  if (!_clerk) _clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
+  if (!_clerk) {
+    assertNotProductionClerk('lib/role-sync')
+    _clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
+  }
   return _clerk
 }
 

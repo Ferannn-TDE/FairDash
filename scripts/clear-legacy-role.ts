@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
@@ -14,6 +15,7 @@ const EMAILS = process.argv.slice(2)
 
 async function main() {
   if (!EMAILS.length) throw new Error('Usage: clear-legacy-role.ts <email> [<email> ...]')
+  assertNotProductionClerk('clear-legacy-role.ts')
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
 
   for (const email of EMAILS) {

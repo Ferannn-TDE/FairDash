@@ -36,5 +36,13 @@ PROD_DIRECT_URL="$(read_var DIRECT_URL)"
 
 echo "⚠️  PRODUCTION database (CONFIRM_PROD_DB=$CONFIRM_PROD_DB). Queue disabled for this run." >&2
 export DATABASE_URL="$PROD_DATABASE_URL" DIRECT_URL="$PROD_DIRECT_URL" REDIS_URL=""
+# Production Clerk only on request: CONFIRM_PROD_CLERK=<frontend host> (lib/prod-clerk-guard.ts
+# checks it matches). Otherwise the Clerk keys are cleared so nothing reaches production users.
+if [ -n "${CONFIRM_PROD_CLERK:-}" ]; then
+  export NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$(read_var NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)" CLERK_SECRET_KEY="$(read_var CLERK_SECRET_KEY)"
+  echo "⚠️  PRODUCTION Clerk (CONFIRM_PROD_CLERK=$CONFIRM_PROD_CLERK)." >&2
+else
+  export NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="" CLERK_SECRET_KEY=""
+fi
 unset TEST_DATABASE_URL
 exec "$@"

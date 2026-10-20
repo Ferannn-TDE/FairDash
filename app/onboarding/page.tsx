@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { safeRedirect } from '@/lib/safe-redirect'
 import { ensureOrganizerBootstrap } from '@/lib/organizer-bootstrap'
 import { ensureDbUser } from '@/lib/ensure-db-user'
+import { assertNotProductionClerk } from '@/lib/prod-clerk-guard'
 
 const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type Role = (typeof VALID_ROLES)[number]
@@ -92,6 +93,7 @@ export default async function OnboardingPage({
   // column note in schema.prisma), and skipped when it would be a no-op so the sign-in hop does
   // not spend a Clerk round-trip on a field no one consults.
   if (user.publicMetadata?.role !== role) {
+    assertNotProductionClerk('app/onboarding')
     const client = await clerkClient()
     await client.users.updateUser(user.id, {
       publicMetadata: { ...user.publicMetadata, role },

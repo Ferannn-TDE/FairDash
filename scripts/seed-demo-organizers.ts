@@ -1,4 +1,5 @@
 import { config } from 'dotenv'
+import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
 import { PrismaClient } from '@prisma/client'
@@ -94,6 +95,7 @@ async function main() {
     }
     generated = !cliPassword && !process.env.DEMO_PASSWORD
     password = cliPassword ?? process.env.DEMO_PASSWORD ?? `Demo!${randomBytes(9).toString('base64url')}`
+    assertNotProductionClerk('seed-demo-organizers.ts')
     clerk = createClerkClient({ secretKey: secret })
   }
 
