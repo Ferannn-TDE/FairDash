@@ -61,8 +61,11 @@ export interface OrderItemization {
   refunds: RefundLine[]
   refundedCents: number
   processingCents: number
-  /** Service fee not returned. Null when there are no refunds (nothing to contrast). */
-  serviceFeeKeptCents: number | null
+  /** Every vendor's food refunded in full (landed or processing): a full cancel. */
+  fullCancel: boolean
+  /** The service fee not returned, shown ONLY on a full cancel. On a partial cancel the
+   *  rest of the order went ahead, so the fee is simply part of what was bought. */
+  serviceFeeKept: { label: string; cents: number } | null
   /** totalCents − refundedCents. */
   netPaidCents: number
   /** e.g. "Food refunded $35.00 · Delivery & tip refunded $15.99" ('' when none landed). */
@@ -139,6 +142,13 @@ export function itemizeOrder(o: ItemizationInput): OrderItemization {
     }
   }
 
+  // Full cancel = every vendor's food refunded IN FULL (landed or processing). A partial
+  // amount on any vendor, or a vendor with no refund, makes it a partial cancel.
+  const foodBack = new Map<string, number>()
+  for (const r of refunds) if (r.key === 'food') foodBack.set(r.vendorId, (foodBack.get(r.vendorId) ?? 0) + r.cents)
+  const fullCancel = vendorOrder.length > 0 && vendorOrder.every(v => (foodBack.get(v) ?? 0) >= (sliceCents.get(v) ?? 0))
+  const keptCents = serviceFeeCents - waived.REFUNDED - waived.PROCESSING
+
   const refundedCents = refunds.filter(r => r.status === 'REFUNDED').reduce((s, r) => s + r.cents, 0)
   const processingCents = refunds.filter(r => r.status === 'PROCESSING').reduce((s, r) => s + r.cents, 0)
 
@@ -159,7 +169,8 @@ export function itemizeOrder(o: ItemizationInput): OrderItemization {
     refunds,
     refundedCents,
     processingCents,
-    serviceFeeKeptCents: refunds.length > 0 ? serviceFeeCents - waived.REFUNDED - waived.PROCESSING : null,
+    fullCancel,
+    serviceFeeKept: fullCancel && keptCents > 0 ? { label: 'Service fee (non-refundable)', cents: keptCents } : null,
     netPaidCents: totalCents - refundedCents,
     refundSummary: parts.join(' · '),
   }

@@ -429,10 +429,10 @@ function RefundBreakdownCard({ itemization }: { itemization: OrderItemization })
           </span>
         </div>
       ))}
-      {(itemization.serviceFeeKeptCents ?? 0) > 0 && (
+      {itemization.serviceFeeKept && (
         <div className="flex justify-between text-sm">
-          <span className="text-[#A1A1A1]">Service fee (not refunded)</span>
-          <span className="text-white/60">{formatCents(itemization.serviceFeeKeptCents!)}</span>
+          <span className="text-[#A1A1A1]">{itemization.serviceFeeKept.label}</span>
+          <span className="text-white/60">{formatCents(itemization.serviceFeeKept.cents)}</span>
         </div>
       )}
       <div className="border-t border-white/5 pt-2 mt-1 space-y-1">

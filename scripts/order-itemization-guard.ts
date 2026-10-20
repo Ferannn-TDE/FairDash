@@ -41,7 +41,7 @@ console.log('[1a] normal paid delivery order')
   assert(eq(it.charges.map(l => [l.label, l.cents]), [['Subtotal', 2000], ['Delivery fee', 599], ['Tip', 300], ['Service fee', 200]]),
     'charge lines: Subtotal 2000, Delivery fee 599, Tip 300, Service fee 200')
   assert(it.linesSumCents === 3099 && it.totalCents === 3099 && it.reconciles, 'lines add up to the $30.99 total')
-  assert(it.refunds.length === 0 && it.refundedCents === 0 && it.serviceFeeKeptCents === null, 'no refunds, no kept line')
+  assert(it.refunds.length === 0 && it.refundedCents === 0 && it.serviceFeeKept === null && !it.fullCancel, 'no refunds, no kept line')
   assert(it.netPaidCents === 3099 && it.refundSummary === '', 'net paid 3099, empty summary')
 }
 
@@ -57,7 +57,9 @@ console.log('[1b] fully auto-cancelled: food per vendor + delivery & tip, servic
   ]), 'lines: Taco Stand 1200, Lemonade 800 (item order, not row order), Delivery & tip 899')
   const dt = it.refunds.find(r => r.key === 'delivery_tip')
   assert(dt?.key === 'delivery_tip' && dt.tipCents === 300 && dt.feeCents === 599, 'delivery & tip splits as tip 300 + fee 599')
-  assert(it.refundedCents === 2899 && it.serviceFeeKeptCents === 200 && it.netPaidCents === 200, 'refunded 2899, fee kept 200, net 200')
+  assert(it.refundedCents === 2899 && it.netPaidCents === 200, 'refunded 2899, net 200')
+  assert(it.fullCancel && it.serviceFeeKept?.label === 'Service fee (non-refundable)' && it.serviceFeeKept.cents === 200,
+    'full cancel: kept line reads "Service fee (non-refundable)" $2.00')
   assert(it.refundSummary === 'Food refunded $20.00 · Delivery & tip refunded $8.99', `summary (got "${it.refundSummary}")`)
 }
 
@@ -65,7 +67,8 @@ console.log('[1c] partial multi-vendor cancel: one vendor refunded, the delivery
 {
   const it = itemizeOrder({ ...base, refunds: [{ vendorId: 'vA', status: 'COMPLETED', amountCents: 1200 }] })
   assert(eq(it.refunds.map(r => [r.label, r.cents]), [['Food · Taco Stand', 1200]]), 'only Taco Stand food is refunded')
-  assert(it.refundedCents === 1200 && it.netPaidCents === 1899 && it.serviceFeeKeptCents === 200, 'refunded 1200, net 1899, fee kept 200')
+  assert(it.refundedCents === 1200 && it.netPaidCents === 1899, 'refunded 1200, net 1899')
+  assert(!it.fullCancel && it.serviceFeeKept === null, 'partial cancel: no service fee line at all')
   assert(it.refundSummary === 'Food refunded $12.00', 'summary names food only')
 }
 
@@ -81,7 +84,9 @@ console.log('[1e] waived service-fee share shows as its own line')
 {
   const it = itemizeOrder({ ...base, refunds: [{ vendorId: 'vA', status: 'COMPLETED', amountCents: 1320 }] })
   assert(eq(it.refunds.map(r => [r.key, r.cents]), [['food', 1200], ['service_fee', 120]]), 'food 1200 + service fee 120')
-  assert(it.serviceFeeKeptCents === 80 && it.refundedCents === 1320, 'fee kept 80, refunded 1320')
+  assert(it.refundedCents === 1320 && it.serviceFeeKept === null, 'refunded 1320; partial, so no kept line')
+  const both = itemizeOrder({ ...base, refunds: [{ vendorId: 'vA', status: 'COMPLETED', amountCents: 1320 }, { vendorId: 'vB', status: 'COMPLETED', amountCents: 880 }] })
+  assert(both.fullCancel === true && both.serviceFeeKept === null, 'full cancel with the whole fee waived → nothing kept, no line')
   assert(it.refundSummary === 'Food refunded $12.00 · Service fee refunded $1.20', 'summary includes the waived fee')
 }
 
@@ -93,8 +98,11 @@ console.log('[1f] partial override stays food; PENDING is processing; FAILED is 
   ] })
   assert(eq(it.refunds.map(r => [r.cents, r.status]), [[500, 'REFUNDED'], [800, 'PROCESSING']]), 'partial 500 refunded, 800 processing')
   assert(it.refundedCents === 500 && it.processingCents === 800 && it.netPaidCents === 2599, 'processing not counted as refunded')
+  assert(!it.fullCancel && it.serviceFeeKept === null, 'a partial amount on one vendor is a partial cancel: no fee line')
+  const pend = itemizeOrder({ ...base, refunds: [{ vendorId: 'vA', status: 'COMPLETED', amountCents: 1200 }, { vendorId: 'vB', status: 'PENDING', amountCents: 800 }] })
+  assert(pend.fullCancel && pend.serviceFeeKept?.cents === 200, 'every slice back (one still processing) is a full cancel: fee line shown')
   const failed = itemizeOrder({ ...base, refunds: [{ vendorId: 'vA', status: 'FAILED', amountCents: 1200 }] })
-  assert(failed.refunds.length === 0 && failed.refundedCents === 0 && failed.serviceFeeKeptCents === null, 'FAILED row shows nothing')
+  assert(failed.refunds.length === 0 && failed.refundedCents === 0 && failed.serviceFeeKept === null && !failed.fullCancel, 'FAILED row shows nothing and is not a cancel')
 }
 
 console.log('[1g] curbside and booth pickup labels')
