@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { resolveOrder } from '@/lib/resolve-order'
+import { itemizeOrder } from '@/lib/order-itemization'
 
 // GET /api/orders/:id — fetch a single order with full detail.
 // Accessible by the order's customer OR any VendorMember of the order's vendor.
@@ -39,7 +40,11 @@ export async function GET(
             vendor: { select: { name: true } },
           },
         },
-        cancellation: true,
+        // Who/when/why only. The deprecated refundIssued/refundAmount columns are never
+        // read or returned; refund state comes from `itemization` below.
+        cancellation: { select: { reason: true, cancelledAt: true } },
+        // The money record for refunds, fed to itemizeOrder and not returned raw.
+        refunds: { select: { vendorId: true, status: true, amountCents: true } },
         // Delivered-time for the customer timeline. RunnerEarning is created in the SAME
         // DELIVERED transition that accrues the runner's earning, so its createdAt is the
         // honest delivery timestamp — deliberately NOT Order.completedAt, which stays null on
@@ -80,7 +85,10 @@ export async function GET(
         })
       : null
 
-    return success({ ...order, runner })
+    const { refunds, ...rest } = order
+    const itemization = itemizeOrder({ ...order, refunds })
+
+    return success({ ...rest, runner, itemization })
   } catch (err) {
     return handleApiError(err)
   }

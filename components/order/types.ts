@@ -1,4 +1,5 @@
 import type { OrderView } from '@/lib/order-view'
+import type { OrderItemization } from '@/lib/order-itemization'
 
 export interface OrderItem {
   id: string
@@ -73,6 +74,8 @@ export interface Order {
   vendor: { id: string; name: string; boothNumber?: string | null }
   orderItems: OrderItem[]
   vendorOrderStatuses?: VendorOrderStatus[]
+  // Charge lines and refund parts, from lib/order-itemization (server-computed).
+  itemization: OrderItemization
 }
 
 export interface OrderTrackingProps {

@@ -26,6 +26,7 @@ import { StatusPill } from '@/components/ui/StatusPill'
 import { getStatusConfig } from '@/lib/order-status-config'
 import { isCompleted as isCompletedStatus, isFailed as isFailedStatus } from '@/lib/order-status'
 import type { OrderView, VendorLaneView } from '@/lib/order-view'
+import { formatCents, type OrderItemization } from '@/lib/order-itemization'
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
@@ -382,39 +383,69 @@ export function OrderItemsCard({ order, view, isMultiVendor }: { order: Order; v
         )
       })}
 
-      <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl px-5 py-4 space-y-2">
-        {!isMultiVendor && (
-          <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-3">Order Total</p>
-        )}
-        <div className="flex justify-between text-sm">
-          <span className="text-[#A1A1A1]">Subtotal</span>
-          <span className="text-white">${(order.subtotal ?? 0).toFixed(2)}</span>
+      <OrderTotalsCard itemization={order.itemization} showTitle={!isMultiVendor} />
+      {order.itemization.refunds.length > 0 && <RefundBreakdownCard itemization={order.itemization} />}
+    </div>
+  )
+}
+
+// ─── OrderTotalsCard / RefundBreakdownCard ────────────────────────────────────
+// Both render lib/order-itemization verbatim; no arithmetic here.
+
+function OrderTotalsCard({ itemization, showTitle }: { itemization: OrderItemization; showTitle: boolean }) {
+  return (
+    <div className="bg-[#1A1A1A] border border-white/5 rounded-2xl px-5 py-4 space-y-2">
+      {showTitle && (
+        <p className="text-[0.6875rem] uppercase tracking-wide text-[#A1A1A1] font-semibold mb-3">Order Total</p>
+      )}
+      {itemization.charges.map(line => (
+        <div key={line.key} className="flex justify-between text-sm">
+          <span className="text-[#A1A1A1]">{line.label}</span>
+          <span className={line.key === 'service_fee' ? 'text-white/60' : 'text-white'}>{formatCents(line.cents)}</span>
         </div>
-        {(order.deliveryFee ?? 0) > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-[#A1A1A1]">Delivery Fee</span>
-            <span className="text-white">${order.deliveryFee!.toFixed(2)}</span>
-          </div>
-        )}
-        {(order.serviceCharge ?? 0) > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-[#A1A1A1]">Event Service Charge</span>
-            <span className="text-white">${order.serviceCharge!.toFixed(2)}</span>
-          </div>
-        )}
-        {order.fairSynqFee > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-[#A1A1A1]">Service Fee</span>
-            <span className="text-white/60">${(order.fairSynqFee ?? 0).toFixed(2)}</span>
-          </div>
-        )}
-        <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-1">
-          <span className="text-white">Total</span>
-          <span className="text-[#FF0077] text-base [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
-            ${(order.total ?? 0).toFixed(2)}
+      ))}
+      <div className="flex justify-between font-semibold border-t border-white/5 pt-2 mt-1">
+        <span className="text-white">Total</span>
+        <span className="text-[#FF0077] text-base [text-shadow:0_0_20px_rgba(255,0,119,0.4)]">
+          {formatCents(itemization.totalCents)}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function RefundBreakdownCard({ itemization }: { itemization: OrderItemization }) {
+  return (
+    <div className="bg-[#1A1A1A] border border-emerald-500/15 rounded-2xl px-5 py-4 space-y-2">
+      <p className="text-[0.6875rem] uppercase tracking-wide text-emerald-400/80 font-semibold mb-3">Refunds</p>
+      {itemization.refunds.map((line, i) => (
+        <div key={`${line.key}-${i}`} className="flex justify-between gap-3 text-sm">
+          <span className="text-[#A1A1A1] min-w-0 truncate">
+            {line.label}
+            {line.status === 'PROCESSING' && <span className="text-amber-400 text-xs ml-1.5">processing</span>}
+          </span>
+          <span className={line.status === 'PROCESSING' ? 'text-amber-300' : 'text-emerald-400'}>
+            −{formatCents(line.cents)}
           </span>
         </div>
+      ))}
+      {(itemization.serviceFeeKeptCents ?? 0) > 0 && (
+        <div className="flex justify-between text-sm">
+          <span className="text-[#A1A1A1]">Service fee (not refunded)</span>
+          <span className="text-white/60">{formatCents(itemization.serviceFeeKeptCents!)}</span>
+        </div>
+      )}
+      <div className="border-t border-white/5 pt-2 mt-1 space-y-1">
+        <div className="flex justify-between text-sm font-semibold">
+          <span className="text-white">Refunded</span>
+          <span className="text-emerald-400">{formatCents(itemization.refundedCents)}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-[#A1A1A1]">You paid</span>
+          <span className="text-white">{formatCents(itemization.netPaidCents)}</span>
+        </div>
       </div>
+      <p className="text-[#A1A1A1] text-xs pt-1">Refunds usually appear on your card within 5–10 business days.</p>
     </div>
   )
 }

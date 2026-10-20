@@ -103,6 +103,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'active-shape-guard',     file: 'scripts/active-shape-guard.ts' },
   { group: 'correctness', name: 'delivery-progress',      file: 'scripts/delivery-progress-guard.ts' },
   { group: 'correctness', name: 'order-view',             file: 'scripts/order-view-guard.ts' },
+  { group: 'correctness', name: 'order-itemization',      file: 'scripts/order-itemization-guard.ts' },
   { group: 'correctness', name: 'date-round-trip',        file: 'scripts/date-round-trip-guard.ts' },
   { group: 'correctness', name: 'date-fns-containment',   file: 'scripts/date-fns-containment-guard.ts' },
   { group: 'correctness', name: 'date-bounds',            file: 'scripts/date-bounds-guard.ts' },

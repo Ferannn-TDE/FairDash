@@ -837,13 +837,11 @@ model Cancellation {
 
   reason       String?
   cancelledAt  DateTime @default(now())
-  // DEPRECATED — no longer written (Cancellation is now a pure audit row: who/when/
-  // why). Refund money-truth lives in the Refund rows; all readers derive from
-  // Σ Refund.amountCents (status=COMPLETED). These columns drifted on ~80% of
-  // historical rows (four writers, four meanings). Kept nullable as dead history;
-  // drop in a later sweep once a deploy cycle confirms nothing reads them.
-  refundIssued Boolean  @default(false)
-  refundAmount Float?
+  // Pure audit row: who/when/why. The old refundIssued/refundAmount columns (drifted on
+  // ~80% of rows) are out of the model (expand step, readiness 1.3) but STILL IN THE
+  // DATABASE: refundIssued has a default and refundAmount is nullable, so inserts work.
+  // The DROP is the Phase 9 contract step; don't bundle it into an unrelated migration.
+  // Refund state comes from lib/order-itemization (Refund rows + owed-back marker).
 
   @@index([vendorId])
 }

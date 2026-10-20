@@ -4,6 +4,7 @@ import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
+import { itemizeOrder } from '@/lib/order-itemization'
 
 // GET /api/organizer/fairs/[fairSlug]/orders/[orderId]
 // Full order detail: items, timeline, dispute, cancellation, refund status.
@@ -58,12 +59,12 @@ export async function GET(
     if (!order) return apiError('Order not found', 404, 'NOT_FOUND')
     if (order.eventId !== event.id) return apiError('Access denied', 403, 'FORBIDDEN')
 
-    // Refund truth derived from Refund rows (the money record) — replaces the
-    // deprecated Cancellation.refundIssued/refundAmount. Sum the COMPLETED refunds
-    // (PENDING/FAILED haven't moved money). This is what the detail modal renders.
-    const refundedCents = order.refunds
-      .filter(r => r.status === 'COMPLETED')
-      .reduce((s, r) => s + r.amountCents, 0)
+    // Refund truth from the money records (COMPLETED Refund rows + the owed-back
+    // marker), through the same helper as the customer order page.
+    const itemization = itemizeOrder({
+      ...order,
+      vendorNames: Object.fromEntries(order.vendorOrderStatuses.map(v => [v.vendorId, v.vendor.name])),
+    })
 
     return success({
       id: order.id,
@@ -149,14 +150,9 @@ export async function GET(
       })),
       // Disputes
       disputes: order.disputes,
-      // Cancellation audit (reason) + refund summary DERIVED from Refund rows.
-      cancellation: order.cancellation
-        ? {
-            reason: order.cancellation.reason,
-            refundIssued: refundedCents > 0,
-            refundAmount: refundedCents / 100,
-          }
-        : null,
+      // Cancellation audit (reason only) and the shared itemization.
+      cancellation: order.cancellation ? { reason: order.cancellation.reason } : null,
+      itemization,
     })
   } catch (err) {
     return handleApiError(err)

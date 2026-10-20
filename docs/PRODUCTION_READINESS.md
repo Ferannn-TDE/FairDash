@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 16/43 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 23/43 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 0/11 |
@@ -91,15 +91,15 @@ Policy: refund the delivery fee on any cancel where no runner earned anything (n
 - [x] Reconciliation test (`scripts/b4-tip-refund-test.ts`, 90 checks, 24/24 mutations caught): auto-cancelled order refunds food + delivery + tip to the cent; a partially cancelled multi-vendor order refunds no delivery fee; an order with a `RunnerEarning` refunds neither; old tip refund with a lost marker refunds the fee only; >10 and >100 refunds on a charge.
 - [x] Update `/refund-policy` to state the rule.
 - [x] Known trade-off: a runner who accepted but hadn't picked up gets nothing. Revisit if runners complain.
-- [ ] Apply the migration (`20261019120000_add_owed_back_fee_refund`) to production, then deploy. Needs approval.
+- [x] Apply the migration (`20261019120000_add_owed_back_fee_refund`) to production, then deploy. Done 2026-10-19 (a35cc68); first sweep 0 refunds, 0 adoptions, 0 halts, matching the dry run.
 
 ### 1.3 Refund and order display
-- [ ] Order page shows the tip as its own line. Total = itemized lines.
-- [ ] Order page shows each refund part as it lands ("Food refunded $35.00 · Delivery & tip refunded $15.99").
-- [ ] One shared itemization helper feeds the order page, the receipt email and the refund email.
-- [ ] `GET /api/orders/[id]` returns refund state derived from COMPLETED `Refund` rows through the helper the organizer route uses.
-- [ ] Expand step: remove `Cancellation.refundIssued` and `refundAmount` from the Prisma model and every response. (Contract step is in Phase 9.)
-- [ ] Grep guard: nothing in `app/` or `components/` reads `refundIssued`/`refundAmount`.
+- [x] Order page shows the tip as its own line. Total = itemized lines.
+- [x] Order page shows each refund part as it lands ("Food refunded $35.00 · Delivery & tip refunded $15.99").
+- [x] One shared itemization helper (`lib/order-itemization.ts`) feeds the order page and the organizer order detail. The receipt and refund emails (5.2) must use it too.
+- [x] `GET /api/orders/[id]` returns refund state derived from COMPLETED `Refund` rows through the helper the organizer route uses.
+- [x] Expand step: remove `Cancellation.refundIssued` and `refundAmount` from the Prisma model and every response. (Contract step is in Phase 9.)
+- [x] Grep guard (`scripts/order-itemization-guard.ts`): nothing in `app/` or `components/` reads `refundIssued`/`refundAmount`.
 
 ### 1.4 Payout-status limbo + Connect webhook
 Root cause: `StripeConnectCard` maps "onboarding complete but transfers not active yet" to "Payout setup unfinished" and reads status only once.
@@ -272,7 +272,7 @@ Resend, sending from `notifications.fairsynq.com`. Clerk keeps sending verificat
 - [ ] Turn off Stripe's own receipts once ours are live.
 
 ### 5.2 Essential templates (no opt-out)
-- [ ] Customer: order confirmation + receipt (itemized: food per vendor, delivery, tip, service fee).
+- [ ] Customer: order confirmation + receipt (itemized: food per vendor, delivery, tip, service fee), built from `itemizeOrder`.
 - [ ] Customer: delivered / ready for pickup.
 - [ ] Customer: cancellation/refund, one per cancellation event. A partial cancel says the rest is still coming; a full cancel sends one itemized email after everything owed is issued, covering only parts not already emailed, with a note that the parts may show separately on the statement. "Everything owed is issued" is computed per order, not triggered by Pattern R.
 - [ ] Vendor: application received; approved / rejected with reason; documents missing or rejected; document expiring (14 and 3 days).

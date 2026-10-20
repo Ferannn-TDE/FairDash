@@ -15,6 +15,7 @@ import { getStatusConfig } from '@/lib/order-status-config'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
 import toast from 'react-hot-toast'
 import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
+import type { OrderItemization } from '@/lib/order-itemization'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,8 @@ interface DetailOrder extends Order {
   payoutStatus: string | null
   timeline: { id: string; eventType: string; actorRole: string | null; metadata: unknown; timestamp: string }[]
   disputes: { id: string; status: string; reason: string; submittedAt: string; resolution: string | null; resolvedAt: string | null }[]
-  cancellation: { reason: string | null; refundIssued: boolean; refundAmount: number | null } | null
+  cancellation: { reason: string | null } | null
+  itemization: OrderItemization
 }
 
 interface Meta { pendingCount: number; issuesCount: number; disputeCount: number }
@@ -457,8 +459,8 @@ function OrderModal({
                 )}
                 {order.cancellation && (
                   <p className="text-xs font-inter mt-1">
-                    {order.cancellation.refundIssued
-                      ? <span className="text-emerald-400">Refund issued: {fmt(order.cancellation.refundAmount)}</span>
+                    {order.itemization.refundSummary
+                      ? <span className="text-emerald-400">{order.itemization.refundSummary}</span>
                       : <span className="text-amber-400">Refund pending</span>}
                   </p>
                 )}

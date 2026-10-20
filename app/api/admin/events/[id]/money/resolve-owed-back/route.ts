@@ -33,7 +33,7 @@ export async function POST(
     if (!res.ok && res.code === 'NOT_FOUND') throw new ApiError('No owed-back halt for that order in this fair', 404, 'NOT_FOUND')
     if (!res.ok) throw new ApiError('This halt is already resolved', 409, 'CONFLICT')
 
-    return success({ orderId, resolved: true, refundIssued: false })
+    return success({ orderId, resolved: true, refunded: false })
   } catch (err) {
     return handleApiError(err)
   }
