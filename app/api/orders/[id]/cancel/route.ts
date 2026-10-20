@@ -42,8 +42,10 @@ export async function PATCH(
     const clerkId = await requireAuth()
     const { id: rawOrderId } = await params
 
-    const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? clerkId
-    const { allowed } = await enforceRateLimit(ip, 'refund', { failClosed: false })
+    // Per USER (was per IP — a fair crowd shared one bucket) and FAIL CLOSED (readiness 1.7): a
+    // cancel starts a refund, and the refund needs Redis for its queue anyway, so letting a cancel
+    // through while Redis is down would only accept one that can't be processed.
+    const { allowed } = await enforceRateLimit(`cancel:${clerkId}`, 'refund', { failClosed: true })
     if (!allowed) return NextResponse.json({ success: false, error: { message: 'Too many requests', code: 'RATE_LIMITED' } }, { status: 429 })
 
     const body = await req.json().catch(() => ({})) as { vendorId?: string; reason?: string }

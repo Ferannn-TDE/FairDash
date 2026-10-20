@@ -38,3 +38,31 @@ services:
       interval: 1s
       timeout: 3s
       retries: 30
+
+  # Rate limits (readiness 1.7): the REAL @upstash/ratelimit, against a throwaway Redis through
+  # an Upstash-compatible REST proxy, so the gate proves limits actually refuse — not just that
+  # numbers are wired. Nothing here touches the Upstash account. Ephemeral like the DB.
+  fairsynq-test-redis:
+    image: redis:7.2-alpine
+    container_name: fairsynq-test-redis
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  fairsynq-test-upstash:
+    image: hiett/serverless-redis-http:0.0.10
+    container_name: fairsynq-test-upstash
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: fairsynq-test-token
+      SRH_CONNECTION_STRING: redis://fairsynq-test-redis:6379
+    ports:
+      # 58080: the dev stack's proxy owns 58079. Never a default port.
+      - '58080:80'
+    depends_on:
+      fairsynq-test-redis:
+        condition: service_healthy

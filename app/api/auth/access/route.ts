@@ -29,7 +29,8 @@ export async function GET(req: NextRequest) {
     // real users out if Redis is down. ~30/min (the limiter's effective window).
     const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? 'anonymous'
     const rlKey = clerkId ? `access:user:${clerkId}` : `access:ip:${ip}`
-    const { allowed, headers: rlHeaders } = await enforceRateLimit(rlKey, 'publicRoutes')
+    // Signed out → per IP under the higher publicAnonymous limit: a fair crowd can share one IP.
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(rlKey, clerkId ? 'publicRoutes' : 'publicAnonymous')
     if (!allowed) {
       return NextResponse.json(
         { success: false, error: { message: 'Too many requests. Please slow down.', code: 'RATE_LIMITED' } },

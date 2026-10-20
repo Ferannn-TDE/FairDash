@@ -54,6 +54,9 @@ import { Ratelimit } from '@upstash/ratelimit'
 
 // ─── Test 1 — Missing env vars does not crash on import ─────────────────────
 
+// lib/ratelimit now holds one limiter per policy (readiness 1.7); these fakes stand in for all of them.
+const everyPolicy = (rl: Ratelimit) => new Proxy({}, { get: () => rl }) as never
+
 async function test1() {
   console.log('\nTest 1 — missing env vars handled gracefully (no crash on import)')
 
@@ -249,11 +252,11 @@ async function test7() {
   const reset = Date.now() + 60_000
   __setStateForTest({
     type: 'ready',
-    rl: {
+    limiters: everyPolicy({
       limit: async (_key: string) => ({
         success: false, limit: 30, remaining: 0, reset,
       }),
-    } as unknown as Ratelimit,
+    } as unknown as Ratelimit),
   })
 
   const result = await enforceRateLimit('test-user', 'vendorStatus')
@@ -283,9 +286,9 @@ async function test8() {
 
   __setStateForTest({
     type: 'ready',
-    rl: {
+    limiters: everyPolicy({
       limit: async (_key: string) => { throw new Error('Redis connection refused') },
-    } as unknown as Ratelimit,
+    } as unknown as Ratelimit),
   })
 
   let errorLogged = false
@@ -325,9 +328,9 @@ async function test9() {
 
   __setStateForTest({
     type: 'ready',
-    rl: {
+    limiters: everyPolicy({
       limit: async (_key: string) => { throw new Error('Redis timeout') },
-    } as unknown as Ratelimit,
+    } as unknown as Ratelimit),
   })
 
   let result: { allowed: boolean } | null = null
@@ -391,12 +394,12 @@ async function test11() {
 
   __setStateForTest({
     type: 'ready',
-    rl: {
+    limiters: everyPolicy({
       limit: async (k: string) => {
         capturedKey = k
         return { success: true, limit: 30, remaining: 29, reset: Date.now() + 60_000 }
       },
-    } as unknown as Ratelimit,
+    } as unknown as Ratelimit),
   })
 
   await enforceRateLimit('user123', 'vendorStatus')
@@ -413,12 +416,12 @@ async function test11() {
   let capturedOrderKey = ''
   __setStateForTest({
     type: 'ready',
-    rl: {
+    limiters: everyPolicy({
       limit: async (k: string) => {
         capturedOrderKey = k
         return { success: true, limit: 10, remaining: 9, reset: Date.now() + 60_000 }
       },
-    } as unknown as Ratelimit,
+    } as unknown as Ratelimit),
   })
 
   await enforceRateLimit('ip-10.0.0.1', 'orderCreate', { failClosed: true })

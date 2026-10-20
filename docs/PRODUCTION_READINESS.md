@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 42/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 44/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -17,7 +17,7 @@
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
 | R. Cutover rehearsal | Jan 18 – Jan 24 | 0/4 |
 | 8. Runner portal + onboarding | Jan 25 – Jan 31 | 0/9 |
-| 9. Live cutover | Feb 1 – Feb 5 | 0/19 |
+| 9. Live cutover | Feb 1 – Feb 5 | 0/20 |
 | Buffer | Feb 6 – Feb 12 | — |
 
 ## Capacity
@@ -124,10 +124,22 @@ Root cause: `StripeConnectCard` maps "onboarding complete but transfers not acti
 - [x] No coordinates at all: show no map rather than a globe.
 
 ### 1.7 Rate limits that match their policies
-`lib/ratelimit.ts` builds one shared limiter (30/min), so the per-policy numbers in `RATE_LIMITS` are never read.
+`lib/ratelimit.ts` built one shared limiter (30/min), so the per-policy numbers in `RATE_LIMITS` were never read. Found while planning: order creation, cancel and the public vendor read were keyed by **IP**, so a fair crowd on one Wi-Fi or carrier IP shared one bucket. The `login` policy had no caller: sign-in goes through Clerk.
 
-- [ ] Each policy uses its own limit from `RATE_LIMITS`: login 5/min, refund 5/min, orderCreate 10/min, deliveryCheck 10/min (vendorStatus 30, publicRoutes 60).
-- [ ] Test proving each limit is enforced at its own number (N allowed, N+1 refused, per policy), with a positive control that a different policy's key is unaffected.
+- [x] Each policy uses its own limiter from `RATE_LIMITS`, keyed per user where the user is known. Numbers set at ≥2× the worst legitimate rate computed from the code (3 open devices per user):
+
+| Policy | Limit/min | Worst legitimate rate | Headroom | Change |
+|---|---|---|---|---|
+| vendorStatus | 120 | 36 (booth rush: accept + ready every ~10 s, one shared login on 3 devices) | 3.3× | raised from 30 |
+| orderCreate | 10 per user | 4 (order + card-decline retries) | 2.5× | was per IP |
+| deliveryCheck | 20 | 9 (address pick + 2 field blurs, ~3 corrections) | 2.2× | raised from 10 |
+| connectStatusFresh | 75 | 36 (payout card: 12 fresh reads in its first minute × 3 devices; over the limit → cached read) | 2.1× | raised from 30 |
+| refund (cancel) | 10 per user | 4 (cancelling several orders) | 2.5× | raised from 5; was per IP; now fails closed |
+| publicRoutes (signed in) | 60 per user | 30 (opening ~10 vendor pages/min × 3 devices) | 2× | was per IP |
+| publicAnonymous (signed out) | 600 per IP | 300 (~30 people browsing on one IP) | 2× | new |
+| login | — | — | — | removed; Clerk attack protection (9.2) |
+
+- [x] Test proving each limit is enforced at its own number (N allowed, N+1 refused, per policy), with a positive control that a different policy's key is unaffected. *(`scripts/rate-limit-test.ts`, 26 checks, real `@upstash/ratelimit` against a local proxy in docker-compose.test.yml; 4/4 mutations killed.)*
 
 ### 1.8 Code can't deploy ahead of its migration
 Migrations are applied by hand; Prisma reads every column, so code that ships before its migration breaks every read of that table.
@@ -379,6 +391,7 @@ Today's production becomes **staging** (test keys, test Clerk, all history kept)
 - [ ] Fresh live webhook endpoints (platform + Connect) on www with new `whsec_` secrets.
 - [ ] Test-mode webhooks re-pointed to staging.fairsynq.com.
 - [ ] Clerk production instance, with its DNS records (clerk./accounts. CNAMEs, email DKIM), app name and logo, email From name.
+- [ ] Clerk attack protection on the production instance: failed-attempt lockout and bot protection on, verified by a lockout on a test account. Sign-in has no app-side rate limit (1.7); Clerk is the only guard.
 - [ ] Resend upgraded to paid (trigger from 2.4), or explicitly deferred with the daily-cap alert in place.
 
 ### 9.3 Cutover (following the rehearsed runbook from Phase R)

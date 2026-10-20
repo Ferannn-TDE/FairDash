@@ -21,8 +21,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Per user when signed in; per IP under the higher publicAnonymous limit when not — at a fair,
+    // a crowd browsing menus on one Wi-Fi or carrier IP shared a single 60/min bucket (1.7).
+    const userId = await getOptionalUserId()
     const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
-    const { allowed } = await enforceRateLimit(ip, 'publicRoutes')
+    const { allowed } = userId
+      ? await enforceRateLimit(`vendor:user:${userId}`, 'publicRoutes')
+      : await enforceRateLimit(`vendor:ip:${ip}`, 'publicAnonymous')
     if (!allowed) {
       return NextResponse.json({ success: false, error: { message: 'Too many requests.', code: 'RATE_LIMITED' } }, { status: 429 })
     }
@@ -95,7 +100,7 @@ export async function GET(
     // resolved ONLY on the non-ACTIVE branch, so the common ACTIVE path stays a cheap
     // anonymous read.
     if (vendor.status !== VendorStatus.ACTIVE) {
-      const clerkId = await getOptionalUserId()
+      const clerkId = userId
       const callerUserId = clerkId
         ? (await db.user.findUnique({ where: { clerkId }, select: { id: true } }))?.id ?? null
         : null

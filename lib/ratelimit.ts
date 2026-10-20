@@ -3,22 +3,30 @@ import { Redis } from '@upstash/redis'
 
 // ─── Centralized policies ─────────────────────────────────────────────────────
 
+// Each policy gets its OWN limiter built from this table (readiness 1.7). Until 2026-10-20 one
+// 30/min limiter served every policy and these numbers were never read. Each limit is at least
+// 2× the heaviest legitimate rate computed from the code, assuming 3 open devices per user
+// (scripts/rate-limit-test.ts pins the numbers; docs/PRODUCTION_READINESS.md 1.7 has the table).
+// Sign-in has no policy here: it goes through Clerk, whose attack protection covers it.
 export const RATE_LIMITS = {
-  vendorStatus: { requests: 30,  window: '1 m' },
-  orderCreate:  { requests: 10,  window: '1 m' },
-  deliveryCheck: { requests: 10, window: '1 m' }, // each call spends a paid geocode
-  connectStatusFresh: { requests: 30, window: '1 m' }, // ?fresh=1 payout-status reads go straight to Stripe
-  login:        { requests: 5,   window: '1 m' },
-  refund:       { requests: 5,   window: '1 m' },
-  publicRoutes: { requests: 60,  window: '1 m' },
+  vendorStatus:       { requests: 120, window: '1 m' }, // booth taps (accept/ready…); staff often share one login across devices
+  orderCreate:        { requests: 10,  window: '1 m' }, // per USER (was per IP: a fair crowd shares one)
+  deliveryCheck:      { requests: 20,  window: '1 m' }, // each call spends a paid geocode
+  connectStatusFresh: { requests: 75,  window: '1 m' }, // ?fresh=1 payout-status reads go straight to Stripe; over it → cached read
+  refund:             { requests: 10,  window: '1 m' }, // cancel, per USER (was per IP)
+  publicRoutes:       { requests: 60,  window: '1 m' }, // public reads, signed in, per user
+  publicAnonymous:    { requests: 600, window: '1 m' }, // public reads, signed out, per IP — a fair crowd can share one IP
 } as const
+
+export type RateLimitPolicy = keyof typeof RATE_LIMITS
+type Duration = Parameters<typeof Ratelimit.slidingWindow>[1]
 
 // ─── State machine ────────────────────────────────────────────────────────────
 
 type RateLimitState =
   | { type: 'disabled' }
   | { type: 'failed'; error: string }
-  | { type: 'ready'; rl: Ratelimit }
+  | { type: 'ready'; limiters: Record<RateLimitPolicy, Ratelimit> }
 
 // Module-level singletons — reset by Next.js hot-reload unless we use globalThis
 let state: RateLimitState | null = null
@@ -57,17 +65,7 @@ async function initRatelimit(): Promise<RateLimitState> {
     const redis = new Redis({ url, token })
 
     // RATE_LIMIT_TEST=true: tight 3/3 s window for integration tests (test-c2)
-    const isTest = process.env.RATE_LIMIT_TEST === 'true'
-    const rl = new Ratelimit({
-      redis,
-      limiter: isTest
-        ? Ratelimit.slidingWindow(3, '3 s')
-        : Ratelimit.slidingWindow(30, '1 m'),
-      prefix:    isTest ? '@test/vendor-status' : `v1:rl:${process.env.NODE_ENV}`,
-      analytics: !isTest,
-    })
-
-    return { type: 'ready', rl }
+    return { type: 'ready', limiters: buildLimiters(redis) }
   } catch (err) {
     console.error('[Ratelimit] Failed to initialize', err)
     return { type: 'failed', error: String(err) }
@@ -93,7 +91,32 @@ async function getRatelimit(): Promise<RateLimitState> {
   return state
 }
 
+// One limiter per policy, each from its own RATE_LIMITS entry and its own key prefix.
+// RATE_LIMIT_TEST=true keeps the legacy tight 3/3 s window for scripts/test-c2.ts.
+let windowOverride: Duration | null = null
+function buildLimiters(redis: Redis): Record<RateLimitPolicy, Ratelimit> {
+  const isTest = process.env.RATE_LIMIT_TEST === 'true'
+  const out = {} as Record<RateLimitPolicy, Ratelimit>
+  for (const policy of Object.keys(RATE_LIMITS) as RateLimitPolicy[]) {
+    const cfg = RATE_LIMITS[policy]
+    const window = (windowOverride ?? cfg.window) as Duration
+    out[policy] = new Ratelimit({
+      redis,
+      limiter: isTest ? Ratelimit.slidingWindow(3, '3 s') : Ratelimit.slidingWindow(cfg.requests, window),
+      prefix: isTest ? `@test/${policy}` : `v2:rl:${process.env.NODE_ENV}:${policy}`,
+      analytics: !isTest,
+    })
+  }
+  return out
+}
+
 // ─── Test helpers (non-production only) ──────────────────────────────────────
+
+/** Rebuild every limiter with the same request counts over a shorter window (null restores). */
+export function __setWindowOverrideForTest(w: Duration | null): void {
+  windowOverride = w
+  __resetForTest()
+}
 
 export type { RateLimitState }
 
@@ -118,7 +141,7 @@ export function __setInitPromiseForTest(p: Promise<RateLimitState>): void {
 
 export async function enforceRateLimit(
   key: string,
-  policy: keyof typeof RATE_LIMITS,
+  policy: RateLimitPolicy,
   opts: { failClosed?: boolean } = {}
 ): Promise<{ allowed: boolean; headers: Record<string, string> }> {
   const s = await Promise.race([
@@ -137,7 +160,7 @@ export async function enforceRateLimit(
   }
 
   try {
-    const { success, limit, remaining, reset } = await s.rl.limit(`v1:${policy}:${key}`)
+    const { success, limit, remaining, reset } = await s.limiters[policy].limit(key)
     return {
       allowed: success,
       headers: {

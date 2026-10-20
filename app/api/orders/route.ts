@@ -72,16 +72,16 @@ interface CreateOrderBody {
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get('x-forwarded-for') ?? 'anonymous'
-    const { allowed, headers: rlHeaders } = await enforceRateLimit(ip, 'orderCreate', { failClosed: true })
+    // Per USER, not per IP (readiness 1.7): at a fair, a crowd on venue Wi-Fi or one carrier IP
+    // shared a single 10/min bucket. Auth first so the key is the person.
+    const clerkId = await requireAuth()
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(`order:${clerkId}`, 'orderCreate', { failClosed: true })
     if (!allowed) {
       return NextResponse.json(
         { success: false, error: { message: 'Too many requests. Please slow down.', code: 'RATE_LIMITED' } },
         { status: 429, headers: rlHeaders }
       )
     }
-
-    const clerkId = await requireAuth()
 
     // ── 1. Parse + validate body ───────────────────────────────────────────
     const body: CreateOrderBody = await req.json()
