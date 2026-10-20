@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 32/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 33/50 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -81,6 +81,7 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 - [x] Fail closed on config: home delivery can't be enabled unless the fair has coordinates and a radius. Shown as a fair-readiness item.
 - [x] Geocoding call has a timeout. If Google is unreachable, the order fails with "We can't verify your address right now. Try pickup or retry."
 - [x] Test matrix (`scripts/delivery-radius-guard.ts`, 62 checks, mutation-tested): Springfield fair + Edwardsville address rejected with no PaymentIntent; in-radius accepted; missing `place_id` rejected; fair without coordinates has no home delivery; geocoder timeout rejected.
+- [x] ZIP fallback *(2026-10-20; live check on www found campus ZIP 62026 returns nothing, even for SIUE's own address)*: when the ZIP-pinned search is empty, search again unpinned and accept the top result only in the typed ZIP or city (and the typed state). Fallback points are always approximate; the order keeps the address as typed. Guard [12]: Cougar Village 62026 and 1 Hairpin Dr 62026 found and approximate; another city, or the same city name in another state, rejected; the existing matrix unchanged. 5/5 mutations killed.
 
 ### 1.2 Delivery fee on cancel-before-pickup (CURRENT_STATE #18)
 Policy: refund the delivery fee on any cancel where no runner earned anything (no `RunnerEarning`), whoever cancelled. On a multi-vendor order, only when every vendor portion is cancelled. Service fee stays non-refundable.

@@ -148,17 +148,67 @@ const PRECISIONS = new Set<GeoPrecision>(['ROOFTOP', 'RANGE_INTERPOLATED', 'GEOM
  * restriction) — never a NEXT_PUBLIC key. Bounded by GEOCODE_TIMEOUT_MS; every failure mode
  * becomes `unavailable`, which the decision turns into a refusal.
  */
+//
+// ZIP FALLBACK (2026-10-20). Some ZIPs make the pinned search come back empty for real addresses:
+// 62026 is SIUE's campus ZIP, and pinned to it Google finds nothing — not even SIUE's own
+// address — so campus students were told their address doesn't exist. When the pinned search
+// returns ZERO_RESULTS, search once more pinned only to the US, and accept the top result only
+// if it lies in the typed ZIP or the typed city (and the typed state, when given). A result we
+// cannot place that way is rejected. A fallback point is ALWAYS approximate, whatever Google
+// says, so the order is flagged and the runner is told to check the written address.
 export const googleGeocoder: Geocoder = async (addr) => {
   const key = process.env.GOOGLE_GEOCODING_API_KEY
   if (!key) return { kind: 'unavailable', reason: 'GOOGLE_GEOCODING_API_KEY not set' }
 
   const zip = addr.zip.trim()
-  const params = new URLSearchParams({
-    address: [addr.street, addr.city, addr.state, zip].filter(Boolean).join(', '),
-    components: `postal_code:${zip}|country:US`,
-    key,
-  })
-  let body: { status?: string; results?: Array<{ geometry?: { location?: { lat: number; lng: number }; location_type?: string } }> }
+  const address = [addr.street, addr.city, addr.state, zip].filter(Boolean).join(', ')
+  const pinned = await googleGeocodeRequest(address, `postal_code:${zip}|country:US`, key)
+  if (pinned.kind !== 'zero') return pinned.kind === 'ok' ? found(pinned.top) : pinned
+
+  const loose = await googleGeocodeRequest(address, 'country:US', key)
+  if (loose.kind === 'zero') return { kind: 'not_found' }
+  if (loose.kind !== 'ok') return loose
+  if (!sameZipOrCity(loose.top, addr)) return { kind: 'not_found' }
+  const result = found(loose.top)
+  return result.kind === 'found' ? { kind: 'found', point: { ...result.point, precision: 'APPROXIMATE' } } : result
+}
+
+interface GoogleResult {
+  geometry?: { location?: { lat: number; lng: number }; location_type?: string }
+  address_components?: Array<{ long_name?: string; short_name?: string; types?: string[] }>
+}
+
+type GoogleRequestOutcome =
+  | { kind: 'ok'; top: GoogleResult }
+  | { kind: 'zero' }
+  | { kind: 'unavailable'; reason: string }
+
+function found(top: GoogleResult): GeocodeResult {
+  const geom = top.geometry
+  const loc = geom?.location
+  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return { kind: 'not_found' }
+  const precision = PRECISIONS.has(geom?.location_type as GeoPrecision)
+    ? (geom!.location_type as GeoPrecision)
+    : 'APPROXIMATE'
+  return { kind: 'found', point: { lat: loc.lat, lng: loc.lng, precision } }
+}
+
+const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+/** Does an unpinned result lie in the typed ZIP or the typed city (and the typed state, if any)? */
+function sameZipOrCity(top: GoogleResult, addr: AddressToGeocode): boolean {
+  const parts = top.address_components ?? []
+  const of = (type: string) => parts.filter(p => p.types?.includes(type)).flatMap(p => [norm(p.long_name), norm(p.short_name)])
+  const state = norm(addr.state)
+  if (state && !of('administrative_area_level_1').includes(state)) return false
+  if (of('postal_code').includes(norm(addr.zip))) return true
+  const city = norm(addr.city)
+  return city !== '' && [...of('locality'), ...of('postal_town'), ...of('sublocality'), ...of('neighborhood')].includes(city)
+}
+
+async function googleGeocodeRequest(address: string, components: string, key: string): Promise<GoogleRequestOutcome> {
+  const params = new URLSearchParams({ address, components, key })
+  let body: { status?: string; results?: GoogleResult[] }
   try {
     const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, {
       signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS),
@@ -170,14 +220,7 @@ export const googleGeocoder: Geocoder = async (addr) => {
     return { kind: 'unavailable', reason: err instanceof Error ? err.name : 'fetch failed' }
   }
 
-  if (body.status === 'ZERO_RESULTS') return { kind: 'not_found' }
+  if (body.status === 'ZERO_RESULTS' || (body.status === 'OK' && !body.results?.length)) return { kind: 'zero' }
   if (body.status !== 'OK') return { kind: 'unavailable', reason: `status ${body.status ?? 'missing'}` }
-
-  const geom = body.results?.[0]?.geometry
-  const loc = geom?.location
-  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return { kind: 'not_found' }
-  const precision = PRECISIONS.has(geom?.location_type as GeoPrecision)
-    ? (geom!.location_type as GeoPrecision)
-    : 'APPROXIMATE'
-  return { kind: 'found', point: { lat: loc.lat, lng: loc.lng, precision } }
+  return { kind: 'ok', top: body.results![0] }
 }

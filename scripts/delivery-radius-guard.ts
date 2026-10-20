@@ -225,6 +225,82 @@ async function main() {
       throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })
     }) as typeof fetch
     assert((await googleGeocoder(ADDR)).kind === 'unavailable', 'a timeout → unavailable')
+
+    // [12] ZIP FALLBACK (1.1 follow-up, 2026-10-20). 62026 is SIUE's campus ZIP: pinned to it,
+    // Google finds nothing — not even SIUE's own address — and campus students were told their
+    // address doesn't exist. When the pinned search finds nothing, search again unpinned and
+    // accept the top result only if it lies in the typed ZIP or the typed city (and the typed
+    // state, when given). A fallback point is ALWAYS approximate, so the runner view warns.
+    console.log('\n[12] ZIP FALLBACK — pinned search empty → unpinned, same ZIP or city, approximate')
+    const COUGAR = { lat: 38.7925, lng: -89.9930 }
+    const comp = (types: string[], short_name: string) => ({ long_name: short_name, short_name, types })
+    const place = (loc: { lat: number; lng: number }, o: { zip?: string; city: string; state?: string; type?: string }) => ({
+      geometry: { location: loc, location_type: o.type ?? 'ROOFTOP' },
+      address_components: [
+        comp(['locality', 'political'], o.city),
+        comp(['administrative_area_level_1', 'political'], o.state ?? 'IL'),
+        ...(o.zip ? [comp(['postal_code'], o.zip)] : []),
+      ],
+    })
+    const urls: string[] = []
+    const byPin = (pinned: unknown, unpinned: unknown) => {
+      globalThis.fetch = (async (url: string) => {
+        urls.push(String(url))
+        const pin = (new URL(String(url)).searchParams.get('components') ?? '').includes('postal_code:')
+        return new Response(JSON.stringify(pin ? pinned : unpinned))
+      }) as typeof fetch
+    }
+    const EMPTY = { status: 'ZERO_RESULTS', results: [] }
+    const CV62026: AddressToGeocode = { street: 'Cougar Village', city: 'Edwardsville', state: 'IL', zip: '62026' }
+
+    urls.length = 0
+    byPin(EMPTY, { status: 'OK', results: [place(COUGAR, { zip: '62025', city: 'Edwardsville', type: 'ROOFTOP' })] })
+    const cv = await googleGeocoder(CV62026)
+    assert(cv.kind === 'found' && cv.point.lat === COUGAR.lat, 'Cougar Village, 62026 → found via the fallback (same city, ZIP 62025)')
+    assert(cv.kind === 'found' && cv.point.precision === 'APPROXIMATE', `fallback result is APPROXIMATE even when Google says ROOFTOP (got ${cv.kind === 'found' ? cv.point.precision : cv.kind})`)
+    const second = new URL(urls[1] ?? 'http://x').searchParams
+    assert(urls.length === 2 && second.get('components') === 'country:US' && (second.get('address') ?? '').includes('62026'),
+      `second request is unpinned (components=${second.get('components')}) and still carries the typed address`)
+
+    byPin(EMPTY, { status: 'OK', results: [place(EDWARDSVILLE, { zip: '62026', city: 'Edwardsville' })] })
+    const hp = await googleGeocoder(ADDR)
+    assert(hp.kind === 'found' && hp.point.precision === 'APPROXIMATE', '1 Hairpin Dr, Edwardsville 62026 → found via the fallback, approximate')
+
+    byPin(EMPTY, { status: 'OK', results: [place({ lat: 38.7814, lng: -89.9532 }, { zip: '62034', city: 'Glen Carbon' })] })
+    assert((await googleGeocoder(CV62026)).kind === 'not_found', 'fallback lands in another city and ZIP (Glen Carbon 62034) → rejected, not_found')
+
+    byPin(EMPTY, { status: 'OK', results: [place({ lat: 39.0, lng: -94.5 }, { zip: '64101', city: 'Edwardsville', state: 'KS' })] })
+    assert((await googleGeocoder(CV62026)).kind === 'not_found', 'same city name in another state (Edwardsville, KS) → rejected')
+
+    byPin(EMPTY, { status: 'OK', results: [place(COUGAR, { zip: '62026', city: 'SIUE' })] })
+    assert((await googleGeocoder(CV62026)).kind === 'found', 'fallback in the typed ZIP but a different locality name → accepted')
+
+    byPin(EMPTY, { status: 'OK', results: [{ geometry: { location: COUGAR, location_type: 'ROOFTOP' } }] })
+    assert((await googleGeocoder(CV62026)).kind === 'not_found', 'fallback result with no address components → rejected (cannot prove where it is)')
+
+    byPin(EMPTY, EMPTY)
+    assert((await googleGeocoder(CV62026)).kind === 'not_found', 'both searches empty → not_found')
+    byPin(EMPTY, { status: 'OVER_QUERY_LIMIT' })
+    assert((await googleGeocoder(CV62026)).kind === 'unavailable', 'fallback search errors → unavailable (fail closed)')
+
+    urls.length = 0
+    byPin({ status: 'OK', results: [place(EDWARDSVILLE, { zip: '62026', city: 'Edwardsville', type: 'RANGE_INTERPOLATED' })] }, { status: 'OK', results: [] })
+    const pinnedHit = await googleGeocoder(ADDR)
+    assert(urls.length === 1 && pinnedHit.kind === 'found' && pinnedHit.point.precision === 'RANGE_INTERPOLATED',
+      'pinned search finds it → one request, precision kept (no fallback, no downgrade)')
+
+    // Through the decision: the Collinsville test fair (10 km) — Cougar Village is ~15 km out.
+    const COLLINSVILLE: FairDeliveryArea = { eventLat: 38.6703, eventLng: -89.9845, homeDeliveryRadiusKm: 20 }
+    byPin(EMPTY, { status: 'OK', results: [place(COUGAR, { zip: '62025', city: 'Edwardsville' })] })
+    const d = await decideDeliveryRadius(COLLINSVILLE, CV62026, googleGeocoder)
+    assert(d.ok === true && d.approximate === true, 'decision on a fallback point → ok and flagged approximate (runner sees "check the written address")')
+
+    // The typed address is what the order stores; the geocoder returns a point, never text.
+    const orderSrc = stripComments(readFileSync('app/api/orders/route.ts', 'utf8'))
+    assert(/deliveryStreet:\s*deliveryStreet\?\.trim\(\)/.test(orderSrc) && /deliveryCity:\s*deliveryCity\?\.trim\(\)/.test(orderSrc) && /deliveryZip:\s*deliveryZip\?\.trim\(\)/.test(orderSrc),
+      'order stores street, city and ZIP exactly as typed (trimmed)')
+    assert(!/formatted_address|address_components/.test(orderSrc), 'order route never reads Google’s formatted address or components')
+    assert(cv.kind === 'found' && Object.keys(cv.point).sort().join() === 'lat,lng,precision', 'a found result carries only lat, lng, precision — no address text to overwrite with')
   } finally {
     globalThis.fetch = realFetch
     if (realKey === undefined) delete process.env.GOOGLE_GEOCODING_API_KEY
