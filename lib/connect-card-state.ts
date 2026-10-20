@@ -84,3 +84,30 @@ export const VERIFYING_COPY = {
   body: 'Usually under a minute. No action needed.',
   longWait: 'Still verifying. This page updates on its own; you can leave and come back.',
 }
+
+/**
+ * The verifying poll LOOP, on verifyingPoll's schedule. Keeps reading until the answer is not
+ * "verifying" (null = a failed read → keep going) or `cancelled()` turns true (unmount, or the
+ * card left verifying). Owns its own timing so it cannot depend on React re-rendering.
+ *
+ * 2026-10-20: the card used to re-arm its timer from a useEffect keyed on state. A read that
+ * answered "verifying" again set the SAME state, React skipped the re-render, and the card
+ * froze on "Verifying with Stripe" after one poll.
+ */
+export async function pollWhileVerifying(opts: {
+  load: (fresh: boolean) => Promise<ConnectCardState | null>
+  sleep: (ms: number) => Promise<void>
+  now: () => number
+  cancelled: () => boolean
+  onLongWait?: (longWait: boolean) => void
+}): Promise<void> {
+  const start = opts.now()
+  while (!opts.cancelled()) {
+    const { delayMs, fresh, longWait } = verifyingPoll(opts.now() - start)
+    opts.onLongWait?.(longWait)
+    await opts.sleep(delayMs)
+    if (opts.cancelled()) return
+    const next = await opts.load(fresh)
+    if (next !== null && next !== 'verifying') return
+  }
+}

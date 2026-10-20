@@ -17,6 +17,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+type ConnectCardStateLike = import('../lib/connect-card-state').ConnectCardState
 import { deriveConnectCardState, needsLine, plainRequirement, verifyingPoll, VERIFYING_COPY, GENERIC_NEED } from '../lib/connect-card-state'
 
 let pass = 0, fail = 0
@@ -52,6 +53,38 @@ assert(verifyingPoll(300_000).delayMs === 60_000 && verifyingPoll(300_000).longW
 let fresh = 0
 for (let t = 0; t < 300_000; t += verifyingPoll(t).delayMs) fresh++
 assert(fresh === 28, `fresh Stripe reads in the first 5 minutes = 28 (got ${fresh})`)
+
+console.log('[3b] poll loop keeps polling (2026-10-20: it stopped after one read)')
+// The bug: the card re-armed its timer only when React state CHANGED, and a poll that answers
+// "verifying" again sets the same value, so it polled once and froze on "Verifying with Stripe".
+{
+  const { pollWhileVerifying } = await import('../lib/connect-card-state')
+  const run = async (answers: Array<ConnectCardStateLike | null>, cancelAfter = Infinity) => {
+    let t = 0, i = 0
+    const calls: Array<{ at: number; fresh: boolean }> = []
+    const waits: boolean[] = []
+    await pollWhileVerifying({
+      now: () => t,
+      sleep: async ms => { t += ms },
+      cancelled: () => calls.length >= cancelAfter,
+      onLongWait: lw => waits.push(lw),
+      load: async fresh => { calls.push({ at: t, fresh }); return answers[Math.min(i++, answers.length - 1)] },
+    })
+    return { calls, waits }
+  }
+  const five = await run(['verifying', 'verifying', 'verifying', 'verifying', 'verifying', 'active'])
+  assert(five.calls.length === 6, `verifying ×5 then active → 6 reads, then stops (got ${five.calls.length})`)
+  assert(five.calls.slice(0, 5).every(c => c.fresh) && five.calls[0].at === 3000 && five.calls[1].at === 6000, 'reads follow the schedule: fresh, 3s apart at first')
+  const toNeeds = await run(['verifying', 'needs_info'])
+  assert(toNeeds.calls.length === 2, 'stops as soon as the answer is not "verifying" (needs info)')
+  const flaky = await run([null, null, 'active'])
+  assert(flaky.calls.length === 3, 'a failed read (null) keeps polling')
+  const long = await run(['verifying'], 40)
+  assert(long.calls.length === 40 && long.calls.filter(c => c.fresh).length === 28 && long.calls[39].fresh === false && long.waits.includes(true),
+    'still verifying after 5 min → keeps going on cached reads with the long-wait copy (28 fresh, then cached)')
+  const cancelled = await run(['verifying'], 2)
+  assert(cancelled.calls.length === 2, 'cancel (unmount / state change) stops the loop')
+}
 
 console.log('[4] render')
 const { ConnectCardView } = await import('../app/_components/StripeConnectCard')
@@ -89,6 +122,8 @@ assert(/readPayeeConnectStatus\(/.test(routeHelper) && /'connectStatusFresh', \{
 const hook = src('app/api/stripe/connect-webhook/route.ts')
 assert(/handleConnectWebhook\(/.test(hook) && !/stripeVerified/.test(hook), 'webhook route delegates to handleConnectWebhook and writes no flag itself')
 assert(/^\s*connectStatusFresh:/m.test(src('lib/ratelimit.ts')), 'connectStatusFresh is a declared rate-limit policy')
+const card = src('app/_components/StripeConnectCard.tsx')
+assert(/pollWhileVerifying\(/.test(card) && !/verifyingPoll\(/.test(card), 'the card polls through pollWhileVerifying, not its own timer re-arm')
 const worker = src('workers/order-worker.ts')
 assert(/JOB_PAYEE_NOTICE/.test(worker) && /JOB_CONNECT_RECHECK/.test(worker), 'the worker handles payee-notice and connect-recheck jobs')
 

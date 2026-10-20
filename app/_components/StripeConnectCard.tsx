@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import { CheckCircleIcon, ExclamationCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import {
-  deriveConnectCardState, needsLine, verifyingPoll, VERIFYING_COPY,
+  deriveConnectCardState, needsLine, pollWhileVerifying, VERIFYING_COPY,
   type ConnectCardState, type ConnectStatusView,
 } from '@/lib/connect-card-state'
 
@@ -103,31 +103,37 @@ export default function StripeConnectCard({
   const [needs, setNeeds] = useState<string | undefined>()
   const [longWait, setLongWait] = useState(false)
   const [busy, setBusy] = useState(false)
-  const verifyingSince = useRef<number | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const loadStatus = useCallback(async (fresh = false) => {
+  /** Reads status, updates the card, and returns the new state (null when the read failed). */
+  const loadStatus = useCallback(async (fresh = false): Promise<ConnectCardState | null> => {
     try {
       const json = await fetch(`${basePath}/status${fresh ? '?fresh=1' : ''}`).then(r => r.json())
-      if (!json.success) { setState('not_connected'); return }
+      if (!json.success) { setState('not_connected'); return 'not_connected' }
       const data = json.data as ConnectStatusView
       const next = deriveConnectCardState(data)
       setState(next)
       setNeeds(next === 'needs_info' ? needsLine(data.dueItems) : undefined)
+      return next
     } catch {
-      /* leave prior state; the next poll retries */
+      return null // leave prior state; the loop retries
     }
   }, [basePath])
 
-  // Poll only while verifying, on the shared schedule.
+  // Poll only while verifying. The loop owns its timing (lib/connect-card-state
+  // pollWhileVerifying): re-arming from this effect froze the card after one read, because a
+  // read that answers "verifying" again doesn't change state and so doesn't re-run the effect.
+  const verifying = state === 'verifying'
   useEffect(() => {
-    if (state !== 'verifying') { verifyingSince.current = null; setLongWait(false); return }
-    if (verifyingSince.current === null) verifyingSince.current = Date.now()
-    const { delayMs, fresh, longWait: lw } = verifyingPoll(Date.now() - verifyingSince.current)
-    setLongWait(lw)
-    timer.current = setTimeout(() => { void loadStatus(fresh) }, delayMs)
-    return () => { if (timer.current) clearTimeout(timer.current) }
-  }, [state, loadStatus, needs, longWait])
+    if (!verifying) { setLongWait(false); return }
+    let cancelled = false
+    void pollWhileVerifying({
+      load: loadStatus,
+      sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+      cancelled: () => cancelled,
+      onLongWait: setLongWait,
+    })
+    return () => { cancelled = true }
+  }, [verifying, loadStatus])
 
   // Ensure an account exists, then redirect to the hosted Stripe onboarding link.
   const startOnboarding = useCallback(async () => {
