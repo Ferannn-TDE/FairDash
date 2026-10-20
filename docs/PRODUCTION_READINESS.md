@@ -6,12 +6,12 @@
 
 | Phase | Window | Done |
 |---|---|---|
-| 0. Safety close-out | Oct 19 – Oct 25 | 3/4 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 23/43 |
+| 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 32/43 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
-| 4. Customer portal | Dec 21 – Jan 3 | 1/9 |
+| 4. Customer portal | Dec 21 – Jan 3 | 1/11 |
 | 5. Email platform | Dec 14 – Jan 10 | 0/20 |
 | 6. Vendor portal + onboarding | Jan 4 – Jan 17 | 0/12 |
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
@@ -60,6 +60,8 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 - [x] Add a gate check that fails when any script constructs its own `PrismaClient` without the guard. *(Already existed as `prod-db-guard-test.ts [3]`; tightened so a guard that is only a comment, or is called after the client, fails. Positive-controlled with a planted file.)*
 - [x] Record `72582db` + `scripts/prod-db-guard-test.ts` as the proof of isolation.
 - [ ] **Oct 21:** after the Supabase reset, re-run the bucket settings check on the current project (future staging) and do one upload pass.
+- [x] Clerk guard (`lib/prod-clerk-guard.ts`, `scripts/prod-clerk-guard-test.ts`): a local process refuses the production Clerk instance's keys (today `noble-tahr-47`, the instance www runs on) unless `CONFIRM_PROD_CLERK=<host>`. The proxy serves a 503 locally, and every script that builds a Clerk client is guarded and scanned. *(2026-10-19, after opening localhost `/onboarding` wrote to a real user's Clerk metadata and the webhook carried it into production.)*
+- [ ] **You:** create a separate Clerk development application for localhost and put its keys in `.env.local` (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`). Until then the local dev server refuses every request.
 
 **Done when:** the gate check fails on an unguarded fixture script and passes on the real tree. Verified locally.
 
@@ -104,15 +106,15 @@ Policy: refund the delivery fee on any cancel where no runner earned anything (n
 ### 1.4 Payout-status limbo + Connect webhook
 Root cause: `StripeConnectCard` maps "onboarding complete but transfers not active yet" to "Payout setup unfinished" and reads status only once.
 
-- [ ] Add a `verifying` state: "Verifying with Stripe, usually under a minute", no "finish setup" button.
-- [ ] Poll `/status` while verifying: every 3s for 30s, then every 15s up to 5 min, then "Still verifying. We'll email you when it's done."
-- [ ] `StripeConnectCard` is the single owner for vendor, runner and organizer. Delete the duplicate in `app/vendor/[fairSlug]/settings/page.tsx`.
-- [ ] Show `currently_due`/`past_due` requirements in plain English ("Stripe needs: ID document").
-- [ ] `app/api/stripe/connect-webhook`: conditional update (`stripeVerified` false→true via `updateMany`). Only `count === 1` triggers the "payout setup complete" email.
-- [ ] `stripeConnectedAt` is set once, at that transition, not on every event.
-- [ ] True→false transition schedules a delayed job (~10 min) that re-reads live status and sends "payout setup needs attention" only if still restricted.
-- [ ] Return 500 on internal errors so Stripe retries. Signature failures stay 400; unknown event types stay 200.
-- [ ] Tests: same event replayed ×3 gives one status change and one email job; a database failure returns 500; all four card states render.
+- [x] Add a `verifying` state: "Verifying with Stripe, usually under a minute", no "finish setup" button. (Verifying = nothing due from the payee, transfers not active yet.)
+- [x] Poll `/status` while verifying: every 3s for 30s, then every 15s up to 5 min, then "Still verifying. This page updates on its own; you can leave and come back." with a cached 60s refresh. (Email promise waits for Phase 5.) `?fresh=1` is honoured only for the payee's owner, within the per-user `connectStatusFresh` limit, fail closed.
+- [x] `StripeConnectCard` is the single owner for vendor, runner and organizer. Delete the duplicate in `app/vendor/[fairSlug]/settings/page.tsx`.
+- [x] Show `currently_due`/`past_due` requirements in plain English ("Stripe needs: ID document").
+- [x] `app/api/stripe/connect-webhook`: conditional update (`stripeVerified` false→true via `updateMany`). Only `count === 1` triggers the "payout setup complete" email. One writer (`lib/connect-status.ts`) for the webhook and all three `/status` routes; the notice is a `PayeeNotice` row until Phase 5 sends it (migration `20261020120000_add_payee_notice`).
+- [x] `stripeConnectedAt` is set once, at that transition, not on every event.
+- [x] True→false transition schedules a delayed job (~10 min) that re-reads live status and sends "payout setup needs attention" only if still restricted. The gate itself closes immediately.
+- [x] Return 500 on internal errors so Stripe retries. Signature failures stay 400; unknown event types stay 200.
+- [x] Tests: same event replayed ×3 gives one status change and one email job; a database failure returns 500; all four card states render. (`connect-status` 80 checks against the test DB incl. the real runner executor; `connect-card` 38; 13/13 mutations killed. Sealed production dry run `scripts/connect-dry-run.ts`: 9 payees, 0 transitions, 0 notices, 0 re-checks.)
 - [ ] Walkthrough GIF of return-from-Stripe for vendor, runner and organizer.
 
 ### 1.5 Tracking map centering (basic fix)
@@ -248,6 +250,8 @@ About 20 pages: landing → fair → menu → checkout → tracking → account.
 
 - [ ] Audit checklist written (`docs/audit/customer.md`).
 - [x] Fair cards (landing "Happening now & soon" and `/fairs`): uniform height, clamped description, fixed banner, only live/upcoming under "Happening now", ended fairs under Past Events with "View fair", "1 vendor" pluralization, AA badge contrast. Fixed 2026-10-19 via the shared `FairCard`; screenshots at 390px and 1280px taken.
+- [ ] **P1:** opening `/onboarding` writes to Clerk (`publicMetadata.role`, `roles[]` via the organizer bootstrap) and the DB with no user action. It must write only when the user submits something. *(2026-10-19: a page view on localhost changed a real account.)*
+- [ ] Data consistency: users whose Clerk `roles[]` disagrees with their payee rows. Read-only check `scripts/role-consistency-check.ts`. 2026-10-19 production: 4 of 21 compared users mismatch (runner row but no `runner` role: 2; `vendor` role without a row: 1; `runner` role without a row: 1), plus 1 DB user with no Clerk user and 1 Clerk user with no DB row. Decide the repair per kind; the role sync can only add roles.
 - [ ] Your pass added.
 - [ ] P0/P1 closed.
 - [ ] Pages migrated to tokens and primitives (zero arbitrary values on migrated pages).
