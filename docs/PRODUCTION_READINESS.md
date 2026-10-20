@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 41/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 42/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -74,7 +74,7 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 `homeDeliveryRadiusKm` exists but nothing reads it at order time, and delivery addresses carry no coordinates.
 
 - [x] `POST /api/orders` geocodes the stored street/city/state/ZIP **on the server**, pinned to the ZIP (`components=postal_code:…`). Coordinates from the browser are never trusted. *(Changed from `place_id`: checkout keeps fields editable and dorm addresses are often typed, so a `place_id` is often missing or stale.)*
-- [ ] New server-only key `GOOGLE_GEOCODING_API_KEY`, restricted to the Geocoding API (no referrer restriction, never `NEXT_PUBLIC`). The browser Maps key stays referrer-restricted. *(Code reads it and the guard enforces server-only; **you** create it in Google Cloud and set it on Vercel Production + Preview. Until then, home-delivery orders are refused.)*
+- [x] New server-only key `GOOGLE_GEOCODING_API_KEY`, restricted to the Geocoding API (no referrer restriction, never `NEXT_PUBLIC`). The browser Maps key stays referrer-restricted. *(Code reads it and the guard enforces server-only; **you** create it in Google Cloud and set it on Vercel Production + Preview. Until then, home-delivery orders are refused.)* *(2026-10-20: live on www; the delivery checks returned real distances. Local `.env.local` copy was pasted twice and is fixed.)*
 - [x] Straight-line (haversine) check from `eventLat/eventLng` to the address against `homeDeliveryRadiusKm`, **before** the PaymentIntent is created.
 - [x] The same check runs when the address is picked at checkout, for early feedback. The order route remains the authority.
 - [x] Copy says "within X km of the fair (straight-line distance)" in the checkout error and in the radius setting.
