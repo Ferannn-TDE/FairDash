@@ -81,9 +81,9 @@ assert(/previewAllowed === true/.test(page) && /previewAllowed/.test(page),
   'the gate opens only on an explicit true — a null (in-flight) probe keeps it closed')
 
 console.log('\n[4] the flag is visible per environment')
-const health = readFileSync('app/api/health/route.ts', 'utf8')
+const health = readFileSync('app/api/admin/health/route.ts', 'utf8')
 assert(/previewBypass:\s*isPreviewBypassEnabled\(\)/.test(health),
-  '/api/health reports the effective flag (no silent local/prod drift)')
+  '/api/admin/health reports the effective flag to admins (no silent local/prod drift; strangers see nothing)')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} preview-bypass-guard: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

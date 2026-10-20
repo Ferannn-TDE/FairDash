@@ -7,8 +7,8 @@
  * Run:  npx tsx scripts/test-health-guard.ts
  */
 
-import { readFileSync } from 'node:fs'
-import { computeHealth, resolveWorkerStaleSec, DEFAULT_WORKER_STALE_SEC } from '../lib/health'
+import { readFileSync, existsSync } from 'node:fs'
+import { computeHealth, resolveWorkerStaleSec, DEFAULT_WORKER_STALE_SEC, publicHealthBody } from '../lib/health'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -71,9 +71,13 @@ function main() {
   assert(route.includes("process.env.COMMIT_SHA ?? 'unknown'"), "route reads the baked COMMIT_SHA, falling back to 'unknown'")
   assert(!route.includes('VERCEL_GIT_COMMIT_SHA') && !route.includes('?? null'), 'route has NO runtime Vercel-var read and NO null fallback (the regression path)')
 
-  console.log('\n[9] effective feature flags are surfaced (local/prod drift is visible)')
-  assert(/flags:\s*\{/.test(route) && /enforceVendorReadiness:\s*isVendorReadinessEnforced\(\)/.test(route),
-    'health exposes the effective enforceVendorReadiness — a curl on each env shows whether they agree')
+  console.log('\n[9] effective feature flags are surfaced to ADMINS (local/prod drift is visible, strangers see nothing)')
+  const adminRoute = readFileSync('app/api/admin/health/route.ts', 'utf8')
+  assert(/requireStrictAdminAuth\(\)/.test(adminRoute) && adminRoute.indexOf('requireStrictAdminAuth()') < adminRoute.indexOf('runHealthChecks()'),
+    'admin health requires a strict admin BEFORE running any check')
+  assert(/flags:\s*\{/.test(adminRoute) && /enforceVendorReadiness:\s*isVendorReadinessEnforced\(\)/.test(adminRoute),
+    'admin health exposes the effective enforceVendorReadiness — compare it per environment')
+  assert(/worker:\s*health\.worker/.test(adminRoute), 'admin health carries the full worker block (sweep age, role reconcile)')
 
   // ── [10] THE WORKER'S OWN FINGERPRINT — two deployments, two SHAs ──────────────────────
   // `commit` above is baked at Vercel BUILD time: it is the WEB APP's SHA. The worker is a
@@ -117,7 +121,8 @@ function main() {
     'liveness is written FIRST — if the fingerprint write fails, liveness still lands')
   assert(/mget\(HEARTBEAT_KEY, WORKER_COMMIT_KEY, ROLE_RECONCILE_KEY\)/.test(healthSrc), 'all three keys are read in one round trip')
 
-  assert(/worker:\s*health\.worker/.test(route), 'the route passes the whole worker block through, so commit reaches the JSON')
+  assert(/publicHealthBody\(health,/.test(route) && /commit: h\.worker\.commit \?\? 'unknown'/.test(healthSrc),
+    'the public route still carries the worker\'s own SHA (checks.worker.commit) — the one worker detail strangers keep')
 
   const workerSrc = readFileSync(new URL('../workers/order-worker.ts', import.meta.url), 'utf8')
   assert(/console\.warn\('\[Worker\] boot'/.test(workerSrc),
@@ -152,6 +157,46 @@ function main() {
   }
   assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale',
     'after the override is cleared, 181s is stale again (no leaked state)')
+
+  // ── [11] PUBLIC BODY IS MINIMAL (2026-10-20) ──────────────────────────────────────────────
+  // /api/health is public. It showed feature flags, sweep timing and — once 1.9 shipped — how
+  // many users the Clerk instance has. Strangers get the verdict, each component's ok/fail and
+  // the two deploy SHAs; everything else is /api/admin/health.
+  console.log('\n[11] the PUBLIC health body: verdict, per-component ok/fail, SHAs — nothing else')
+  const rich = computeHealth({
+    database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), workerCommit: 'abc1234', nowMs: NOW,
+    roleReconcile: JSON.stringify({ state: 'on', at: agoSec(5), lastRun: { at: agoSec(5), clerkUsers: 22, usersToUpdate: 2, missing: { runner: 2 }, updated: 2, errors: 0 } }),
+  })
+  const pub = publicHealthBody(rich, 'def5678')
+  const ALLOWED_KEYS = new Set(['status', 'commit', 'checks', 'database', 'redis', 'worker'])
+  const ALLOWED_VALUES = new Set(['ok', 'degraded', 'fail', 'off', 'unknown', 'abc1234', 'def5678'])
+  const leaks: string[] = []
+  const walk = (v: unknown, path: string) => {
+    if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v)) { if (!ALLOWED_KEYS.has(k)) leaks.push(`${path}.${k}`); walk(x, `${path}.${k}`) }
+    } else if (typeof v === 'number') leaks.push(`${path}=${v} (a number)`)
+    else if (!ALLOWED_VALUES.has(String(v))) leaks.push(`${path}=${String(v)}`)
+  }
+  walk(pub, 'body')
+  assert(leaks.length === 0, `public body has only allowed keys and values, no numbers${leaks.length ? ` — leaks: ${leaks.join(', ')}` : ''}`)
+  assert(JSON.stringify(pub) === JSON.stringify({ status: 'ok', commit: 'def5678', checks: { database: 'ok', redis: 'ok', worker: { status: 'ok', commit: 'abc1234' } } }),
+    `public body is exactly the minimal shape (got ${JSON.stringify(pub)})`)
+  // Positive control on the leak walker: the full report must trip it.
+  const before = leaks.length
+  walk(rich, 'rich')
+  assert(leaks.length > before, 'positive control: the full internal report DOES trip the leak check (counts, timings)')
+  const failing = publicHealthBody(computeHealth({ database: 'error', redis: 'unreachable', lastSweepAt: agoSec(9999), nowMs: NOW }), 'def5678')
+  assert(failing.status === 'degraded' && failing.checks.database === 'fail' && failing.checks.redis === 'fail' && failing.checks.worker.status === 'fail',
+    'failures read as "fail" (stale worker included) and the verdict stays degraded')
+  assert(publicHealthBody(computeHealth({ database: 'ok', redis: 'not_configured', lastSweepAt: null, nowMs: NOW }), 'x').checks.redis === 'off',
+    'Redis not configured reads "off", not "fail"')
+  assert(/publicHealthBody\(/.test(route) && !/isVendorReadinessEnforced|isPreviewBypassEnabled|health\.worker\b|timestamp|version/.test(route.replace(/\/\/.*$/gm, '')),
+    'the public route sends only publicHealthBody — no flags, no worker internals, no timestamp/version')
+
+  assert(!existsSync('app/api/health/queues/route.ts'), 'no public queue-counts route (/api/health/queues is gone)')
+  const queuesAdmin = readFileSync('app/api/admin/health/queues/route.ts', 'utf8')
+  assert(queuesAdmin.indexOf('requireStrictAdminAuth()') >= 0 && queuesAdmin.indexOf('requireStrictAdminAuth()') < queuesAdmin.indexOf('queueHealth()'),
+    'queue counts are behind a strict admin check, run before the counts are read')
 
   // Role reconcile status (readiness 1.9): parsed through, garbage → null, absent → null.
   const rr = { state: 'on', at: agoSec(5), lastRun: { at: agoSec(5), clerkUsers: 22, usersToUpdate: 2, missing: { runner: 2 }, updated: 2, errors: 0 } }

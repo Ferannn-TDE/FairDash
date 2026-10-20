@@ -1,41 +1,17 @@
 import { NextResponse } from 'next/server'
-import { runHealthChecks } from '@/lib/health'
-import { isVendorReadinessEnforced } from '@/lib/vendor-readiness'
-import { isPreviewBypassEnabled } from '@/lib/preview-access'
+import { runHealthChecks, publicHealthBody } from '@/lib/health'
 
-// GET /api/health — real measurements, not stubs. Returns 200 when healthy, 503 when degraded,
-// so an external dead-man's-switch monitor can watch it directly. The `commit` field remains the
-// deploy fingerprint. `worker` is the reconcile-sweep heartbeat: a stale one is a dead/stuck
-// worker — the failure that used to look like a calm day.
+// GET /api/health — PUBLIC. Real measurements, not stubs: 200 when healthy, 503 when degraded,
+// so an external dead-man's-switch monitor can watch it directly.
+//
+// Strangers get only the verdict, each component's ok/fail, and the two deploy fingerprints:
+// `commit` (the web app, baked at build time by next.config.mjs, 'unknown' as the fallback) and
+// `checks.worker.commit` (the Railway worker). Sweep timings, the role-reconcile status (with
+// Clerk user counts) and the effective feature flags are /api/admin/health only (2026-10-20).
 export async function GET() {
   const health = await runHealthChecks()
   return NextResponse.json(
-    {
-      status: health.status,
-      timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version ?? '1.0.0',
-      // COMMIT_SHA is baked at build time by next.config.mjs (fallback chain ending in
-      // 'unknown') — never read the Vercel var at runtime here; it is null on non-git deploys.
-      commit: process.env.COMMIT_SHA ?? 'unknown',
-      checks: {
-        database: health.database,
-        redis: health.redis,
-        worker: health.worker,
-      },
-      // EFFECTIVE feature flags — the runtime value, per environment. Surfaced because a
-      // customer-facing filter (vendor readiness) was set true locally and unset in prod, so the
-      // public site listed vendors who can't take payment while local hid them, and nothing made
-      // the drift visible. A boolean env value is not a secret; a `curl /api/health` on each
-      // environment now shows whether they agree.
-      flags: {
-        enforceVendorReadiness: isVendorReadinessEnforced(),
-        // Temporary preview scaffolding (removed when the fair opens). Surfaced for the same
-        // reason as the line above: a flag that changes who can reach a storefront must never
-        // drift silently between environments. NOTE this is the FLAG only — access also
-        // requires an admin session, which this endpoint does not and cannot report.
-        previewBypass: isPreviewBypassEnabled(),
-      },
-    },
+    publicHealthBody(health, process.env.COMMIT_SHA ?? 'unknown'),
     { status: health.status === 'ok' ? 200 : 503 },
   )
 }

@@ -147,6 +147,53 @@ export function computeHealth(input: {
   return { status: degraded ? 'degraded' : 'ok', database: input.database, redis: input.redis, worker }
 }
 
+// ─── Public vs admin (2026-10-20) ─────────────────────────────────────────────────────────
+// /api/health is public, and it had grown feature flags, sweep timings and the worker's Clerk
+// user count. Strangers get only what an uptime monitor needs: the verdict, each component's
+// ok/fail, and the web and worker SHAs. The full HealthReport is /api/admin/health.
+export interface PublicHealth {
+  status: 'ok' | 'degraded'
+  commit: string
+  checks: {
+    database: 'ok' | 'fail'
+    redis: 'ok' | 'fail' | 'off'
+    worker: { status: 'ok' | 'fail' | 'unknown'; commit: string }
+  }
+}
+
+/** PURE — the public body. Built from an allow-list, so a new internal field can't leak by default. */
+export function publicHealthBody(h: HealthReport, webCommit: string): PublicHealth {
+  return {
+    status: h.status,
+    commit: webCommit,
+    checks: {
+      database: h.database === 'ok' ? 'ok' : 'fail',
+      redis: h.redis === 'ok' ? 'ok' : h.redis === 'not_configured' ? 'off' : 'fail',
+      worker: {
+        status: h.worker.status === 'ok' ? 'ok' : h.worker.status === 'stale' ? 'fail' : 'unknown',
+        commit: h.worker.commit ?? 'unknown',
+      },
+    },
+  }
+}
+
+/**
+ * Queue job counts (waiting / active / delayed / failed …) for the admin dashboard. ADMIN ONLY
+ * since 2026-10-20 — it used to be the public /api/health/queues, which showed strangers
+ * order-volume counts and raw error strings.
+ */
+export async function queueHealth(): Promise<{ httpStatus: number; body: Record<string, unknown> }> {
+  try {
+    const { getOrderQueue } = await import('./queues')
+    const queue = getOrderQueue()
+    if (!queue) return { httpStatus: 503, body: { status: 'degraded', reason: 'Redis unavailable — queue not initialized' } }
+    const counts = await queue.getJobCounts()
+    return { httpStatus: 200, body: { status: 'ok', queues: { orders: counts } } }
+  } catch (err) {
+    return { httpStatus: 503, body: { status: 'error', error: String(err) } }
+  }
+}
+
 function redisClient(): IORedis | null {
   const url = process.env.REDIS_URL
   if (!url) return null

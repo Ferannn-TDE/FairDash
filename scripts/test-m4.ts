@@ -25,7 +25,9 @@ import { Queue, ConnectionOptions } from 'bullmq'
 import { enqueueJobSafely } from '../lib/queue-safe.js'
 import { stripe } from '../lib/stripe.js'
 import { __setOrderQueueForTest } from '../lib/queues.js'
-import { GET as healthGET } from '../app/api/health/queues/route.js'
+import { queueHealth } from '../lib/health.js'
+// The queue-counts endpoint is admin-only now (/api/admin/health/queues); exercise its logic directly.
+const healthGET = async () => { const r = await queueHealth(); return new Response(JSON.stringify(r.body), { status: r.httpStatus }) }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

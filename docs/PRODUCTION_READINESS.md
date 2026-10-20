@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 38/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 39/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -117,7 +117,7 @@ Root cause: `StripeConnectCard` maps "onboarding complete but transfers not acti
 - [x] True→false transition schedules a delayed job (~10 min) that re-reads live status and sends "payout setup needs attention" only if still restricted. The gate itself closes immediately.
 - [x] Return 500 on internal errors so Stripe retries. Signature failures stay 400; unknown event types stay 200.
 - [x] Tests: same event replayed ×3 gives one status change and one email job; a database failure returns 500; all four card states render. (`connect-status` 80 checks against the test DB incl. the real runner executor; `connect-card` 38; 13/13 mutations killed. Sealed production dry run `scripts/connect-dry-run.ts`: 9 payees, 0 transitions, 0 notices, 0 re-checks.)
-- [ ] Walkthrough GIF of return-from-Stripe for vendor, runner and organizer.
+- [x] Walkthrough GIF of return-from-Stripe for vendor, runner and organizer. *(2026-10-20, local stack: all three reached "Payouts active" and opened their gate once. The vendor run caught the card freezing on "Verifying" after one poll; fixed in 6b94083, runner and organizer then updated without a reload.)*
 
 ### 1.5 Tracking map centering (basic fix)
 - [ ] Center on `deliveryLat/Lng` when present, otherwise on the fair coordinates. Never the world view.
