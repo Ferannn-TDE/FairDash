@@ -8,10 +8,10 @@
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
 | 1. Money & trust bugs | Oct 26 – Nov 29 | 44/49 |
-| 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
+| 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
-| 4. Customer portal | Dec 21 – Jan 3 | 1/11 |
+| 4. Customer portal | Dec 21 – Jan 3 | 1/12 |
 | 5. Email platform | Dec 14 – Jan 10 | 0/20 |
 | 6. Vendor portal + onboarding | Jan 4 – Jan 17 | 0/12 |
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
@@ -209,6 +209,7 @@ You already have delegate access to the GoDaddy account holding fairsynq.com, so
 ### 2.4 Free-tier inventory (`docs/COST-WORKSHEET.md`)
 - [ ] Every free tier we depend on, with its limit, current usage and upgrade trigger: Supabase, Upstash, Railway, Vercel, Clerk, Resend, Zoho, Google Maps/Geocoding/Routes, Sentry, Better Stack.
 - [ ] Upstash budget updated for 3-minute health checks (~29K commands/month).
+- [ ] Upstash commands spent by rate limiting on a busy fair day (e.g. 2,000 attendees, typical browsing; every limited request is at least one command, including signed-out menu reads at 600/min per IP), checked against the daily share of the 500K/month budget the worker also lives on.
 - [ ] Resend: "free supports about 45 orders/day" written down, with the trigger "upgrade to paid before the first real fair". Verify current pricing first.
 - [ ] Google: check current free usage for Geocoding (the pricing model changed in 2025) before writing a cost.
 
@@ -290,6 +291,7 @@ About 20 pages: landing → fair → menu → checkout → tracking → account.
 - [ ] Loading, empty and error states on every page.
 - [ ] Contrast checks pass on migrated pages.
 - [ ] Screenshots at 390px and 1280px.
+- [ ] Public read-only pages and APIs (fair pages, menus, the vendor list) served with Vercel edge caching and a short revalidate, so anonymous browsing mostly skips the server and Redis. Then decide whether signed-out reads still need a limiter at all (today: `publicAnonymous`, 600/min per IP, one Upstash command per request).
 - [ ] Walkthrough GIF: browse → order → track → cancel/refund view.
 
 ## Phase 5: Email platform (Dec 14 – Jan 10)
