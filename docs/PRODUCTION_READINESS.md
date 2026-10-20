@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 39/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 41/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -120,8 +120,8 @@ Root cause: `StripeConnectCard` maps "onboarding complete but transfers not acti
 - [x] Walkthrough GIF of return-from-Stripe for vendor, runner and organizer. *(2026-10-20, local stack: all three reached "Payouts active" and opened their gate once. The vendor run caught the card freezing on "Verifying" after one poll; fixed in 6b94083, runner and organizer then updated without a reload.)*
 
 ### 1.5 Tracking map centering (basic fix)
-- [ ] Center on `deliveryLat/Lng` when present, otherwise on the fair coordinates. Never the world view.
-- [ ] No coordinates at all: show no map rather than a globe.
+- [x] Center on `deliveryLat/Lng` when present, otherwise on the fair coordinates. Never the world view. *(Cause: the embed was sent free text such as "Fair grounds" or "<vendor> booth 12". Now `orderMapCenter` in `components/order/helpers.ts` always sends coordinates; guard `order-map-center`, 15 checks.)*
+- [x] No coordinates at all: show no map rather than a globe.
 
 ### 1.7 Rate limits that match their policies
 `lib/ratelimit.ts` builds one shared limiter (30/min), so the per-policy numbers in `RATE_LIMITS` are never read.

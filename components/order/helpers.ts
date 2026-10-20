@@ -95,16 +95,26 @@ export function buildVendorGroups(orderItems: OrderItem[]): VendorGroup[] {
   return [...map.values()]
 }
 
-export function getMapEmbedUrl(order: Order): string {
-  let query = ''
-  if (order.fulfillmentType === 'HOME_DELIVERY' && order.deliveryStreet) {
-    query = `${order.deliveryStreet}, ${order.deliveryCity} ${order.deliveryZip}`
-  } else if (order.vendor?.boothNumber) {
-    query = `${order.vendor.name} booth ${order.vendor.boothNumber}`
-  } else {
-    query = order.vendor?.name || 'Fair grounds'
+/**
+ * Where the order map is centred (readiness 1.5): the stored delivery point for a home delivery,
+ * otherwise the fair. Never free text — Google can't place "Fair grounds" or "<vendor> booth 12",
+ * and the embedded map fell back to a vague match or the whole globe. null → show no map.
+ */
+export function orderMapCenter(order: Order): { lat: number; lng: number; source: 'delivery' | 'fair' } | null {
+  const real = (lat: unknown, lng: unknown): lat is number =>
+    typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)
+  if (order.fulfillmentType === 'HOME_DELIVERY' && real(order.deliveryLat, order.deliveryLng)) {
+    return { lat: order.deliveryLat as number, lng: order.deliveryLng as number, source: 'delivery' }
   }
-  return `https://maps.google.com/maps?q=${encodeURIComponent(query)}&output=embed&hl=en&z=15`
+  if (real(order.event?.eventLat, order.event?.eventLng)) {
+    return { lat: order.event!.eventLat as number, lng: order.event!.eventLng as number, source: 'fair' }
+  }
+  return null
+}
+
+export function getMapEmbedUrl(order: Order): string | null {
+  const c = orderMapCenter(order)
+  return c ? `https://maps.google.com/maps?q=${c.lat},${c.lng}&output=embed&hl=en&z=15` : null
 }
 
 export function formatTime(iso?: string | null): string {

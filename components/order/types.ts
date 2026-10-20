@@ -53,6 +53,10 @@ export interface Order {
   deliveryStreet?: string | null
   deliveryCity?: string | null
   deliveryZip?: string | null
+  deliveryLat?: number | null
+  deliveryLng?: number | null
+  /** The fair's coordinates — where the order map centres when there's no delivery point. */
+  event?: { eventLat: number | null; eventLng: number | null } | null
   estimatedReadyAt?: string | null
   placedAt: string
   acceptedAt?: string | null

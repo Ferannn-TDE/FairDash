@@ -22,6 +22,8 @@ export async function GET(
     const order = await resolveOrder(rawId, {
       include: {
         vendor: { select: { id: true, name: true, boothNumber: true } },
+        // The fair's coordinates: where the order map centres without a delivery point (1.5).
+        event: { select: { eventLat: true, eventLng: true } },
         orderItems: {
           include: {
             menuItem: { select: { name: true, imageUrl: true, category: true, prepTime: true } },
