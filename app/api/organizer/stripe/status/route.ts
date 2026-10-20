@@ -1,61 +1,32 @@
-import { unstable_cache } from 'next/cache'
+import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
-import { assertStripeConfigured, getConnectStatus } from '@/lib/stripe-connect'
+import { assertStripeConfigured } from '@/lib/stripe-connect'
+import { payeeStatusResponse } from '@/lib/connect-status-route'
 
-// GET /api/organizer/stripe/status
+// GET /api/organizer/stripe/status[?fresh=1]
 //
-// Reads V2 connected-account status LIVE from Stripe (source of truth — never a
-// DB flag). Lightly cached (~60s). Mirrors the live result into the DB display
-// cache (FairOrganizer.stripeVerified / stripeConnectedAt).
-//
-// Response: { connected, readyToReceivePayments, onboardingComplete, requirements }
-export async function GET() {
+// The organizer account's live Connect status, ~60s cached. ?fresh=1 is honoured only for an
+// OWNER of the organizer account, within the per-user 'connectStatusFresh' limit. Goes through
+// lib/connect-status, the one writer of the payout gate — this route never writes it itself.
+export async function GET(req: NextRequest) {
   try {
     assertStripeConfigured()
+    const { clerkId, organizerId } = await requireOrganizerAuth()
 
-    const { organizerId } = await requireOrganizerAuth()
-
-    const organizer = await db.fairOrganizer.findUnique({
-      where: { id: organizerId },
-      select: { id: true, stripeAccountId: true },
-    })
+    const organizer = await db.fairOrganizer.findUnique({ where: { id: organizerId }, select: { id: true, stripeAccountId: true } })
     if (!organizer) return apiError('Organizer not found', 404, 'NOT_FOUND')
 
-    if (!organizer.stripeAccountId) {
-      return success({
-        connected: false,
-        readyToReceivePayments: false,
-        onboardingComplete: false,
-        requirements: null,
-      })
-    }
+    const member = await db.orgMember.findFirst({
+      where: { organizerId, user: { clerkId } }, select: { role: true },
+    })
 
-    const accountId = organizer.stripeAccountId
-
-    // ~60s cache per account so renders don't hammer the Stripe API.
-    const readStatus = unstable_cache(
-      () => getConnectStatus(accountId),
-      [`stripe-connect-status-${accountId}`],
-      { revalidate: 60 },
-    )
-
-    const status = await readStatus()
-
-    // Best-effort mirror of the live result into the DB display cache.
-    await db.fairOrganizer
-      .update({
-        where: { id: organizer.id },
-        data: {
-          stripeVerified: status.readyToReceivePayments,
-          ...(status.readyToReceivePayments ? { stripeConnectedAt: new Date() } : {}),
-        },
-      })
-      .catch(() => {})
-
-    return success({ connected: true, ...status })
+    return success(await payeeStatusResponse({
+      kind: 'organizer', id: organizer.id, accountId: organizer.stripeAccountId,
+      isOwner: member?.role === 'owner', clerkId, url: req.url,
+    }))
   } catch (err) {
     return handleApiError(err)
   }

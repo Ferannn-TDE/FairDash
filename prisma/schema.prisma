@@ -835,8 +835,8 @@ model Cancellation {
   vendorId String
   vendor   Vendor @relation(fields: [vendorId], references: [id])
 
-  reason       String?
-  cancelledAt  DateTime @default(now())
+  reason      String?
+  cancelledAt DateTime @default(now())
   // Pure audit row: who/when/why. The old refundIssued/refundAmount columns (drifted on
   // ~80% of rows) are out of the model (expand step, readiness 1.3) but STILL IN THE
   // DATABASE: refundIssued has a default and refundAmount is nullable, so inserts work.
@@ -1930,4 +1930,29 @@ model OwedBackHalt {
   resolutionNote String?
 
   @@index([eventId, resolvedAt])
+}
+
+// ============================================================================
+// PAYEE NOTICES (readiness 1.4): one row per payout-setup notice owed to a payee
+// (vendor / runner / organizer). Written by the payee-notice job when a Connect
+// status transition calls for one. Until the email platform ships (Phase 5) the
+// row IS the record: status 'pending_email_platform', and Phase 5 sends the backlog.
+// noticeKey is the send-once anchor — a replayed job or event can never add a second.
+// ============================================================================
+model PayeeNotice {
+  id        String   @id @default(cuid())
+  noticeKey String   @unique
+  /// PAYOUT_SETUP_COMPLETE | PAYOUTS_RESTORED | PAYOUT_NEEDS_ATTENTION
+  kind      String
+  /// vendor | runner | organizer
+  payeeType String
+  payeeId   String
+  /// pending_email_platform | sent | failed
+  status    String   @default("pending_email_platform")
+  /// Plain-English items Stripe needs, for PAYOUT_NEEDS_ATTENTION.
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([payeeType, payeeId, kind])
+  @@index([status])
 }

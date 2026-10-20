@@ -32,6 +32,8 @@ import {
   JOB_ORGANIZER_PAYOUT,
   JOB_REFUND,
   JOB_RECONCILE,
+  JOB_PAYEE_NOTICE,
+  JOB_CONNECT_RECHECK,
   getQueuePrefix,
   JobData,
 } from '../lib/queues'
@@ -841,6 +843,19 @@ export function startOrderWorker() {
         case JOB_RECONCILE:
           await handleReconcile(job)
           break
+        case JOB_PAYEE_NOTICE: {
+          // Readiness 1.4: records the payout-setup notice (Phase 5 sends it). Idempotent on noticeKey.
+          const { handlePayeeNotice } = await import('../lib/connect-status')
+          await handlePayeeNotice(job.data as import('../lib/connect-status').PayeeJobData)
+          break
+        }
+        case JOB_CONNECT_RECHECK: {
+          // Readiness 1.4: ~10 min after a payout gate closed — still restricted → needs-attention notice.
+          const { handleConnectRecheck } = await import('../lib/connect-status')
+          const { getConnectStatus } = await import('../lib/stripe-connect')
+          await handleConnectRecheck(job.data as import('../lib/connect-status').PayeeJobData, { getStatus: getConnectStatus })
+          break
+        }
         default:
           console.warn(`[Worker] Unknown job: ${job.name}`)
       }
@@ -981,6 +996,7 @@ export function startOrderWorker() {
     JOB_HIDE_VENDOR, JOB_INCIDENT_REFUND, JOB_ESCALATE_DISPUTE,
     JOB_POST_EVENT_REPORT, JOB_BULK_REFUND,
     JOB_VENDOR_PAYOUT, JOB_RUNNER_PAYOUT, JOB_ORGANIZER_PAYOUT, JOB_REFUND, JOB_RECONCILE,
+    JOB_PAYEE_NOTICE, JOB_CONNECT_RECHECK,
   ].join(', ')}`)
 
   // SHUTDOWN ORDER (SIGTERM → workers/index.ts → close()): stop the sweep FIRST — clear the timer,

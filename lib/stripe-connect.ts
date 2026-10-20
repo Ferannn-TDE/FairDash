@@ -105,6 +105,9 @@ export interface ConnectStatus {
   onboardingComplete: boolean
   /** Raw requirements summary from Stripe, for surfacing outstanding items in the UI. */
   requirements: unknown
+  /** Requirements Stripe is waiting on the PAYEE for (awaiting_action_from = 'user'). An
+   *  account with none of these that still can't receive transfers is being verified. */
+  dueItems: { description: string; deadline: string }[]
 }
 
 /**
@@ -128,10 +131,15 @@ export async function getConnectStatus(accountId: string): Promise<ConnectStatus
   const reqStatus = account.requirements?.summary?.minimum_deadline?.status
   const onboardingComplete = reqStatus !== 'currently_due' && reqStatus !== 'past_due'
 
+  const dueItems = (account.requirements?.entries ?? [])
+    .filter(e => e.awaiting_action_from === 'user')
+    .map(e => ({ description: e.description, deadline: e.minimum_deadline?.status ?? 'currently_due' }))
+
   return {
     readyToReceivePayments,
     onboardingComplete,
     requirements: account.requirements?.summary ?? null,
+    dueItems,
   }
 }
 

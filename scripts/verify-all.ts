@@ -30,6 +30,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'status-write-guard',   file: 'scripts/status-write-guard.ts' },
   { group: 'boundary',    name: 'test-isolation',        file: 'scripts/test-isolation-guard.ts' },
   { group: 'boundary',    name: 'prod-db-guard',         file: 'scripts/prod-db-guard-test.ts' },
+  { group: 'boundary',    name: 'prod-clerk-guard',      file: 'scripts/prod-clerk-guard-test.ts' },
   { group: 'boundary',    name: 'protected-membership',  file: 'scripts/protected-events-membership-guard.ts' },
   // Previously UNREGISTERED and silently red — an unregistered script is one nobody runs,
   // which is exactly how both drifted onto ambient production data without anyone noticing.
@@ -105,6 +106,8 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'order-view',             file: 'scripts/order-view-guard.ts' },
   { group: 'correctness', name: 'order-itemization',      file: 'scripts/order-itemization-guard.ts' },
   { group: 'correctness', name: 'fair-card',              file: 'scripts/fair-card-guard.ts' },
+  { group: 'correctness', name: 'connect-card',           file: 'scripts/connect-card-state-test.ts' },
+  { group: 'correctness', name: 'connect-status',         file: 'scripts/connect-status-test.ts' },
   { group: 'correctness', name: 'date-round-trip',        file: 'scripts/date-round-trip-guard.ts' },
   { group: 'correctness', name: 'date-fns-containment',   file: 'scripts/date-fns-containment-guard.ts' },
   { group: 'correctness', name: 'date-bounds',            file: 'scripts/date-bounds-guard.ts' },

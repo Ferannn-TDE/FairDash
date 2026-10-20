@@ -110,6 +110,12 @@ export const JOB_REFUND = 'process-refund'
 /** Recurring backstop sweep → reconciles Stripe (money) ↔ DB (state), self-heals leaks */
 export const JOB_RECONCILE = 'reconcile-sweep'
 
+/** Records a payout-setup notice for a payee (lib/connect-status.ts). Phase 5 sends it. */
+export const JOB_PAYEE_NOTICE = 'payee-notice'
+
+/** ~10 min after a payee's payout gate closed: still restricted → needs-attention notice. */
+export const JOB_CONNECT_RECHECK = 'connect-recheck'
+
 // ─── Job payload ──────────────────────────────────────────────────────────────
 // Unified interface — all jobs share the same queue so all payloads must be
 // compatible with the Worker<JobData> generic. Fields are optional when not

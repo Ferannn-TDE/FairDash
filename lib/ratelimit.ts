@@ -7,6 +7,7 @@ export const RATE_LIMITS = {
   vendorStatus: { requests: 30,  window: '1 m' },
   orderCreate:  { requests: 10,  window: '1 m' },
   deliveryCheck: { requests: 10, window: '1 m' }, // each call spends a paid geocode
+  connectStatusFresh: { requests: 30, window: '1 m' }, // ?fresh=1 payout-status reads go straight to Stripe
   login:        { requests: 5,   window: '1 m' },
   refund:       { requests: 5,   window: '1 m' },
   publicRoutes: { requests: 60,  window: '1 m' },

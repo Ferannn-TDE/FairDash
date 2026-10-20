@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import StripeConnectCard from '../../../_components/StripeConnectCard'
 import toast from 'react-hot-toast'
 import { toastError } from '@/lib/toast-error'
 import { useClerk } from '@clerk/clerk-react'
@@ -10,7 +11,6 @@ import {
   ClockIcon,
   DocumentTextIcon,
   CheckCircleIcon,
-  ExclamationCircleIcon,
   ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
@@ -147,56 +147,6 @@ export default function VendorSettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingDocKey = useRef<DocKey | null>(null)
 
-  // ── Stripe ───────────────────────────────────────────────────────────────
-  const [stripeState,  setStripeState]  = useState<'loading' | 'active' | 'incomplete' | 'not_connected'>('loading')
-  const [stripeBusy,   setStripeBusy]   = useState(false)
-
-  // Maps the live V2 status response to our UI state machine.
-  const applyStripeStatus = (data: { connected: boolean; readyToReceivePayments: boolean }) => {
-    if (!data.connected) setStripeState('not_connected')
-    else if (data.readyToReceivePayments) setStripeState('active')
-    else setStripeState('incomplete')
-  }
-
-  const loadStripeStatus = useCallback(async () => {
-    if (!vendorId) return
-    try {
-      const json = await fetch(`/api/vendors/${vendorId}/stripe/status`).then(r => r.json())
-      if (json.success) applyStripeStatus(json.data)
-    } catch { /* leave prior state */ }
-  }, [vendorId])
-
-  // Starts (or resumes) onboarding: ensure an account exists, then redirect to
-  // the hosted Stripe onboarding link.
-  const startOnboarding = useCallback(async () => {
-    if (!vendorId || stripeBusy) return
-    setStripeBusy(true)
-    try {
-      const connect = await fetch(`/api/vendors/${vendorId}/stripe/connect`, { method: 'POST' })
-        .then(r => r.json())
-      if (!connect.success) { toast.error('Could not start payout setup'); return }
-
-      const link = await fetch(`/api/vendors/${vendorId}/stripe/onboarding-link`, { method: 'POST' })
-        .then(r => r.json())
-      if (!link.success || !link.data?.url) { toast.error('Could not create onboarding link'); return }
-
-      window.location.href = link.data.url
-    } catch {
-      toast.error('Network error — please try again')
-    } finally {
-      setStripeBusy(false)
-    }
-  }, [vendorId, stripeBusy])
-
-  // On return from the hosted flow (?stripe=return|refresh), re-read live status.
-  useEffect(() => {
-    const param = new URLSearchParams(window.location.search).get('stripe')
-    if (param === 'return' || param === 'refresh') {
-      loadStripeStatus()
-      if (param === 'return') toast.success('Returned from Stripe — checking status…')
-    }
-  }, [loadStripeStatus])
-
   // ── Notifications — persisted to Vendor.notificationPrefs via PATCH ───────
   const [notifs, setNotifs] = useState({
     newOrder: true, orderReady: true, dailySummary: false, marketing: false,
@@ -229,16 +179,15 @@ export default function VendorSettingsPage() {
   useEffect(() => {
     if (!vendorId) return
 
-    // Load vendor profile + documents + Stripe status in parallel.
+    // Load vendor profile + documents in parallel (payout status is StripeConnectCard's own read).
     // Profile comes from the MEMBER endpoint /api/vendors/me?fairSlug= (ungated,
     // fair-scoped) — NOT the customer-facing GET /api/vendors/[id], which applies
     // the readiness gate and 404s not-ready vendors, blanking the owner's own form.
     Promise.all([
       fetch(`/api/vendors/me?fairSlug=${encodeURIComponent(fairSlug)}`).then(r => r.json()),
       fetch(`/api/vendors/${vendorId}/documents`).then(r => r.json()),
-      fetch(`/api/vendors/${vendorId}/stripe/status`).then(r => r.json()),
     ])
-      .then(([vendorJson, docsJson, stripeJson]) => {
+      .then(([vendorJson, docsJson]) => {
         if (vendorJson.success) {
           const v = vendorJson.data.vendor
           setForm({ name: v.name ?? '', cuisineType: v.cuisineType ?? '', description: v.description ?? '' })
@@ -252,9 +201,6 @@ export default function VendorSettingsPage() {
         }
         if (docsJson.success) {
           setDocs(docsJson.data)
-        }
-        if (stripeJson.success) {
-          applyStripeStatus(stripeJson.data)
         }
       })
       .catch(() => toast.error('Failed to load settings'))
@@ -579,54 +525,8 @@ export default function VendorSettingsPage() {
 
         {/* Payments */}
         <SectionCard icon={BuildingStorefrontIcon} title="Payments">
-          {stripeState === 'loading' ? (
-            <div className="h-14 bg-white/5 rounded-xl animate-pulse" />
-          ) : stripeState === 'active' ? (
-            <div className="flex items-center gap-3 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
-              <CheckCircleIcon className="w-4 h-4 text-emerald-400 shrink-0" />
-              <div>
-                <p className="text-white font-semibold text-sm">Payouts active — verified</p>
-                <p className="text-text-gray text-xs">Your Stripe account is ready to receive payouts.</p>
-              </div>
-            </div>
-          ) : stripeState === 'incomplete' ? (
-            // Same non-wrapping right-aligned shape as every other action card here.
-            // min-w-0 twice: once on this flex item of the row, and again on the text div
-            // inside it — that inner div is itself a flex item (of the icon+text flex), so
-            // without it the paragraphs hold the old width open and the outer min-w-0 does
-            // nothing. Same both-levels-or-neither rule as the operating-hours row.
-            // NB a braced JSX comment cannot go here: a ternary branch is an expression
-            // position, where the braces parse as an object literal and break the build.
-            <div className="flex items-center justify-between gap-4 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-              <div className="flex items-start gap-3 min-w-0">
-                <ExclamationCircleIcon className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <p className="text-white font-semibold text-sm">Payout setup unfinished</p>
-                  <p className="text-text-gray text-xs">Your account exists but onboarding isn't complete. Payouts are blocked until you finish.</p>
-                </div>
-              </div>
-              <button
-                onClick={startOnboarding}
-                disabled={stripeBusy}
-                className="shrink-0 px-4 py-2.5 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#FF0077]/85 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {stripeBusy ? 'Opening…' : 'Finish payout setup'}
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-white font-semibold text-sm mb-1">Set up payouts</p>
-                <p className="text-text-gray text-xs">Connect a Stripe account to receive payouts from FairSynq.</p>
-              </div>
-              <button
-                onClick={startOnboarding}
-                disabled={stripeBusy}
-                className="shrink-0 px-4 py-2.5 bg-[#FF0077] text-white rounded-xl text-sm font-semibold hover:bg-[#FF0077]/85 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {stripeBusy ? 'Opening…' : 'Set up payouts'}
-              </button>
-            </div>
+          {vendorId && (
+            <StripeConnectCard basePath={`/api/vendors/${vendorId}/stripe`} />
           )}
         </SectionCard>
 
