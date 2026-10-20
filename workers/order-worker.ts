@@ -995,6 +995,9 @@ export function startOrderWorker() {
         const { reconcileAllRoles } = await import('../lib/role-sync')
         const sum = await reconcileAllRoles({ dryRun: false })
         if (sum.usersToUpdate > 0 || sum.errors > 0) console.warn('[Worker] role reconcile', sum)
+        const { recordRoleReconcileStatus } = await import('../lib/health')
+        const at = new Date().toISOString()
+        await recordRoleReconcileStatus({ state: 'on', at, lastRun: { at, clerkUsers: sum.clerkUsers, usersToUpdate: sum.usersToUpdate, missing: sum.missing, updated: sum.updated, errors: sum.errors } })
       } catch (e) {
         console.error('[Worker] role reconcile failed; next run retries:', e)
       } finally {
@@ -1004,8 +1007,11 @@ export function startOrderWorker() {
     setTimeout(() => { void runRoleReconcile() }, 60_000)
     setInterval(() => { void runRoleReconcile() }, roleEveryMs)
     console.warn(`[Worker] role reconcile ON (first run in 60s, then every ${roleEveryMs}ms)`)
+    void import('../lib/health').then(h => h.recordRoleReconcileStatus({ state: 'on', at: new Date().toISOString() }))
   } else {
-    console.warn(`[Worker] role reconcile OFF (${process.env.CLERK_SECRET_KEY ? 'interval 0' : 'no CLERK_SECRET_KEY'})`)
+    const reason = process.env.CLERK_SECRET_KEY ? 'interval 0' : 'no CLERK_SECRET_KEY'
+    console.warn(`[Worker] role reconcile OFF (${reason})`)
+    void import('../lib/health').then(h => h.recordRoleReconcileStatus({ state: 'off', reason, at: new Date().toISOString() }))
   }
 
   // ── THE BOOT SEAM ────────────────────────────────────────────────────────────────────────

@@ -53,6 +53,35 @@ export function resolveWorkerStaleSec(env: Record<string, string | undefined> = 
  */
 const WORKER_COMMIT_KEY = 'fairsynq:heartbeat:reconcile-sweep:commit'
 
+// Role reconcile status (readiness 1.9): written by the worker at boot (on/off) and after each
+// run. Counts only. `clerkUsers` doubles as an instance check — the production Clerk instance
+// and a developer's local app have very different user counts, so a worker holding the wrong
+// CLERK_SECRET_KEY is visible here without exposing the key.
+const ROLE_RECONCILE_KEY = 'fairsynq:heartbeat:role-reconcile'
+export interface RoleReconcileStatus {
+  state: 'on' | 'off'
+  reason?: string
+  at: string
+  lastRun?: { at: string; clerkUsers: number; usersToUpdate: number; missing: Record<string, number>; updated: number; errors: number }
+}
+
+/** Best-effort, like the heartbeat: never breaks the caller. */
+export async function recordRoleReconcileStatus(status: RoleReconcileStatus): Promise<void> {
+  const r = redisClient()
+  if (!r) return
+  try {
+    await r.connect()
+    await r.set(ROLE_RECONCILE_KEY, JSON.stringify(status))
+  }
+  catch { /* best-effort */ }
+  finally { r.disconnect() }
+}
+
+function parseRoleReconcile(raw: string | null | undefined): RoleReconcileStatus | null {
+  if (!raw) return null
+  try { return JSON.parse(raw) as RoleReconcileStatus } catch { return null }
+}
+
 /**
  * Railway injects RAILWAY_GIT_COMMIT_SHA. Same variable `next.config.mjs:11` already falls back
  * to for the web build, so the name is corroborated by existing code rather than assumed here.
@@ -80,6 +109,8 @@ export interface HealthReport {
     ageSec: number | null
     /** The WORKER's SHA — separate deployment, separate fingerprint. null ⇒ not reported yet. */
     commit: string | null
+    /** Role reconcile on/off + last run counts. null ⇒ not reported yet (pre-1.9 worker). */
+    roleReconcile: RoleReconcileStatus | null
   }
 }
 
@@ -90,6 +121,7 @@ export function computeHealth(input: {
   lastSweepAt: string | null
   /** Absent/undefined ⇒ pre-fingerprint worker or unreadable Redis; reported as null. */
   workerCommit?: string | null
+  roleReconcile?: string | null
   nowMs?: number
   /** Defaults to resolveWorkerStaleSec(process.env). */
   staleSec?: number
@@ -105,6 +137,7 @@ export function computeHealth(input: {
     // NOT gated on liveness: a STALE worker's last-known SHA is precisely what you want when
     // diagnosing why it went stale (did the deploy that killed it ever land?).
     commit: input.workerCommit ?? null,
+    roleReconcile: parseRoleReconcile(input.roleReconcile),
   }
   // Degraded if the DB is unreachable, Redis is down, or the worker is stale (money engine silent).
   const degraded =
@@ -152,6 +185,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
   let redis: ServiceCheck = 'not_configured'
   let lastSweepAt: string | null = null
   let workerCommit: string | null = null
+  let roleReconcile: string | null = null
   const r = redisClient()
   if (r) {
     try {
@@ -160,9 +194,10 @@ export async function runHealthChecks(): Promise<HealthReport> {
       redis = 'ok'
       // One round trip. A worker that predates the fingerprint returns null for the second key,
       // which is the honest reading — not an error, and not a guess at the web app's SHA.
-      const [sweep, commit] = await r.mget(HEARTBEAT_KEY, WORKER_COMMIT_KEY)
+      const [sweep, commit, roles] = await r.mget(HEARTBEAT_KEY, WORKER_COMMIT_KEY, ROLE_RECONCILE_KEY)
       lastSweepAt = sweep
       workerCommit = commit
+      roleReconcile = roles
     } catch {
       redis = 'unreachable'
     } finally {
@@ -170,5 +205,5 @@ export async function runHealthChecks(): Promise<HealthReport> {
     }
   }
 
-  return computeHealth({ database, redis, lastSweepAt, workerCommit })
+  return computeHealth({ database, redis, lastSweepAt, workerCommit, roleReconcile })
 }

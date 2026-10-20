@@ -115,7 +115,7 @@ function main() {
     '⛔ the heartbeat value is STILL a bare ISO string — changing its shape would blind old readers mid-deploy')
   assert(healthSrc.indexOf('r.set(HEARTBEAT_KEY') < healthSrc.indexOf('r.set(WORKER_COMMIT_KEY'),
     'liveness is written FIRST — if the fingerprint write fails, liveness still lands')
-  assert(/mget\(HEARTBEAT_KEY, WORKER_COMMIT_KEY\)/.test(healthSrc), 'both keys are read in one round trip')
+  assert(/mget\(HEARTBEAT_KEY, WORKER_COMMIT_KEY, ROLE_RECONCILE_KEY\)/.test(healthSrc), 'all three keys are read in one round trip')
 
   assert(/worker:\s*health\.worker/.test(route), 'the route passes the whole worker block through, so commit reaches the JSON')
 
@@ -152,6 +152,13 @@ function main() {
   }
   assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale',
     'after the override is cleared, 181s is stale again (no leaked state)')
+
+  // Role reconcile status (readiness 1.9): parsed through, garbage → null, absent → null.
+  const rr = { state: 'on', at: agoSec(5), lastRun: { at: agoSec(5), clerkUsers: 22, usersToUpdate: 2, missing: { runner: 2 }, updated: 2, errors: 0 } }
+  const hr = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), roleReconcile: JSON.stringify(rr), nowMs: NOW })
+  assert(hr.worker.roleReconcile?.state === 'on' && hr.worker.roleReconcile?.lastRun?.clerkUsers === 22, 'role reconcile status is reported (state + Clerk user count)')
+  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), roleReconcile: '{not json', nowMs: NOW }).worker.roleReconcile === null, 'unparseable role status → null, never a crash')
+  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), nowMs: NOW }).worker.roleReconcile === null, 'no role status yet → null')
 
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} health-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)
