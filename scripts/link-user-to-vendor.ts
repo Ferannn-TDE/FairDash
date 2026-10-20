@@ -19,6 +19,7 @@ config({ path: '.env.local' })
 import { PrismaClient } from '@prisma/client'
 import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { syncUserRoleMetadata } from '../lib/role-sync'
+import { addVendorMember } from '../lib/payee-membership'
 
 assertNotProductionDatabase('link-user-to-vendor.ts')
 const db = new PrismaClient()
@@ -60,9 +61,7 @@ async function main() {
   if (existing) {
     console.log(`\nAlready linked (role=${existing.role}) — no change made.`)
   } else {
-    await db.vendorMember.create({
-      data: { userId: user.id, vendorId: vendor.id, role: ROLE },
-    })
+    await addVendorMember({ userId: user.id, vendorId: vendor.id, role: ROLE }, { db })
     console.log(`\nLinked: ${user.email} → ${vendor.name} as ${ROLE}.`)
     // New VendorMember row → keep Clerk role metadata in sync with the DB.
     const synced = await syncUserRoleMetadata(user.id)

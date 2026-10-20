@@ -1,6 +1,5 @@
 import { db } from './db'
-import { logger } from './logger'
-import { syncUserRoleMetadata } from './role-sync'
+import { addOrgOwner } from './payee-membership'
 
 // ─── Organizer bootstrap — the SINGLE HOME for "provision a self-signup organizer" ──
 //
@@ -65,22 +64,8 @@ export async function ensureOrganizerBootstrap(
     skipDuplicates: true, // ON CONFLICT (id) DO NOTHING
   })
 
-  await db.orgMember.createMany({
-    data: [{ organizerId, userId, role: 'owner' }],
-    skipDuplicates: true, // ON CONFLICT (organizerId, userId) DO NOTHING
-  })
-
-  // Membership-create path → derive roles[] from the DB authority (house rule).
-  // Best-effort: the DB is the authority, so a transient Clerk failure self-heals on
-  // the next login/sync (and onboarding has already written roles[] directly).
-  try {
-    await syncUserRoleMetadata(userId)
-  } catch (err) {
-    logger.error('[organizer-bootstrap] roles[] sync failed (DB is authority; will self-heal)', {
-      userId,
-      err: err instanceof Error ? err.message : String(err),
-    })
-  }
+  // Owner OrgMember (ON CONFLICT DO NOTHING) + the organizer role, via the one create helper.
+  await addOrgOwner(organizerId, userId)
 
   return { organizerId, created: true }
 }

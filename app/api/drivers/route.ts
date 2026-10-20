@@ -7,7 +7,7 @@ import { ApiError } from '@/lib/api-error'
 import { getOptionalUserId } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import { validateApplication } from '@/lib/runner-application-validation'
-import { syncUserRoleMetadata } from '@/lib/role-sync'
+import { createRunnerRecord } from '@/lib/payee-membership'
 
 // GET  /api/drivers  — list driver applications (admin only, stub)
 // POST /api/drivers  — submit driver application (public + auth optional)
@@ -109,44 +109,27 @@ export async function POST(req: NextRequest) {
         })
         if (!existing) {
           try {
-            await db.runner.create({
-              data: {
-                userId: applicant.id,
-                eventId: event.id,
-                approvalStatus: 'PENDING',
-                status: 'OFFLINE',
-                // CARRY-THROUGH: the contact + vehicle details the applicant just typed
-                // are copied onto the Runner, which is the record the Settings page reads
-                // and writes (/api/runners/me). Without this the data lived ONLY on
-                // RunnerApplication and Settings rendered blank on first open — the user
-                // re-typed everything they had just entered. RunnerApplication remains the
-                // immutable consent/audit trail; Runner is the mutable working profile.
-                phone: String(personal.phone).trim() || null,
-                vehicleMake: String(vehicle.make).trim() || null,
-                vehicleModel: String(vehicle.model).trim() || null,
-                vehicleColor: vehicle.color?.trim() || null,
-                vehiclePlate: vehicle.plate?.trim() || null,
-              },
+            await createRunnerRecord({
+              userId: applicant.id,
+              eventId: event.id,
+              approvalStatus: 'PENDING',
+              status: 'OFFLINE',
+              // CARRY-THROUGH: the contact + vehicle details the applicant just typed
+              // are copied onto the Runner, which is the record the Settings page reads
+              // and writes (/api/runners/me). Without this the data lived ONLY on
+              // RunnerApplication and Settings rendered blank on first open — the user
+              // re-typed everything they had just entered. RunnerApplication remains the
+              // immutable consent/audit trail; Runner is the mutable working profile.
+              phone: String(personal.phone).trim() || null,
+              vehicleMake: String(vehicle.make).trim() || null,
+              vehicleModel: String(vehicle.model).trim() || null,
+              vehicleColor: vehicle.color?.trim() || null,
+              vehiclePlate: vehicle.plate?.trim() || null,
             })
             runnerMinted = true
-
-            // Membership-create path → derive roles[] from the DB authority (house rule,
-            // lib/role-sync.ts). This site was the ONLY one of the three that never called it:
-            // vendors (app/api/vendors/route.ts) and organizers (lib/organizer-bootstrap.ts)
-            // both did. So a runner had genuine portal access with no 'runner' in roles[], and
-            // the navbar's Runner Dashboard link never appeared — the mirror image of the
-            // vendor bug, a ROW WITH NO METADATA rather than metadata with no row. Confirmed
-            // live: odedairoferan@gmail.com holds a Runner row and roles[] ["organizer"].
-            // Best-effort, matching the other two: the DB is the authority, so a transient
-            // Clerk failure self-heals on the next sync and must never fail the application.
-            try {
-              await syncUserRoleMetadata(applicant.id)
-            } catch (syncErr) {
-              logger.error('[Drivers] roles[] sync failed (DB is authority; will self-heal)', {
-                userId: applicant.id,
-                err: syncErr instanceof Error ? syncErr.message : String(syncErr),
-              })
-            }
+            // The role is added inside createRunnerRecord (lib/payee-membership): this site was
+            // once the only create path that never synced, which left a production runner with
+            // no runner role. Best-effort there; the worker's role reconcile heals any miss.
           } catch (mintErr) {
             // Lost a race to a concurrent submit (userId @unique violation) — the row
             // already exists, so leave it as-is. Any other error is unexpected: log,

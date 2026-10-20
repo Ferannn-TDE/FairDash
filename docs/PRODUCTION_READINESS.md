@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 33/50 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 38/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/25 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -17,7 +17,7 @@
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
 | R. Cutover rehearsal | Jan 18 – Jan 24 | 0/4 |
 | 8. Runner portal + onboarding | Jan 25 – Jan 31 | 0/9 |
-| 9. Live cutover | Feb 1 – Feb 5 | 0/18 |
+| 9. Live cutover | Feb 1 – Feb 5 | 0/19 |
 | Buffer | Feb 6 – Feb 12 | — |
 
 ## Capacity
@@ -152,12 +152,12 @@ Clerk `roles[]` opens the portal doors and the payee rows (OrgMember, VendorMemb
 | DB user, no Clerk user | 1 | `softDeleteClerkUser` tombstone (user had orders; `purged…` clerkId, `.invalid` email) | No: by design; the check should classify it as expected |
 | Clerk user, no DB row | 1 | Signed up 2026-02-24, before the Clerk webhook (2026-03-22) and `/onboarding` (2026-04-18); never returned | Mostly closed. Gap: the webhook silently skips a user with no primary email |
 
-- [ ] Role reconcile: one function that adds every missing payee role from the rows (never removes), run on sign-in and by a worker sweep, so a failed best-effort sync or an out-of-band insert converges.
-- [ ] Explicit revoke, separate from the sync: removes a payee role only when no row backs it; never touches admin-family roles. Used once for the 2 stale claims, with your approval per user.
-- [ ] Every script that creates an OrgMember/VendorMember/Runner (seeds included) goes through the same create-and-sync helper; a gate scan fails on a bare create outside tests.
-- [ ] Clerk webhook logs a warning (not a silent skip) when a user has no primary email; such a user still gets a DB row on first authenticated request.
-- [ ] `role-consistency-check` classifies purge tombstones as expected and exits non-zero on anything else; it runs after the 9.3 seed as a cutover gate.
-- [ ] Tests (test DB + a fake Clerk client): each kind above is created, then shown converged by the reconcile or the revoke, with a positive control that the check sees the mismatch first.
+- [x] Role reconcile: one function that adds every missing payee role from the rows (never removes), run on sign-in and by a worker sweep, so a failed best-effort sync or an out-of-band insert converges. *(`lib/role-sync` `reconcileAllRoles`; Clerk webhook `session.created`; worker in-process timer, hourly, OFF without `CLERK_SECRET_KEY`. Sealed production dry run 2026-10-20: 22 Clerk users, first run adds `runner` to 2 users, nothing else; positive control passed.)*
+- Explicit revoke: moved below the line (2026-10-20). The 2 stale claims stay until then.
+- [x] Every script that creates an OrgMember/VendorMember/Runner (seeds included) goes through the same create-and-sync helper; a gate scan fails on a bare create outside tests. *(`lib/payee-membership.ts`; 7 sites moved; scan covers nested, multi-line and raw SQL.)*
+- [x] Clerk webhook logs a warning (not a silent skip) when a user has no primary email; such a user still gets a DB row on first authenticated request. *(Row is created by the webhook itself: first email, else `<clerkId>@pending.invalid`, the same fallback checkout uses.)*
+- [x] `role-consistency-check` classifies purge tombstones as expected and exits non-zero on anything else; it runs after the 9.3 seed as a cutover gate.
+- [x] Tests (test DB + a fake Clerk client): each kind above is created, then shown converged by the reconcile, with a positive control that the check sees the mismatch first. *(`scripts/role-reconcile-test.ts`, 38 checks, 12/12 mutations killed.)*
 
 **Done when:** every test above passes in the gate, the descriptor is confirmed on a test charge, and the three payee GIFs are recorded. Worker-dependent flows (refunds, emails from the webhook) are verified on the local Docker stack.
 
@@ -384,6 +384,7 @@ Today's production becomes **staging** (test keys, test Clerk, all history kept)
 - [ ] Contract step: migration dropping `Cancellation.refundIssued` and `refundAmount` (run on staging too).
 - [ ] Worker-stop alert test repeated on new production.
 - [ ] `prisma migrate deploy` on the empty production database. Seed only real data (admin account, real organizers and fairs entered fresh).
+- [ ] Seed creates organizers, vendors and runners only through `lib/payee-membership` (the gate enforces it); then `scripts/role-consistency-check.ts` exits 0 against the new database and Clerk instance.
 - [ ] Health check green: deploy SHA, worker heartbeat, Redis.
 
 ### 9.4 Stranger walkthrough
@@ -416,6 +417,7 @@ The codebase has no customer-facing personal name. Every leak is in an external 
 
 ## Below the line (after launch, unordered)
 
+- Explicit role revoke (1.9 item 2): remove a payee role only when no row backs it, never admin roles; then clear the 2 stale signup-time claims with approval per user
 - Admin portal and remaining organizer pages migrated to the design system
 - Page transitions and list animations
 - Light mode

@@ -152,24 +152,37 @@ function main() {
   const vendorRoute = code(readFileSync('app/api/vendors/route.ts', 'utf8'))
   const driverRoute = code(readFileSync('app/api/drivers/route.ts', 'utf8'))
   assert(/assertFairAcceptsJoins\(/.test(vendorRoute),
-    'app/api/vendors (vendor signup) gates before db.vendor.create')
+    'app/api/vendors (vendor signup) gates before createVendorWithOwner')
   assert(/fairAcceptsJoins\(/.test(driverRoute),
-    'app/api/drivers (runner minting) gates before db.runner.create')
+    'app/api/drivers (runner minting) gates before createRunnerRecord')
   // Ordering matters: a gate AFTER the create protects nothing.
   //
   // ⚠️ `indexOf` returns -1 when ABSENT, and -1 < anything is true — so a naive
   // `indexOf(gate) < indexOf(create)` PASSES when the gate has been deleted entirely, which is the
   // one case it exists to catch. Caught by the negative control, not by reading. Require presence
   // first, then compare.
+  //
+  // ⚠️ AND IT MUST BE IN THE SAME HANDLER. d026119 put the vendor gate in GET (the public vendor
+  // list, which shares the event-lookup line) while POST — signup — stayed ungated; a whole-file
+  // indexOf compare passed because GET sits above POST. So the probe reads only the body of the
+  // handler that creates: from its `export async function` to the next one.
+  function handler(src: string, name: string): string {
+    const start = src.indexOf(`export async function ${name}(`)
+    if (start < 0) return ''
+    const next = src.indexOf('export async function', start + 1)
+    return src.slice(start, next < 0 ? undefined : next)
+  }
   function gatedBefore(src: string, gate: string, create: string): boolean {
     const g = src.indexOf(gate)
     const c = src.indexOf(create)
     return g >= 0 && c >= 0 && g < c
   }
-  assert(gatedBefore(vendorRoute, 'assertFairAcceptsJoins(', 'db.vendor.create'),
-    'the vendor gate is PRESENT and runs BEFORE the create')
-  assert(gatedBefore(driverRoute, 'fairAcceptsJoins(', 'db.runner.create'),
-    'the runner gate is PRESENT and runs BEFORE the create')
+  assert(gatedBefore(handler(vendorRoute, 'POST'), 'assertFairAcceptsJoins(', 'createVendorWithOwner('),
+    'the vendor gate is PRESENT in POST and runs BEFORE the create')
+  assert(gatedBefore(handler(driverRoute, 'POST'), 'fairAcceptsJoins(', 'createRunnerRecord('),
+    'the runner gate is PRESENT in POST and runs BEFORE the create')
+  assert(!gatedBefore(handler('export async function GET() { assertFairAcceptsJoins(s) }\nexport async function POST() { createVendorWithOwner({}) }', 'POST'), 'assertFairAcceptsJoins(', 'createVendorWithOwner('),
+    'positive control: a gate in ANOTHER handler does not count (the d026119 shape)')
   // Positive control on the ordering probe itself: it must reject BOTH failure shapes.
   assert(!gatedBefore('db.vendor.create({})', 'assertFairAcceptsJoins(', 'db.vendor.create'),
     'positive control: the ordering probe FAILS when the gate is absent (the -1 trap)')

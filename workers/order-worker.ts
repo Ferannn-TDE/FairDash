@@ -979,6 +979,35 @@ export function startOrderWorker() {
     })
   }
 
+  // ── Role reconcile (readiness 1.9) ─────────────────────────────────────────────────────
+  // Adds any Clerk payee role whose row exists but whose role is missing (lib/role-sync
+  // reconcileAllRoles — union only, never removes). On an IN-PROCESS timer, not a BullMQ repeat:
+  // a permanently-pending delayed job pins BullMQ to its 10s poll floor (see the sweep above).
+  // Idempotent, so an overlapping replica is harmless; a run that is still going is skipped.
+  // Off when the worker has no Clerk key — said once at boot so it can't be silently off.
+  const roleEveryMs = Number(process.env.WORKER_ROLE_RECONCILE_INTERVAL_MS ?? 3_600_000)
+  if (roleEveryMs > 0 && process.env.CLERK_SECRET_KEY) {
+    let roleRunning = false
+    const runRoleReconcile = async () => {
+      if (roleRunning) return
+      roleRunning = true
+      try {
+        const { reconcileAllRoles } = await import('../lib/role-sync')
+        const sum = await reconcileAllRoles({ dryRun: false })
+        if (sum.usersToUpdate > 0 || sum.errors > 0) console.warn('[Worker] role reconcile', sum)
+      } catch (e) {
+        console.error('[Worker] role reconcile failed; next run retries:', e)
+      } finally {
+        roleRunning = false
+      }
+    }
+    setTimeout(() => { void runRoleReconcile() }, 60_000)
+    setInterval(() => { void runRoleReconcile() }, roleEveryMs)
+    console.warn(`[Worker] role reconcile ON (first run in 60s, then every ${roleEveryMs}ms)`)
+  } else {
+    console.warn(`[Worker] role reconcile OFF (${process.env.CLERK_SECRET_KEY ? 'interval 0' : 'no CLERK_SECRET_KEY'})`)
+  }
+
   // ── THE BOOT SEAM ────────────────────────────────────────────────────────────────────────
   // console.WARN, not log: Railway runs NODE_ENV=production, where the Next compiler strips
   // console.log/info call sites and logger.info is a hard no-op. Every line above this one is

@@ -1,7 +1,9 @@
 /**
  * ROLE CONSISTENCY CHECK — READ-ONLY. Counts users whose Clerk publicMetadata.roles[]
  * disagrees with their payee rows (OrgMember → organizer, VendorMember → vendor,
- * Runner → runner). Admin-family roles live only in Clerk and are not compared.
+ * Runner → runner). Admin-family roles live only in Clerk and are not compared. Purge
+ * tombstones are expected (lib/role-consistency). Exits 1 on any other disagreement, so it can
+ * gate the cutover seed (PRODUCTION_READINESS 9.3).
  *
  * Sealed: one DB connection in a read-only session (verified before any read), a
  * middleware that refuses every write action, and Clerk list calls only. Prints counts,
@@ -16,9 +18,7 @@ import { PrismaClient } from '@prisma/client'
 import { createClerkClient } from '@clerk/backend'
 import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
-
-const PAYEE_ROLES = ['organizer', 'vendor', 'runner'] as const
-type PayeeRole = (typeof PAYEE_ROLES)[number]
+import { classifyRoleConsistency } from '../lib/role-consistency'
 
 async function main() {
   assertNotProductionDatabase('role-consistency-check.ts')
@@ -42,55 +42,30 @@ async function main() {
       where: { clerkId: { not: '' } },
       select: {
         clerkId: true,
+        email: true,
         orgMembers: { select: { id: true }, take: 1 },
         vendorMembers: { select: { id: true }, take: 1 },
         runner: { select: { id: true } },
       },
     })
-    const dbRoles = new Map<string, Set<PayeeRole>>()
-    for (const u of users) {
-      const r = new Set<PayeeRole>()
-      if (u.orgMembers.length) r.add('organizer')
-      if (u.vendorMembers.length) r.add('vendor')
-      if (u.runner) r.add('runner')
-      dbRoles.set(u.clerkId, r)
-    }
 
-    const clerkRoles = new Map<string, Set<string>>()
+    const clerkUsers: Array<{ id: string; roles: string[] }> = []
     for (let offset = 0; ; offset += 100) {
       const page = await clerk.users.getUserList({ limit: 100, offset })
       for (const cu of page.data) {
-        const roles = Array.isArray(cu.publicMetadata?.roles) ? (cu.publicMetadata.roles as string[]) : []
-        clerkRoles.set(cu.id, new Set(roles))
+        clerkUsers.push({ id: cu.id, roles: Array.isArray(cu.publicMetadata?.roles) ? (cu.publicMetadata.roles as string[]) : [] })
       }
       if (page.data.length < 100) break
     }
 
-    const missing: Record<PayeeRole, number> = { organizer: 0, vendor: 0, runner: 0 }
-    const extra: Record<PayeeRole, number> = { organizer: 0, vendor: 0, runner: 0 }
-    let mismatchedUsers = 0, dbOnly = 0
-    for (const [clerkId, rows] of dbRoles) {
-      const meta = clerkRoles.get(clerkId)
-      if (!meta) { dbOnly++; continue }
-      let bad = false
-      for (const r of PAYEE_ROLES) {
-        if (rows.has(r) && !meta.has(r)) { missing[r]++; bad = true }
-        if (!rows.has(r) && meta.has(r)) { extra[r]++; bad = true }
-      }
-      if (bad) mismatchedUsers++
-    }
-    const clerkOnly = [...clerkRoles.keys()].filter(id => !dbRoles.has(id)).length
-
-    console.log(JSON.stringify({
-      dbUsers: dbRoles.size,
-      clerkUsers: clerkRoles.size,
-      compared: dbRoles.size - dbOnly,
-      mismatchedUsers,
-      roleInRowsButNotInClerk: missing,
-      roleInClerkButNoRow: extra,
-      dbUsersWithNoClerkUser: dbOnly,
-      clerkUsersWithNoDbRow: clerkOnly,
-    }, null, 2))
+    const result = classifyRoleConsistency(
+      users.map(u => ({ clerkId: u.clerkId, email: u.email, organizer: u.orgMembers.length > 0, vendor: u.vendorMembers.length > 0, runner: !!u.runner })),
+      clerkUsers,
+    )
+    console.log(JSON.stringify(result.counts, null, 2))
+    console.log(result.ok ? '✅ consistent (purge tombstones are expected)' : '❌ roles and rows disagree')
+    await db.$disconnect()
+    process.exit(result.ok ? 0 : 1)
   } finally {
     await db.$disconnect()
   }

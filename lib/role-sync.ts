@@ -1,12 +1,19 @@
 import { createClerkClient } from '@clerk/backend'
 import { db } from './db'
+import { logger } from './logger'
+import { PAYEE_ROLES, type PayeeRole } from './role-consistency'
 import { assertNotProductionClerk } from './prod-clerk-guard'
 
 // Use @clerk/backend directly (not @clerk/nextjs/server's clerkClient) so this
 // helper works identically in API routes AND in standalone scripts — the
 // nextjs wrapper can't resolve CLERK_SECRET_KEY outside Next's runtime.
-let _clerk: ReturnType<typeof createClerkClient> | null = null
-function getClerk() {
+type ClerkLike = Pick<ReturnType<typeof createClerkClient>, 'users'>
+let _clerk: ClerkLike | null = null
+let _testClerk: ClerkLike | null = null
+/** Test seam: route every Clerk call here to a fake (null restores the real client). */
+export function __setClerkForTest(fake: ClerkLike | null) { _testClerk = fake }
+function getClerk(): ClerkLike {
+  if (_testClerk) return _testClerk
   if (!_clerk) {
     assertNotProductionClerk('lib/role-sync')
     _clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY })
@@ -94,9 +101,83 @@ export async function syncUserRoleMetadata(
   // it must become an EXPLICIT call — never a side effect of a membership write.
   const roles = Array.from(new Set([...existing, ...dbRoles]))
 
+  // Nothing to add → no Clerk write. This runs on every sign-in and every sweep, so a write
+  // here would be a Clerk round-trip (and a user.updated webhook) for no change.
+  if (roles.length === existing.length) return { clerkId: user.clerkId, roles }
+
   await clerk.users.updateUserMetadata(user.clerkId, {
     publicMetadata: { ...clerkUser.publicMetadata, roles },
   })
 
   return { clerkId: user.clerkId, roles }
+}
+
+// ─── Reconcile (readiness 1.9) ────────────────────────────────────────────────
+//
+// The sync above runs where a row is created, best-effort — and "self-heals on the next sync"
+// was false, because nothing ran a next sync. Production had runner rows with no runner role
+// for months. This is the next sync: every Clerk user is compared with their rows and any
+// MISSING payee role is added (union — never removes; stale claims and admin roles stay).
+// Run by the worker on a timer and by the Clerk webhook on each sign-in.
+
+export interface RoleReconcileSummary {
+  clerkUsers: number
+  usersToUpdate: number
+  missing: Record<PayeeRole, number>
+  updated: number
+  errors: number
+  dryRun: boolean
+}
+
+export async function reconcileAllRoles(opts: { dryRun: boolean }): Promise<RoleReconcileSummary> {
+  const clerk = getClerk()
+  const clerkUsers: Array<{ id: string; publicMetadata: Record<string, unknown> }> = []
+  for (let offset = 0; ; offset += 100) {
+    const page = await clerk.users.getUserList({ limit: 100, offset })
+    clerkUsers.push(...(page.data as Array<{ id: string; publicMetadata: Record<string, unknown> }>))
+    if (page.data.length < 100) break
+  }
+  const rows = await db.user.findMany({
+    where: { clerkId: { in: clerkUsers.map(u => u.id) } },
+    select: {
+      clerkId: true,
+      orgMembers: { select: { id: true }, take: 1 },
+      vendorMembers: { select: { id: true }, take: 1 },
+      runner: { select: { id: true } },
+    },
+  })
+  const byClerk = new Map(rows.map(r => [r.clerkId, r]))
+
+  const summary: RoleReconcileSummary = {
+    clerkUsers: clerkUsers.length, usersToUpdate: 0, missing: { organizer: 0, vendor: 0, runner: 0 },
+    updated: 0, errors: 0, dryRun: opts.dryRun,
+  }
+  for (const cu of clerkUsers) {
+    const row = byClerk.get(cu.id)
+    if (!row) continue
+    const have = new Set(Array.isArray(cu.publicMetadata?.roles) ? (cu.publicMetadata.roles as string[]) : [])
+    const backed: Record<PayeeRole, boolean> = {
+      organizer: row.orgMembers.length > 0, vendor: row.vendorMembers.length > 0, runner: !!row.runner,
+    }
+    const add = PAYEE_ROLES.filter(r => backed[r] && !have.has(r))
+    if (!add.length) continue
+    summary.usersToUpdate++
+    for (const r of add) summary.missing[r]++
+    if (opts.dryRun) continue
+    try {
+      await clerk.users.updateUserMetadata(cu.id, {
+        publicMetadata: { ...cu.publicMetadata, roles: [...have, ...add] },
+      })
+      summary.updated++
+    } catch (err) {
+      summary.errors++
+      logger.error('[role-reconcile] roles[] update failed; the next run retries', {
+        clerkId: cu.id, add, err: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  if (summary.usersToUpdate > 0) {
+    logger.warn(`[role-reconcile] ${opts.dryRun ? 'would add' : 'added'} missing payee roles`, { ...summary })
+  }
+  return summary
 }

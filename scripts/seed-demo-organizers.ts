@@ -3,6 +3,7 @@ import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
 import { PrismaClient } from '@prisma/client'
+import { addOrgOwner } from '../lib/payee-membership'
 import { assertNotProductionDatabase } from '../lib/prod-db-guard'
 import { randomBytes } from 'node:crypto'
 
@@ -126,7 +127,7 @@ async function main() {
     const org = await prisma.fairOrganizer.create({
       data: { name: o.name, contactEmail: `org-${o.key}${DEMO_MAIL}`, ...o.data },
     })
-    await prisma.orgMember.create({ data: { userId: user.id, organizerId: org.id, role: 'owner' } })
+    await addOrgOwner(org.id, user.id, { db: prisma })
 
     if ((o as any).fair) {
       await prisma.event.create({

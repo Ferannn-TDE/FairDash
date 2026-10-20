@@ -4,8 +4,7 @@ import { success, apiError, paginated } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { uniqueVendorSlug } from '@/lib/vendor-slug'
-import { logger } from '@/lib/logger'
-import { syncUserRoleMetadata } from '@/lib/role-sync'
+import { createVendorWithOwner } from '@/lib/payee-membership'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { SELLABLE } from '@/lib/menu/on-menu'
 
@@ -85,6 +84,10 @@ export async function POST(req: Request) {
     // a fair goes live — so this is archivedAt-gated only, not ACTIVE-gated.
     const event = await db.event.findFirst({ where: { urlSlug: eventSlug, archivedAt: null } })
     if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
+    // ACQUISITION GATE: a DRAFT fair must never gain a Vendor (Vendor CASCADEs on Event delete,
+    // and discarding a draft is a hard delete). d026119 meant to put this here but it landed in
+    // GET, which shares the same lookup line; signup stayed ungated until 2026-10-20.
+    assertFairAcceptsJoins(event.status, event.name)
 
     // Resolve internal user
     const user = await db.user.findUnique({ where: { clerkId } })
@@ -96,8 +99,9 @@ export async function POST(req: Request) {
     // timestamp + IP set server-side (authoritative — not client-supplied).
     const acceptedIp = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? null
 
-    const vendor = await db.vendor.create({
-      data: {
+    // Vendor + owner VendorMember in one write, then the vendor role (lib/payee-membership).
+    const vendor = await createVendorWithOwner(
+      {
         eventId: event.id,
         name,
         slug,
@@ -112,20 +116,9 @@ export async function POST(req: Request) {
         termsVersion:      termsVersion ?? null,
         termsAcceptedAt:   new Date(),
         termsAcceptedIp:   acceptedIp,
-        vendorMembers: {
-          create: { userId: user.id, role: 'owner' },
-        },
       },
-    })
-
-    // Derive publicMetadata.roles[] from DB memberships (now includes this new
-    // VendorMember) so the fast gate matches the authority immediately.
-    try {
-      await syncUserRoleMetadata(user.id)
-    } catch (err) {
-      // Non-fatal — vendor record exists; backfill/next sync will reconcile.
-      logger.error('[Vendors] Failed to sync Clerk role metadata', { clerkId, error: String(err) })
-    }
+      { userId: user.id },
+    )
 
     return success(vendor, 201)
   } catch (err) {

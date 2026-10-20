@@ -34,6 +34,7 @@ async function main() {
   const { ensureDbUser } = await import('../lib/ensure-db-user')
   const { ensureOrganizerBootstrap } = await import('../lib/organizer-bootstrap')
   const { syncUserRoleMetadata } = await import('../lib/role-sync')
+  const { createVendorWithOwner, createRunnerRecord } = await import('../lib/payee-membership')
   try {
     const { user, outcome } = await ensureDbUser(clerkId, { email })
     console.log(`user ${user.id} (${outcome})`)
@@ -55,17 +56,17 @@ async function main() {
 
     let vendor = await db.vendor.findFirst({ where: { eventId: event.id, slug: `${SLUG}-booth` } })
     if (!vendor) {
-      vendor = await db.vendor.create({ data: {
-        eventId: event.id, name: 'Walkthrough Booth', slug: `${SLUG}-booth`, cuisineType: 'Demo', status: 'ACTIVE',
-        vendorMembers: { create: { userId: user.id, role: 'owner', approvalStatus: 'APPROVED', approvedAt: new Date() } },
-      } })
+      vendor = await createVendorWithOwner(
+        { eventId: event.id, name: 'Walkthrough Booth', slug: `${SLUG}-booth`, cuisineType: 'Demo', status: 'ACTIVE' },
+        { userId: user.id, approvalStatus: 'APPROVED', approvedAt: new Date() },
+      )
     }
     await db.vendor.update({ where: { id: vendor.id }, data: CLEARED })
 
     const runner = await db.runner.findUnique({ where: { userId: user.id } })
     if (runner && runner.eventId !== event.id) throw new Error(`user already has a runner on another fair (${runner.eventId}); not moving it`)
     if (!runner) {
-      await db.runner.create({ data: { userId: user.id, eventId: event.id, approvalStatus: 'APPROVED', approvedAt: new Date(), status: 'OFFLINE' } })
+      await createRunnerRecord({ userId: user.id, eventId: event.id, approvalStatus: 'APPROVED', approvedAt: new Date(), status: 'OFFLINE' })
     }
     await db.runner.update({ where: { userId: user.id }, data: CLEARED })
 

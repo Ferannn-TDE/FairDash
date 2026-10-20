@@ -4,6 +4,7 @@ config({ path: '.env.local' })
 import { guardedPrisma } from '../lib/prod-write-guard'
 const db = guardedPrisma()
 import { syncUserRoleMetadata } from '../lib/role-sync'
+import { createRunnerRecord } from '../lib/payee-membership'
 
 // Assign a user as a Runner for an event. There is no production runner-creation
 // endpoint yet (app/api/drivers only acknowledges applications; "Runner records
@@ -26,7 +27,7 @@ async function main() {
   if (existing) {
     console.log(`Runner row already exists for ${user.email} (eventId=${existing.eventId}) — no insert.`)
   } else {
-    await db.runner.create({ data: { userId: user.id, eventId: event.id, status: 'OFFLINE' } })
+    await createRunnerRecord({ userId: user.id, eventId: event.id, status: 'OFFLINE' }, { db })
     console.log(`Created Runner: ${user.email} → ${event.name} (status=OFFLINE).`)
   }
 
