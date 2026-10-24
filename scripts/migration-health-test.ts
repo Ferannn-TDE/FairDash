@@ -15,7 +15,7 @@
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/migration-health-test.ts
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -122,6 +122,11 @@ async function run(folder: string[], latest: string) {
   const cfg = (await import('../next.config.mjs')).default as { env: Record<string, string> }
   const baked = bakedMigrations(cfg.env)
   assert(baked.join() === folder.join(), `next.config.mjs bakes exactly the folder (${baked.length} vs ${folder.length})`)
+  // Next replaces only the literal expression; any other read finds nothing in the deployed
+  // bundle (health went 503 'unknown' on www the first time). Comments stripped so prose can't satisfy it.
+  const src = readFileSync('lib/migration-status.ts', 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')
+  assert(/=\s*\{\s*BUILD_MIGRATIONS:\s*process\.env\.BUILD_MIGRATIONS\s*\}/.test(src),
+    'the runtime read is the literal process.env.BUILD_MIGRATIONS (the only form Next inlines)')
 
   console.log('\n[6] the drift check — exit code from the comparison')
   // Inherits the environment: with-test-db.sh points every database variable at the test DB.

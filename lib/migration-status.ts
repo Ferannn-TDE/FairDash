@@ -21,8 +21,13 @@ export interface MigrationState {
   pending: string[]
 }
 
-/** The folder names baked into this build. Empty ⇒ not baked (unknown, not "nothing expected"). */
-export function bakedMigrations(env: Record<string, string | undefined> = process.env): string[] {
+/**
+ * The folder names baked into this build. Empty ⇒ not baked (unknown, not "nothing expected").
+ * The default MUST read `process.env.BUILD_MIGRATIONS` literally: Next inlines a next.config
+ * `env` value only where that exact expression appears, and the variable does not exist at
+ * runtime. Reading it through `process.env` as an object found nothing on Vercel (2026-10-24).
+ */
+export function bakedMigrations(env: Record<string, string | undefined> = { BUILD_MIGRATIONS: process.env.BUILD_MIGRATIONS }): string[] {
   return (env.BUILD_MIGRATIONS ?? '').split(',').map(s => s.trim()).filter(Boolean)
 }
 
