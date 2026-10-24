@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 5/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 44/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 45/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -144,8 +144,8 @@ Root cause: `StripeConnectCard` maps "onboarding complete but transfers not acti
 ### 1.8 Code can't deploy ahead of its migration
 Migrations are applied by hand; Prisma reads every column, so code that ships before its migration breaks every read of that table.
 
-- [ ] `/api/health` reports pending Prisma migrations against the live database (names + count), and is non-200 when any are pending.
-- [ ] A deploy-time or gate check fails when the build's migrations folder has entries the target database hasn't applied; the uptime monitor (2.3) alerts on it.
+- [x] `/api/health` reports pending Prisma migrations against the live database, and is non-200 when any are pending. *(2026-10-24: public `checks.migrations` is ok/fail only (no counts, same rule as the rest of the public body); names and count are on `/api/admin/health`. The build bakes the folder names (`next.config.mjs`, `BUILD_MIGRATIONS`); `lib/migration-status.ts` compares them with `_prisma_migrations`. A database ahead of the build is fine; unreadable is `unknown` and non-200. `scripts/migration-health-test.ts`, 19 checks, 10/10 mutations killed.)*
+- [ ] A deploy-time or gate check fails when the build's migrations folder has entries the target database hasn't applied; the uptime monitor (2.3) alerts on it. *(2026-10-24, partly: `scripts/migration-drift-check.ts` exits 1 on pending, is in the gate, and read-only against production finds all 58 applied. It runs by hand before a push (`CONFIRM_PROD_DB=<ref> ./scripts/with-prod-db.sh npx tsx scripts/migration-drift-check.ts`). Open: run it automatically at deploy time, and the 2.3 alert.)*
 
 ### 1.6 Card statement descriptor
 Charges are created on the platform account (separate charges & transfers, no `on_behalf_of`), so the FairSynq prefix appears.

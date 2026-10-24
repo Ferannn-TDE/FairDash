@@ -22,6 +22,9 @@ export async function GET() {
         // status: on/off, plus the last run's Clerk user count, which shows the worker holds the
         // right Clerk instance's key without exposing it.
         worker: health.worker,
+        // Migrations this build expects that the database hasn't applied: names and count here,
+        // ok/fail only on the public endpoint.
+        migrations: { status: health.migrations.status, pendingCount: health.migrations.pending.length, pending: health.migrations.pending },
       },
       // EFFECTIVE feature flags, per environment. Surfaced because a customer-facing filter
       // (vendor readiness) was set true locally and unset in prod and nothing made the drift

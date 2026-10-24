@@ -124,6 +124,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'typecheck',              file: 'scripts/typecheck-gate.ts' },
   { group: 'correctness', name: 'readiness-progress',     file: 'scripts/readiness-progress.ts' },
   { group: 'correctness', name: 'health-guard',           file: 'scripts/test-health-guard.ts' },
+  { group: 'correctness', name: 'migration-health',       file: 'scripts/migration-health-test.ts' },
   { group: 'correctness', name: 'worker-throttle',        file: 'scripts/worker-throttle-guard.ts' },
   { group: 'correctness', name: 'escalation-guard',       file: 'scripts/test-escalation-guard.ts' },
   { group: 'money',       name: 'runner-earnings',        file: 'scripts/runner-earnings-guard.ts' },

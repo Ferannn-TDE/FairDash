@@ -9,12 +9,15 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { computeHealth, resolveWorkerStaleSec, DEFAULT_WORKER_STALE_SEC, publicHealthBody } from '../lib/health'
+import type { MigrationState } from '../lib/migration-status'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
 
 const NOW = new Date('2026-07-21T12:00:00Z').getTime()
 const agoSec = (s: number) => new Date(NOW - s * 1000).toISOString()
+// Every case below is about another component; migrations get their own section, [13].
+const MIG_OK: MigrationState = { status: 'ok', pending: [] }
 
 function main() {
   // The default-threshold sections below must not inherit an ambient override.
@@ -22,42 +25,42 @@ function main() {
 
   // ── [1] all healthy + a fresh sweep ─────────────────────────────────────────
   console.log('[1] everything up + a fresh heartbeat → ok')
-  const h1 = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(30), nowMs: NOW })
+  const h1 = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(30), nowMs: NOW })
   assert(h1.status === 'ok', 'status ok')
   assert(h1.worker.status === 'ok', 'worker ok')
   assert(h1.worker.ageSec === 30, 'worker age computed (30s)')
 
   // ── [2] DB down → degraded ──────────────────────────────────────────────────
   console.log('\n[2] database error → degraded')
-  const h2 = computeHealth({ database: 'error', redis: 'ok', lastSweepAt: agoSec(10), nowMs: NOW })
+  const h2 = computeHealth({ migrations: MIG_OK, database: 'error', redis: 'ok', lastSweepAt: agoSec(10), nowMs: NOW })
   assert(h2.status === 'degraded', 'degraded on DB error')
 
   // ── [3] Redis unreachable → degraded ────────────────────────────────────────
   console.log('\n[3] redis unreachable → degraded')
-  const h3 = computeHealth({ database: 'ok', redis: 'unreachable', lastSweepAt: null, nowMs: NOW })
+  const h3 = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'unreachable', lastSweepAt: null, nowMs: NOW })
   assert(h3.status === 'degraded', 'degraded on redis unreachable')
 
   // ── [4] THE ONE THAT MATTERS — a stale worker → degraded ────────────────────
   console.log('\n[4] a stale sweep heartbeat → degraded (dead worker no longer looks calm)')
-  const stale = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(600), nowMs: NOW }) // 10m > 180s
+  const stale = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(600), nowMs: NOW }) // 10m > 180s
   assert(stale.worker.status === 'stale', 'worker reads stale at 10m')
   assert(stale.status === 'degraded', 'a live DB + Redis but a dead worker is DEGRADED, not ok')
 
   // ── [5] cold start (no heartbeat yet) → unknown, but not a false alarm ──────
   console.log('\n[5] no heartbeat yet (cold start) → worker unknown, status still ok')
-  const cold = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: null, nowMs: NOW })
+  const cold = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: null, nowMs: NOW })
   assert(cold.worker.status === 'unknown', 'worker unknown when no heartbeat exists')
   assert(cold.worker.ageSec === null && cold.worker.lastSweepAt === null, 'no age/timestamp when unknown')
   assert(cold.status === 'ok', 'unknown does NOT cry wolf on a cold start (only stale degrades)')
 
   // ── [6] staleness boundary — exactly at the threshold is still ok ───────────
   console.log('\n[6] the 180s staleness boundary')
-  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(180), nowMs: NOW }).worker.status === 'ok', 'at 180s → still ok')
-  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale', 'at 181s → stale')
+  assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(180), nowMs: NOW }).worker.status === 'ok', 'at 180s → still ok')
+  assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale', 'at 181s → stale')
 
   // ── [7] a garbage timestamp is treated as unknown, never a crash ────────────
   console.log('\n[7] an unparseable heartbeat is unknown, not a throw')
-  const bad = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: 'not-a-date', nowMs: NOW })
+  const bad = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: 'not-a-date', nowMs: NOW })
   assert(bad.worker.status === 'unknown' && bad.worker.ageSec === null, 'garbage timestamp → unknown')
 
   // ── [8] fingerprint honesty — the commit field can never silently be null ───
@@ -85,19 +88,19 @@ function main() {
   // up that push?" was unanswerable outside Railway's UI, and a green health check with a fresh
   // commit was true in a narrow sense and misleading in a wider one.
   console.log('\n[10] the worker reports its OWN commit — a matching web SHA says nothing about it')
-  const withCommit = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), workerCommit: 'abc1234', nowMs: NOW })
+  const withCommit = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), workerCommit: 'abc1234', nowMs: NOW })
   assert(withCommit.worker.commit === 'abc1234', 'worker.commit surfaces the value the worker itself wrote')
   assert(withCommit.status === 'ok', 'and reporting a commit does not disturb the verdict')
 
   // The honest-unknown case: a worker deployed BEFORE this feature writes no commit key.
-  const preFingerprint = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), nowMs: NOW })
+  const preFingerprint = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), nowMs: NOW })
   assert(preFingerprint.worker.commit === null,
     'a worker that predates the fingerprint reports null — honestly unknown, never guessed')
   assert(preFingerprint.worker.status === 'ok',
     'and is still reported ALIVE — the fingerprint is additive, it cannot break liveness')
 
   // A stale worker's last-known SHA is exactly what you want when diagnosing why it went stale.
-  const staleWithCommit = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(9999), workerCommit: 'dead999', nowMs: NOW })
+  const staleWithCommit = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(9999), workerCommit: 'dead999', nowMs: NOW })
   assert(staleWithCommit.worker.status === 'stale' && staleWithCommit.worker.commit === 'dead999',
     'a STALE worker still reports its commit (did the deploy that killed it ever land?)')
 
@@ -139,15 +142,15 @@ function main() {
   assert(resolveWorkerStaleSec({ HEALTH_WORKER_STALE_SEC: '' }) === 180, 'empty → 180')
   // POSITIVE CONTROL first: with the default, a 300s-old heartbeat IS stale — so the override
   // below is shown to CHANGE the verdict, not to agree with one that was already 'ok'.
-  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(300), nowMs: NOW }).worker.status === 'stale',
+  assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(300), nowMs: NOW }).worker.status === 'stale',
     'control: 300s with the default threshold → stale')
   process.env.HEALTH_WORKER_STALE_SEC = '360'
   try {
     assert(resolveWorkerStaleSec() === 360, 'HEALTH_WORKER_STALE_SEC=360 is read from process.env')
-    assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(300), nowMs: NOW }).worker.status === 'ok',
+    assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(300), nowMs: NOW }).worker.status === 'ok',
       'with 360: 300s → ok (the env var changed the verdict)')
-    assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(360), nowMs: NOW }).worker.status === 'ok', 'with 360: 360s boundary → ok')
-    const s361 = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(361), nowMs: NOW })
+    assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(360), nowMs: NOW }).worker.status === 'ok', 'with 360: 360s boundary → ok')
+    const s361 = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(361), nowMs: NOW })
     assert(s361.worker.status === 'stale' && s361.status === 'degraded', 'with 360: 361s → stale + degraded')
   } finally {
     delete process.env.HEALTH_WORKER_STALE_SEC
@@ -155,7 +158,7 @@ function main() {
   for (const bad of ['abc', '0', '-5', '12.5', 'Infinity']) {
     assert(resolveWorkerStaleSec({ HEALTH_WORKER_STALE_SEC: bad }) === 180, `invalid "${bad}" → 180 (never "never stale")`)
   }
-  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale',
+  assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(181), nowMs: NOW }).worker.status === 'stale',
     'after the override is cleared, 181s is stale again (no leaked state)')
 
   // ── [11] PUBLIC BODY IS MINIMAL (2026-10-20) ──────────────────────────────────────────────
@@ -164,11 +167,12 @@ function main() {
   // the two deploy SHAs; everything else is /api/admin/health.
   console.log('\n[11] the PUBLIC health body: verdict, per-component ok/fail, SHAs — nothing else')
   const rich = computeHealth({
+    migrations: MIG_OK,
     database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), workerCommit: 'abc1234', nowMs: NOW,
     roleReconcile: JSON.stringify({ state: 'on', at: agoSec(5), lastRun: { at: agoSec(5), clerkUsers: 22, usersToUpdate: 2, missing: { runner: 2 }, updated: 2, errors: 0 } }),
   })
   const pub = publicHealthBody(rich, 'def5678')
-  const ALLOWED_KEYS = new Set(['status', 'commit', 'checks', 'database', 'redis', 'worker'])
+  const ALLOWED_KEYS = new Set(['status', 'commit', 'checks', 'database', 'redis', 'worker', 'migrations'])
   const ALLOWED_VALUES = new Set(['ok', 'degraded', 'fail', 'off', 'unknown', 'abc1234', 'def5678'])
   const leaks: string[] = []
   const walk = (v: unknown, path: string) => {
@@ -179,16 +183,16 @@ function main() {
   }
   walk(pub, 'body')
   assert(leaks.length === 0, `public body has only allowed keys and values, no numbers${leaks.length ? ` — leaks: ${leaks.join(', ')}` : ''}`)
-  assert(JSON.stringify(pub) === JSON.stringify({ status: 'ok', commit: 'def5678', checks: { database: 'ok', redis: 'ok', worker: { status: 'ok', commit: 'abc1234' } } }),
+  assert(JSON.stringify(pub) === JSON.stringify({ status: 'ok', commit: 'def5678', checks: { database: 'ok', redis: 'ok', worker: { status: 'ok', commit: 'abc1234' }, migrations: 'ok' } }),
     `public body is exactly the minimal shape (got ${JSON.stringify(pub)})`)
   // Positive control on the leak walker: the full report must trip it.
   const before = leaks.length
   walk(rich, 'rich')
   assert(leaks.length > before, 'positive control: the full internal report DOES trip the leak check (counts, timings)')
-  const failing = publicHealthBody(computeHealth({ database: 'error', redis: 'unreachable', lastSweepAt: agoSec(9999), nowMs: NOW }), 'def5678')
+  const failing = publicHealthBody(computeHealth({ migrations: MIG_OK, database: 'error', redis: 'unreachable', lastSweepAt: agoSec(9999), nowMs: NOW }), 'def5678')
   assert(failing.status === 'degraded' && failing.checks.database === 'fail' && failing.checks.redis === 'fail' && failing.checks.worker.status === 'fail',
     'failures read as "fail" (stale worker included) and the verdict stays degraded')
-  assert(publicHealthBody(computeHealth({ database: 'ok', redis: 'not_configured', lastSweepAt: null, nowMs: NOW }), 'x').checks.redis === 'off',
+  assert(publicHealthBody(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'not_configured', lastSweepAt: null, nowMs: NOW }), 'x').checks.redis === 'off',
     'Redis not configured reads "off", not "fail"')
   assert(/publicHealthBody\(/.test(route) && !/isVendorReadinessEnforced|isPreviewBypassEnabled|health\.worker\b|timestamp|version/.test(route.replace(/\/\/.*$/gm, '')),
     'the public route sends only publicHealthBody — no flags, no worker internals, no timestamp/version')
@@ -200,10 +204,10 @@ function main() {
 
   // Role reconcile status (readiness 1.9): parsed through, garbage → null, absent → null.
   const rr = { state: 'on', at: agoSec(5), lastRun: { at: agoSec(5), clerkUsers: 22, usersToUpdate: 2, missing: { runner: 2 }, updated: 2, errors: 0 } }
-  const hr = computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), roleReconcile: JSON.stringify(rr), nowMs: NOW })
+  const hr = computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), roleReconcile: JSON.stringify(rr), nowMs: NOW })
   assert(hr.worker.roleReconcile?.state === 'on' && hr.worker.roleReconcile?.lastRun?.clerkUsers === 22, 'role reconcile status is reported (state + Clerk user count)')
-  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), roleReconcile: '{not json', nowMs: NOW }).worker.roleReconcile === null, 'unparseable role status → null, never a crash')
-  assert(computeHealth({ database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), nowMs: NOW }).worker.roleReconcile === null, 'no role status yet → null')
+  assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), roleReconcile: '{not json', nowMs: NOW }).worker.roleReconcile === null, 'unparseable role status → null, never a crash')
+  assert(computeHealth({ migrations: MIG_OK, database: 'ok', redis: 'ok', lastSweepAt: agoSec(5), nowMs: NOW }).worker.roleReconcile === null, 'no role status yet → null')
 
   console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} health-guard: ${pass} passed, ${fail} failed`)
   if (fail > 0) process.exit(1)

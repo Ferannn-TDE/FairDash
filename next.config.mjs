@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
 
 // Deploy fingerprint, baked at BUILD time. The health route used to read VERCEL_GIT_COMMIT_SHA
 // at runtime, which went null on a deploy that didn't come through the Git integration — the
@@ -18,10 +19,20 @@ const commitSha =
   })() ??
   'unknown'
 
+// The migrations this build expects, for /api/health (lib/migration-status.ts). Baked because the
+// serverless bundle has no prisma/migrations folder to read at runtime. Folders with a
+// migration.sql only, the same set `prisma migrate` applies.
+const buildMigrations = readdirSync('prisma/migrations', { withFileTypes: true })
+  .filter(d => d.isDirectory() && existsSync(`prisma/migrations/${d.name}/migration.sql`))
+  .map(d => d.name)
+  .sort()
+  .join(',')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
     COMMIT_SHA: commitSha,
+    BUILD_MIGRATIONS: buildMigrations,
   },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'

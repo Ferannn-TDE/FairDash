@@ -1,5 +1,6 @@
 import IORedis from 'ioredis'
 import { db } from './db'
+import { readMigrationState, type MigrationState } from './migration-status'
 
 /**
  * Health checks (rider 3) — turn the /api/health stubs into real measurements, and close the
@@ -112,6 +113,8 @@ export interface HealthReport {
     /** Role reconcile on/off + last run counts. null ⇒ not reported yet (pre-1.9 worker). */
     roleReconcile: RoleReconcileStatus | null
   }
+  /** Migrations this build expects that the database hasn't applied (readiness 1.8). */
+  migrations: MigrationState
 }
 
 /** PURE — the verdict, from raw check results. Testable with no live infra. */
@@ -122,6 +125,8 @@ export function computeHealth(input: {
   /** Absent/undefined ⇒ pre-fingerprint worker or unreadable Redis; reported as null. */
   workerCommit?: string | null
   roleReconcile?: string | null
+  /** Absent ⇒ not checked, reported as 'unknown' (degraded), never as ok. */
+  migrations?: MigrationState
   nowMs?: number
   /** Defaults to resolveWorkerStaleSec(process.env). */
   staleSec?: number
@@ -139,12 +144,15 @@ export function computeHealth(input: {
     commit: input.workerCommit ?? null,
     roleReconcile: parseRoleReconcile(input.roleReconcile),
   }
-  // Degraded if the DB is unreachable, Redis is down, or the worker is stale (money engine silent).
+  const migrations: MigrationState = input.migrations ?? { status: 'unknown', pending: [] }
+  // Degraded if the DB is unreachable, Redis is down, the worker is stale (money engine silent),
+  // or the code is ahead of the database's migrations (or that can't be read).
   const degraded =
     input.database !== 'ok' ||
     input.redis === 'unreachable' || input.redis === 'error' ||
-    worker.status === 'stale'
-  return { status: degraded ? 'degraded' : 'ok', database: input.database, redis: input.redis, worker }
+    worker.status === 'stale' ||
+    migrations.status !== 'ok'
+  return { status: degraded ? 'degraded' : 'ok', database: input.database, redis: input.redis, worker, migrations }
 }
 
 // ─── Public vs admin (2026-10-20) ─────────────────────────────────────────────────────────
@@ -158,6 +166,8 @@ export interface PublicHealth {
     database: 'ok' | 'fail'
     redis: 'ok' | 'fail' | 'off'
     worker: { status: 'ok' | 'fail' | 'unknown'; commit: string }
+    /** ok/fail only: pending names and counts are /api/admin/health. */
+    migrations: 'ok' | 'fail'
   }
 }
 
@@ -173,6 +183,7 @@ export function publicHealthBody(h: HealthReport, webCommit: string): PublicHeal
         status: h.worker.status === 'ok' ? 'ok' : h.worker.status === 'stale' ? 'fail' : 'unknown',
         commit: h.worker.commit ?? 'unknown',
       },
+      migrations: h.migrations.status === 'ok' ? 'ok' : 'fail',
     },
   }
 }
@@ -228,6 +239,7 @@ export async function recordSweepHeartbeat(): Promise<void> {
 /** IO — gather the raw check results (DB + one Redis client for PING and the heartbeat read). */
 export async function runHealthChecks(): Promise<HealthReport> {
   const database: ServiceCheck = await db.$queryRaw`SELECT 1`.then(() => 'ok' as const).catch(() => 'error' as const)
+  const migrations = await readMigrationState(db)
 
   let redis: ServiceCheck = 'not_configured'
   let lastSweepAt: string | null = null
@@ -252,5 +264,5 @@ export async function runHealthChecks(): Promise<HealthReport> {
     }
   }
 
-  return computeHealth({ database, redis, lastSweepAt, workerCommit, roleReconcile })
+  return computeHealth({ database, redis, lastSweepAt, workerCommit, roleReconcile, migrations })
 }
