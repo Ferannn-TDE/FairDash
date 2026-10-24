@@ -2,7 +2,7 @@
  * MIGRATION HEALTH (readiness 1.8) — code can't deploy ahead of its migration unnoticed.
  *
  * /api/health compares the migrations baked into the build with `_prisma_migrations` and is 503
- * when any are pending; scripts/migration-drift-check.ts does the same comparison before a push.
+ * when any are pending; scripts/migration-drift.ts does the same comparison before a push.
  * The test database is built with `prisma db push`, which writes no migration history, so the
  * suite creates `_prisma_migrations` itself with Prisma's own DDL, one finished row per folder
  * (what `migrate deploy` leaves behind), and drops it at the end. Every change after that happens
@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process'
 import { testPrisma } from '../lib/test-db'
 import { bakedMigrations, computeMigrationState, readMigrationState, type MigrationState } from '../lib/migration-status'
 import { computeHealth, publicHealthBody } from '../lib/health'
-import { listMigrationFolders } from './migration-drift-check'
+import { migrationFolders } from './migration-drift'
 
 const prisma = testPrisma()
 
@@ -44,7 +44,7 @@ const HISTORY_DDL = `CREATE TABLE "_prisma_migrations" (
   "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(), "applied_steps_count" INTEGER NOT NULL DEFAULT 0)`
 
 async function main() {
-  const folder = listMigrationFolders()
+  const folder = migrationFolders()
   const latest = folder[folder.length - 1]
 
   const [{ exists }] = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(`SELECT to_regclass('"_prisma_migrations"') IS NOT NULL AS exists`)
@@ -130,7 +130,7 @@ async function run(folder: string[], latest: string) {
 
   console.log('\n[6] the drift check — exit code from the comparison')
   // Inherits the environment: with-test-db.sh points every database variable at the test DB.
-  const run = (...args: string[]) => spawnSync('npx', ['tsx', 'scripts/migration-drift-check.ts', ...args], { encoding: 'utf8' })
+  const run = (...args: string[]) => spawnSync('npx', ['tsx', 'scripts/migration-drift.ts', ...args], { encoding: 'utf8' })
   const real = run()
   assert(real.status === 0, `real folder vs test database → exit 0 (got ${real.status}: ${real.stdout.trim().split('\n').pop()})`)
   const planted = mkdtempSync(join(tmpdir(), 'migr-'))
@@ -142,6 +142,7 @@ async function run(folder: string[], latest: string) {
     const drift = run('--migrations-dir', planted)
     assert(drift.status === 1 && drift.stdout.includes('29991231000000_not_applied_yet') && !drift.stdout.includes('not_a_migration'),
       `planted unapplied folder → exit 1 naming it (got ${drift.status})`)
+    assert(run('--warn', '--migrations-dir', planted).status === 0, '--warn (predev) reports drift but never blocks')
   } finally { rmSync(planted, { recursive: true, force: true }) }
 }
 
