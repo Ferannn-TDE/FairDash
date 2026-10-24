@@ -46,6 +46,7 @@ import {
   assertUploadSize,
   assertSafeImageUrl,
 } from '../lib/upload-limits'
+import { STORAGE_BUCKETS, bucketDrift, type LiveBucket } from '../lib/storage-buckets'
 
 const prisma = testPrisma()
 
@@ -330,6 +331,23 @@ async function main() {
   // ══ [C] CONFIG — the bucket limit, the only enforcement for the direct-upload path ══════
   console.log('\n[C] BUCKET CONFIG — the only size boundary the delivery-proof photo has')
 
+  // Checked against lib/storage-buckets.ts as a whole: size, allowed types and public flag.
+  // POSITIVE CONTROL on the comparator first: a record wrong in each field must be flagged on
+  // each field, or a matching-looking live bucket would prove nothing.
+  const probe = bucketDrift(
+    { name: 'probe', public: false, fileSizeLimit: UPLOAD_MAX_BYTES, allowedMimeTypes: ['image/jpeg', 'image/jpg'] },
+    { public: true, file_size_limit: 10485760, allowed_mime_types: ['image/jpeg', 'application/pdf'] },
+  )
+  assert(
+    probe.length === 3 && probe.some(d => d.includes('missing [image/jpg]') && d.includes('extra [application/pdf]')),
+    `bucket comparator CONTROL: a wrong record is flagged on public, size and types (got ${JSON.stringify(probe)})`,
+  )
+  assert(bucketDrift(STORAGE_BUCKETS[0], null)[0] === 'bucket missing', 'bucket comparator CONTROL: a missing bucket is flagged')
+  assert(
+    STORAGE_BUCKETS.filter(b => b.public).map(b => b.name).join() === 'menu-images',
+    'config: menu-images is the ONLY public bucket (documents and delivery proofs stay private)',
+  )
+
   const SUPA = process.env.SUPABASE_URL
   const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
   // A config guard that SKIPS when it can't look is a config guard that doesn't exist.
@@ -338,15 +356,12 @@ async function main() {
     // menu-images is PUBLIC (menu photos render as plain <img src> on the storefront), but the
     // size boundary is identical: its uploads are presigned too, so the bucket limit is the
     // only enforcement there is. Public-vs-private changes who may read it, not how big it may be.
-    for (const bucket of ['delivery-proofs', 'vendor-documents', 'runner-documents', 'menu-images']) {
-      const res = await fetch(`${SUPA}/storage/v1/bucket/${bucket}`, {
+    for (const want of STORAGE_BUCKETS) {
+      const res = await fetch(`${SUPA}/storage/v1/bucket/${want.name}`, {
         headers: { Authorization: `Bearer ${KEY}`, apikey: KEY },
       })
-      const b = res.ok ? await res.json() as { file_size_limit?: number | null } : null
-      assert(
-        b?.file_size_limit === UPLOAD_MAX_BYTES,
-        `bucket "${bucket}" file_size_limit = ${b?.file_size_limit ?? 'UNSET'} (must be ${UPLOAD_MAX_BYTES})`,
-      )
+      const drift = bucketDrift(want, res.ok ? await res.json() as LiveBucket : null)
+      assert(drift.length === 0, `bucket "${want.name}" matches lib/storage-buckets.ts${drift.length ? `: ${drift.join('; ')}` : ''}`)
     }
   }
 }

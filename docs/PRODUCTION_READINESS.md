@@ -60,7 +60,7 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 - [x] Audit the 42 scripts in `scripts/` that write to the database without importing the guard. Each one either uses `lib/db.ts` or calls the guard directly. *(2026-10-18: all 42 go through `lib/db` or `guardedPrisma`, or are static source scanners that never connect. No raw `pg` clients anywhere; nothing in `tests/` or `app/` builds its own client.)*
 - [x] Add a gate check that fails when any script constructs its own `PrismaClient` without the guard. *(Already existed as `prod-db-guard-test.ts [3]`; tightened so a guard that is only a comment, or is called after the client, fails. Positive-controlled with a planted file.)*
 - [x] Record `72582db` + `scripts/prod-db-guard-test.ts` as the proof of isolation.
-- [ ] **Oct 21:** after the Supabase reset, re-run the bucket settings check on the current project (future staging) and do one upload pass.
+- [ ] **Oct 21:** after the Supabase reset, re-run the bucket settings check on the current project (future staging) and do one upload pass. *(2026-10-24: Storage serves reads; bucket settings now come from `lib/storage-buckets.ts`, applied with `scripts/apply-bucket-config.ts` (adds the allowed-type lists; re-read matches). Upload pass pending: one menu photo on the test fair.)*
 - [x] Clerk guard (`lib/prod-clerk-guard.ts`, `scripts/prod-clerk-guard-test.ts`): a local process refuses the production Clerk instance's keys (today `noble-tahr-47`, the instance www runs on) unless `CONFIRM_PROD_CLERK=<host>`. The proxy serves a 503 locally, and every script that builds a Clerk client is guarded and scanned. *(2026-10-19, after opening localhost `/onboarding` wrote to a real user's Clerk metadata and the webhook carried it into production.)*
 - [x] **You:** create a separate Clerk development application for localhost and put its keys in `.env.local` (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`). Until then the local dev server refuses every request. *(Done 2026-10-19: `ready-zebra-3552`; confirmed 2026-10-24 that the `.env.local` publishable key decodes to that instance.)*
 
@@ -215,7 +215,7 @@ You already have delegate access to the GoDaddy account holding fairsynq.com, so
 
 ### 2.5 Local storage
 - [ ] Supabase CLI local stack (`supabase start`) replaces the `fairsynq-dev-db` Postgres container. CLI version pinned in the repo. Auth, realtime and edge functions turned off in `supabase/config.toml`. Redis stays in `docker-compose.dev.yml`.
-- [ ] One bucket config file (names, public/private, size limits, allowed types) seeds local storage, provisions staging and production, and is what the vendor-document-privacy and upload-cap tests check against.
+- [ ] One bucket config file (names, public/private, size limits, allowed types) seeds local storage, provisions staging and production, and is what the vendor-document-privacy and upload-cap tests check against. *(2026-10-24, partly: `lib/storage-buckets.ts` + `scripts/apply-bucket-config.ts` provision the current project, and the upload-cap guard checks size, types and public against it. Left: seeding local storage, and the vendor-document-privacy test reading it.)*
 - [ ] `.env.local` points at local storage. Uploads work on the local stack.
 
 **Done when:** the worker-stop alert reached your phone, a test email to support@ arrived and a reply from support@ landed in an outside inbox, the Sentry test alert fired, and an upload works locally.
