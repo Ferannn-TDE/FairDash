@@ -6,7 +6,7 @@
 
 | Phase | Window | Done |
 |---|---|---|
-| 0. Safety close-out | Oct 19 – Oct 25 | 4/6 |
+| 0. Safety close-out | Oct 19 – Oct 25 | 5/6 |
 | 1. Money & trust bugs | Oct 26 – Nov 29 | 44/49 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
@@ -62,7 +62,7 @@ The local-off-production work shipped in `72582db` (`lib/prod-db-guard.ts`, Dock
 - [x] Record `72582db` + `scripts/prod-db-guard-test.ts` as the proof of isolation.
 - [ ] **Oct 21:** after the Supabase reset, re-run the bucket settings check on the current project (future staging) and do one upload pass.
 - [x] Clerk guard (`lib/prod-clerk-guard.ts`, `scripts/prod-clerk-guard-test.ts`): a local process refuses the production Clerk instance's keys (today `noble-tahr-47`, the instance www runs on) unless `CONFIRM_PROD_CLERK=<host>`. The proxy serves a 503 locally, and every script that builds a Clerk client is guarded and scanned. *(2026-10-19, after opening localhost `/onboarding` wrote to a real user's Clerk metadata and the webhook carried it into production.)*
-- [ ] **You:** create a separate Clerk development application for localhost and put its keys in `.env.local` (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`). Until then the local dev server refuses every request.
+- [x] **You:** create a separate Clerk development application for localhost and put its keys in `.env.local` (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`). Until then the local dev server refuses every request. *(Done 2026-10-19: `ready-zebra-3552`; confirmed 2026-10-24 that the `.env.local` publishable key decodes to that instance.)*
 
 **Done when:** the gate check fails on an unguarded fixture script and passes on the real tree. Verified locally.
 
