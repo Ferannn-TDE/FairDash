@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 5/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 45/49 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 45/53 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -171,6 +171,16 @@ Clerk `roles[]` opens the portal doors and the payee rows (OrgMember, VendorMemb
 - [x] Clerk webhook logs a warning (not a silent skip) when a user has no primary email; such a user still gets a DB row on first authenticated request. *(Row is created by the webhook itself: first email, else `<clerkId>@pending.invalid`, the same fallback checkout uses.)*
 - [x] `role-consistency-check` classifies purge tombstones as expected and exits non-zero on anything else; it runs after the 9.3 seed as a cutover gate.
 - [x] Tests (test DB + a fake Clerk client): each kind above is created, then shown converged by the reconcile, with a positive control that the check sees the mismatch first. *(`scripts/role-reconcile-test.ts`, 38 checks, 12/12 mutations killed.)*
+
+### 1.10 Delivery address fields (P1)
+Found 2026-10-24 on the www test order (`cmvm0h9om…`): `deliveryStreet` held the whole address ("125 W Main St, Collinsville, IL 62234, USA") and `deliveryUnit` held "125".
+
+- **Street:** `handlePlaceSelect` (`app/fair/[fairSlug]/checkout/page.tsx:357`) copies Google's `formatted_address` into the street field. Build the street from `street_number` + `route` (or `premise` for a campus building with no number), and keep `formatted_address` only when those are absent.
+- **Unit:** the code never writes the unit, so "125" was either typed or put there by browser autofill: the field has no `autoComplete` hint. Add `autoComplete="address-line1"` / `"address-line2"` (and `postal-code`, `address-level2`, `address-level1` on the others), and take Google's `subpremise` when it returns one. *(Confirm with you whether "125" was typed.)*
+- [ ] Street is the street line only; city/state/ZIP never repeat inside it.
+- [ ] Unit is never filled from the street number; `subpremise` used when present.
+- [ ] Test: a captured Places result for 125 W Main St, Cougar Village (no number) and an address with a `subpremise` each produce the right fields; the server geocode of the result is unchanged (still ROOFTOP for 125 W Main St).
+- [ ] No backfill of old orders: display only, and every past order with a full-address street still geocoded correctly.
 
 **Done when:** every test above passes in the gate, the descriptor is confirmed on a test charge, and the three payee GIFs are recorded. Worker-dependent flows (refunds, emails from the webhook) are verified on the local Docker stack.
 
