@@ -1,7 +1,7 @@
 /**
  * MIGRATION-DRIFT GUARD — the dev-database drift warning stays wired and can see drift.
  *
- *   [1] pendingMigrations: the real migrations folder minus an applied list missing the newest
+ *   [1] pending (lib/migration-status, shared with /api/health): the real migrations folder minus an applied list missing the newest
  *       entry → exactly that entry (positive control), and nothing when all are applied.
  *   [2] wiring: `npm run dev` runs the check first (predev, warn-only, never blocks), and
  *       `npm run db:drift` runs it strictly — both against the dev database wrapper.
@@ -10,7 +10,12 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { migrationFolders, pendingMigrations } from './migration-drift'
+import { migrationFolders } from './migration-drift'
+import { computeMigrationState } from '../lib/migration-status'
+
+/** Folders still pending when exactly `applied` finished. */
+const pendingMigrations = (folders: string[], applied: string[]) =>
+  computeMigrationState(folders, applied.map(migration_name => ({ migration_name, finished_at: new Date(), rolled_back_at: null }))).pending
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
