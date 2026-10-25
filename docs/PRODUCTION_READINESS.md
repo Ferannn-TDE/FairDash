@@ -17,7 +17,7 @@
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
 | R. Cutover rehearsal | Jan 18 – Jan 24 | 0/4 |
 | 8. Runner portal + onboarding | Jan 25 – Jan 31 | 0/9 |
-| 9. Live cutover | Feb 1 – Feb 5 | 0/20 |
+| 9. Live cutover | Feb 1 – Feb 5 | 0/21 |
 | Buffer | Feb 6 – Feb 12 | — |
 
 ## Capacity
@@ -145,7 +145,8 @@ Root cause: `StripeConnectCard` maps "onboarding complete but transfers not acti
 Migrations are applied by hand; Prisma reads every column, so code that ships before its migration breaks every read of that table.
 
 - [x] `/api/health` reports pending Prisma migrations against the live database, and is non-200 when any are pending. *(2026-10-24: public `checks.migrations` is ok/fail only (no counts, same rule as the rest of the public body); names and count are on `/api/admin/health`. The build bakes the folder names (`next.config.mjs`, `BUILD_MIGRATIONS`); `lib/migration-status.ts` compares them with `_prisma_migrations`. A database ahead of the build is fine; unreadable is `unknown` and non-200. `scripts/migration-health-test.ts`, 19 checks, 10/10 mutations killed.)*
-- [ ] A deploy-time or gate check fails when the build's migrations folder has entries the target database hasn't applied; the uptime monitor (2.3) alerts on it. *(2026-10-24, partly: `scripts/migration-drift.ts` (merged with the dev-database drift script from 2026-10-20) exits 1 on pending, is in the gate, and read-only against production finds all 58 applied. It runs by hand before a push (`CONFIRM_PROD_DB=<ref> ./scripts/with-prod-db.sh npx tsx scripts/migration-drift.ts`). 2026-10-25: proven on Vercel Preview with `tsx scripts/migration-drift.ts` before `next build`: passes against the live database (58/58), and fails naming the folder when a migration the database lacks is added. Checks `DATABASE_URL` (Vercel's `DIRECT_URL` is not a valid URL). Open: adopt it in the production build command, and the 2.3 alert.)*
+- [ ] A deploy-time or gate check fails when the build's migrations folder has entries the target database hasn't applied; the uptime monitor (2.3) alerts on it. *(2026-10-24, partly: `scripts/migration-drift.ts` (merged with the dev-database drift script from 2026-10-20) exits 1 on pending, is in the gate, and read-only against production finds all 58 applied. It runs by hand before a push (`CONFIRM_PROD_DB=<ref> ./scripts/with-prod-db.sh npx tsx scripts/migration-drift.ts`). 2026-10-25: proven on Vercel Preview with `tsx scripts/migration-drift.ts` before `next build`: passes against the live database (58/58), and fails naming the folder when a migration the database lacks is added. Checks `DATABASE_URL` (Vercel's `DIRECT_URL` is not a valid URL). 2026-10-25: on for production builds (`npm run build`); override `SKIP_MIGRATION_CHECK=1` for one deploy, documented in the script header. Open: the 2.3 alert.)*
+- **Note:** Vercel Preview uses the production `DATABASE_URL` until cutover (9.1), so a Preview build's drift check, and anything a Preview deployment does, reads and writes the live database. Treat a Preview URL like production until then.
 
 ### 1.6 Card statement descriptor
 Charges are created on the platform account (separate charges & transfers, no `on_behalf_of`), so the FairSynq prefix appears.
@@ -396,6 +397,7 @@ Today's production becomes **staging** (test keys, test Clerk, all history kept)
 - [ ] Check Supabase's free active-project limit; pause or delete Timeline if staging + production + Timeline exceeds it.
 - [ ] Separate Upstash databases for staging and production.
 - [ ] staging.fairsynq.com: Vercel Preview with staging env vars and test keys. DNS record added. No staging worker (auto-cancel and payouts don't run there).
+- [ ] Preview's `DATABASE_URL` points at staging, not production (until then Preview shares the live database; see 1.8). Fix or remove Vercel's invalid `DIRECT_URL` at the same time if not done earlier.
 - [ ] Bucket config applied to the production project.
 
 ### 9.2 Keys and providers

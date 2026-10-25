@@ -14,6 +14,15 @@
  *   CONFIRM_PROD_DB=<ref> ./scripts/with-prod-db.sh npx tsx scripts/migration-drift.ts
  *   --migrations-dir <dir>             compare another folder (the test's planted fixture)
  *
+ * BUILD GATE. `npm run build` runs this before `next build` (Vercel production and Preview), so a
+ * deploy whose code expects a migration the database lacks stops at build time instead of going
+ * live and turning /api/health 503. It also stops when the database can't be read.
+ *
+ *   SKIP_MIGRATION_CHECK=1   the documented override, for when the check itself is wrong (e.g.
+ *                            the database is down and you must ship a fix that doesn't touch it).
+ *                            Set it on the Vercel deployment's environment for ONE deploy, then
+ *                            remove it. The build log says loudly that it was skipped.
+ *
  * "Applied" means the same thing here as in /api/health: both go through
  * lib/migration-status.ts (finished and not rolled back; a database ahead of the folder is fine).
  *
@@ -35,6 +44,10 @@ export function migrationFolders(dir = MIGRATIONS_DIR): string[] {
 async function main() {
   const warnOnly = process.argv.includes('--warn')
   const say = (m: string) => (warnOnly ? console.warn(m) : console.log(m))
+  if (process.env.SKIP_MIGRATION_CHECK === '1') {
+    console.warn('⚠️  SKIP_MIGRATION_CHECK=1 — migration drift NOT checked. Remove the override after this deploy.')
+    process.exit(0)
+  }
   const { assertNotProductionDatabase } = await import('../lib/prod-db-guard')
   assertNotProductionDatabase('migration-drift.ts') // production only with CONFIRM_PROD_DB=<ref>
   const { PrismaClient } = await import('@prisma/client')

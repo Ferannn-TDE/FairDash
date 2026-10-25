@@ -33,6 +33,11 @@ console.log('[2] wiring')
 const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>
 assert(/with-dev-db\.sh npx tsx scripts\/migration-drift\.ts --warn \|\| true$/.test(scripts.predev ?? ''), 'predev warns about dev-database drift before `npm run dev`, and never blocks it')
 assert(/with-dev-db\.sh npx tsx scripts\/migration-drift\.ts$/.test(scripts['db:drift'] ?? ''), '`npm run db:drift` checks the dev database strictly')
+assert(/^prisma generate && tsx scripts\/migration-drift\.ts && next build$/.test(scripts.build ?? ''),
+  '`npm run build` runs the drift check strictly (no --warn, no || true) before next build')
+const src = readFileSync('scripts/migration-drift.ts', 'utf8')
+assert(src.includes("process.env.SKIP_MIGRATION_CHECK === '1'") && /SKIP_MIGRATION_CHECK=1 +the documented override/.test(src),
+  'the build override is exactly SKIP_MIGRATION_CHECK=1, and documented in the script header')
 const plan = readFileSync('docs/PRODUCTION_READINESS.md', 'utf8')
 assert(/\*\*A migration is applied to every database in the same session\.\*\*/.test(plan), 'the standing rule names all three databases')
 

@@ -143,6 +143,14 @@ async function run(folder: string[], latest: string) {
     assert(drift.status === 1 && drift.stdout.includes('29991231000000_not_applied_yet') && !drift.stdout.includes('not_a_migration'),
       `planted unapplied folder → exit 1 naming it (got ${drift.status})`)
     assert(run('--warn', '--migrations-dir', planted).status === 0, '--warn (predev) reports drift but never blocks')
+    const skipped = spawnSync('npx', ['tsx', 'scripts/migration-drift.ts', '--migrations-dir', planted], {
+      encoding: 'utf8', env: { ...process.env, SKIP_MIGRATION_CHECK: '1' },
+    })
+    assert(skipped.status === 0 && skipped.stderr.includes('NOT checked'), 'SKIP_MIGRATION_CHECK=1 passes the same drift, and says so loudly')
+    const notOne = spawnSync('npx', ['tsx', 'scripts/migration-drift.ts', '--migrations-dir', planted], {
+      encoding: 'utf8', env: { ...process.env, SKIP_MIGRATION_CHECK: 'true' },
+    })
+    assert(notOne.status === 1, 'any other value (e.g. "true") does not skip: one exact spelling')
   } finally { rmSync(planted, { recursive: true, force: true }) }
 }
 
