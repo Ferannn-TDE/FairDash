@@ -9,6 +9,7 @@ import { SELLABLE } from '@/lib/menu/on-menu'
 import { stripe } from '@/lib/stripe'
 import { validateDeliveryAddress } from '@/lib/delivery-address'
 import { decideDeliveryRadius, googleGeocoder } from '@/lib/delivery-radius'
+import { statementSuffix } from '@/lib/statement-descriptor'
 import { deriveEventLiveState, formatEventDateRange } from '@/lib/event-date'
 import { hasPreviewAccess } from '@/lib/preview-access'
 import { success, apiError } from '@/lib/api-response'
@@ -498,6 +499,12 @@ export async function POST(req: NextRequest) {
         vendorSubtotalCents: JSON.stringify(vendorSubtotalCents),
       },
     }
+
+    // Card statement: "FAIRSYNQ* ITALIAN FEST" (readiness 1.6). Already cleaned to Stripe's rules;
+    // when nothing usable is left the field is omitted and the prefix stands alone, because a
+    // suffix Stripe rejects would fail this create, and with it the checkout.
+    const statementDescriptorSuffix = statementSuffix(event)
+    if (statementDescriptorSuffix) piParams.statement_descriptor_suffix = statementDescriptorSuffix
 
     // ── Delivery radius — the LAST check before money exists ─────────────────────
     // Server geocode of the stored address, straight-line distance from the fair, fail closed on

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { OrganizerBreadcrumb } from '../../../_components/Breadcrumb'
+import { statementPreview, STATEMENT_SUFFIX_MAX } from '@/lib/statement-descriptor'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,7 @@ interface FairSettings {
   status: 'UPCOMING' | 'ACTIVE' | 'INACTIVE'
   primaryColor: string
   welcomeMessage: string | null
+  statementName: string | null
   // Operational timing
   orderAcceptanceWindowSec: number
   vendorOfflineHideSec: number
@@ -147,6 +149,7 @@ export default function FairSettingsPage() {
         body: JSON.stringify({
           primaryColor:             settings.primaryColor,
           welcomeMessage:           settings.welcomeMessage,
+          statementName:            settings.statementName,
           status:                   settings.status,
           orderAcceptanceWindowSec: settings.orderAcceptanceWindowSec,
           vendorOfflineHideSec:     settings.vendorOfflineHideSec,
@@ -254,6 +257,22 @@ export default function FairSettingsPage() {
             </span>
           </div>
           <p className="text-white/20 text-xs font-inter mt-1.5">Shown on the fair home page · max 120 chars</p>
+        </div>
+        <div>
+          <p className="text-white/35 text-xs uppercase tracking-wider mb-2 font-semibold font-inter">Card Statement Name</p>
+          <input
+            type="text"
+            value={settings.statementName ?? ''}
+            onChange={e => update('statementName', e.target.value || null)}
+            placeholder={settings.name}
+            maxLength={40}
+            className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/15 focus:border-neon-pink outline-none font-inter"
+          />
+          <p className="text-white/20 text-xs font-inter mt-1.5">
+            Customers&apos; card statements will read{' '}
+            <span className="text-white/60 font-mono">{statementPreview({ statementName: settings.statementName, name: settings.name })}</span>
+            {' '}· letters and numbers, up to {STATEMENT_SUFFIX_MAX} characters after FAIRSYNQ. Leave empty to use the fair name.
+          </p>
         </div>
       </Section>
 

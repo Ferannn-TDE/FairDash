@@ -27,6 +27,9 @@ model Event {
   logoUrl      String?
   primaryColor String  @default("#FF0077")
   qrCodeUrl    String?
+  // Card statement suffix ("FAIRSYNQ* <this>"), organizer-editable, stored already cleaned to
+  // Stripe's rules (lib/statement-descriptor.ts). Null → the fair name's short form.
+  statementName String?
 
   // Discovery coords (customer-facing map pin — distinct from staging zone)
   eventLat Float?

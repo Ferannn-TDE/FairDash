@@ -7,6 +7,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { EventStatus } from '@prisma/client'
 import { organizerFairScope } from '@/lib/organizer-fair-context'
+import { parseStatementNameInput } from '@/lib/statement-descriptor'
 
 const ALLOWED_FIELDS = new Set([
   // Operational timing
@@ -15,6 +16,7 @@ const ALLOWED_FIELDS = new Set([
   'maxVendorsPerOrder',
   // Branding / UX
   'welcomeMessage',
+  'statementName',
   'showVendorWaitTimes',
   'allowGuestBrowse',
   'primaryColor',
@@ -120,6 +122,13 @@ export async function PATCH(
 
     if ('welcomeMessage' in data && data.welcomeMessage) {
       data.welcomeMessage = String(data.welcomeMessage).slice(0, 120)
+    }
+
+    // Card statement name (readiness 1.6): stored already cleaned; no letter left → refused.
+    if ('statementName' in data) {
+      const parsed = parseStatementNameInput(data.statementName)
+      if (!parsed.ok) return apiError(parsed.message, 400, 'VALIDATION_ERROR')
+      data.statementName = parsed.value
     }
 
     const updated = await db.event.update({

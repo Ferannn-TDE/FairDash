@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 6/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 50/53 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 52/53 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -151,9 +151,9 @@ Migrations are applied by hand; Prisma reads every column, so code that ships be
 ### 1.6 Card statement descriptor
 Charges are created on the platform account (separate charges & transfers, no `on_behalf_of`), so the FairSynq prefix appears.
 
-- [ ] Optional `Event.statementName`, organizer-editable, with a fallback to an automatic short form of the fair name.
-- [ ] `statement_descriptor_suffix` set per order. Cleaned to Stripe's rules (22 chars total, no `<>\'"*`). Falls back to the prefix alone. Unit test for the cleaning.
-- [ ] One test-mode charge confirms the descriptor shown in the Stripe dashboard reads `FAIRSYNQ* <FAIR>`.
+- [x] Optional `Event.statementName`, organizer-editable, with a fallback to an automatic short form of the fair name. *(2026-10-25: migration `20261025120000_add_event_statement_name` (adds one nullable column); organizer settings has a "Card Statement Name" field with a live preview; stored already cleaned; an input with no letter left is refused.)*
+- [x] `statement_descriptor_suffix` set per order. Cleaned to Stripe's rules (22 chars total, no `<>\'"*`). Falls back to the prefix alone. Unit test for the cleaning. *(2026-10-25: `lib/statement-descriptor.ts`; with FAIRSYNQ the suffix gets 12 characters. Stricter than Stripe: A–Z 0–9 space & . - only, accents folded, cut at a word boundary, at least one letter or no suffix at all. `scripts/statement-descriptor-test.ts`, 38 checks incl. a 5000-input fuzz, 9/9 mutations killed. Probed: Stripe test mode rejects `*`, `'` and digits-only at create (so a raw name could fail checkout) but does not check length.)*
+- [ ] One test-mode charge confirms the descriptor shown in the Stripe dashboard reads `FAIRSYNQ* <FAIR>`. *(2026-10-25: `scripts/statement-descriptor-live.ts` placed a real charge through `POST /api/orders`: suffix `ITALIAN FEST` applied, but Stripe printed `STRIPE* ITALIAN FEST` because the sandbox the app's keys use (`acct_1TFJuBHk5f3uB8J9`) has no shortened descriptor. Re-run after setting it there.)*
 
 ### 1.9 Roles that match their rows
 Clerk `roles[]` opens the portal doors and the payee rows (OrgMember, VendorMember, Runner) open the gates. 2026-10-19 production had 6 disagreements. Read-only root cause of each:
