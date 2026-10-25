@@ -38,7 +38,8 @@ async function main() {
   const { assertNotProductionDatabase } = await import('../lib/prod-db-guard')
   assertNotProductionDatabase('migration-drift.ts') // production only with CONFIRM_PROD_DB=<ref>
   const { PrismaClient } = await import('@prisma/client')
-  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL
+  const urlVar = process.env.DIRECT_URL ? 'DIRECT_URL' : 'DATABASE_URL'
+  const url = process.env[urlVar]
   if (!url) { say('⚠️  migration drift: no DATABASE_URL — not checked'); process.exit(warnOnly ? 0 : 1) }
   const prisma = new PrismaClient({ datasources: { db: { url } } })
   const i = process.argv.indexOf('--migrations-dir')
@@ -47,7 +48,10 @@ async function main() {
   let state
   try { state = await readMigrationState(prisma, folders) } finally { await prisma.$disconnect().catch(() => {}) }
   if (state.status === 'unknown') {
+    // Which variable, whether it even parses, and the database's own reason: at build time on
+    // Vercel this line is the only diagnosis there is. Never the URL itself (it holds the password).
     say(`⚠️  migration drift: could not read _prisma_migrations on ${host} — not checked`)
+    say(`   using ${urlVar} (parses as a URL: ${host !== 'unknown host' ? 'yes' : 'no'})${state.readError ? `: ${state.readError}` : ''}`)
     process.exit(warnOnly ? 0 : 1)
   }
   const { pending } = state

@@ -19,6 +19,8 @@ export interface MigrationRow {
 export interface MigrationState {
   status: 'ok' | 'pending' | 'unknown'
   pending: string[]
+  /** Why the history couldn't be read (first line of the database error). Admin/CLI only. */
+  readError?: string
 }
 
 /**
@@ -48,8 +50,14 @@ export async function readMigrationState(
   client: { $queryRawUnsafe<T>(sql: string): Promise<T> },
   expected: string[] = bakedMigrations(),
 ): Promise<MigrationState> {
+  let readError: string | undefined
   const rows = await client
     .$queryRawUnsafe<MigrationRow[]>('SELECT migration_name, finished_at, rolled_back_at FROM "_prisma_migrations"')
-    .catch(() => null)
-  return computeMigrationState(expected, rows)
+    .catch((err: unknown) => {
+      // Prisma puts the useful line last ("Can't reach database server at …"); no URL credentials appear in it.
+      readError = String((err as Error)?.message ?? err).split('\n').map(l => l.trim()).filter(Boolean).pop()?.slice(0, 200)
+      return null
+    })
+  const state = computeMigrationState(expected, rows)
+  return readError ? { ...state, readError } : state
 }
