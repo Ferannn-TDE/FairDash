@@ -7,7 +7,7 @@
 | Phase | Window | Done |
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 6/6 |
-| 1. Money & trust bugs | Oct 26 – Nov 29 | 46/53 |
+| 1. Money & trust bugs | Oct 26 – Nov 29 | 50/53 |
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
@@ -174,14 +174,12 @@ Clerk `roles[]` opens the portal doors and the payee rows (OrgMember, VendorMemb
 - [x] Tests (test DB + a fake Clerk client): each kind above is created, then shown converged by the reconcile, with a positive control that the check sees the mismatch first. *(`scripts/role-reconcile-test.ts`, 38 checks, 12/12 mutations killed.)*
 
 ### 1.10 Delivery address fields (P1)
-Found 2026-10-24 on the www test order (`cmvm0h9om…`): `deliveryStreet` held the whole address ("125 W Main St, Collinsville, IL 62234, USA") and `deliveryUnit` held "125".
+Found 2026-10-24 on the www test order (`cmvm0h9om…`): `deliveryStreet` held the whole address ("125 W Main St, Collinsville, IL 62234, USA"). The unit "125" was typed by the customer, so the unit field worked. Cause: picking a suggestion copied Google's `formatted_address` into Street, in both `handlePlaceSelect` and `AddressAutocomplete`'s own input text.
 
-- **Street:** `handlePlaceSelect` (`app/fair/[fairSlug]/checkout/page.tsx:357`) copies Google's `formatted_address` into the street field. Build the street from `street_number` + `route` (or `premise` for a campus building with no number), and keep `formatted_address` only when those are absent.
-- **Unit:** the code never writes the unit, so "125" was either typed or put there by browser autofill: the field has no `autoComplete` hint. Add `autoComplete="address-line1"` / `"address-line2"` (and `postal-code`, `address-level2`, `address-level1` on the others), and take Google's `subpremise` when it returns one. *(Confirm with you whether "125" was typed.)*
-- [ ] Street is the street line only; city/state/ZIP never repeat inside it.
-- [ ] Unit is never filled from the street number; `subpremise` used when present.
-- [ ] Test: a captured Places result for 125 W Main St, Cougar Village (no number) and an address with a `subpremise` each produce the right fields; the server geocode of the result is unchanged (still ROOFTOP for 125 W Main St).
-- [ ] No backfill of old orders: display only, and every past order with a full-address street still geocoded correctly.
+- [x] Street is the street line only: `streetLineFromPlace` (`lib/delivery-address.ts`) builds number + road, else the building, else the first part of the formatted address. City, state and ZIP keep their own fields. The unit stays the customer's. *(2026-10-25)*
+- [x] Autofill hints on every address input: `address-line1` (street), `address-line2` (unit), `address-level2` (city), `address-level1` (state), `postal-code` (ZIP). Google's autocomplete may override the street input's hint with its own dropdown.
+- [x] Test: `delivery-address-guard` [6] runs on real Google results captured into `scripts/fixtures/places-results.json` (numbered street, campus road with no number, an address with a unit, a corrected ZIP). 4/4 mutations killed. The server geocode of "125 W Main St" + Collinsville/IL/62234 is the same point at ROOFTOP as the old full-address form.
+- [x] No backfill: past orders with a full-address street geocode to the same point and still display (with the city repeated).
 
 **Done when:** every test above passes in the gate, the descriptor is confirmed on a test charge, and the three payee GIFs are recorded. Worker-dependent flows (refunds, emails from the webhook) are verified on the local Docker stack.
 

@@ -130,3 +130,30 @@ export function deliveryMapsQuery(addr: DeliveryAddressInput): string | null {
   return [street, addr.city?.trim(), [addr.state?.trim(), addr.zip?.trim()].filter(Boolean).join(' ').trim()]
     .filter(Boolean).join(', ')
 }
+
+/** The parts of a Google Places / Geocoding result the street line is built from. */
+export interface PlaceAddressParts {
+  address_components?: { long_name: string; short_name: string; types: string[] }[]
+  formatted_address?: string
+}
+
+/**
+ * The street line for the Street Address field: "125 W Main St", never the whole
+ * "125 W Main St, Collinsville, IL 62234, USA". Copying `formatted_address` into the street
+ * (until 2026-10-24) repeated city, state, ZIP and country inside it, so every surface that
+ * renders through formatDeliveryAddress printed them twice.
+ *
+ * Number + road when Google has a road ("Cougar Village" comes back as a road with no number);
+ * else the building (`premise`); else the first part of the formatted address. Short names,
+ * because that is how Google itself writes the line. The unit (`subpremise`) is not included:
+ * the Apartment / Suite / Room field is the customer's.
+ */
+export function streetLineFromPlace(place: PlaceAddressParts): string {
+  const comps = place.address_components ?? []
+  const part = (type: string) => comps.find(c => c.types.includes(type))?.short_name?.trim() ?? ''
+  const route = part('route')
+  if (route) return [part('street_number'), route].filter(Boolean).join(' ')
+  const premise = part('premise')
+  if (premise) return premise
+  return place.formatted_address?.split(',')[0]?.trim() ?? ''
+}

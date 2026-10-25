@@ -28,6 +28,10 @@
  *   [4] THE FORM COLLECTS WHAT THE RULE REQUIRES — an input exists for every required field
  *       (the missing city input is what turned a validation miss into a dead end), plus the
  *       unit line Places can never supply.
+ *   [6] THE STREET LINE (2026-10-24) — picking a suggestion fills Street with the street line
+ *       only. Before, the whole formatted address went in ("125 W Main St, Collinsville, IL
+ *       62234, USA"), so city/state/ZIP printed twice. Checked against REAL Google results
+ *       (scripts/fixtures/places-results.json), plus the autofill hints on every address input.
  *   [5] ONE FORMATTER — no surface hand-joins address parts, so a new field reaches every
  *       surface at once (five hand-rolled joins existed before this).
  *
@@ -36,7 +40,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { validateDeliveryAddress, formatDeliveryAddress, REQUIRED_DELIVERY_FIELDS } from '../lib/delivery-address'
+import { validateDeliveryAddress, formatDeliveryAddress, streetLineFromPlace, REQUIRED_DELIVERY_FIELDS } from '../lib/delivery-address'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -143,6 +147,36 @@ for (const s of SURFACES) {
   const name = s.split('/').slice(-3).join('/')
   assert(!HAND_JOIN.test(src), `${name} renders through the shared formatter, not a hand-join`)
 }
+
+console.log('\n[6] the street line from a picked suggestion')
+const fixtures = JSON.parse(readFileSync(new URL('./fixtures/places-results.json', import.meta.url), 'utf8')).results as
+  { query: string; formatted_address: string; address_components: { long_name: string; short_name: string; types: string[] }[] }[]
+const placeFor = (q: string) => fixtures.find(f => f.query.startsWith(q))!
+// Control: the old behaviour (formatted_address) is what the bug looked like, so the fixture can show it.
+assert(placeFor('125 W Main St').formatted_address === '125 W Main St, Collinsville, IL 62234, USA', 'control: the real formatted address carries city, state, ZIP and country')
+const expected: [string, string][] = [
+  ['125 W Main St', '125 W Main St'],             // number + road
+  ['Cougar Village', 'Cougar Village'],           // campus road, no number
+  ['1600 Pennsylvania Ave NW Apt 2', '1600 Pennsylvania Ave NW'], // unit (#2) stays out of Street
+  ['1 Hairpin Dr', '1 Hairpin Dr'],               // Google corrected the ZIP; street unaffected
+]
+for (const [q, want] of expected) {
+  const got = streetLineFromPlace(placeFor(q))
+  assert(got === want, `"${q}" → street "${want}" (got "${got}")`)
+}
+for (const f of fixtures) {
+  const line = streetLineFromPlace(f)
+  assert(!/,|\bUSA\b|\b\d{5}\b/.test(line), `no comma, country or ZIP inside the street line for "${f.query}"`)
+}
+assert(streetLineFromPlace({ address_components: [{ long_name: 'Bldg 5', short_name: 'Bldg 5', types: ['premise'] }], formatted_address: 'Bldg 5, X, IL' }) === 'Bldg 5', 'a building with no road → the building name')
+assert(streetLineFromPlace({ formatted_address: 'Somewhere, X, IL' }) === 'Somewhere' && streetLineFromPlace({}) === '', 'no components → first part of the formatted address, or empty')
+assert(/streetLineFromPlace\(place\)/.test(checkoutCode) && !/deliveryStreet:\s*place\.formatted_address/.test(checkoutCode), 'checkout fills Street through streetLineFromPlace, never formatted_address')
+const autocomplete = codeOnly(readFileSync(new URL('../app/_components/AddressAutocomplete.tsx', import.meta.url), 'utf8'))
+assert(/setInputValue\(street\)/.test(autocomplete) && !/setInputValue\(place\.formatted_address\)/.test(autocomplete), 'the autocomplete input shows the street line too (it keeps its own copy of the text)')
+for (const [field, hint] of [['deliveryUnit', 'address-line2'], ['deliveryCity', 'address-level2'], ['deliveryState', 'address-level1'], ['deliveryZip', 'postal-code']]) {
+  assert(new RegExp(`name="${field}"\\s+autoComplete="${hint}"`).test(checkout), `${field} carries autoComplete="${hint}"`)
+}
+assert(/autoComplete="address-line1"/.test(autocomplete), 'the street input carries autoComplete="address-line1"')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} delivery-address-guard: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

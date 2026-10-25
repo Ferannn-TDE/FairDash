@@ -17,7 +17,7 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
 import { calculateServiceFee } from '@/lib/constants'
-import { validateDeliveryAddress, type DeliveryAddressError } from '@/lib/delivery-address'
+import { validateDeliveryAddress, streetLineFromPlace, type DeliveryAddressError } from '@/lib/delivery-address'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 import AddressAutocomplete from '../../../_components/AddressAutocomplete'
@@ -354,7 +354,7 @@ export default function CheckoutPage() {
     // unit type, so the room/apartment is always the customer's to enter.
     const next = {
       ...form,
-      deliveryStreet: place.formatted_address ?? form.deliveryStreet,
+      deliveryStreet: streetLineFromPlace(place), // never empty: the component only reports a pick with a formatted address
       deliveryCity: get('locality') || get('sublocality') || get('administrative_area_level_2'),
       deliveryState: short('administrative_area_level_1'),
       deliveryZip: get('postal_code'),
@@ -738,6 +738,7 @@ export default function CheckoutPage() {
                         <label className={labelClass}>Apartment / Suite / Room</label>
                         <input
                           name="deliveryUnit"
+                          autoComplete="address-line2"
                           value={form.deliveryUnit}
                           onChange={handleChange}
                           className={inputClass}
@@ -754,6 +755,7 @@ export default function CheckoutPage() {
                           <label className={labelClass}>City *</label>
                           <input
                             name="deliveryCity"
+                            autoComplete="address-level2"
                             value={form.deliveryCity}
                             onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryCity: undefined })); setAreaCheck({ state: 'idle' }) }}
                             onBlur={() => checkDeliveryArea({ street: form.deliveryStreet, unit: form.deliveryUnit, city: form.deliveryCity, state: form.deliveryState, zip: form.deliveryZip })}
@@ -766,6 +768,7 @@ export default function CheckoutPage() {
                           <label className={labelClass}>State</label>
                           <input
                             name="deliveryState"
+                            autoComplete="address-level1"
                             value={form.deliveryState}
                             onChange={e => {
                               setForm(prev => ({ ...prev, deliveryState: e.target.value.toUpperCase() }))
@@ -781,6 +784,7 @@ export default function CheckoutPage() {
                           <label className={labelClass}>ZIP *</label>
                           <input
                             name="deliveryZip"
+                            autoComplete="postal-code"
                             value={form.deliveryZip}
                             onChange={e => { handleChange(e); setFieldErrors(prev => ({ ...prev, deliveryZip: undefined })); setAreaCheck({ state: 'idle' }) }}
                             onBlur={() => checkDeliveryArea({ street: form.deliveryStreet, unit: form.deliveryUnit, city: form.deliveryCity, state: form.deliveryState, zip: form.deliveryZip })}

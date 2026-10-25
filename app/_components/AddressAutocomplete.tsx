@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMapsLibrary } from '@vis.gl/react-google-maps'
 import { MapPinIcon } from '@heroicons/react/24/outline'
+import { streetLineFromPlace } from '@/lib/delivery-address'
 
 interface Props {
   value?: string
@@ -27,8 +28,10 @@ export default function AddressAutocomplete({ value, onChange, onPlaceSelect }: 
     autocompleteInstance.addListener('place_changed', () => {
       const place = autocompleteInstance.getPlace()
       if (place.formatted_address) {
-        setInputValue(place.formatted_address)
-        onChange?.(place.formatted_address)
+        // The street line only: city, state and ZIP have their own fields.
+        const street = streetLineFromPlace(place)
+        setInputValue(street)
+        onChange?.(street)
         onPlaceSelect?.(place)
       }
     })
@@ -49,6 +52,7 @@ export default function AddressAutocomplete({ value, onChange, onPlaceSelect }: 
           setInputValue(e.target.value)
           onChange?.(e.target.value)
         }}
+        autoComplete="address-line1"
         placeholder="Delivery address"
         className="bg-transparent border-0 text-white outline-none flex-1 text-base placeholder:text-[#A1A1A1] w-full"
       />

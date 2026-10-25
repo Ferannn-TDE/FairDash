@@ -1,0 +1,266 @@
+{
+  "capturedAt": "2026-10-25T22:58:59.758Z",
+  "source": "Google Geocoding API (same address_components shape as Places)",
+  "results": [
+    {
+      "query": "125 W Main St, Collinsville, IL 62234",
+      "formatted_address": "125 W Main St, Collinsville, IL 62234, USA",
+      "address_components": [
+        {
+          "long_name": "125",
+          "short_name": "125",
+          "types": [
+            "street_number"
+          ]
+        },
+        {
+          "long_name": "West Main Street",
+          "short_name": "W Main St",
+          "types": [
+            "route"
+          ]
+        },
+        {
+          "long_name": "Collinsville",
+          "short_name": "Collinsville",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Collinsville Township",
+          "short_name": "Collinsville Township",
+          "types": [
+            "administrative_area_level_3",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Madison County",
+          "short_name": "Madison County",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Illinois",
+          "short_name": "IL",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": [
+            "country",
+            "political"
+          ]
+        },
+        {
+          "long_name": "62234",
+          "short_name": "62234",
+          "types": [
+            "postal_code"
+          ]
+        },
+        {
+          "long_name": "3001",
+          "short_name": "3001",
+          "types": [
+            "postal_code_suffix"
+          ]
+        }
+      ]
+    },
+    {
+      "query": "Cougar Village, Edwardsville, IL 62026",
+      "formatted_address": "Cougar Village, Edwardsville, IL, USA",
+      "address_components": [
+        {
+          "long_name": "Cougar Village",
+          "short_name": "Cougar Village",
+          "types": [
+            "route"
+          ]
+        },
+        {
+          "long_name": "Edwardsville",
+          "short_name": "Edwardsville",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Edwardsville Township",
+          "short_name": "Edwardsville Township",
+          "types": [
+            "administrative_area_level_3",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Madison County",
+          "short_name": "Madison County",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Illinois",
+          "short_name": "IL",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": [
+            "country",
+            "political"
+          ]
+        }
+      ]
+    },
+    {
+      "query": "1600 Pennsylvania Ave NW Apt 2, Washington, DC 20500",
+      "formatted_address": "1600 Pennsylvania Ave NW #2, Washington, DC 20500, USA",
+      "address_components": [
+        {
+          "long_name": "2",
+          "short_name": "2",
+          "types": [
+            "subpremise"
+          ]
+        },
+        {
+          "long_name": "1600",
+          "short_name": "1600",
+          "types": [
+            "street_number"
+          ]
+        },
+        {
+          "long_name": "Pennsylvania Avenue Northwest",
+          "short_name": "Pennsylvania Ave NW",
+          "types": [
+            "route"
+          ]
+        },
+        {
+          "long_name": "Northwest Washington",
+          "short_name": "Northwest Washington",
+          "types": [
+            "neighborhood",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Washington",
+          "short_name": "Washington",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "District of Columbia",
+          "short_name": "DC",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": [
+            "country",
+            "political"
+          ]
+        },
+        {
+          "long_name": "20500",
+          "short_name": "20500",
+          "types": [
+            "postal_code"
+          ]
+        }
+      ]
+    },
+    {
+      "query": "1 Hairpin Dr, Edwardsville, IL 62026",
+      "formatted_address": "1 Hairpin Dr, Edwardsville, IL 62025, USA",
+      "address_components": [
+        {
+          "long_name": "1",
+          "short_name": "1",
+          "types": [
+            "street_number"
+          ]
+        },
+        {
+          "long_name": "Hairpin Drive",
+          "short_name": "Hairpin Dr",
+          "types": [
+            "route"
+          ]
+        },
+        {
+          "long_name": "Edwardsville",
+          "short_name": "Edwardsville",
+          "types": [
+            "locality",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Edwardsville Township",
+          "short_name": "Edwardsville Township",
+          "types": [
+            "administrative_area_level_3",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Madison County",
+          "short_name": "Madison County",
+          "types": [
+            "administrative_area_level_2",
+            "political"
+          ]
+        },
+        {
+          "long_name": "Illinois",
+          "short_name": "IL",
+          "types": [
+            "administrative_area_level_1",
+            "political"
+          ]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": [
+            "country",
+            "political"
+          ]
+        },
+        {
+          "long_name": "62025",
+          "short_name": "62025",
+          "types": [
+            "postal_code"
+          ]
+        }
+      ]
+    }
+  ]
+}
