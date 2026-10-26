@@ -52,8 +52,8 @@ async function main() {
   assertNotProductionDatabase('migration-drift.ts') // production only with CONFIRM_PROD_DB=<ref>
   const { PrismaClient } = await import('@prisma/client')
   // DATABASE_URL first: it is the database this app (or this deploy) actually serves, and the one
-  // /api/health reads. On Vercel, DIRECT_URL is set but not a valid URL (found 2026-10-25), and
-  // nothing at runtime uses it.
+  // /api/health reads. Nothing at runtime uses DIRECT_URL (on Vercel it was an invalid URL until
+  // 2026-10-25).
   const urlVar = process.env.DATABASE_URL ? 'DATABASE_URL' : 'DIRECT_URL'
   const url = process.env[urlVar]
   if (!url) { say('⚠️  migration drift: no DATABASE_URL — not checked'); process.exit(warnOnly ? 0 : 1) }
