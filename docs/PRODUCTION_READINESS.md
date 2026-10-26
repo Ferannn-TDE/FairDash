@@ -312,7 +312,7 @@ One rule file, `lib/seo.ts`; gate suite `scripts/seo-test.ts` (83 checks, 9/9 mu
 - [x] Open Graph image per fair (`next/og`), brand style; Bebas Neue + Inter bundled in `assets/fonts` with their OFL licences. One site image for every other page.
 - [x] Noindex on every non-production host: indexable only when `VERCEL_ENV=production` and `VERCEL_PROJECT_PRODUCTION_URL=www.fairsynq.com`; elsewhere every page is `noindex, nofollow` and robots.txt is `Disallow: /`.
 - [x] `SEO_INDEX_FAIRS` (only `1` turns it on; default off): fair pages noindex and out of the sitemap until cutover. Home and `/fairs` stay indexable. (9.3 turns it on.)
-- [ ] Fairs need a venue address for Google's event results (`location` is required). Production's only live fair (Italian Fest 2026) has none. The organizer settings page should make the address part of a fair being publishable, or at least prompt for it.
+- [ ] Fairs need a venue address for Google's event results (`location` is required). Production's only live fair (Italian Fest 2026) has none. *(Rich Results Test by URL on www, 2026-10-26: page fetched, crawl allowed, indexing blocked by our `noindex` (SEO_INDEX_FAIRS off, as intended); Event invalid only for missing `location`; optional notes: `performer`, organizer `url`.)* The organizer settings page should make the address part of a fair being publishable, or at least prompt for it.
 
 ## Phase 5: Email platform (Dec 14 – Jan 10)
 
