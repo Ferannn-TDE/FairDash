@@ -91,3 +91,6 @@ FAIRSYNQ.jpg
 Icon.png
 fairdash3.html
 index.html
+
+# Gate pass stamp (scripts/gate.sh), read by the pre-push hook
+.gate-pass

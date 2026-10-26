@@ -19,11 +19,12 @@
     "test:db:up": "docker compose -f docker-compose.test.yml up -d --wait && npm run test:db:migrate",
     "test:db:down": "docker compose -f docker-compose.test.yml down -v",
     "test:db:migrate": "./scripts/with-test-db.sh npx prisma db push --skip-generate --accept-data-loss",
-    "gate": "npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/verify-all.ts",
-    "gate:fast": "npm run test:db:up && ./scripts/with-test-db.sh npx tsx scripts/verify-all.ts --fast",
+    "gate": "./scripts/gate.sh",
+    "gate:fast": "./scripts/gate.sh --fast",
     "test:db:deploy": "./scripts/with-test-db.sh npx prisma migrate deploy",
     "predev": "./scripts/with-dev-db.sh npx tsx scripts/migration-drift.ts --warn || true",
-    "db:drift": "./scripts/with-dev-db.sh npx tsx scripts/migration-drift.ts"
+    "db:drift": "./scripts/with-dev-db.sh npx tsx scripts/migration-drift.ts",
+    "prepare": "sh scripts/install-git-hooks.sh"
   },
   "dependencies": {
     "@bull-board/api": "^7.1.5",

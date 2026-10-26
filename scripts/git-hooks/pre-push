@@ -1,0 +1,30 @@
+#!/bin/sh
+# Refuses a push unless `npm run gate` passed on the exact commit being pushed.
+#
+# scripts/gate.sh writes .gate-pass (git-ignored) with the commit it passed on. Every ref in
+# this push must point at that commit. Docs-only commits are not exempt. Deleting a remote
+# ref pushes no code and is allowed.
+#
+# Installed into .git/hooks by scripts/install-git-hooks.sh (npm runs it on install); the
+# global dispatcher in ~/.git-hooks runs the repo's .git/hooks/pre-push.
+
+top="$(git rev-parse --show-toplevel)" || exit 1
+stamp=""
+[ -f "$top/.gate-pass" ] && stamp="$(tr -d '[:space:]' < "$top/.gate-pass")"
+zero=0000000000000000000000000000000000000000
+
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  commit="$(git rev-parse "$local_sha^{commit}" 2>/dev/null)" || commit="$local_sha"
+  if [ -z "$stamp" ]; then
+    echo "pre-push: refused $local_ref -> $remote_ref: no gate pass recorded." >&2
+    echo "          Run \`npm run gate\` on $(git rev-parse --short "$commit") and push again." >&2
+    status=1
+  elif [ "$commit" != "$stamp" ]; then
+    echo "pre-push: refused $local_ref -> $remote_ref: pushing $(git rev-parse --short "$commit"), but the gate last passed on $(git rev-parse --short "$stamp" 2>/dev/null || echo "$stamp")." >&2
+    echo "          Run \`npm run gate\` on this commit and push again." >&2
+    status=1
+  fi
+done
+exit $status
