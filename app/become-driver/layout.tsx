@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { auth } from '@clerk/nextjs/server'
 import { resolveOnboardingRedirect } from '@/lib/runner-onboarding-guard'
@@ -8,6 +9,12 @@ import { resolveOnboardingRedirect } from '@/lib/runner-onboarding-guard'
 // Anonymous applicants and authenticated users with no Runner row fall through to the form
 // (the generic apply path is preserved). The idempotent create-if-absent in POST
 // /api/drivers is the defence-in-depth backstop (Hole 2) if this guard is ever bypassed.
+export const metadata: Metadata = {
+  title: 'Become a Runner — FairSynq',
+  description: 'Apply to deliver fair food as a FairSynq runner at fairs near you.',
+  alternates: { canonical: '/become-driver' },
+}
+
 export default async function BecomeDriverLayout({ children }: { children: React.ReactNode }) {
   const { userId: clerkId } = await auth()
   const dest = await resolveOnboardingRedirect(clerkId)

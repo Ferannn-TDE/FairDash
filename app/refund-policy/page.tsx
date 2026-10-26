@@ -3,7 +3,11 @@ import { EnvelopeIcon } from '@heroicons/react/24/outline'
 import MarketplaceNavbar from '../_components/MarketplaceNavbar'
 import { CONTACT_EMAIL, RESPONSE_TIME_LONG, contactMailto } from '@/lib/contact-info'
 
-export const metadata = { title: 'Refund Policy — FairSynq' }
+export const metadata = {
+  title: 'Refund Policy — FairSynq',
+  description: 'When FairSynq orders are refunded, what is refunded, and how to ask for a refund.',
+  alternates: { canonical: '/refund-policy' },
+}
 
 const POLICY_SECTIONS = [
   {

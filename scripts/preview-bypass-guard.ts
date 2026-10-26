@@ -7,7 +7,7 @@
  * copy claiming the fair is live, and then swears the badge was wrong. Each is asserted below.
  *
  * REMOVAL (2026-08-05, when the fair opens): delete lib/preview-access.ts,
- * app/api/preview-access/, the hook + banner in app/fair/[fairSlug]/page.tsx, the health flag,
+ * app/api/preview-access/, the hook + banner in app/fair/[fairSlug]/FairHome.tsx, the health flag,
  * and this file. `grep -ri preview` finds all of it.
  *
  *   [0] POSITIVE CONTROLS (first) — computePreviewAccess actually returns true for the one
@@ -36,7 +36,7 @@ const stripComments = (src: string) =>
 
 const lib   = stripComments(readFileSync('lib/preview-access.ts', 'utf8'))
 const route = stripComments(readFileSync('app/api/preview-access/route.ts', 'utf8'))
-const page  = readFileSync('app/fair/[fairSlug]/page.tsx', 'utf8')
+const page  = readFileSync('app/fair/[fairSlug]/FairHome.tsx', 'utf8')
 
 console.log('[0] positive control: the one allowed combination IS allowed')
 assert(computePreviewAccess({ flagEnabled: true, isAdmin: true }) === true,

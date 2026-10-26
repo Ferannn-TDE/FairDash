@@ -11,13 +11,13 @@
 | 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
-| 4. Customer portal | Dec 21 – Jan 3 | 1/12 |
+| 4. Customer portal | Dec 21 – Jan 3 | 7/19 |
 | 5. Email platform | Dec 14 – Jan 10 | 0/20 |
 | 6. Vendor portal + onboarding | Jan 4 – Jan 17 | 0/12 |
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
 | R. Cutover rehearsal | Jan 18 – Jan 24 | 0/4 |
 | 8. Runner portal + onboarding | Jan 25 – Jan 31 | 0/9 |
-| 9. Live cutover | Feb 1 – Feb 5 | 0/21 |
+| 9. Live cutover | Feb 1 – Feb 5 | 0/22 |
 | Buffer | Feb 6 – Feb 12 | — |
 
 ## Capacity
@@ -303,6 +303,17 @@ About 20 pages: landing → fair → menu → checkout → tracking → account.
 - [ ] Public read-only pages and APIs (fair pages, menus, the vendor list) served with Vercel edge caching and a short revalidate, so anonymous browsing mostly skips the server and Redis. Then decide whether signed-out reads still need a limiter at all (today: `publicAnonymous`, 600/min per IP, one Upstash command per request).
 - [ ] Walkthrough GIF: browse → order → track → cancel/refund view.
 
+### 4.1 SEO (pulled forward, built 2026-10-26)
+One rule file, `lib/seo.ts`; gate suite `scripts/seo-test.ts` (83 checks, 9/9 mutations killed).
+
+- [x] `app/sitemap.ts` (home, `/fairs`, and live/upcoming non-archived fair pages + their vendor pages) and `app/robots.ts` (disallows `/vendor`, `/runner`, `/organizer`, `/admin`, `/account`, `/api`).
+- [x] `metadataBase` = `https://www.fairsynq.com`; canonical on every public page; title and description on every public page. Fair pages build theirs from name, dates, place, ready-vendor count and the fair's real fulfillment options ("Pickup or delivery" only when delivery is on). Cart, checkout and order pages are always noindex with no canonical.
+- [x] schema.org Event JSON-LD on the fair home page, server-rendered: name, start/end (fair's clock + zone offset when hours are set), venue address, organizer (FairSynq if none), URL, image, free-admission offer. No `location` without a stored address, no price for paid admission. *(Rich Results Test, Code mode, local production build 2026-10-26: 1 valid Event; only note: optional `performer`.)*
+- [x] Open Graph image per fair (`next/og`), brand style; Bebas Neue + Inter bundled in `assets/fonts` with their OFL licences. One site image for every other page.
+- [x] Noindex on every non-production host: indexable only when `VERCEL_ENV=production` and `VERCEL_PROJECT_PRODUCTION_URL=www.fairsynq.com`; elsewhere every page is `noindex, nofollow` and robots.txt is `Disallow: /`.
+- [x] `SEO_INDEX_FAIRS` (only `1` turns it on; default off): fair pages noindex and out of the sitemap until cutover. Home and `/fairs` stay indexable. (9.3 turns it on.)
+- [ ] Fairs need a venue address for Google's event results (`location` is required). Production's only live fair (Italian Fest 2026) has none. The organizer settings page should make the address part of a fair being publishable, or at least prompt for it.
+
 ## Phase 5: Email platform (Dec 14 – Jan 10)
 
 Resend, sending from `notifications.fairsynq.com`. Clerk keeps sending verification and password reset.
@@ -412,6 +423,7 @@ Today's production becomes **staging** (test keys, test Clerk, all history kept)
 - [ ] `prisma migrate deploy` on the empty production database. Seed only real data (admin account, real organizers and fairs entered fresh).
 - [ ] Seed creates organizers, vendors and runners only through `lib/payee-membership` (the gate enforces it); then `scripts/role-consistency-check.ts` exits 0 against the new database and Clerk instance.
 - [ ] Health check green: deploy SHA, worker heartbeat, Redis.
+- [ ] Turn on fair indexing: set `SEO_INDEX_FAIRS=1` on Vercel Production (real fairs only from here), redeploy, and confirm a fair page drops `noindex`, appears in `/sitemap.xml`, and passes the Rich Results Test by URL. Submit the sitemap in Google Search Console.
 
 ### 9.4 Stranger walkthrough
 - [ ] Sign up and pay as a stranger on production: every screen, every email and the card statement line screenshotted. No personal name anywhere.

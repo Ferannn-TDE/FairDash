@@ -67,7 +67,7 @@ const card = readFileSync('app/_components/FairCard.tsx', 'utf8')
 assert(/fairCardState\(fair\)/.test(card) && !/status === 'active'/.test(card), 'the fair card derives its badge from the dates (fairCardState), not the raw status')
 const info = readFileSync('app/fair/[fairSlug]/info/page.tsx', 'utf8')
 assert(/startDate=\{fair\.dates\.startDate\}/.test(info), 'fair-info passes dates to the badge')
-const heroPage = readFileSync('app/fair/[fairSlug]/page.tsx', 'utf8')
+const heroPage = readFileSync('app/fair/[fairSlug]/FairHome.tsx', 'utf8')
 assert(/deriveEventLiveState\(/.test(heroPage) && /liveState === 'upcoming'/.test(heroPage) && /liveState === 'ended'/.test(heroPage),
   'the fair hero is gated on the derived live-state — the hardcoded "Live Now" is only reached when live')
 const vendorPortal = readFileSync('app/vendor/page.tsx', 'utf8')

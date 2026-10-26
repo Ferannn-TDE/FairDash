@@ -6,6 +6,7 @@ import { FAQ_CATEGORIES } from '../_components/faq-content'
 export const metadata = {
   title: 'FAQ — FairSynq',
   description: 'Answers for customers, vendors, runners, and organizers.',
+  alternates: { canonical: '/faq' },
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,11 @@ import MarketplaceNavbar from '../_components/MarketplaceNavbar'
 import { CONTACT_CHANNELS, ContactChannelCard } from '../_components/contact-channels'
 import { CONTACT_EMAIL, RESPONSE_TIME_LONG, SUPPORT_SUBJECT, contactMailto } from '@/lib/contact-info'
 
-export const metadata: Metadata = { title: 'Contact Us — FairSynq' }
+export const metadata: Metadata = {
+  title: 'Contact Us — FairSynq',
+  description: 'Questions about an order, a fair, or joining FairSynq? Here is how to reach us.',
+  alternates: { canonical: '/contact' },
+}
 
 /**
  * ── THIS PAGE NO LONGER PRETENDS TO SEND ─────────────────────────────────────

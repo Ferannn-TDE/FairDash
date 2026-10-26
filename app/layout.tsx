@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Toaster } from 'react-hot-toast'
 import ClerkClientProvider from './_providers/ClerkClientProvider'
 import './globals.css'
+import { SITE_NAME, SITE_URL, robotsFor } from '@/lib/seo'
 
 // ---------------------------------------------------------------------------
 // Root layout — single ClerkProvider for the entire tree.
@@ -16,10 +17,17 @@ import './globals.css'
 // middleware.ts, and server layouts). There is ONE ClerkProvider in the tree.
 // ---------------------------------------------------------------------------
 
+// metadataBase makes every relative canonical and image URL absolute on www. `robots` here is the
+// default for every page; a page that sets its own goes through robotsFor too (lib/seo.ts), so
+// nothing off production is ever indexable. No canonical here: each public page sets its own.
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: 'FairSynq - The Fair Comes To Your Door',
   description:
     'FairSynq - Get your favorite fair foods delivered in 30 minutes. Fresh. Fast. Fair.',
+  robots: robotsFor('public'),
+  openGraph: { siteName: SITE_NAME, type: 'website', locale: 'en_US' },
+  twitter: { card: 'summary_large_image' },
   icons: {
     icon: '/images/logo/icon.png',
     apple: '/images/logo/icon.png',

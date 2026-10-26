@@ -4,6 +4,7 @@ import { safeRedirect } from '@/lib/safe-redirect'
 import { ensureOrganizerBootstrap } from '@/lib/organizer-bootstrap'
 import { ensureDbUser } from '@/lib/ensure-db-user'
 import { assertNotProductionClerk } from '@/lib/prod-clerk-guard'
+import { robotsFor } from '@/lib/seo'
 
 const VALID_ROLES = ['customer', 'vendor', 'organizer', 'runner'] as const
 type Role = (typeof VALID_ROLES)[number]
@@ -14,6 +15,8 @@ const REDIRECT_MAP: Record<Role, string> = {
   organizer: '/organizer',
   runner: '/become-driver',
 }
+
+export const metadata = { robots: robotsFor('private') }
 
 export default async function OnboardingPage({
   searchParams,

@@ -5,6 +5,7 @@ import VendorOnboarding from './VendorOnboarding'
 export const metadata: Metadata = {
   title: 'Become a Vendor — FairSynq',
   description: 'Apply to join FairSynq as a food vendor. Complete your profile, upload documents, set up your menu, and connect Stripe to start receiving orders.',
+  alternates: { canonical: '/become-vendor' },
 }
 
 export default function BecomeVendorPage() {

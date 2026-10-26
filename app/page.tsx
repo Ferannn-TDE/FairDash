@@ -1,11 +1,18 @@
 import { getAllFairsCached } from '@/lib/fairs'
 import { toPublicFairCard, type PublicFairCard } from '@/lib/fair-view'
 import MarketplaceLanding from './MarketplaceLanding'
+import type { Metadata } from 'next'
 
 // Server component: fetch the public fair list here (same source as /fairs) so the
 // landing page's first paint already contains the real fairs. The client component
 // receives them as a prop and never re-fetches — this is what kills the
 // empty→populated flicker on "Happening Now & Soon".
+export const metadata: Metadata = {
+  title: 'FairSynq - The Fair Comes To Your Door',
+  description: 'Order your favorite fair food ahead and skip the line. Pickup at the booth or delivery, from the vendors at fairs near you.',
+  alternates: { canonical: '/' },
+}
+
 export default async function Page() {
   let initialFairs: PublicFairCard[] = []
   try {

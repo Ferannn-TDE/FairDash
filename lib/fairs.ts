@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { FairListItem } from '@/lib/fair-view'
+import type { FairSeo, SitemapFair } from '@/lib/seo'
 
 // Re-export the browser-safe view types for server-side callers' convenience.
 // (Client components must import these from '@/lib/fair-view' directly — importing
@@ -46,6 +47,9 @@ export const getFairBySlugCached = unstable_cache(
         featuredVendorIds: true,
         featuredLabel: true,
         featuredEnabled: true,
+        admissionFree: true,
+        openTime: true,
+        closeTime: true,
         fulfillmentConfig: {
           select: {
             boothPickupEnabled: true,
@@ -95,10 +99,12 @@ export const getFairBySlugCached = unstable_cache(
       featuredVendorIds: raw.featuredVendorIds ?? [],
       featuredLabel: raw.featuredLabel ?? null,
       featuredEnabled: raw.featuredEnabled ?? true,
-      // These fields aren't in the DB — pages guard with optional chaining
+      // Same values the client's /api/events refresh normalizes to (FairContext normalizeEvent),
+      // so the first paint and the hydrated page agree. Location stays empty on both until the
+      // context reads the venue* columns.
       location: { address: '', city: '', state: '' },
-      operatingHours: { open: '', close: '' },
-      admissionFree: false,
+      operatingHours: { open: raw.openTime ?? '', close: raw.closeTime ?? '' },
+      admissionFree: raw.admissionFree,
     }
   },
   ['fair-by-slug'],
@@ -184,4 +190,57 @@ export const getAllFairsCached = unstable_cache(
   },
   ['all-fairs'],
   { revalidate: 300, tags: ['fair'] },
+)
+
+// ─── SEO (lib/seo.ts) ─────────────────────────────────────────────────────────
+
+/** What fair-page metadata, JSON-LD and the share image need. Same public gate as the page. */
+export const getFairSeoBySlugCached = unstable_cache(
+  async (fairSlug: string): Promise<FairSeo | null> => {
+    const e = await db.event.findFirst({
+      where: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null },
+      select: {
+        name: true, urlSlug: true, description: true, startDate: true, endDate: true, timezone: true,
+        openTime: true, closeTime: true, venueAddress: true, venueCity: true, venueState: true, venueZip: true,
+        admissionFree: true,
+        organizer: { select: { name: true } },
+        fulfillmentConfig: { select: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true } },
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
+      },
+    })
+    if (!e) return null
+    return {
+      name: e.name, slug: e.urlSlug, description: e.description,
+      startDate: e.startDate.toISOString(), endDate: e.endDate.toISOString(), timezone: e.timezone,
+      openTime: e.openTime, closeTime: e.closeTime,
+      venueAddress: e.venueAddress, venueCity: e.venueCity, venueState: e.venueState, venueZip: e.venueZip,
+      admissionFree: e.admissionFree,
+      organizerName: e.organizer?.name ?? null,
+      vendorCount: e._count.vendors,
+      fulfillment: e.fulfillmentConfig,
+    }
+  },
+  ['fair-seo-by-slug'],
+  { revalidate: 300, tags: ['fair', 'vendors'] },
+)
+
+/** Public fairs and their browsable vendors, for the sitemap (only read when SEO_INDEX_FAIRS=1). */
+export const getSitemapFairsCached = unstable_cache(
+  async (): Promise<SitemapFair[]> => {
+    const events = await db.event.findMany({
+      where: { status: EventStatus.ACTIVE, archivedAt: null },
+      orderBy: { startDate: 'asc' },
+      select: {
+        urlSlug: true, startDate: true, endDate: true, updatedAt: true,
+        vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() }, select: { id: true }, orderBy: { name: 'asc' } },
+      },
+    })
+    return events.map(e => ({
+      slug: e.urlSlug,
+      startDate: e.startDate.toISOString(), endDate: e.endDate.toISOString(), updatedAt: e.updatedAt.toISOString(),
+      vendorIds: e.vendors.map(v => v.id),
+    }))
+  },
+  ['sitemap-fairs'],
+  { revalidate: 3600, tags: ['fair', 'vendors'] },
 )
