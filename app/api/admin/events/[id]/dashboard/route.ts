@@ -65,7 +65,7 @@ export async function GET(
           })
         : Promise.resolve(null),
       // Same shared core the status route GATES on — display == enforcement.
-      getGoLiveChecklist(event.id, { eventLat: event.eventLat, eventLng: event.eventLng }),
+      getGoLiveChecklist(event.id, event),
     ])
 
     const todayStart = new Date()

@@ -15,6 +15,8 @@ import { EventStatus } from '@prisma/client'
 //   2. At least 1 vendor with stripeVerified = true and status = ACTIVE
 //   3. FulfillmentConfig exists with at least one mode enabled
 //   4. Event has eventLat and eventLng set
+//   5. Home delivery has an area (or is off)
+//   6. Full venue address: street, city, state, ZIP (lib/venue-address)
 //
 // Body: { status: 'ACTIVE' | 'INACTIVE' }
 
@@ -35,7 +37,7 @@ export async function PATCH(
     // ── Go Live checklist ──────────────────────────────────────────────────────
     // Same shared core the dashboard DISPLAYS — the gate and the UI can't drift.
     if (targetStatus === EventStatus.ACTIVE && event.status === EventStatus.UPCOMING) {
-      const checklist = await getGoLiveChecklist(event.id, { eventLat: event.eventLat, eventLng: event.eventLng })
+      const checklist = await getGoLiveChecklist(event.id, event)
       if (!checklist.canGoLive) {
         const failing = GO_LIVE_KEYS.filter(k => !checklist[k])
         throw new ApiError(

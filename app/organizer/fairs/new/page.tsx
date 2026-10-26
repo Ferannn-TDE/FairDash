@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
 import DateRangePicker from '@/app/_components/ui/DateRangePicker'
 import { creationDateBounds } from '@/lib/calendar-date'
+import { parseVenueAddress } from '@/lib/venue-address'
 import { ChevronLeftIcon } from '@heroicons/react/24/outline'
 
 const STEPS = ['Basic Info', 'Dates & Location', 'Branding', 'Settings', 'Review']
@@ -32,9 +33,10 @@ const INITIAL: FairDraft = {
   admissionFree: true,
 }
 
-function FormInput({ label, name, value, onChange, type = 'text', placeholder = '', required = false }: {
+function FormInput({ label, name, value, onChange, type = 'text', placeholder = '', required = false, autoComplete, inputMode, maxLength }: {
   label: string; name: string; value: string | number; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   type?: string; placeholder?: string; required?: boolean
+  autoComplete?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; maxLength?: number
 }) {
   return (
     <div className="mb-5">
@@ -43,6 +45,7 @@ function FormInput({ label, name, value, onChange, type = 'text', placeholder = 
       </label>
       <input
         type={type} name={name} value={value} onChange={onChange} placeholder={placeholder}
+        required={required} autoComplete={autoComplete} inputMode={inputMode} maxLength={maxLength}
         className="w-full px-4 py-2.5 bg-[#0a0a0a] border border-white/10 rounded-lg
                    text-sm font-inter text-white placeholder:text-[#444]
                    focus:border-[#FF0077]/50 focus:ring-1 focus:ring-[#FF0077]/20 focus:outline-none transition-colors"
@@ -110,10 +113,12 @@ function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
           defaultMonth={defaultMonth}
         />
       </div>
-      <FormInput label="Address" name="address" value={data.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St" required />
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2"><FormInput label="City" name="city" value={data.city} onChange={e => set('city', e.target.value)} placeholder="Springfield" required /></div>
-        <FormInput label="State" name="state" value={data.state} onChange={e => set('state', e.target.value)} placeholder="IL" />
+      {/* Venue address: all four fields are required to publish (lib/venue-address). */}
+      <FormInput label="Street Address" name="address" value={data.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St" required autoComplete="address-line1" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="col-span-2"><FormInput label="City" name="city" value={data.city} onChange={e => set('city', e.target.value)} placeholder="Springfield" required autoComplete="address-level2" /></div>
+        <FormInput label="State" name="state" value={data.state} onChange={e => set('state', e.target.value.toUpperCase())} placeholder="IL" required autoComplete="address-level1" maxLength={2} />
+        <FormInput label="ZIP" name="zip" value={data.zip} onChange={e => set('zip', e.target.value)} placeholder="62701" required autoComplete="postal-code" inputMode="numeric" maxLength={10} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormInput label="Open Time" name="openTime" value={data.openTime} onChange={e => set('openTime', e.target.value)} type="time" />
@@ -181,7 +186,7 @@ function Step5({ data }: { data: FairDraft }) {
         { label: 'Name', value: data.name || '—' },
         { label: 'Slug', value: data.slug || '—' },
         { label: 'Dates', value: data.startDate && data.endDate ? `${data.startDate} – ${data.endDate}` : '—' },
-        { label: 'Location', value: data.city ? `${data.city}, ${data.state}` : '—' },
+        { label: 'Venue', value: [data.address, data.city, [data.state, data.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') || '—' },
         { label: 'Hours', value: `${data.openTime} – ${data.closeTime}` },
         { label: 'Platform Fee', value: `${data.platformFee}%` },
         { label: 'Max Vendors', value: String(data.maxVendors) },
@@ -242,6 +247,11 @@ export default function CreateFairPage() {
   async function createFair(asDraft = false) {
     if (!data.name.trim()) { toast.error('Fair name is required'); setStep(0); return }
     if (!data.startDate || !data.endDate) { toast.error('Start and end dates are required'); setStep(1); return }
+    // Publishing needs the full venue address; a draft can be saved without it.
+    if (!asDraft) {
+      const venue = parseVenueAddress({ venueAddress: data.address, venueCity: data.city, venueState: data.state, venueZip: data.zip })
+      if (!venue.ok) { toast.error(venue.message); setStep(1); return }
+    }
     setSubmitting(true)
     try {
       const res = await fetch(

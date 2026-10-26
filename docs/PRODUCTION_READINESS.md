@@ -8,10 +8,10 @@
 |---|---|---|
 | 0. Safety close-out | Oct 19 – Oct 25 | 6/6 |
 | 1. Money & trust bugs | Oct 26 – Nov 29 | 53/53 |
-| 2. Ops foundation | Nov 2 – Dec 13 | 0/26 |
+| 2. Ops foundation | Nov 2 – Dec 13 | 1/27 |
 | B. Business & legal readiness (track) | Nov 2 – Jan 10 | 0/14 |
 | 3. Design foundation | Nov 30 – Dec 20 | 1/12 |
-| 4. Customer portal | Dec 21 – Jan 3 | 7/19 |
+| 4. Customer portal | Dec 21 – Jan 3 | 8/19 |
 | 5. Email platform | Dec 14 – Jan 10 | 0/20 |
 | 6. Vendor portal + onboarding | Jan 4 – Jan 17 | 0/12 |
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
@@ -215,6 +215,8 @@ You already have delegate access to the GoDaddy account holding fairsynq.com, so
 - [ ] Test: force a 500 on a webhook in a Vercel Preview deploy; confirm the Sentry alert fires.
 - [ ] Owed-back halts (`OwedBackHalt`, from 1.2) go to Sentry as alerts when first raised, so a customer owed money pages you instead of waiting for someone to open the money page.
 
+- [x] Read the failed Railway worker build for `928808d` (2026-10-26) and confirm the cause. *(Confirmed 2026-10-26 from the build log: Railway's builder failed 13s in, before `npm install` ran: `build daemon returned an error < failed to solve: frontend grpc server closed unexpectedly >`, during Railway's "slow build snapshot uploads" incident. Not our code; the next push (`8f59434`) built and deployed. The previous worker kept running throughout. Note: the worker build is only `npm install --include=dev && npx prisma generate`, start `npm run worker`; it does not run the migration drift check.)*
+
 ### 2.4 Free-tier inventory (`docs/COST-WORKSHEET.md`)
 - [ ] Every free tier we depend on, with its limit, current usage and upgrade trigger: Supabase, Upstash, Railway, Vercel, Clerk, Resend, Zoho, Google Maps/Geocoding/Routes, Sentry, Better Stack.
 - [ ] Upstash budget updated for 3-minute health checks (~29K commands/month).
@@ -312,7 +314,7 @@ One rule file, `lib/seo.ts`; gate suite `scripts/seo-test.ts` (83 checks, 9/9 mu
 - [x] Open Graph image per fair (`next/og`), brand style; Bebas Neue + Inter bundled in `assets/fonts` with their OFL licences. One site image for every other page.
 - [x] Noindex on every non-production host: indexable only when `VERCEL_ENV=production` and `VERCEL_PROJECT_PRODUCTION_URL=www.fairsynq.com`; elsewhere every page is `noindex, nofollow` and robots.txt is `Disallow: /`.
 - [x] `SEO_INDEX_FAIRS` (only `1` turns it on; default off): fair pages noindex and out of the sitemap until cutover. Home and `/fairs` stay indexable. (9.3 turns it on.)
-- [ ] Fairs need a venue address for Google's event results (`location` is required). Production's only live fair (Italian Fest 2026) has none. *(Rich Results Test by URL on www, 2026-10-26: page fetched, crawl allowed, indexing blocked by our `noindex` (SEO_INDEX_FAIRS off, as intended); Event invalid only for missing `location`; optional notes: `performer`, organizer `url`.)* The organizer settings page should make the address part of a fair being publishable, or at least prompt for it.
+- [x] No real fair without a venue address (Google's event results require `location`). *(2026-10-26: `lib/venue-address.ts`: street, city, 2-letter state and 5-digit ZIP required to publish a fair (organizer create and draft publish; a draft may stay incomplete), and `hasVenueAddress` added to the admin Go Live checklist the status route enforces. The wizard gained the missing ZIP field, marks all four required with autofill hints, and runs the same check before publishing. The admin `POST /api/events` can no longer create a fair straight as ACTIVE (it skipped the whole checklist). `scripts/venue-address-test.ts` (38 checks through the real routes on the test DB, 8/8 mutations killed). Italian Fest 2026 left as is: test data, gone at cutover. Rich Results Test by URL on www (2026-10-26): page fetched, indexing blocked by our noindex as intended, Event invalid only for missing `location`. The live URL test on a real fair is in 9.3.)*
 
 ## Phase 5: Email platform (Dec 14 – Jan 10)
 

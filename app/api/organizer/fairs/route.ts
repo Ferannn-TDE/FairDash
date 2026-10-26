@@ -3,6 +3,7 @@ import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { EventStatus } from '@prisma/client'
 import { success, apiError } from '@/lib/api-response'
+import { parseVenueAddress, type VenueAddressInput } from '@/lib/venue-address'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
@@ -151,6 +152,13 @@ export async function POST(req: NextRequest) {
 
     if (!name || !String(name).trim()) return apiError('Fair name is required', 400, 'VALIDATION_ERROR')
     if (!startDate || !endDate)          return apiError('Start and end dates are required', 400, 'VALIDATION_ERROR')
+    // Publishing needs the full venue address (lib/venue-address); a draft may be incomplete.
+    let venue: VenueAddressInput = { venueAddress, venueCity, venueState, venueZip }
+    if (asDraft !== true) {
+      const parsed = parseVenueAddress(venue)
+      if (!parsed.ok) return apiError(parsed.message, 400, 'VALIDATION_ERROR')
+      venue = parsed.value
+    }
 
     const urlSlug = await uniqueEventSlug(slug || name)
 
@@ -167,10 +175,10 @@ export async function POST(req: NextRequest) {
         endDate: new Date(endDate),
         timezone: timezone || 'America/Chicago',
         primaryColor: accentColor || '#FF0077',
-        venueAddress: venueAddress ?? null,
-        venueCity:    venueCity ?? null,
-        venueState:   venueState ?? null,
-        venueZip:     venueZip ?? null,
+        venueAddress: (venue.venueAddress as string | undefined) ?? null,
+        venueCity:    (venue.venueCity as string | undefined) ?? null,
+        venueState:   (venue.venueState as string | undefined) ?? null,
+        venueZip:     (venue.venueZip as string | undefined) ?? null,
         openTime:     openTime ?? null,
         closeTime:    closeTime ?? null,
         maxVendors:   typeof maxVendors === 'number' ? maxVendors : null,

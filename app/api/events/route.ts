@@ -27,6 +27,13 @@ export async function POST(req: Request) {
       return apiError('name, urlSlug, startDate, and endDate are required', 400, 'VALIDATION_ERROR')
     }
 
+    // A fair reaches customers only through Go Live (PATCH /api/admin/events/[id]/status), which
+    // runs the checklist (vendors, Stripe, fulfillment, location, venue address). Creating one
+    // straight as ACTIVE would skip all of it.
+    if (status !== undefined && status !== 'UPCOMING' && status !== 'DRAFT') {
+      return apiError('A new fair starts as UPCOMING or DRAFT; use Go Live to make it ACTIVE', 400, 'VALIDATION_ERROR')
+    }
+
     const existing = await db.event.findUnique({ where: { urlSlug } })
     if (existing) return apiError('urlSlug already taken', 409, 'CONFLICT')
 

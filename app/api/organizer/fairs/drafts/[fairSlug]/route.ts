@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { parseVenueAddress, type VenueAddressInput } from '@/lib/venue-address'
 import { revalidateTag } from 'next/cache'
 import { EventStatus } from '@prisma/client'
 import { db } from '@/lib/db'
@@ -96,6 +97,13 @@ export async function PATCH(
     // Publishing enforces the same floor as creating: a real fair always has a name and dates.
     if (!name || !String(name).trim()) throw new ApiError('Fair name is required', 400, 'VALIDATION_ERROR')
     if (!startDate || !endDate)        throw new ApiError('Start and end dates are required', 400, 'VALIDATION_ERROR')
+    // Publishing needs the full venue address (lib/venue-address); saving the draft again does not.
+    let venue: VenueAddressInput = { venueAddress, venueCity, venueState, venueZip }
+    if (publish === true) {
+      const parsed = parseVenueAddress(venue)
+      if (!parsed.ok) throw new ApiError(parsed.message, 400, 'VALIDATION_ERROR')
+      venue = parsed.value
+    }
 
     const updated = await db.event.update({
       where: { id: event.id },
@@ -106,10 +114,10 @@ export async function PATCH(
         endDate: new Date(endDate),
         timezone: timezone || 'America/Chicago',
         primaryColor: accentColor || '#FF0077',
-        venueAddress: venueAddress ?? null,
-        venueCity:    venueCity ?? null,
-        venueState:   venueState ?? null,
-        venueZip:     venueZip ?? null,
+        venueAddress: (venue.venueAddress as string | undefined) ?? null,
+        venueCity:    (venue.venueCity as string | undefined) ?? null,
+        venueState:   (venue.venueState as string | undefined) ?? null,
+        venueZip:     (venue.venueZip as string | undefined) ?? null,
         openTime:     openTime ?? null,
         closeTime:    closeTime ?? null,
         maxVendors:   typeof maxVendors === 'number' ? maxVendors : null,
