@@ -14,7 +14,7 @@
 | 4. Customer portal | Dec 21 – Jan 3 | 8/19 |
 | 5. Email platform | Dec 14 – Jan 10 | 0/20 |
 | 6. Vendor portal + onboarding | Jan 4 – Jan 17 | 0/12 |
-| 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/10 |
+| 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/11 |
 | R. Cutover rehearsal | Jan 18 – Jan 24 | 0/4 |
 | 8. Runner portal + onboarding | Jan 25 – Jan 31 | 0/9 |
 | 9. Live cutover | Feb 1 – Feb 5 | 0/22 |
@@ -375,6 +375,12 @@ Resend, sending from `notifications.fairsynq.com`. Clerk keeps sending verificat
 - [ ] "View payouts in Stripe" link (Express dashboard login link).
 - [ ] Total across fairs on `/organizer`.
 - [ ] Test: the card matches the ledger the event-close batch pays.
+- [ ] **Venue address editable after publishing.** No settings page can change it today (found 2026-10-26 with 4.1), so a typo is permanent. Rules:
+  - Same validation as publishing, through `lib/venue-address` (street, city, 2-letter state, 5-digit ZIP).
+  - An address change re-geocodes the fair. The new coordinates are held for admin review, and the delivery radius check and customer maps keep using the current approved coordinates until an admin approves them.
+  - While the fair is LIVE (ACTIVE), only an admin can change it, after a confirmation dialog explaining that it affects delivery and customers' maps. Organizers can change it before go-live.
+  - Every change goes to the audit log: old → new address, who, when (and the coordinate approval as its own entry).
+  - Tests for each rule: validation refuses a bad address; the change does not move delivery or map coordinates until approval; an organizer is refused on a LIVE fair and an admin is allowed; the audit rows carry old, new, actor and time.
 
 ## Phase 8: Runner portal + onboarding (Jan 25 – Jan 31)
 
