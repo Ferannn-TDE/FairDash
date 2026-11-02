@@ -149,36 +149,12 @@ function QuickActionsSection() {
   )
 }
 
-// ── Social Proof + Stats — merged block ───────────────────────────────────────
-
-const FAIR_NAMES = [
-  'Springfield State Fair',
-  'STL Street Food Fest',
-  'Columbus Taste Fest',
-  'Edwardsville Night Market',
-]
+// ── Stats ─────────────────────────────────────────────────────────────────────
 
 function ProofSection({ fairCount, vendorTotal }: { fairCount: number; vendorTotal: number }) {
   return (
     <section className="py-16 sm:py-20 px-5">
       <div className="max-w-5xl mx-auto">
-
-        {/* Trust bar */}
-        <Reveal className="text-center mb-12">
-          <p className="text-[10px] font-inter text-gray-600 uppercase tracking-[0.2em] mb-6">
-            Powering food experiences at
-          </p>
-          <div className="flex items-center justify-center gap-6 sm:gap-10 flex-wrap">
-            {FAIR_NAMES.map(name => (
-              <span
-                key={name}
-                className="text-xs sm:text-sm font-bebas text-gray-500 uppercase tracking-wider hover:text-gray-400 transition-colors cursor-default"
-              >
-                {name}
-              </span>
-            ))}
-          </div>
-        </Reveal>
 
         {/* Stats — contained card */}
         <Stagger slow className="bg-white/[0.02] rounded-2xl border border-white/[0.04] grid grid-cols-2 sm:grid-cols-4 gap-8 p-8 sm:p-10">
@@ -443,7 +419,7 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
         {/* ── How It Works ── */}
         <HowItWorksSection />
 
-        {/* ── Social proof + stats — merged block ── */}
+        {/* ── Stats ── */}
         <ProofSection
           fairCount={allFairs.length}
           vendorTotal={allFairs.reduce((s, f) => s + f.vendorCount, 0)}
