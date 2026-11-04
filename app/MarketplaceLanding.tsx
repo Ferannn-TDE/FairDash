@@ -45,11 +45,18 @@ const OPERATOR_CARDS = [
 ]
 
 function RoleSection() {
-  const { isSignedIn } = useUser()
-  if (isSignedIn) return null
+  const { isLoaded, isSignedIn } = useUser()
+  if (isLoaded && isSignedIn) return null
 
+  // Auth unknown until Clerk loads (and always on the server). Don't guess "signed out" and
+  // show the cards to someone who is signed in: render the section invisible so it holds its
+  // exact footprint at every width, then reveal it once Clerk says signed out
+  // (flicker-class-guard [J]).
   return (
-    <section className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-20">
+    <section
+      aria-hidden={!isLoaded}
+      className={`max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-20${isLoaded ? '' : ' invisible'}`}
+    >
       <Reveal className="text-center mb-10">
         <p className="text-[11px] text-neon-pink font-inter font-semibold uppercase tracking-[0.2em] mb-3">
           Work with FairSynq

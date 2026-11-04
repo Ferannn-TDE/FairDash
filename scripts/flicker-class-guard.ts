@@ -300,6 +300,33 @@ assert(/aria-hidden="true" className="w-\[7\.5rem\] h-9"/.test(navSrc),
 assert(/Get Started/.test(navSrc),
   'the signed-out CTA still exists (the fix delays it, it does not delete it)')
 
+// ── [J] the homepage role cards do not guess the auth state (11th instance) ───────────────
+// RoleSection ("Work with FairSynq") returned null only when `isSignedIn` was true. Before Clerk
+// loads it is undefined, so the server HTML and first frames rendered the cards for everyone and
+// a signed-in user watched them vanish. Same plausible-but-wrong default as [I], same fix: hold
+// the footprint (invisible) until isLoaded, then decide.
+console.log('\n[J] RoleSection waits for Clerk before showing the signed-out cards')
+const landingSrc = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
+const roleSrc = landingSrc.slice(landingSrc.indexOf('function RoleSection()'), landingSrc.indexOf('// ── Quick actions'))
+
+// The smell: an early return on isSignedIn alone, so undefined falls through to the cards.
+const HIDES_ON_SIGNED_IN_ONLY = /if \(\s*isSignedIn\s*\) return null/
+assert(HIDES_ON_SIGNED_IN_ONLY.test('  const { isSignedIn } = useUser()\n  if (isSignedIn) return null'),
+  '[0] positive control: the scanner DOES flag `if (isSignedIn) return null` (the exact shape that shipped)')
+assert(!HIDES_ON_SIGNED_IN_ONLY.test('  if (isLoaded && isSignedIn) return null'),
+  '[0] baseline: it does NOT flag the gated `if (isLoaded && isSignedIn) return null`')
+assert(roleSrc.length > 0 && roleSrc.includes('Work with FairSynq'),
+  '[0] the RoleSection slice was found (the checks below are not reading an empty string)')
+
+assert(/const \{ isLoaded, isSignedIn \} = useUser\(\)/.test(roleSrc),
+  'RoleSection reads isLoaded from useUser')
+assert(!HIDES_ON_SIGNED_IN_ONLY.test(roleSrc),
+  'RoleSection does not decide on isSignedIn alone')
+assert(/if \(isLoaded && isSignedIn\) return null/.test(roleSrc),
+  'signed-in users still get no cards once Clerk has loaded (the fix does not show them the cards)')
+assert(/isLoaded \? '' : ' invisible'/.test(roleSrc) && /aria-hidden=\{!isLoaded\}/.test(roleSrc),
+  'while auth is unknown the section is invisible and hidden from assistive tech, holding its exact footprint')
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)
