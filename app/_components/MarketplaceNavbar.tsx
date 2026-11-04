@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useClerk, useUser } from '@clerk/clerk-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { EASE, TIMING } from '@/components/animations/motion'
+import { EASE } from '@/components/animations/motion'
 import {
   ChevronDownIcon,
   UserIcon,
@@ -22,7 +22,7 @@ import { useRole } from '@/app/_contexts/RoleContext'
 export default function MarketplaceNavbar() {
   const pathname = usePathname()
   const { signOut } = useClerk()
-  const { isSignedIn, user } = useUser()
+  const { isLoaded, isSignedIn, user } = useUser()
   const { isVendor, isOrganizer, isRunner } = useRole()
   const [showSignOut, setShowSignOut] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -62,10 +62,10 @@ export default function MarketplaceNavbar() {
 
   return (
     <>
-      <motion.nav
-        initial={{ opacity: 0, y: -12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: TIMING.normal, ease: EASE.decelerate, delay: 0.1 }}
+      {/* Plain <nav>, no entrance animation. Each marketplace page mounts its own navbar, so an
+          entrance animation replayed on every soft navigation: the bar dropped to opacity 0 and
+          faded back in (~600ms) on each click between pages. Chrome should just be there. */}
+      <nav
         className="fixed top-0 left-0 right-0 z-50 h-16 bg-bg-dark/80 backdrop-blur-md border-b border-white/10"
       >
         <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 h-full flex items-center justify-between">
@@ -95,7 +95,12 @@ export default function MarketplaceNavbar() {
 
           {/* Right actions */}
           <div className="flex items-center gap-3">
-            {isSignedIn ? (
+            {/* Auth unknown until Clerk loads (and always on the server). Reserve the slot
+                rather than guessing: defaulting to the signed-out CTA flashed "Get Started" at
+                signed-in users before the avatar replaced it (flicker-class-guard [I]). */}
+            {!isLoaded ? (
+              <div aria-hidden="true" className="w-[7.5rem] h-9" />
+            ) : isSignedIn ? (
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={() => setDropdownOpen(o => !o)}
@@ -170,7 +175,7 @@ export default function MarketplaceNavbar() {
             )}
           </div>
         </div>
-      </motion.nav>
+      </nav>
 
       <SignOutModal
         isOpen={showSignOut}

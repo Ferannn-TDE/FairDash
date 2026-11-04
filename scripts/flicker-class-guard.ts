@@ -273,6 +273,33 @@ settle(slot, B, state)                                             // B resolves
 assert(loadingNow(state) === false,
   '[0] positive control: the CURRENT request DOES clear loading — the page does not spin forever')
 
+// ── [I] the marketplace navbar does not guess the auth state (10th instance) ──────────────
+// MarketplaceNavbar chose its right-hand slot with `isSignedIn ? avatar : "Get Started"`. Clerk's
+// isSignedIn is undefined until it loads, and always on the server, so the server HTML and the
+// first client frames rendered the SIGNED-OUT CTA for everyone. A signed-in user saw "Get
+// Started" flash and then swap to their avatar on every hard load. "Signed out" was the
+// plausible-but-wrong default; the fix reserves the slot until isLoaded.
+console.log('\n[I] the marketplace navbar waits for Clerk before choosing signed-in vs signed-out')
+const navSrc = readFileSync('app/_components/MarketplaceNavbar.tsx', 'utf8')
+
+// The smell: a JSX branch that opens directly on isSignedIn, so undefined falls to the else arm.
+const GUESSES_AUTH = /\{\s*isSignedIn\s*\?/
+assert(GUESSES_AUTH.test('            {isSignedIn ? (\n              <div className="relative" ref={dropdownRef}>'),
+  '[0] positive control: the scanner DOES flag `{isSignedIn ? (` (the exact shape that shipped)')
+assert(!GUESSES_AUTH.test('            {!isLoaded ? (\n              <div aria-hidden="true" />\n            ) : isSignedIn ? ('),
+  '[0] baseline: it does NOT flag the gated form `: isSignedIn ?` behind an isLoaded check')
+
+assert(/const \{ isLoaded, isSignedIn, user \} = useUser\(\)/.test(navSrc),
+  'the navbar reads isLoaded from useUser')
+assert(!GUESSES_AUTH.test(navSrc),
+  'no branch in the navbar opens on isSignedIn alone (undefined can never fall to the signed-out arm)')
+assert(/\{!isLoaded \? \([\s\S]{0,400}?\) : isSignedIn \? \(/.test(navSrc),
+  'the right-hand slot renders a placeholder while auth is unknown, then chooses')
+assert(/aria-hidden="true" className="w-\[7\.5rem\] h-9"/.test(navSrc),
+  'the placeholder has a fixed footprint (no reflow when the CTA or avatar lands)')
+assert(/Get Started/.test(navSrc),
+  'the signed-out CTA still exists (the fix delays it, it does not delete it)')
+
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
 else console.log(`  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

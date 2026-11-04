@@ -19,13 +19,12 @@ export default async function FairsPage() {
     fairs = []
   }
 
-  // Sections by DATE (fairCardState), never the admin status: ended fairs only ever
-  // appear under "Past events", where their card says "View fair".
-  const { live, upcoming, past } = partitionFairCards(fairs)
+  // Sections by DATE (fairCardState), never the admin status. Ended fairs are not listed:
+  // this page shows current events only, and says so when there are none.
+  const { live, upcoming } = partitionFairCards(fairs)
   const sections = [
     { key: 'live', label: 'Happening Now', fairs: live },
     { key: 'upcoming', label: 'Coming Soon', fairs: upcoming },
-    { key: 'past', label: 'Past Events', fairs: past },
   ].filter(s => s.fairs.length > 0)
 
   return (
@@ -35,18 +34,24 @@ export default async function FairsPage() {
         <WelcomeBanner />
         <div className="max-w-[87.5rem] mx-auto px-[6%] lg:px-8 md:px-5 sm:px-4 py-12">
 
-          {/* Header */}
-          <div className="mb-10">
-            <h1 className="font-bebas text-5xl text-white tracking-wide">Discover Fairs</h1>
-            <p className="text-text-gray mt-2">
-              Find a fair near you and order ahead from your favorite vendors.
+          {/* Hero */}
+          <div className="mb-12 text-center sm:text-left">
+            <p className="text-text-gray text-xs sm:text-sm font-semibold uppercase tracking-widest mb-3">
+              Discover Fairs
+            </p>
+            <h1 className="font-bebas text-5xl sm:text-6xl md:text-7xl text-white tracking-wide leading-none">
+              Skip the line. <span className="text-neon-pink">Order ahead.</span>
+            </h1>
+            <p className="text-text-gray mt-4 text-base sm:text-lg max-w-2xl sm:mx-0 mx-auto">
+              Browse vendors, order your food ahead, and pick it up at the booth. No waiting around.
             </p>
           </div>
 
-          {fairs.length === 0 ? (
-            <div className="bg-bg-card border border-white/10 rounded-2xl py-20 text-center">
-              <p className="text-white font-semibold mb-1">No fairs are live right now</p>
-              <p className="text-text-gray text-sm">Check back soon — new fairs are added regularly.</p>
+          {sections.length === 0 ? (
+            <div className="bg-bg-card border border-white/10 rounded-2xl py-20 px-6 text-center">
+              <p className="text-white font-semibold">
+                Events coming soon. Check back for 2027 fairs and festivals.
+              </p>
             </div>
           ) : (
             /* Grouped sections */

@@ -70,7 +70,10 @@ assert(/vendorCountLabel\(/.test(src) && !/vendorCount\} vendors/.test(src), 've
 const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
 assert(/partitionFairCards\(allFairs\)\.current/.test(landing) && /<StaggerItem key=\{fair\.id\} className="h-full">/.test(landing), 'landing shows current fairs only, grid items stretch')
 const fairs = readFileSync('app/fairs/page.tsx', 'utf8')
-assert(/partitionFairCards\(fairs\)/.test(fairs) && /'Past Events'/.test(fairs) && !/f\.status === status/.test(fairs), '/fairs sections by date, ended fairs under Past Events')
+// Ended fairs are not listed on /fairs (Batch 1, T-3): current events only, with the
+// "Events coming soon" message when there are none.
+assert(/partitionFairCards\(fairs\)/.test(fairs) && !/'Past Events'/.test(fairs) && !/f\.status === status/.test(fairs), '/fairs sections by date, ended fairs not listed')
+assert(/Events coming soon\. Check back for 2027 fairs and festivals\./.test(fairs), '/fairs shows the coming-soon message when nothing is current')
 
 function walk(dir: string, out: string[] = []) {
   for (const n of readdirSync(dir)) { const q = join(dir, n); statSync(q).isDirectory() ? walk(q, out) : /\.tsx$/.test(n) && out.push(q) }

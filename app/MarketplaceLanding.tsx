@@ -151,28 +151,53 @@ function QuickActionsSection() {
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
-function ProofSection({ fairCount, vendorTotal }: { fairCount: number; vendorTotal: number }) {
+// Real results, client-supplied copy (Batch 1 task 1.7). Hard-coded until the Batch 3
+// content editor makes it editable. "Nearly" keeps the sales claim exact.
+function ProofSection() {
   return (
     <section className="py-16 sm:py-20 px-5">
       <div className="max-w-5xl mx-auto">
-
-        {/* Stats — contained card */}
-        <Stagger slow className="bg-white/[0.02] rounded-2xl border border-white/[0.04] grid grid-cols-2 sm:grid-cols-4 gap-8 p-8 sm:p-10">
-          {[
-            { value: `${fairCount}`,    label: 'Fairs on platform' },
-            { value: `${vendorTotal}+`, label: 'Vendors served' },
-            { value: '~15 MIN',         label: 'Avg. wait saved' },
-            { value: 'FREE',            label: 'To join as a vendor' },
-          ].map(({ value, label }) => (
-            <StaggerItem key={label} className="text-center">
-              <p className="font-bebas text-2xl sm:text-3xl text-neon-pink">{value}</p>
-              <p className="mt-1 text-xs text-text-gray font-inter">{label}</p>
-            </StaggerItem>
-          ))}
-        </Stagger>
-
+        <StatsTiles />
       </div>
     </section>
+  )
+}
+
+// Three equal tiles and one caption.
+const STAT_TILES = [
+  { value: '288',  label: 'orders',      prefix: null },
+  { value: '$16K', label: 'in sales',    prefix: 'nearly' },
+  { value: 'FREE', label: 'for vendors', prefix: null },
+]
+
+function StatsTiles() {
+  return (
+    <div className="bg-white/[0.02] rounded-2xl border border-white/[0.04] px-4 py-8 sm:p-10">
+      <Stagger slow className="grid grid-cols-3 divide-x divide-white/[0.08]">
+        {STAT_TILES.map(({ value, label, prefix }) => (
+          <StaggerItem key={label} className="text-center px-2">
+            {/* "nearly" sits above the figure on phones (a 375px tile can't hold both on one
+                line) and inline from sm up. The other tiles reserve the same line on phones so
+                the three figures stay level. */}
+            <p className="sm:hidden h-4 font-inter text-[10px] font-semibold uppercase tracking-wider text-text-gray leading-4">
+              {prefix ?? '\u00a0'}
+            </p>
+            <p className="font-bebas text-4xl sm:text-5xl text-neon-pink tracking-wide leading-none whitespace-nowrap">
+              {prefix && (
+                <span className="hidden sm:inline font-inter text-xs font-semibold uppercase tracking-wider text-text-gray align-middle mr-1">
+                  {prefix}
+                </span>
+              )}
+              {value}
+            </p>
+            <p className="mt-2 text-xs sm:text-sm text-text-gray font-inter">{label}</p>
+          </StaggerItem>
+        ))}
+      </Stagger>
+      <p className="mt-6 text-center text-[11px] sm:text-xs text-text-gray/80 font-inter">
+        Over our first two seasons
+      </p>
+    </div>
   )
 }
 
@@ -326,7 +351,7 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
               transition={{ duration: TIMING.fast, ease: EASE.decelerate, delay: 0.1 }}
               className="text-text-gray text-xs sm:text-sm font-semibold uppercase tracking-widest mb-5"
             >
-              The multi-fair food marketplace
+              For fairs &amp; festivals
             </motion.p>
 
             <motion.h1
@@ -335,9 +360,9 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
               transition={{ duration: 0.7, ease: EASE.decelerate, delay: 0.2 }}
               className="font-bebas text-5xl sm:text-6xl md:text-7xl lg:text-[7rem] text-white tracking-wide leading-none mb-6"
             >
-              Skip the line.
+              Long lines are
               <br />
-              <span className="text-neon-pink">Order ahead.</span>
+              <span className="text-neon-pink">lost sales.</span>
             </motion.h1>
 
             <motion.p
@@ -346,8 +371,8 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
               transition={{ duration: 0.6, ease: EASE.decelerate, delay: 0.5 }}
               className="text-text-gray text-base sm:text-lg md:text-xl max-w-2xl mx-auto mb-10"
             >
-              Browse vendors, order your food in advance, and pick it up at the
-              booth — no waiting around.
+              Mobile ordering and vendor management in one platform. Fairgoers skip
+              the line, vendors sell more, and organizers run it all from one dashboard.
             </motion.p>
 
             <motion.div
@@ -386,31 +411,37 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
           </div>
         </section>
 
-        {/* ── Active / upcoming fairs ── */}
+        {/* ── Active / upcoming fairs, or "Coming in 2027" when there are none ── */}
         <section className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-20">
-          <Reveal className="flex items-center justify-between mb-8 sm:mb-10">
-            <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
-              {activeFairs.length > 0 ? (
-                <>Happening <span className="text-neon-pink">Now</span> &amp; Soon</>
-              ) : (
-                'Upcoming Fairs'
-              )}
-            </h2>
-            <Link href="/fairs" className="text-neon-pink text-sm font-semibold hover:underline shrink-0 ml-4">
-              View all →
-            </Link>
-          </Reveal>
-
-          {activeFairs.length === 0 && (
-            <p className="text-text-gray text-sm">No fairs are live right now. Check back soon.</p>
+          {activeFairs.length > 0 ? (
+            <>
+              <Reveal className="flex items-center justify-between mb-8 sm:mb-10">
+                <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
+                  Happening <span className="text-neon-pink">Now</span> &amp; Soon
+                </h2>
+                <Link href="/fairs" className="text-neon-pink text-sm font-semibold hover:underline shrink-0 ml-4">
+                  View all →
+                </Link>
+              </Reveal>
+              <Stagger className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+                {activeFairs.map((fair) => (
+                  <StaggerItem key={fair.id} className="h-full">
+                    <FairCard fair={fair} />
+                  </StaggerItem>
+                ))}
+              </Stagger>
+            </>
+          ) : (
+            <Reveal className="max-w-2xl mx-auto text-center bg-white/[0.03] border border-white/[0.08] rounded-2xl px-6 py-10 sm:py-12">
+              <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
+                Coming in <span className="text-neon-pink">2027</span>
+              </h2>
+              <p className="mt-3 text-text-gray text-sm sm:text-base leading-relaxed">
+                Coming to fairs and festivals in 2027. Events announced soon. Vendors, organizers
+                and partner organizations can sign up now.
+              </p>
+            </Reveal>
           )}
-          <Stagger className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-            {activeFairs.map((fair) => (
-              <StaggerItem key={fair.id} className="h-full">
-                <FairCard fair={fair} />
-              </StaggerItem>
-            ))}
-          </Stagger>
         </section>
 
         {/* ── Role cards — how will you FairSynq? ── */}
@@ -420,10 +451,7 @@ export default function MarketplaceLanding({ initialFairs }: { initialFairs: Pub
         <HowItWorksSection />
 
         {/* ── Stats ── */}
-        <ProofSection
-          fairCount={allFairs.length}
-          vendorTotal={allFairs.reduce((s, f) => s + f.vendorCount, 0)}
-        />
+        <ProofSection />
 
         {/* ── FAQ ── */}
         <FAQSection />
