@@ -86,3 +86,11 @@ export function withRoleAdded(roles: readonly string[], role: string): string[] 
 export function withRoleRemoved(roles: readonly string[], role: string): string[] {
   return roles.filter((r) => r !== role)
 }
+
+// ── Approvals (Batch 1 item 9) ───────────────────────────────────────────────────────────────
+// Who decides sign-ups on /admin/approvals: the strict admins plus platform_manager (the client),
+// i.e. the same set as settings. Kept as its own name so the two can diverge without a hunt.
+export const APPROVALS_ROLES = SETTINGS_ROLES
+export function hasApprovalsRole(meta: unknown): boolean {
+  return hasSettingsRole(meta)
+}

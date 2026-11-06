@@ -146,9 +146,9 @@ async function main() {
   assert(/source: '\/become-driver', destination: '\/partners', permanent: false/.test(nextConfig), '/become-driver redirects (temporarily) to /partners')
   assert(!/source: '\/sign-in\/runner'/.test(nextConfig), 'runner sign-in is NOT redirected (existing runners keep it)')
   const fairsRoute = readFileSync('app/api/admin/fairs/route.ts', 'utf8'), picker = readFileSync('app/admin/_components/FairPicker.tsx', 'utf8')
-  assert(/partnerOrganization\.count\(\{ where: \{ approvalStatus: 'PENDING' \} \}\)/.test(fairsRoute) && /requireStrictAdminAuth\(\)/.test(fairsRoute),
-    'the pending count comes from the strict-admin fairs route')
-  assert(/!loading && partnerPending > 0 &&/.test(picker), 'the picker shows it only once loaded and only when above zero')
+  assert(/countPendingApplications\(\)/.test(fairsRoute) && /requireStrictAdminAuth\(\)/.test(fairsRoute),
+    'the pending count (vendors, organizers and partners since item 9) comes from the strict-admin fairs route')
+  assert(/!loading && pending > 0 &&[\s\S]{0,120}href="\/admin\/approvals"/.test(picker), 'the picker shows it only once loaded, only when above zero, linking to /admin/approvals')
 }
 
 main()

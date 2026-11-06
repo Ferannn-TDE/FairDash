@@ -1014,6 +1014,31 @@ export function startOrderWorker() {
     void import('../lib/health').then(h => h.recordRoleReconcileStatus({ state: 'off', reason, at: new Date().toISOString() }))
   }
 
+  // ── Notification outbox delivery (Batch 1 item 9) ─────────────────────────────────────
+  // Sends due sign-up alerts and applicant emails (lib/notifications.ts). In-process timer, like
+  // the role reconcile above (no BullMQ repeat). Claims are atomic, so an overlapping replica is
+  // harmless; a run still going is skipped. With no email provider (production today) it only
+  // marks rows held: nothing is sent, logged or marked SENT.
+  const notifyEveryMs = Number(process.env.WORKER_NOTIFICATIONS_INTERVAL_MS ?? 60_000)
+  if (notifyEveryMs > 0) {
+    let notifyRunning = false
+    const runNotifications = async () => {
+      if (notifyRunning) return
+      notifyRunning = true
+      try {
+        const { deliverDueNotifications } = await import('../lib/notifications')
+        const r = await deliverDueNotifications()
+        if (r.failed > 0) console.warn('[Worker] notifications: some emails failed after retries', r)
+      } catch (e) {
+        console.error('[Worker] notification delivery failed; next run retries:', e)
+      } finally {
+        notifyRunning = false
+      }
+    }
+    setTimeout(() => { void runNotifications() }, 15_000)
+    setInterval(() => { void runNotifications() }, notifyEveryMs)
+  }
+
   // ── THE BOOT SEAM ────────────────────────────────────────────────────────────────────────
   // console.WARN, not log: Railway runs NODE_ENV=production, where the Next compiler strips
   // console.log/info call sites and logger.info is a hard no-op. Every line above this one is

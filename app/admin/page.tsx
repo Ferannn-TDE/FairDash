@@ -18,8 +18,8 @@ export default async function AdminIndexPage() {
     redirect('/admin/login')
   }
   if (!user) redirect('/admin/login')
-  // A settings-only platform_manager has no fair picker: their admin home is /admin/settings.
-  if (isPlatformManagerOnly(user.publicMetadata)) redirect('/admin/settings')
+  // A platform_manager has no fair picker: their admin home is the approvals queue (item 9).
+  if (isPlatformManagerOnly(user.publicMetadata)) redirect('/admin/approvals')
   if (!hasRole(user.publicMetadata, 'admin')) redirect('/')
 
   // The fair picker. An admin oversees fairs it does NOT own, so the list can't

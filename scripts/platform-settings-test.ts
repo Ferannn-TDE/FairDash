@@ -138,12 +138,28 @@ async function main() {
   // Static info stubs: no gate and no data (no db import). Listed, not silently skipped.
   const STATIC_STUBS = ['route.ts', join('dashboard', 'route.ts')]
   const SELF = join('settings', 'route.ts')
+  // platform_manager's second agreed grant (item 9): the approvals page's routes, and nothing else.
+  const APPROVALS = join('approvals') + sep
+  let approvalsProbed = 0, approvalsAdmitted = 0
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
   let probed = 0, refused = 0, controlPassed = 0
   const leaks: string[] = [], controlFails: string[] = []
   for (const file of routeFiles) {
     const rel = relative(API_ROOT, file)
     if (rel === SELF) continue
+    if (rel.startsWith(APPROVALS)) {
+      const params: Record<string, string> = {}
+      for (const m of rel.matchAll(/\[([^\]]+)\]/g)) params[m[1]] = m[1] === 'kind' ? 'vendor' : `${PFX}nope`
+      const mod: Record<string, any> = await import(file)
+      for (const method of METHODS) {
+        if (typeof mod[method] !== 'function') continue
+        approvalsProbed++
+        as('platform_manager')
+        const r: Response = await mod[method](req('/api/admin/' + rel, method, {}), { params: Promise.resolve(params) })
+        if (r.status !== 401 && r.status !== 403) approvalsAdmitted++
+      }
+      continue
+    }
     if (STATIC_STUBS.includes(rel)) {
       const s = readFileSync(file, 'utf8')
       assert(!/from '@\/lib\/db'|from '\.\.?\/.*db'/.test(s) && !/prisma/i.test(s),
@@ -172,7 +188,8 @@ async function main() {
   for (const l of controlFails) console.log(`     ↳ control refused ${l}`)
   assert(probed >= 40, `[0] the scan found the admin API (${probed} handler methods across ${routeFiles.length} route files)`)
   assert(controlPassed === probed, `[0] positive control: super_admin gets past the gate on all ${probed} (${controlPassed})`)
-  assert(refused === probed, `platform_manager → 403 on all ${probed} (${refused})`)
+  assert(refused === probed, `platform_manager → 403 on all ${probed} other admin handlers (${refused})`)
+  assert(approvalsProbed === 3 && approvalsAdmitted === 3, `platform_manager gets past the gate on exactly the 3 approvals handlers (${approvalsAdmitted}/${approvalsProbed})`)
 
   // ── [3] page gates ─────────────────────────────────────────────────────────────────────
   console.log('\n[3] Where each role lands')
@@ -183,7 +200,7 @@ async function main() {
   const operatorsPage = (await import('../app/admin/vendor-members/page')).default
 
   as('platform_manager')
-  assert(await redirectOf(() => adminIndex()) === '/admin/settings', 'platform_manager: /admin → /admin/settings')
+  assert(await redirectOf(() => adminIndex()) === '/admin/approvals', 'platform_manager: /admin → /admin/approvals (their work queue, item 9)')
   assert(await redirectOf(() => settingsPage()) === null, 'platform_manager: /admin/settings renders')
   assert(await redirectOf(() => fairLayout({ children: null })) === '/', 'platform_manager: a fair\'s admin pages send it away')
   assert(await redirectOf(() => organizersPage()) === '/', 'platform_manager: /admin/organizers sends it away')
@@ -337,8 +354,10 @@ async function main() {
     }
     return out
   }
-  const fake = noteViolations([...sources, { path: 'lib/signup-alerts.ts', text: "await getSetting('alerts.email')" }])
-  assert(fake.some(v => v.startsWith('alerts.email: read by lib/signup-alerts.ts')), '[0] positive control: a fabricated reader makes the check demand the note\'s removal')
+  const fake = noteViolations([...sources, { path: 'lib/sms-alerts.ts', text: "await getSetting('alerts.phone')" }])
+  assert(fake.some(v => v.startsWith('alerts.phone: read by lib/sms-alerts.ts')), '[0] positive control: a fabricated reader makes the check demand the note\'s removal')
+  assert(!settingsLib.SETTINGS['alerts.email'].hasOwnProperty('notInEffect') && sources.some(f => f.path === 'lib/notifications.ts' && f.text.includes("'alerts.email'")),
+    'alerts.email is read by the outbox (lib/notifications.ts) and its note is gone; alerts.phone keeps its note')
   const real = noteViolations(sources)
   for (const v of real) console.log(`     ↳ ${v}`)
   assert(real.length === 0, 'the alert settings carry the note (nothing reads them yet); delivery.enabled is read, so it has none')

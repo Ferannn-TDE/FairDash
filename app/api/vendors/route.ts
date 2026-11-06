@@ -4,7 +4,8 @@ import { success, apiError, paginated } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { uniqueVendorSlug } from '@/lib/vendor-slug'
-import { createVendorWithOwner } from '@/lib/payee-membership'
+import { createVendorWithOwner, syncPayeeRoles } from '@/lib/payee-membership'
+import { enqueueSignupAlert } from '@/lib/notifications'
 import { VENDOR_AGREEMENT_VERSION } from '@/lib/legal/vendor-agreement'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { SELLABLE } from '@/lib/menu/on-menu'
@@ -108,28 +109,38 @@ export async function POST(req: Request) {
     // timestamp + IP set server-side (authoritative — not client-supplied).
     const acceptedIp = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? null
 
-    // Vendor + owner VendorMember in one write, then the vendor role (lib/payee-membership).
-    const vendor = await createVendorWithOwner(
-      {
-        eventId: event.id,
-        name,
-        slug,
-        description,
-        cuisineType,
-        boothNumber,
-        status: 'PENDING',
-        contactName:  contactName  ?? null,
-        contactEmail: contactEmail ?? null,
-        contactPhone: contactPhone ?? null,
-        termsAcceptedName: String(legalName).trim(),
-        // Always the version this server publishes (lib/legal/vendor-agreement.ts), never a value
-        // from the browser: the record says which terms were actually shown.
-        termsVersion:      VENDOR_AGREEMENT_VERSION,
-        termsAcceptedAt:   new Date(),
-        termsAcceptedIp:   acceptedIp,
-      },
-      { userId: user.id },
-    )
+    // Vendor + owner VendorMember AND the client's sign-up alert, in one transaction (item 9): the
+    // alert can't exist without the application or go missing with it. Roles sync after commit
+    // (lib/payee-membership deferRoleSync), so a slow Clerk call can't hold the transaction open.
+    const vendor = await db.$transaction(async tx => {
+      const v = await createVendorWithOwner(
+        {
+          eventId: event.id,
+          name,
+          slug,
+          description,
+          cuisineType,
+          boothNumber,
+          status: 'PENDING',
+          contactName:  contactName  ?? null,
+          contactEmail: contactEmail ?? null,
+          contactPhone: contactPhone ?? null,
+          termsAcceptedName: String(legalName).trim(),
+          // Always the version this server publishes (lib/legal/vendor-agreement.ts), never a value
+          // from the browser: the record says which terms were actually shown.
+          termsVersion:      VENDOR_AGREEMENT_VERSION,
+          termsAcceptedAt:   new Date(),
+          termsAcceptedIp:   acceptedIp,
+        },
+        { userId: user.id },
+        { db: tx, deferRoleSync: true },
+      )
+      await enqueueSignupAlert(tx, v.id, {
+        kind: 'vendor', name: v.name, contactName: v.contactName, email: v.contactEmail ?? user.email, phone: v.contactPhone,
+      })
+      return v
+    })
+    await syncPayeeRoles(user.id, 'payee-membership:vendor')
 
     return success(vendor, 201)
   } catch (err) {

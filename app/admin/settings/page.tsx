@@ -4,7 +4,7 @@ import { currentUser } from '@clerk/nextjs/server'
 import { ChevronLeft } from 'lucide-react'
 import { hasSettingsRole, isPlatformManagerOnly } from '@/lib/roles'
 import PlatformSettingsPanel from '../_components/PlatformSettingsPanel'
-import AdminSignOutButton from '../_components/AdminSignOutButton'
+import PlatformManagerHeader from '../_components/PlatformManagerHeader'
 
 export const metadata = { title: 'Platform settings — FairSynq Admin' }
 
@@ -35,12 +35,7 @@ export default async function PlatformSettingsPage() {
     <div className="min-h-screen bg-[#0F0F0F] px-4 sm:px-5 md:px-[6%] lg:px-8 py-8 sm:py-10">
       <div className="max-w-[56rem] mx-auto">
         {managerOnly ? (
-          <div className="flex items-center justify-between mb-6">
-            <span className="font-bebas text-xl tracking-widest text-white">
-              FAIR<span className="text-neon-pink">SYNQ</span>
-            </span>
-            <AdminSignOutButton />
-          </div>
+          <PlatformManagerHeader current="settings" />
         ) : (
           <Link
             href="/admin"

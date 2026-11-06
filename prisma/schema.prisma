@@ -2047,3 +2047,56 @@ model PartnerOrganization {
   @@index([approvalStatus])
   @@index([contactEmail])
 }
+
+// ── Notification outbox (Batch 1 item 9, B1.12) ──────────────────────────────────────────────
+// Written in the SAME transaction as the application or decision it announces; delivered later by
+// the worker (JOB_DELIVER_NOTIFICATIONS). Email never runs inline, so it can't block or fail a
+// sign-up. lib/notifications.ts owns every read and write.
+model Notification {
+  id       String @id @default(cuid())
+  channel  String @default("email") // email (sms later)
+  audience String // admin | applicant
+  /// null for admin rows: resolved from the alerts.email setting at send time.
+  to       String?
+  template String
+  payload  Json
+
+  /// PENDING | SENDING | SENT | FAILED | SKIPPED
+  status        String    @default("PENDING")
+  /// Why a PENDING row is waiting: NO_EMAIL_PROVIDER | NO_ALERT_EMAIL (null = due normally).
+  heldReason    String?
+  attempts      Int       @default(0)
+  lastError     String?
+  nextAttemptAt DateTime  @default(now())
+  sentAt        DateTime?
+
+  /// One row per event, ever: a retried request can't queue the same message twice.
+  dedupeKey String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([audience, status])
+}
+
+/// Audit for the approvals page (item 9): every approve, reject and document view. Append-only.
+model ApprovalAction {
+  id              String   @id @default(cuid())
+  /// APPROVE | REJECT | VIEW_DOCUMENT
+  action          String
+  /// vendor | organizer | partner
+  applicationType String
+  applicationId   String
+  /// Clerk id of who acted, and the role they acted as (super_admin | admin | platform_manager).
+  actorId   String
+  actorType String
+  reason    String?
+  /// The document viewed (VIEW_DOCUMENT), or decision detail (e.g. whether the owner row changed).
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([applicationType, applicationId])
+  @@index([actorId])
+  @@index([createdAt])
+}

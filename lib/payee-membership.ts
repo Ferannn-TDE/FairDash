@@ -27,7 +27,17 @@ type Db = {
   vendorMember: { create(args: { data: Prisma.VendorMemberUncheckedCreateInput }): Promise<VendorMember> }
   orgMember: { createMany(args: { data: Prisma.OrgMemberCreateManyInput[]; skipDuplicates: boolean }): Promise<{ count: number }> }
 }
-interface Opts { db?: Db }
+interface Opts {
+  db?: Db
+  /** Skip the role sync here because the caller runs inside a transaction (item 9: the vendor row
+   *  and its sign-up alert commit together). The caller MUST call syncPayeeRoles after commit. */
+  deferRoleSync?: boolean
+}
+
+/** The post-commit half of a deferRoleSync create. Best-effort, like every sync here. */
+export async function syncPayeeRoles(userId: string, site: string): Promise<void> {
+  await syncRoles(userId, site)
+}
 
 async function syncRoles(userId: string, site: string): Promise<void> {
   try {
@@ -55,7 +65,7 @@ export async function createVendorWithOwner(
   const created = await (opts.db ?? db).vendor.create({
     data: { ...vendor, vendorMembers: { create: { ...owner, role: 'owner' } } },
   })
-  await syncRoles(owner.userId, 'payee-membership:vendor')
+  if (!opts.deferRoleSync) await syncRoles(owner.userId, 'payee-membership:vendor')
   return created
 }
 

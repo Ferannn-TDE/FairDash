@@ -256,6 +256,17 @@ export async function PATCH(
     // re-approve (REJECTED → ACTIVE) all route through this same handler with
     // status='ACTIVE'; gating those too would turn "pause a vendor" into a one-way door
     // for any booth that predates this requirement.
+    // ── ORGANIZER APPROVAL OF VENDORS IS SWITCHED OFF (item 9, pending C-9) ─────────────────
+    // "Only the client approves": a new vendor (PENDING) is approved or rejected on /admin/approvals
+    // or the admin fair Vendors page, never here (a reject here would split the booth from its owner
+    // and skip the applicant's email). Pausing, suspending and reactivating active vendors stay.
+    // To switch organizer approval back on (if the client answers C-9 that way): set
+    // ORGANIZER_MAY_APPROVE_VENDORS below to true; the documents gate under it still applies.
+    const ORGANIZER_MAY_APPROVE_VENDORS = false
+    if (!ORGANIZER_MAY_APPROVE_VENDORS && statusChanging && vendor.status === VendorStatus.PENDING
+        && (body.status === VendorStatus.ACTIVE || body.status === VendorStatus.REJECTED)) {
+      return apiError('New vendors are approved by FairSynq. You can pause or suspend vendors once they are active.', 403, 'APPROVAL_BY_PLATFORM')
+    }
     if (statusChanging && body.status === VendorStatus.ACTIVE && vendor.status === VendorStatus.PENDING) {
       if (!vendorDocsComplete(vendor)) {
         return apiError(

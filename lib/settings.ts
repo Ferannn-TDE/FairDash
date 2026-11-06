@@ -95,7 +95,7 @@ export const SETTINGS = {
     help: `Where sign-up alerts are sent. Up to ${MAX_ALERT_EMAILS} addresses, separated by commas. Until one is set, alerts are held.`,
     class: 'ops',
     default: null,
-    notInEffect: 'Not in effect yet: used once sign-up alerts ship.',
+    // Read by the notification outbox (item 9): no "not in effect yet" note any more.
     parse: parseEmailList,
     format: (v: string[]) => v.join(', '),
   } satisfies SettingDef<string[]>,

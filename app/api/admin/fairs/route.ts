@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireStrictAdminAuth } from '@/lib/auth'
+import { countPendingApplications } from '@/lib/approvals'
 
 // GET /api/admin/fairs
 // The admin fair picker's backing list. This is the ONE genuinely net-new admin
@@ -33,11 +34,11 @@ export async function GET(_req: NextRequest) {
       },
     })
 
-    // Read-only count for the picker (item 7); review and approval come with item 9.
-    const partnerApplicationsPending = await db.partnerOrganization.count({ where: { approvalStatus: 'PENDING' } })
+    // Pending sign-ups (vendors, organizers, partners) for the picker's link to /admin/approvals.
+    const applicationsPending = await countPendingApplications()
 
     return success({
-      partnerApplicationsPending,
+      applicationsPending,
       fairs: fairs.map(f => ({
         id: f.id,
         name: f.name,

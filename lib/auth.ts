@@ -276,3 +276,15 @@ export async function requireSettingsAdmin(): Promise<{ clerkId: string; actorTy
 
   return { clerkId: userId, actorType }
 }
+
+/** Approvals gate (item 9): admin | super_admin | platform_manager — the client decides sign-ups.
+ *  Same set as settings; platform_manager reaches nothing else. Returns the role recorded on the
+ *  decision audit. */
+export async function requireApprovalsAdmin(): Promise<{ clerkId: string; actorType: SettingsRole }> {
+  const { userId } = await auth()
+  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+  const user = await currentUser()
+  const actorType = settingsActorRole(user?.publicMetadata)
+  if (!actorType) throw new ApiError('Forbidden — approvals access required', 403, 'FORBIDDEN')
+  return { clerkId: userId, actorType }
+}

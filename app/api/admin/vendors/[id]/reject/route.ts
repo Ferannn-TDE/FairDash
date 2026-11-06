@@ -2,50 +2,32 @@ import { NextRequest } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
-import { ApiError, handleApiError } from '@/lib/api-error'
-import { requireAdminAuth } from '@/lib/auth'
-import { VendorStatus } from '@prisma/client'
+import { handleApiError } from '@/lib/api-error'
+import { requireStrictAdminAuth } from '@/lib/auth'
+import { decideVendor } from '@/lib/approvals'
+import { settingsActorRole } from '@/lib/roles'
+import { currentUser } from '@clerk/nextjs/server'
 
-// PATCH /api/admin/vendors/[id]/reject
-// Sets vendor status to REJECTED.
-// Body: { reason: string }
-
+// PATCH /api/admin/vendors/[id]/reject   Body: { reason: string }
+// The fair Vendors page's reject button. Same single decision as the approvals page
+// (lib/approvals.ts decideVendor): reason required and emailed to the applicant; the owner row is
+// rejected only if it was still PENDING. Strict admins only since item 9 (C-9).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAdminAuth()
+    const clerkId = await requireStrictAdminAuth()
+    const user = await currentUser()
+    const { id } = await params
+    let reason: unknown
+    try { reason = (await req.json()).reason } catch { /* validated below */ }
 
-    const vendor = await db.vendor.findUnique({ where: { id: (await params).id } })
-    if (!vendor) throw new ApiError('Vendor not found', 404, 'VENDOR_NOT_FOUND')
-
-    if (vendor.status !== VendorStatus.PENDING) {
-      throw new ApiError('Only PENDING vendors can be rejected', 409, 'INVALID_STATUS')
-    }
-
-    let reason: string | undefined
-    try {
-      const body = await req.json()
-      reason = body.reason
-    } catch { /* body optional */ }
-
-    if (!reason?.trim()) {
-      throw new ApiError('A rejection reason is required', 400, 'VALIDATION_ERROR')
-    }
-
-    const updated = await db.vendor.update({
-      where: { id: (await params).id },
-      data: { status: VendorStatus.REJECTED },
-      select: { id: true, name: true, status: true },
-    })
+    await decideVendor(id, 'reject', reason, { clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin' })
+    const updated = await db.vendor.findUnique({ where: { id }, select: { id: true, name: true, status: true } })
 
     // No longer ACTIVE → must drop from the cached customer discovery list ('vendors').
     revalidateTag('vendors', 'default')
-
-    // TODO: send rejection email/notification to vendor with reason
-    // await sendVendorRejectionEmail(vendor, reason)
-
     return success({ vendor: updated, reason })
   } catch (err) {
     return handleApiError(err)

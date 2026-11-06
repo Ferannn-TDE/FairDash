@@ -1,5 +1,6 @@
 import { db } from './db'
 import { addOrgOwner } from './payee-membership'
+import { enqueueSignupAlert } from './notifications'
 
 // ─── Organizer bootstrap — the SINGLE HOME for "provision a self-signup organizer" ──
 //
@@ -52,16 +53,24 @@ export async function ensureOrganizerBootstrap(
   // string; nothing assumes a cuid shape.)
   const organizerId = `org_${userId}`
 
-  await db.fairOrganizer.createMany({
-    data: [
-      {
-        id: organizerId,
-        name: profile.name ?? profile.email,
-        contactEmail: profile.email,
-        ...(profile.phone ? { contactPhone: profile.phone } : {}),
-      },
-    ],
-    skipDuplicates: true, // ON CONFLICT (id) DO NOTHING
+  // The organizer row and the client's sign-up alert commit together (item 9). Both are
+  // idempotent: ON CONFLICT DO NOTHING on the id, and on the alert's dedupe key, so a retried or
+  // concurrent bootstrap writes neither twice.
+  await db.$transaction(async tx => {
+    await tx.fairOrganizer.createMany({
+      data: [
+        {
+          id: organizerId,
+          name: profile.name ?? profile.email,
+          contactEmail: profile.email,
+          ...(profile.phone ? { contactPhone: profile.phone } : {}),
+        },
+      ],
+      skipDuplicates: true, // ON CONFLICT (id) DO NOTHING
+    })
+    await enqueueSignupAlert(tx, organizerId, {
+      kind: 'organizer', name: profile.name ?? profile.email, contactName: profile.name, email: profile.email, phone: profile.phone,
+    })
   })
 
   // Owner OrgMember (ON CONFLICT DO NOTHING) + the organizer role, via the one create helper.

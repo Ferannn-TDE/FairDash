@@ -172,25 +172,11 @@ function VendorCard({
 
       {/* Action buttons */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* New vendors are approved by FairSynq (item 9, pending C-9): no approve/reject here. */}
         {vendor.status === 'PENDING' && (
-          <>
-            <button
-              onClick={() => onStatusChange(vendor.id, 'ACTIVE')}
-              disabled={isActing}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/10 text-xs font-semibold font-inter transition-colors disabled:opacity-40 cursor-pointer"
-            >
-              <CheckCircleIcon className="w-3.5 h-3.5 shrink-0" />
-              Approve
-            </button>
-            <button
-              onClick={() => onStatusChange(vendor.id, 'REJECTED')}
-              disabled={isActing}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-semibold font-inter transition-colors disabled:opacity-40 cursor-pointer"
-            >
-              <XCircleIcon className="w-3.5 h-3.5 shrink-0" />
-              Reject
-            </button>
-          </>
+          <p className="flex-1 py-2 px-3 rounded-xl border border-white/10 text-[#888] text-xs font-semibold font-inter text-center">
+            Awaiting FairSynq approval
+          </p>
         )}
         {vendor.status === 'ACTIVE' && (
           <>
