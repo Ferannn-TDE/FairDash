@@ -305,7 +305,8 @@ export default function CreateFairPage() {
                   ${i < step ? 'bg-[#FF0077] text-white' : i === step ? 'bg-[#FF0077] text-white ring-2 ring-[#FF0077]/30' : 'bg-white/5 text-[#666]'}`}>
                   {i < step ? '✓' : i + 1}
                 </div>
-                <span className={`text-xs font-inter hidden sm:inline ${i <= step ? 'text-white' : 'text-[#666]'}`}>{s}</span>
+                {/* All five labels need ~630px; until there's room (desktop), only the current step is named. */}
+                <span className={`text-xs font-inter whitespace-nowrap ${i === step ? 'inline' : 'hidden desktop:inline'} ${i <= step ? 'text-white' : 'text-[#666]'}`}>{s}</span>
               </button>
               {i < STEPS.length - 1 && <div className={`mx-2 sm:mx-3 w-6 sm:w-10 h-px ${i < step ? 'bg-[#FF0077]' : 'bg-white/10'}`} />}
             </div>

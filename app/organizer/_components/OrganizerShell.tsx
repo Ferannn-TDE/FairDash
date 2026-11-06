@@ -43,7 +43,8 @@ interface FairBadges {
 }
 
 // ─── Nav configs ──────────────────────────────────────────────────────────────
-// Single source of truth for sidebar (desktop) + bottom nav (mobile).
+// Single source of truth for sidebar (desktop) + bottom nav (mobile). The sidebar shows from lg
+// (968px): below that a 256px sidebar left forms too little room, so the bottom nav takes over.
 // Edit here to change navigation everywhere.
 
 type NavItem = {
@@ -222,7 +223,7 @@ export default function OrganizerShell({ children, userInitials, userName, userE
     <div className="min-h-screen bg-[#0a0a0a] flex overflow-x-hidden">
 
       {/* ── Desktop sidebar ─────────────────────────────────────────────── */}
-      <aside className="hidden md:flex fixed inset-y-0 left-0 z-50 w-64 bg-[#111111] border-r border-white/5 flex-col">
+      <aside className="hidden lg:flex fixed inset-y-0 left-0 z-50 w-64 bg-[#111111] border-r border-white/5 flex-col">
         <SidebarContent
           currentFairId={currentFairId}
           fairs={fairs}
@@ -234,10 +235,10 @@ export default function OrganizerShell({ children, userInitials, userName, userE
       </aside>
 
       {/* ── Main area ───────────────────────────────────────────────────── */}
-      <div className="md:pl-64 flex-1 flex flex-col min-h-screen">
+      <div className="lg:pl-64 flex-1 flex flex-col min-h-screen min-w-0">
 
         {/* Mobile top header — logo + bell, no hamburger */}
-        <header className="md:hidden sticky top-0 z-40 h-14 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 shrink-0">
+        <header className="lg:hidden sticky top-0 z-40 h-14 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 shrink-0">
           <Link href="/" className="group flex items-center">
             <span className="font-bebas text-lg text-white group-hover:text-[#FF0077] transition-colors leading-none">FAIR</span>
             <span className="font-bebas text-lg text-[#FF0077] group-hover:text-white transition-colors leading-none">SYNQ</span>
@@ -257,14 +258,14 @@ export default function OrganizerShell({ children, userInitials, userName, userE
         </header>
 
         {/* Page content */}
-        <main className="flex-1 p-5 sm:p-8 pb-24 md:pb-8">
+        <main className="flex-1 min-w-0 p-5 sm:p-8 pb-24 lg:pb-8">
           {children}
         </main>
       </div>
 
       {/* ── Mobile bottom nav ───────────────────────────────────────────── */}
       <nav
-        className="fixed bottom-0 inset-x-0 z-40 bg-[#111111] border-t border-white/5 flex md:hidden items-stretch"
+        className="fixed bottom-0 inset-x-0 z-40 bg-[#111111] border-t border-white/5 flex lg:hidden items-stretch"
         style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}
       >
         {BOTTOM_NAV.map(item => {
