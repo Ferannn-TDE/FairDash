@@ -2,7 +2,7 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from './db'
 import { ApiError } from './api-error'
 import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
-import { hasRole, hasStrictAdminRole } from './roles'
+import { hasRole, hasStrictAdminRole, settingsActorRole, type SettingsRole } from './roles'
 import { organizerSuspensionError } from './organizer-suspension'
 import { organizerApprovalError } from './organizer-approval'
 import { boothOperatingMessage, vendorOperatorState } from './vendor-operator-state'
@@ -260,4 +260,19 @@ export async function hasStrictAdminAuth(): Promise<boolean> {
   if (!userId) return false
   const user = await currentUser()
   return hasStrictAdminRole(user?.publicMetadata)
+}
+
+/** Platform settings gate (Batch 1 item 5): admin | super_admin | platform_manager, NOT
+ *  event_operator (scoped to one fair; these settings apply to all of them). platform_manager
+ *  is not in ADMIN_ROLES, so this is the only gate that admits it. Same FRESH currentUser()
+ *  read as requireStrictAdminAuth. Returns the role the change is recorded under. */
+export async function requireSettingsAdmin(): Promise<{ clerkId: string; actorType: SettingsRole }> {
+  const { userId } = await auth()
+  if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
+
+  const user = await currentUser()
+  const actorType = settingsActorRole(user?.publicMetadata)
+  if (!actorType) throw new ApiError('Forbidden — settings access required', 403, 'FORBIDDEN')
+
+  return { clerkId: userId, actorType }
 }

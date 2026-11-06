@@ -3,20 +3,20 @@ import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
-import { ADMIN_ROLES } from '../lib/roles'
+import { GRANTABLE_ROLES, isGrantableRole, withRoleRemoved } from '../lib/roles'
 
 // Mirror of grant-admin.ts: remove an admin-family role from a user's Clerk
 // publicMetadata.roles[]. Preserves all OTHER roles, idempotent, Clerk-only
 // (no DB, no credentials). Use to pull admin off an account that shouldn't have it.
-//   npx tsx scripts/revoke-admin.ts <email> [admin|super_admin|event_operator]
+//   npx tsx scripts/revoke-admin.ts <email> [admin|super_admin|event_operator|platform_manager]
 
 const EMAIL = process.argv[2]
 const ROLE = process.argv[3] ?? 'admin'
 
 async function main() {
   if (!EMAIL) throw new Error('Usage: revoke-admin.ts <email> [role]')
-  if (!(ADMIN_ROLES as readonly string[]).includes(ROLE)) {
-    throw new Error(`role must be one of: ${ADMIN_ROLES.join(', ')}`)
+  if (!isGrantableRole(ROLE)) {
+    throw new Error(`role must be one of: ${GRANTABLE_ROLES.join(', ')}`)
   }
 
   assertNotProductionClerk('revoke-admin.ts')
@@ -34,7 +34,7 @@ async function main() {
     return
   }
 
-  const roles = before.filter((r) => r !== ROLE)
+  const roles = withRoleRemoved(before, ROLE)
   await clerk.users.updateUserMetadata(user.id, { publicMetadata: { ...meta, roles } })
 
   const after = await clerk.users.getUser(user.id)

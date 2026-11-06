@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { currentUser } from '@clerk/nextjs/server'
-import { hasRole } from '@/lib/roles'
+import { hasRole, isPlatformManagerOnly } from '@/lib/roles'
 import FairPicker from './_components/FairPicker'
 
 export const metadata = { title: 'Admin — FairSynq' }
@@ -18,6 +18,8 @@ export default async function AdminIndexPage() {
     redirect('/admin/login')
   }
   if (!user) redirect('/admin/login')
+  // A settings-only platform_manager has no fair picker: their admin home is /admin/settings.
+  if (isPlatformManagerOnly(user.publicMetadata)) redirect('/admin/settings')
   if (!hasRole(user.publicMetadata, 'admin')) redirect('/')
 
   // The fair picker. An admin oversees fairs it does NOT own, so the list can't

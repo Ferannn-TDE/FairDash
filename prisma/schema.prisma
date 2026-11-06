@@ -1960,3 +1960,42 @@ model PayeeNotice {
   @@index([payeeType, payeeId, kind])
   @@index([status])
 }
+
+// ── Platform settings (Batch 1 item 5) ───────────────────────────────────────────────────────
+// Keys are defined in code (lib/settings.ts), never free-form. No row = the code default; item 5
+// seeds nothing. Every change also appends a PlatformSettingChange row in the SAME transaction.
+model PlatformSetting {
+  key   String @id
+  value Json
+
+  /// Set explicitly on every write (not @updatedAt) and used as the optimistic-concurrency
+  /// version: a save carries the updatedAt it loaded and is refused with 409 if it moved.
+  updatedAt DateTime
+
+  /// Who wrote the current value: Clerk id, and the role they acted as
+  /// (super_admin | admin | platform_manager). Same who-plus-what pairing as AdminMoneyAction.
+  updatedById   String
+  updatedByType String
+}
+
+/// Append-only change log for PlatformSetting. Never updated or deleted.
+model PlatformSettingChange {
+  id  String @id @default(cuid())
+  key String
+
+  /// null = that side was the default / not set (no row).
+  oldValue Json?
+  newValue Json?
+
+  /// Clerk id of who acted, and the role they acted as.
+  actorId   String
+  actorType String
+
+  /// Optional for the non-money settings; item 10 makes it required for money settings.
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+  @@index([createdAt])
+}

@@ -3,22 +3,22 @@ import { assertNotProductionClerk } from '../lib/prod-clerk-guard'
 import { config } from 'dotenv'
 config({ path: '.env.local' })
 import { createClerkClient } from '@clerk/backend'
-import { ADMIN_ROLES } from '../lib/roles'
+import { GRANTABLE_ROLES, isGrantableRole, withRoleAdded } from '../lib/roles'
 
 // Grant an admin-family role to a user's Clerk publicMetadata.roles[].
 // Admin-family roles are dashboard/script-granted (no DB membership model) and
 // PRESERVED by the sync helper; vendor/organizer/runner stay DB-derived. This
 // script touches ONLY the roles[] array — never DB memberships, never passwords.
 // Idempotent. NO credential is ever read or written here.
-//   npx tsx scripts/grant-admin.ts <email> [admin|super_admin|event_operator]
+//   npx tsx scripts/grant-admin.ts <email> [admin|super_admin|event_operator|platform_manager]
 
 const EMAIL = process.argv[2]
 const ROLE = process.argv[3] ?? 'admin'
 
 async function main() {
   if (!EMAIL) throw new Error('Usage: grant-admin.ts <email> [role]')
-  if (!(ADMIN_ROLES as readonly string[]).includes(ROLE)) {
-    throw new Error(`role must be one of: ${ADMIN_ROLES.join(', ')}`)
+  if (!isGrantableRole(ROLE)) {
+    throw new Error(`role must be one of: ${GRANTABLE_ROLES.join(', ')}`)
   }
 
   assertNotProductionClerk('grant-admin.ts')
@@ -36,7 +36,7 @@ async function main() {
     return
   }
 
-  const roles = Array.from(new Set([...before, ROLE]))
+  const roles = withRoleAdded(before, ROLE)
   await clerk.users.updateUserMetadata(user.id, { publicMetadata: { ...meta, roles } })
 
   const after = await clerk.users.getUser(user.id)

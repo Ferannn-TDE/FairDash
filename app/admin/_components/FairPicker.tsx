@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Calendar, Store, ChevronRight, AlertTriangle, Users, UserCheck } from 'lucide-react'
+import { Calendar, Store, ChevronRight, AlertTriangle, Users, UserCheck, Settings } from 'lucide-react'
+import { useUser } from '@clerk/clerk-react'
+import { hasSettingsRole } from '@/lib/roles'
 import { formatEventDateRange } from '@/lib/event-date'
 
 interface Fair {
@@ -27,6 +29,8 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 
 
 export default function FairPicker() {
+  const { isLoaded, user } = useUser()
+  const canEditSettings = isLoaded && hasSettingsRole(user?.publicMetadata)
   const [fairs, setFairs] = useState<Fair[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +65,17 @@ export default function FairPicker() {
             picking a fair. "Booth Operators" is deliberately not called "Vendors": picking a fair
             leads to a Vendors page, and that one is the BOOTHS. This is the people who work them. */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Platform settings: strict admins only (event_operator also uses this picker but
+              can't open settings). Rendered only once Clerk has loaded, never guessed. */}
+          {canEditSettings && (
+            <Link
+              href="/admin/settings"
+              className="inline-flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 transition-colors"
+            >
+              <Settings className="w-3.5 h-3.5" /> Platform settings
+              <ChevronRight className="w-3.5 h-3.5 text-text-gray" />
+            </Link>
+          )}
           <Link
             href="/admin/organizers"
             className="inline-flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold hover:bg-white/10 transition-colors"
