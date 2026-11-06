@@ -7,6 +7,7 @@ import { enforceRateLimit } from '@/lib/ratelimit'
 import { validateDeliveryAddress } from '@/lib/delivery-address'
 import { decideDeliveryRadius, googleGeocoder } from '@/lib/delivery-radius'
 import { logger } from '@/lib/logger'
+import { customerReachableScope } from '@/lib/event-listing'
 
 // POST /api/orders/delivery-check — early feedback at checkout: is this address inside the
 // fair's delivery area?
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
 
     const event = await db.event.findFirst({
-      where: { id: body.eventId, archivedAt: null },
+      where: { id: body.eventId, archivedAt: null, ...customerReachableScope() },
       select: { eventLat: true, eventLng: true, fulfillmentConfig: { select: { homeDeliveryEnabled: true, homeDeliveryRadiusKm: true } } },
     })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')

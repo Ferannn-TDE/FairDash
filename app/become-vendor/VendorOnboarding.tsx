@@ -198,12 +198,23 @@ function ProgressBar({ step }: { step: number }) {
 
 // ─── Step components ──────────────────────────────────────────────────────────
 
-function Step1({ data, update, fairs, eventSlug, setEventSlug }: {
+// Which event an application goes to (item 5b):
+//   'link'    — ?fair=<slug> (or the older ?event=<slug>): that fair, e.g. the B1.17 test fair
+//   'signup'  — the one sign-up-only holding event (/api/vendor-signup/event): no picker
+//   'picker'  — no holding event: today's picker over the public live fairs
+//   'loading' / 'unavailable' — never a guessed fair while we don't know
+type FairMode = 'loading' | 'link' | 'signup' | 'picker' | 'unavailable'
+
+export const SIGNUP_EVENT_COPY =
+  "You're applying to sell with FairSynq. Once you're approved, you'll be able to add the events you're working as they're announced."
+
+function Step1({ data, update, fairs, eventSlug, setEventSlug, fairMode }: {
   data: FormData
   update: (p: Partial<FormData>) => void
   fairs: { slug: string; name: string }[]
   eventSlug: string | null
   setEventSlug: (s: string) => void
+  fairMode: FairMode
 }) {
   return (
     <div className="bg-bg-card border border-white/10 rounded-2xl p-6 space-y-5">
@@ -213,12 +224,26 @@ function Step1({ data, update, fairs, eventSlug, setEventSlug }: {
       </div>
 
       {/* Which fair — a Vendor application is per-fair, so this must be set (was the
-          missing eventSlug that 400'd on submit). Auto-selected when there's one fair. */}
-      <div>
-        <Label required>Which fair are you applying to?</Label>
-        {fairs.length === 0 ? (
-          <p className="text-sm text-text-gray">Loading fairs…</p>
-        ) : (
+          missing eventSlug that 400'd on submit). See FairMode above. */}
+      {fairMode === 'loading' && <div aria-hidden="true" className="h-12 rounded-xl bg-white/5 animate-pulse" />}
+      {fairMode === 'signup' && (
+        <p className="text-sm text-white/90 leading-relaxed bg-neon-pink/5 border border-neon-pink/20 rounded-xl px-4 py-3">
+          {SIGNUP_EVENT_COPY}
+        </p>
+      )}
+      {fairMode === 'link' && (
+        <p className="text-sm text-text-gray leading-relaxed bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3">
+          You&apos;re applying through an event link.
+        </p>
+      )}
+      {fairMode === 'unavailable' && (
+        <p className="text-sm text-text-gray leading-relaxed bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3">
+          Vendor applications aren&apos;t open right now. Please check back soon.
+        </p>
+      )}
+      {fairMode === 'picker' && (
+        <div>
+          <Label required>Which fair are you applying to?</Label>
           <select
             className={`${iCls} cursor-pointer`}
             value={eventSlug ?? ''}
@@ -227,8 +252,8 @@ function Step1({ data, update, fairs, eventSlug, setEventSlug }: {
             <option value="" disabled>Select a fair…</option>
             {fairs.map(f => <option key={f.slug} value={f.slug}>{f.name}</option>)}
           </select>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
@@ -516,22 +541,39 @@ export default function VendorOnboarding() {
   const [uploading, setUploading] = useState(false)
   const [fairs, setFairs] = useState<{ slug: string; name: string }[]>([])
   const [eventSlug, setEventSlug] = useState<string | null>(null)
+  const [fairMode, setFairMode] = useState<FairMode>('loading')
 
-  // Resolve which fair to apply to (a Vendor is per-fair). Prefer the ?event URL
-  // param; else load the public fair list and auto-pick when there's exactly one.
-  // This replaces the old "read ?event or send null" that 400'd every submission.
+  // Resolve which fair to apply to (a Vendor is per-fair). Order: an event link
+  // (?fair=, or the older ?event=), else the sign-up holding event, else the public picker.
+  // The server's join gate is the real check (drafts refused) — this only picks.
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get('event')
-    fetch('/api/fairs')
+    let active = true
+    const query = new URLSearchParams(window.location.search)
+    const fromUrl = (query.get('fair') ?? query.get('event'))?.trim() || null
+    if (fromUrl) { setEventSlug(fromUrl); setFairMode('link'); return }
+
+    const loadPicker = () => fetch('/api/fairs')
       .then(r => r.json())
       .then(json => {
+        if (!active) return
         const list: { slug: string; name: string }[] = (json?.success ? json.data : [])
           .map((f: { slug: string; name: string }) => ({ slug: f.slug, name: f.name }))
         setFairs(list)
-        if (fromUrl) setEventSlug(fromUrl)
-        else if (list.length === 1) setEventSlug(list[0].slug)
+        if (list.length === 1) setEventSlug(list[0].slug)
+        setFairMode(list.length ? 'picker' : 'unavailable')
       })
-      .catch(() => { if (fromUrl) setEventSlug(fromUrl) })
+
+    fetch('/api/vendor-signup/event')
+      .then(r => r.json())
+      .then(json => {
+        if (!active) return
+        if (json?.success && json.data?.event) { setEventSlug(json.data.event.slug); setFairMode('signup'); return }
+        // No holding event → today's picker. Two or more (409) → refuse to guess.
+        if (json?.success) return loadPicker()
+        setFairMode('unavailable')
+      })
+      .catch(() => { if (active) setFairMode('unavailable') })
+    return () => { active = false }
   }, [])
 
   const update = useCallback((patch: Partial<FormData>) => setData(d => ({ ...d, ...patch })), [])
@@ -672,7 +714,7 @@ export default function VendorOnboarding() {
 
         {/* Step content with key for animation re-trigger */}
         <div key={step} className="animate-fadeIn">
-          {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} />}
+          {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} fairMode={fairMode} />}
           {step === 2 && <Step2 data={data} update={update} />}
           {step === 3 && <DocUploadStep files={docFiles} onPick={pickDoc} onClear={clearDoc} uploading={uploading} />}
           {step === 4 && <Step6 data={data} update={update} />}

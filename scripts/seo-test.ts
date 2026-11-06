@@ -76,6 +76,7 @@ eq(on, [SITE_URL, `${SITE_URL}/fairs`, `${SITE_URL}/fair/live-fest`, `${SITE_URL
 
 console.log('\n[5] title + description')
 const base: FairSeo = {
+  indexable: true,
   name: 'Italian Fest 2026', slug: 'italian-fest', description: null,
   startDate: '2026-10-24T00:00:00.000Z', endDate: '2026-10-26T00:00:00.000Z', timezone: 'America/Chicago',
   openTime: '11:00', closeTime: '22:00', venueAddress: '125 W Main St', venueCity: 'Collinsville', venueState: 'IL', venueZip: '62234',
@@ -120,7 +121,8 @@ const root = strip(readFileSync('app/layout.tsx', 'utf8'))
 assert(/metadataBase:\s*new URL\(SITE_URL\)/.test(root) && /robots:\s*robotsFor\('public'\)/.test(root), 'root layout: metadataBase = SITE_URL, robots = robotsFor(public)')
 assert(!/alternates/.test(root), 'root layout sets no canonical (it would leak to every page)')
 const fairLayout = strip(readFileSync('app/fair/[fairSlug]/layout.tsx', 'utf8'))
-assert(/robots:\s*robotsFor\('fair'\)/.test(fairLayout) && /canonical:\s*`\/fair\/\$\{fair\.slug\}`/.test(fairLayout), 'fair layout: robotsFor(fair) + canonical on the fair')
+assert(/robots:\s*fair\.indexable \? robotsFor\('fair'\) : robotsFor\('private'\)/.test(fairLayout) && /fair\.indexable \? \{ canonical:\s*`\/fair\/\$\{fair\.slug\}` \}/.test(fairLayout),
+  'fair layout: robotsFor(fair) + canonical on an indexable fair; an UNLISTED one gets noindex and no canonical')
 
 const walk = (d: string): string[] => readdirSync(d).flatMap(n => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : [p] })
 const appFiles = walk('app').filter(f => /\.(tsx?|mts)$/.test(f))

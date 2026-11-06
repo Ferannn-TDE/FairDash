@@ -30,6 +30,7 @@ const ADMIN_FAIR_SELECT = {
   featuredLabel: true,
   featuredEnabled: true,
   organizerId: true,
+  listing: true,
 } satisfies Prisma.EventSelect
 
 export type AdminFair = Prisma.EventGetPayload<{ select: typeof ADMIN_FAIR_SELECT }>

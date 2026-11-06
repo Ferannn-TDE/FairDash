@@ -5,7 +5,7 @@ import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { revalidateTag } from 'next/cache'
 import { getGoLiveChecklist, GO_LIVE_KEYS } from '@/lib/go-live-checklist'
-import { EventStatus } from '@prisma/client'
+import { EventStatus, EventListing } from '@prisma/client'
 
 // PATCH /api/admin/events/[id]/status
 // Transitions event status: UPCOMING→ACTIVE (Go Live) or ACTIVE→INACTIVE (Close).
@@ -32,6 +32,12 @@ export async function PATCH(
 
     if (!['ACTIVE', 'INACTIVE'].includes(targetStatus)) {
       throw new ApiError('status must be ACTIVE or INACTIVE', 400, 'VALIDATION_ERROR')
+    }
+
+    // A sign-up-only event (the vendor holding event) can never go live, from any status.
+    // Checked before, and in addition to, the checklist (lib/event-listing.ts).
+    if (targetStatus === EventStatus.ACTIVE && event.listing === EventListing.SIGNUP_ONLY) {
+      throw new ApiError('A sign-up-only event can\'t go live', 409, 'EVENT_SIGNUP_ONLY')
     }
 
     // ── Go Live checklist ──────────────────────────────────────────────────────

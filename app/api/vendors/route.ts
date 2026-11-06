@@ -7,6 +7,7 @@ import { uniqueVendorSlug } from '@/lib/vendor-slug'
 import { createVendorWithOwner } from '@/lib/payee-membership'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { SELLABLE } from '@/lib/menu/on-menu'
+import { customerReachableScope } from '@/lib/event-listing'
 
 // GET /api/vendors?eventSlug=springfield-fair-2026&page=1&limit=20
 // Returns active, online vendors for a given event. When ENFORCE_VENDOR_READINESS
@@ -25,7 +26,8 @@ export async function GET(req: Request) {
     // Archived (soft-deleted) fairs vanish from the customer vendor list. Not
     // ACTIVE-gated: this hydrates a fair's vendors and the fair page itself already
     // 404s non-live fairs, so status gating here would be redundant.
-    const event = await db.event.findFirst({ where: { urlSlug: eventSlug, archivedAt: null } })
+    // The customer vendor list: a sign-up-only event has no customer-facing vendors.
+    const event = await db.event.findFirst({ where: { urlSlug: eventSlug, archivedAt: null, ...customerReachableScope() } })
     if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
     // ACQUISITION GATE: a DRAFT fair must never gain a Vendor — Vendor CASCADEs on Event delete,
     // and discarding a draft is a hard delete. Resolving by slug alone (as above) is exactly how a

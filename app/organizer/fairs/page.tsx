@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchJson } from '@/lib/api-fetcher'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 import { formatEventDate } from '@/lib/event-date'
-import { vendorCountLabel } from '@/lib/fair-view'
+import { vendorCountLabel, listingBadgeLabel } from '@/lib/fair-view'
 import DraftFairsSection from './_components/DraftFairsSection'
 
 interface Fair {
@@ -13,6 +13,7 @@ interface Fair {
   name: string
   slug: string
   status: string
+  listing?: string
   startDate: string
   endDate: string
   vendorCount: number
@@ -79,6 +80,11 @@ export default function OrganizerFairsPage() {
                         ${fair.status === 'ACTIVE' ? 'bg-green-500/15 text-green-400' : 'bg-sky-500/15 text-sky-400'}`}>
                         {fair.status}
                       </span>
+                      {listingBadgeLabel(fair.listing) && (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-violet-500/15 text-violet-300">
+                          {listingBadgeLabel(fair.listing)}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-[#666] font-inter truncate mt-0.5">
                       {formatEventDate(fair.startDate)} · {vendorCountLabel(fair.vendorCount)} · {fair.orderCount} orders

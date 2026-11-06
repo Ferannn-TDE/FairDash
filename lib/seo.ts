@@ -100,6 +100,8 @@ export const fairImageUrl = (slug: string) => `${fairUrl(slug)}/opengraph-image`
 // ─── A fair, as search engines see it ─────────────────────────────────────────
 
 export type FairSeo = {
+  /** false for UNLISTED events: page reachable, never indexed, no JSON-LD (lib/event-listing.ts). */
+  indexable: boolean
   name: string
   slug: string
   description: string | null

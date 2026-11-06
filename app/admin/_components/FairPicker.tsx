@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Calendar, Store, ChevronRight, AlertTriangle, Users, UserCheck, Settings } from 'lucide-react'
 import { useUser } from '@clerk/clerk-react'
 import { hasSettingsRole } from '@/lib/roles'
+import { listingBadgeLabel } from '@/lib/fair-view'
 import { formatEventDateRange } from '@/lib/event-date'
 
 interface Fair {
@@ -13,6 +14,7 @@ interface Fair {
   urlSlug: string
   status: 'ACTIVE' | 'UPCOMING' | 'INACTIVE'
   isPaused: boolean
+  listing: string
   startDate: string
   endDate: string
   organizerName: string | null
@@ -134,6 +136,11 @@ export default function FairPicker() {
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${meta.cls}`}>
                     {meta.label}
                   </span>
+                  {listingBadgeLabel(f.listing) && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border bg-violet-500/10 text-violet-300 border-violet-500/20">
+                      {listingBadgeLabel(f.listing)}
+                    </span>
+                  )}
                   {f.isPaused && (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.6875rem] font-semibold border bg-orange-500/10 text-orange-400 border-orange-500/20">
                       Paused

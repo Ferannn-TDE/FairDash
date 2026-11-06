@@ -19,6 +19,13 @@ model Event {
   urlSlug String      @unique // e.g., "springfield-fair-2026"
   status  EventStatus @default(UPCOMING) // Replaces isActive Boolean
 
+  // Where this event may appear (Batch 1 item 5b). Added ON TOP of the status/archived filters,
+  // never instead of them. PUBLIC: today's behaviour. UNLISTED: never in a list, sitemap or SEO,
+  // but its page and orders work by direct URL when ACTIVE (the B1.17 test fair). SIGNUP_ONLY:
+  // the vendor sign-up holding event; never listed, page 404s, never takes an order, can't go
+  // live. Written only by scripts/create-signup-event.ts (lib/event-listing.ts).
+  listing EventListing @default(PUBLIC)
+
   // Dates
   startDate DateTime
   endDate   DateTime
@@ -103,6 +110,12 @@ model Event {
   @@index([urlSlug])
   @@index([status])
   @@index([status, archivedAt])
+}
+
+enum EventListing {
+  PUBLIC
+  UNLISTED
+  SIGNUP_ONLY
 }
 
 enum EventStatus {

@@ -23,8 +23,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       return {
         title: { absolute: title },
         description,
-        alternates: { canonical: `/fair/${fair.slug}` },
-        robots: robotsFor('fair'),
+        // UNLISTED (the B1.17 test fair): reachable by direct URL, never indexed, no canonical claim.
+        alternates: fair.indexable ? { canonical: `/fair/${fair.slug}` } : { canonical: null },
+        robots: fair.indexable ? robotsFor('fair') : robotsFor('private'),
         openGraph: { title, description, url: `/fair/${fair.slug}`, siteName: SITE_NAME, type: 'website', locale: 'en_US' },
         twitter: { card: 'summary_large_image', title, description },
       }

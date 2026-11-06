@@ -35,6 +35,7 @@ async function fetchOrganizerFairs(organizerId: string) {
       name: true,
       urlSlug: true,
       status: true,
+      listing: true,
       startDate: true,
       endDate: true,
       fulfillmentConfig: {
@@ -92,6 +93,7 @@ async function fetchOrganizerFairs(organizerId: string) {
     name: event.name,
     slug: event.urlSlug,
     status: event.status,
+    listing: event.listing,
     startDate: event.startDate,
     endDate: event.endDate,
     vendorCount:   vendorCountByEvent[event.id] ?? 0,

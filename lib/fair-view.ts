@@ -100,3 +100,11 @@ export const FAIR_CARD_BADGE: Record<FairCardState, { label: string; fg: string;
   upcoming: { label: 'Starting soon', fg: '#7DD3FC', bg: '#0F0F0F' },
   ended:    { label: 'Ended',         fg: '#D4D4D8', bg: '#0F0F0F' },
 }
+
+/** Badge for admin and organizer fair lists (item 5b); null for PUBLIC. Browser-safe on purpose:
+ *  lib/event-listing.ts imports the database client and must never reach a client bundle. */
+export function listingBadgeLabel(listing: string | null | undefined): string | null {
+  if (listing === 'SIGNUP_ONLY') return 'Sign-up only'
+  if (listing === 'UNLISTED') return 'Unlisted'
+  return null
+}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { currentUser } from '@clerk/nextjs/server'
 import Stripe from 'stripe'
-import { FulfillmentType, EventStatus, VendorStatus, OrderStatus } from '@prisma/client'
+import { FulfillmentType, EventStatus, EventListing, VendorStatus, OrderStatus } from '@prisma/client'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { db } from '@/lib/db'
 import { SELLABLE } from '@/lib/menu/on-menu'
@@ -171,6 +171,12 @@ export async function POST(req: NextRequest) {
     })
 
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
+
+    // A sign-up-only event never takes an order, at any status. In addition to the status
+    // check below, never instead of it (lib/event-listing.ts).
+    if (event.listing === EventListing.SIGNUP_ONLY) {
+      throw new ApiError('This event does not take orders', 409, 'EVENT_SIGNUP_ONLY')
+    }
 
     if (event.status !== EventStatus.ACTIVE) {
       throw new ApiError('This event is not currently active', 409, 'EVENT_INACTIVE')

@@ -87,6 +87,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },
+  { group: 'correctness', name: 'event-listing',          file: 'scripts/event-listing-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
   { group: 'money',       name: 'earnings-invariant',     file: 'scripts/earnings-invariant-guard.ts' },
   { group: 'correctness', name: 'incoming-divergence',    file: 'scripts/incoming-divergence-guard.ts' },

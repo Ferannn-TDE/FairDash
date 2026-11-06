@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { publicFairScope } from '@/lib/event-listing'
 
 // GET /api/fairs
 // Public endpoint — returns all non-draft events for the discover / fairs listing pages.
@@ -13,7 +14,7 @@ export async function GET() {
       // Public discovery: only truly-live fairs. UPCOMING is NOT public (a fair
       // goes public when deliberately taken ACTIVE), and archived (soft-deleted)
       // fairs vanish even if still ACTIVE.
-      where: { status: EventStatus.ACTIVE, archivedAt: null },
+      where: { status: EventStatus.ACTIVE, archivedAt: null, ...publicFairScope() },
       take: 50,
       orderBy: { startDate: 'asc' },
       select: {

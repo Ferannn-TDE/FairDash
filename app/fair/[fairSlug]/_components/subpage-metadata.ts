@@ -9,6 +9,7 @@ import { SITE_NAME, robotsFor } from '@/lib/seo'
 export async function fairSubpageMetadata(fairSlug: string, label: string, path: string): Promise<Metadata> {
   const fair = await getFairSeoBySlugCached(fairSlug).catch(() => null)
   if (!fair) return {}
+  if (!fair.indexable) return { title: { absolute: `${label} · ${fair.name} | ${SITE_NAME}` }, alternates: { canonical: null } }
   return {
     title: { absolute: `${label} · ${fair.name} | ${SITE_NAME}` },
     alternates: { canonical: `/fair/${fair.slug}${path}` },

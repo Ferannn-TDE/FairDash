@@ -9,7 +9,7 @@ export default async function FairPage({ params }: { params: Promise<{ fairSlug:
   const fair = await getFairSeoBySlugCached(fairSlug).catch(() => null)
   return (
     <>
-      {fair && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdScript(fairEventJsonLd(fair)) }} />}
+      {fair?.indexable && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdScript(fairEventJsonLd(fair)) }} />}
       <FairHomePage />
     </>
   )

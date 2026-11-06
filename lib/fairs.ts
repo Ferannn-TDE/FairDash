@@ -6,6 +6,7 @@ import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { FairListItem } from '@/lib/fair-view'
 import type { FairSeo, SitemapFair } from '@/lib/seo'
+import { customerReachableScope, publicFairScope, isIndexableListing } from '@/lib/event-listing'
 
 // Re-export the browser-safe view types for server-side callers' convenience.
 // (Client components must import these from '@/lib/fair-view' directly — importing
@@ -32,7 +33,7 @@ export const getFairBySlugCached = unstable_cache(
       // Public detail page: only a live, non-archived fair resolves. Returning null
       // for UPCOMING/INACTIVE/archived makes the fair genuinely unreachable by direct
       // URL (the layout fires notFound() on null) — hidden means 404, not just unlinked.
-      where: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null },
+      where: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null, ...customerReachableScope() },
       select: {
         id: true,
         name: true,
@@ -116,7 +117,7 @@ export const getVendorsBySlugCached = unstable_cache(
     const vendors = await db.vendor.findMany({
       where: {
         // Only surface vendors for a live, non-archived fair (mirrors the detail-page gate).
-        event: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null },
+        event: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null, ...customerReachableScope() },
         status: VendorStatus.ACTIVE,
         // Same readiness gate the /api/vendors endpoint applies, so the SSR vendor
         // list matches the hydrated one (no 17→2 flash when enforcement is on).
@@ -159,7 +160,7 @@ export const getAllFairsCached = unstable_cache(
   async (): Promise<FairListItem[]> => {
     const events = await db.event.findMany({
       // Public discovery list: ACTIVE-only (UPCOMING is not public) and never archived.
-      where: { status: EventStatus.ACTIVE, archivedAt: null },
+      where: { status: EventStatus.ACTIVE, archivedAt: null, ...publicFairScope() },
       orderBy: { startDate: 'asc' },
       select: {
         id: true,
@@ -194,15 +195,16 @@ export const getAllFairsCached = unstable_cache(
 
 // ─── SEO (lib/seo.ts) ─────────────────────────────────────────────────────────
 
-/** What fair-page metadata, JSON-LD and the share image need. Same public gate as the page. */
+/** What fair-page metadata, JSON-LD and the share image need. Same gate as the page; `indexable`
+ *  is false for UNLISTED, which reaches its page by direct URL but must never be indexed. */
 export const getFairSeoBySlugCached = unstable_cache(
   async (fairSlug: string): Promise<FairSeo | null> => {
     const e = await db.event.findFirst({
-      where: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null },
+      where: { urlSlug: fairSlug, status: EventStatus.ACTIVE, archivedAt: null, ...customerReachableScope() },
       select: {
         name: true, urlSlug: true, description: true, startDate: true, endDate: true, timezone: true,
         openTime: true, closeTime: true, venueAddress: true, venueCity: true, venueState: true, venueZip: true,
-        admissionFree: true,
+        admissionFree: true, listing: true,
         organizer: { select: { name: true } },
         fulfillmentConfig: { select: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true } },
         _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
@@ -218,6 +220,8 @@ export const getFairSeoBySlugCached = unstable_cache(
       organizerName: e.organizer?.name ?? null,
       vendorCount: e._count.vendors,
       fulfillment: e.fulfillmentConfig,
+      // UNLISTED (the test fair) has a working page but no index, JSON-LD or canonical claim.
+      indexable: isIndexableListing(e.listing),
     }
   },
   ['fair-seo-by-slug'],
@@ -228,7 +232,7 @@ export const getFairSeoBySlugCached = unstable_cache(
 export const getSitemapFairsCached = unstable_cache(
   async (): Promise<SitemapFair[]> => {
     const events = await db.event.findMany({
-      where: { status: EventStatus.ACTIVE, archivedAt: null },
+      where: { status: EventStatus.ACTIVE, archivedAt: null, ...publicFairScope() },
       orderBy: { startDate: 'asc' },
       select: {
         urlSlug: true, startDate: true, endDate: true, updatedAt: true,
