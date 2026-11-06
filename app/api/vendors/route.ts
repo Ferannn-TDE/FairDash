@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { uniqueVendorSlug } from '@/lib/vendor-slug'
 import { createVendorWithOwner } from '@/lib/payee-membership'
+import { VENDOR_AGREEMENT_VERSION } from '@/lib/legal/vendor-agreement'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { SELLABLE } from '@/lib/menu/on-menu'
 import { customerReachableScope } from '@/lib/event-listing'
@@ -71,15 +72,21 @@ export async function POST(req: Request) {
     const {
       eventSlug, name, description, cuisineType, boothNumber,
       contactName, contactEmail, contactPhone,
-      legalName, termsVersion,
+      legalName, agreedToVendorAgreement,
     } = body
 
     if (!eventSlug || !name || !cuisineType) {
       return apiError('eventSlug, name, and cuisineType are required', 400, 'VALIDATION_ERROR')
     }
-    // Legal consent is mandatory to apply — the signed legal name is the signature.
+    // Legal consent is mandatory to apply: the typed legal name is the signature (C-19) AND the
+    // vendor must tick "I agree to the FairSynq Vendor Agreement" (item 8). Both are checked here;
+    // the wizard's own gate is only UX. Applies to self sign-up only: no other path creates a Vendor
+    // through this route (admin/organizer have no create route; scripts write directly).
     if (!legalName || !String(legalName).trim()) {
       return apiError('Legal agreement must be signed to submit an application', 400, 'CONSENT_REQUIRED')
+    }
+    if (agreedToVendorAgreement !== true) {
+      return apiError('You must agree to the FairSynq Vendor Agreement to apply', 400, 'CONSENT_REQUIRED')
     }
 
     // Can't apply to a soft-deleted fair. UPCOMING is allowed — vendors apply before
@@ -115,7 +122,9 @@ export async function POST(req: Request) {
         contactEmail: contactEmail ?? null,
         contactPhone: contactPhone ?? null,
         termsAcceptedName: String(legalName).trim(),
-        termsVersion:      termsVersion ?? null,
+        // Always the version this server publishes (lib/legal/vendor-agreement.ts), never a value
+        // from the browser: the record says which terms were actually shown.
+        termsVersion:      VENDOR_AGREEMENT_VERSION,
         termsAcceptedAt:   new Date(),
         termsAcceptedIp:   acceptedIp,
       },

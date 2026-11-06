@@ -245,7 +245,7 @@ async function main() {
   const apply = async (slug: string) => {
     const u = await prisma.user.create({ data: { clerkId: `${PFX}vu-${rand()}`, email: `vu-${rand()}${MAIL}`, name: 'V' } })
     login(u.clerkId)
-    const r = await vendorsPOST(req('/api/vendors', 'POST', { eventSlug: slug, name: `${PFX}Booth ${rand()}`, cuisineType: 'Tacos', legalName: 'Test Vendor', termsVersion: 'test' }) as any)
+    const r = await vendorsPOST(req('/api/vendors', 'POST', { eventSlug: slug, name: `${PFX}Booth ${rand()}`, cuisineType: 'Tacos', legalName: 'Test Vendor', agreedToVendorAgreement: true }) as any)
     return { status: r.status, code: ((await r.json()) as any)?.error?.code as string | undefined }
   }
   const aSig = await apply(signup.urlSlug), aUnl = await apply(unlisted.urlSlug)

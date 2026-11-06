@@ -27,6 +27,7 @@ import {
   VENDOR_DOC_LABELS,
   type RequiredVendorDoc,
 } from '@/lib/vendor-documents'
+import { VENDOR_AGREEMENT_TEXT, VENDOR_AGREEMENT_PATH } from '@/lib/legal/vendor-agreement'
 
 const SUBMIT_FALLBACK = 'Couldn’t submit your application — please try again.'
 
@@ -48,6 +49,7 @@ interface FormData {
   customCuisine: string      // free text when "Other" is selected
   description: string
   legalName: string
+  agreedToVendorAgreement: boolean
 }
 
 /**
@@ -87,46 +89,14 @@ const STEPS = [
   { num: 4, label: 'Agreement'   },
 ]
 
-const VENDOR_TERMS = `FAIRSYNQ VENDOR AGREEMENT
-Last Updated: January 1, 2026
-
-This Vendor Agreement is entered into between FairSynq LLC ("FairSynq") and the vendor applying to participate on the FairSynq platform.
-
-1. VENDOR ELIGIBILITY
-To become a FairSynq vendor, you must: (a) be a legally registered business or sole proprietor; (b) hold all required food handler permits and health department certifications; (c) maintain valid general liability insurance of at least $1,000,000 per occurrence; and (d) agree to operate within the designated FairSynq service area during scheduled fair events.
-
-2. PLATFORM FEES
-FairSynq charges customers a 10% service fee on top of your menu prices. That fee is FairSynq's and is NOT deducted from your earnings — you keep your full item subtotal. Standard Stripe payment-processing fees (approximately 2.9% + $0.30 per order, split proportionally across vendors on shared orders) are deducted from your payout, the same as any card payment. Vendors receive payment via Stripe within 3–5 business days after each event settlement period. FairSynq reserves the right to adjust the service fee with 30 days' written notice.
-
-3. MENU & PRICING
-Vendors are responsible for maintaining accurate, up-to-date menu listings including item names, descriptions, allergen information, and pricing. Prices listed on FairSynq must match or be lower than prices charged at your on-site booth.
-
-4. ORDER FULFILLMENT & QUALITY
-You agree to: (a) prepare orders promptly; (b) notify FairSynq immediately if an item becomes unavailable; (c) package orders securely for delivery or curbside pickup; and (d) maintain a minimum order fulfillment rate of 95% per event.
-
-5. FOOD SAFETY & COMPLIANCE
-All food prepared and sold through FairSynq must comply with applicable food safety regulations. Vendors indemnify FairSynq against any claims arising from foodborne illness or improper food handling.
-
-6. CUSTOMER REVIEWS & RATINGS
-Vendors with an average rating below 3.5 stars over 30 days may receive a performance notice. Continued low ratings may result in reduced visibility or account suspension.
-
-7. TERMINATION
-Either party may terminate this Agreement with 14 days' written notice. FairSynq may terminate immediately for violations, fraudulent activity, or repeated food safety complaints.
-
-8. GOVERNING LAW
-This Agreement is governed by the laws of the State of Illinois. Disputes shall be resolved by binding arbitration.
-
-By typing your full legal name below, you confirm you have read, understood, and agree to be bound by this Agreement.`
-
-// Version identifier for VENDOR_TERMS (their "Last Updated" date). Sent with the
-// application so the consent record captures WHICH terms were agreed to. Bump this
-// whenever VENDOR_TERMS changes.
-const VENDOR_TERMS_VERSION = '2026-01-01'
+// The agreement text and version live in lib/legal/vendor-agreement.ts (item 8). The server
+// records the version from there; the wizard never sends one.
 
 const INITIAL: FormData = {
   businessName: '', contactName: '', email: '', phone: '',
   cuisineTypes: [], customCuisine: '', description: '',
   legalName: '',
+  agreedToVendorAgreement: false,
 }
 
 const INITIAL_DOCS: DocFiles = { foodHandler: null, insurance: null, businessLicense: null }
@@ -436,7 +406,7 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
 
       {/* Agreement text */}
       <div className="h-52 overflow-y-auto bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-text-gray text-[0.8125rem] leading-relaxed whitespace-pre-line">
-        {VENDOR_TERMS}
+        {VENDOR_AGREEMENT_TEXT}
       </div>
 
       {/* Signature */}
@@ -454,6 +424,22 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
           </div>
         )}
       </div>
+
+      {/* Item 8 (B1.10): explicit agreement, enforced by the server as well. */}
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={data.agreedToVendorAgreement}
+          onChange={e => update({ agreedToVendorAgreement: e.target.checked })}
+          className="mt-0.5 w-5 h-5 shrink-0 accent-[#FF0077] cursor-pointer"
+        />
+        <span className="text-sm text-text-gray leading-relaxed">
+          I agree to the{' '}
+          <a href={VENDOR_AGREEMENT_PATH} target="_blank" rel="noopener noreferrer" className="text-neon-pink font-semibold hover:underline">
+            FairSynq Vendor Agreement
+          </a>
+        </span>
+      </label>
     </div>
   )
 }
@@ -588,7 +574,7 @@ export default function VendorOnboarding() {
       // Every required document must be chosen. Client-side only — the real
       // enforcement is the approve gate, which refuses a docs-incomplete vendor.
       case 3: return REQUIRED_VENDOR_DOCS.every(k => docFiles[k] !== null)
-      case 4: return data.legalName.trim().length >= 3
+      case 4: return data.legalName.trim().length >= 3 && data.agreedToVendorAgreement
       default: return true
     }
   })()
@@ -652,7 +638,7 @@ export default function VendorOnboarding() {
           contactEmail: data.email,
           contactPhone: data.phone,
           legalName:    data.legalName,
-          termsVersion: VENDOR_TERMS_VERSION,
+          agreedToVendorAgreement: data.agreedToVendorAgreement,
         }),
       })
       // `error` is the envelope OBJECT, so a bare `json?.error` produces

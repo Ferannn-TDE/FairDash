@@ -263,7 +263,7 @@ async function main() {
     'app/become-driver/page.tsx': { count: 9, why: 'runner wizard + Driver Terms — runner rework (item 7) and legal pages (item 11)' },
     'app/_components/faq-content.ts': { count: 4, why: 'runner + organizer FAQ answers — rewritten with the runner/partner rework (item 7)' },
     'app/refund-policy/page.tsx': { count: 4, why: 'refund policy — replaced in full by the legal pages (item 11)' },
-    'app/become-vendor/VendorOnboarding.tsx': { count: 1, why: 'Vendor Agreement text — legal pages (item 11)' },
+    'lib/legal/vendor-agreement.ts': { count: 1, why: 'Vendor Agreement text (shown in the wizard and on /vendor-agreement) — replaced by the legal pages (item 11)' },
     'app/fair/[fairSlug]/checkout/page.tsx': { count: 10, why: 'the Home Delivery option, its address/area sections and fee label (render only when delivery is offered or chosen), plus an import and the delivery-check URL' },
     'app/account/orders/[orderId]/page.tsx': { count: 5, why: 'existing delivery orders: fee label + address (HOME_DELIVERY only); the DELIVERED status token (curbside handoff state, stays); an import' },
     'app/fair/[fairSlug]/order/[orderId]/page.tsx': { count: 1, why: 'the DELIVERED status token in the terminal-status set (curbside handoff state, stays)' },
@@ -271,7 +271,8 @@ async function main() {
     'app/_components/AddressAutocomplete.tsx': { count: 2, why: 'import path + placeholder of the address field used only by delivery checkout' },
     'app/_components/usePlatformDelivery.ts': { count: 1, why: 'code: the /api/platform/delivery fetch URL' },
   }
-  const files = walk(join(process.cwd(), 'app')).filter(f => /\.(ts|tsx)$/.test(f))
+  // app/ plus lib/legal/: legal text lives in lib/legal/ but is shown to customers and vendors.
+  const files = [...walk(join(process.cwd(), 'app')), ...walk(join(process.cwd(), 'lib', 'legal'))].filter(f => /\.(ts|tsx)$/.test(f))
     .map(f => ({ path: relative(process.cwd(), f).split(sep).join('/'), text: readFileSync(f, 'utf8') }))
     .filter(f => !OPERATOR.test(f.path))
   assert(countWords("label: 'Delivery Fee'") === 1 && countWords('title: "We deliver to your door"') === 1, '[0] positive control: the counter sees "Delivery" and "deliver" in strings')

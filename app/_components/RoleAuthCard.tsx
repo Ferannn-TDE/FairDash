@@ -22,6 +22,7 @@ export interface RoleAuthProps {
   redirectTo: string;     // where Clerk lands after auth
   allowSignUp?: boolean;  // operators can create accounts; admin cannot
   quiet?: boolean;        // admin = unbranded, no marketing atmosphere
+  pitch?: React.ReactNode; // optional block above the card (vendor sign-in, item 8); same width
 }
 
 
@@ -39,7 +40,7 @@ export default function RoleAuthCard(props: RoleAuthProps) {
 }
 
 function RoleAuthInner({
-  role, Icon, eyebrow, heading, blurb, redirectTo, allowSignUp = true, quiet = false,
+  role, Icon, eyebrow, heading, blurb, redirectTo, allowSignUp = true, quiet = false, pitch,
 }: RoleAuthProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -146,6 +147,8 @@ function RoleAuthInner({
             <span className="text-[#FF0077] group-hover:text-white transition-colors">SYNQ</span>
           </span>
         </Link>
+
+        {pitch && <div className={`mb-8 ${REVEAL}`} style={reveal(40)}>{pitch}</div>}
 
         {/* auth-06's brand mark: a solid accent square, centered and standalone above the copy
             (it was a small tinted chip inline with the eyebrow). RoleAuthCard's own JSX — there is

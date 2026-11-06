@@ -5,7 +5,10 @@ import { decideClerkAccess } from '@/lib/prod-clerk-guard'
 // Routes that require authentication (/api/webhooks is intentionally excluded)
 const isProtectedRoute = createRouteMatcher([
   '/become-vendor(.*)',
-  '/vendor(.*)',
+  // '/vendor' and its sub-paths only. '/vendor(.*)' also matched the PUBLIC /vendor-agreement page
+  // (item 8), sending signed-out applicants to sign in before they could read the terms.
+  '/vendor',
+  '/vendor/(.*)',
   '/organizer(.*)',
   '/become-driver(.*)',
   '/runner(.*)',
