@@ -22,9 +22,8 @@ import { SITE_NAME, SITE_URL, robotsFor } from '@/lib/seo'
 // nothing off production is ever indexable. No canonical here: each public page sets its own.
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: 'FairSynq - The Fair Comes To Your Door',
-  description:
-    'FairSynq - Get your favorite fair foods delivered in 30 minutes. Fresh. Fast. Fair.',
+  title: 'FairSynq | Skip-the-Line Ordering for Fairs & Festivals',
+  description: 'Order fair food ahead and skip the line at fairs and festivals, for booth pickup or curbside.',
   robots: robotsFor('public'),
   openGraph: { siteName: SITE_NAME, type: 'website', locale: 'en_US' },
   twitter: { card: 'summary_large_image' },

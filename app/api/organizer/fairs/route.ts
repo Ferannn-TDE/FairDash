@@ -9,6 +9,7 @@ import { requireOrganizerAuth } from '@/lib/auth'
 import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 import { organizerFairScope } from '@/lib/organizer-fair-context'
+import { isDeliveryEnabled, DELIVERY_OFF_MESSAGE, DELIVERY_OFF_PLATFORM } from '@/lib/delivery'
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
@@ -154,6 +155,11 @@ export async function POST(req: NextRequest) {
 
     if (!name || !String(name).trim()) return apiError('Fair name is required', 400, 'VALIDATION_ERROR')
     if (!startDate || !endDate)          return apiError('Start and end dates are required', 400, 'VALIDATION_ERROR')
+    // Platform delivery switch (item 6): a new fair can't start with delivery on while it's off
+    // for the whole platform (a new fair has no existing flag to keep).
+    if (deliveryEnabled === true && !(await isDeliveryEnabled())) {
+      return apiError(DELIVERY_OFF_MESSAGE, 409, DELIVERY_OFF_PLATFORM)
+    }
     // Publishing needs the full venue address (lib/venue-address); a draft may be incomplete.
     let venue: VenueAddressInput = { venueAddress, venueCity, venueState, venueZip }
     if (asDraft !== true) {

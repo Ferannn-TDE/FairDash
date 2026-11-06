@@ -69,8 +69,27 @@ function parsePhone(raw: unknown): Parsed<string> {
   return phone ? { ok: true, value: phone } : { ok: false, error: 'Enter a valid US phone number, e.g. (618) 555-0100' }
 }
 
+// ── delivery.enabled ───────────────────────────────────────────────────────────────────────
+function parseBoolean(raw: unknown): Parsed<boolean> {
+  if (raw === true || raw === 'true' || raw === 'on') return { ok: true, value: true }
+  if (raw === false || raw === 'false' || raw === 'off') return { ok: true, value: false }
+  if (raw == null || raw === '') return { ok: true, value: null } // clear → back to the default
+  return { ok: false, error: 'Choose on or off' }
+}
+
 // ── The registry ───────────────────────────────────────────────────────────────────────────
 export const SETTINGS = {
+  // Item 6 (B1.2). Home delivery is offered only when this AND the event's own flag are on
+  // (lib/delivery.ts deliveryAvailable). Added when first read, defaulting to OFF, so nothing saved
+  // before it existed can switch delivery back on.
+  'delivery.enabled': {
+    label: 'Home delivery',
+    help: 'Lets customers choose delivery to an address at fairs that also have it switched on. Curbside and booth pickup are not affected.',
+    class: 'ops',
+    default: false,
+    parse: parseBoolean,
+    format: (v: boolean) => (v ? 'On' : 'Off'),
+  } satisfies SettingDef<boolean>,
   'alerts.email': {
     label: 'Alert email',
     help: `Where sign-up alerts are sent. Up to ${MAX_ALERT_EMAILS} addresses, separated by commas. Until one is set, alerts are held.`,

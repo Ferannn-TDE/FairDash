@@ -7,7 +7,7 @@ export const contentType = OG_CONTENT_TYPE
 
 export default async function Image() {
   return new ImageResponse(
-    <OgFrame kicker="Fair food, ordered ahead" title="The fair comes to your door" lines={['Pickup and delivery from your favorite fair vendors']} />,
+    <OgFrame kicker="Fair food, ordered ahead" title="Skip the line at the fair" lines={['Booth pickup and curbside from your favorite fair vendors']} />,
     { ...OG_SIZE, fonts: await ogFonts() },
   )
 }

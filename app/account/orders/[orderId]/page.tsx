@@ -160,9 +160,9 @@ export default async function OrderDetailPage({ params }: Props) {
                 <span>Subtotal</span>
                 <span>${(order.subtotal ?? 0).toFixed(2)}</span>
               </div>
-              {order.deliveryFee != null && (
+              {order.deliveryFee != null && order.deliveryFee > 0 && (
                 <div className="flex justify-between text-text-gray">
-                  <span>Delivery Fee</span>
+                  <span>{order.fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}</span>
                   <span>${(order.deliveryFee ?? 0).toFixed(2)}</span>
                 </div>
               )}

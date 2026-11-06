@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Settings, History } from 'lucide-react'
+import { History } from 'lucide-react'
 
 // /admin/settings panel (Batch 1 item 5). One card per setting with its own Save and an optional
 // reason; the change log underneath. Loading renders skeletons, never placeholder values
@@ -41,7 +41,12 @@ const inputCls =
   'w-full bg-[#0F0F0F] border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-text-gray/40 disabled:opacity-50'
 const labelCls = 'text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5 block'
 
-function SettingCard({ setting, onSaved }: { setting: SettingView; onSaved: () => void }) {
+interface DeliveryEvent { name: string; slug: string }
+
+function SettingCard({ setting, onSaved, deliveryEventsOn }: { setting: SettingView; onSaved: () => void; deliveryEventsOn: DeliveryEvent[] }) {
+  const isSwitch = typeof setting.value === 'boolean'
+  // Turning delivery ON is a two-step action: show which events start offering it, then confirm.
+  const [confirmingOn, setConfirmingOn] = useState(false)
   const [draft, setDraft] = useState(toInput(setting.value))
   const [reason, setReason] = useState('')
   const [version, setVersion] = useState(setting.version)
@@ -57,14 +62,14 @@ function SettingCard({ setting, onSaved }: { setting: SettingView; onSaved: () =
     setVersion(setting.version)
   }, [setting.value, setting.version]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save = async () => {
+  const save = async (valueOverride?: unknown) => {
     setSaving(true)
     setFieldError(null)
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: setting.key, value: draft, expectedVersion: version, reason }),
+        body: JSON.stringify({ key: setting.key, value: valueOverride !== undefined ? valueOverride : draft, expectedVersion: version, reason }),
       })
       const json = await res.json()
       if (res.status === 409) {
@@ -78,6 +83,7 @@ function SettingCard({ setting, onSaved }: { setting: SettingView; onSaved: () =
         return
       }
       setConflict(null)
+      setConfirmingOn(false)
       setReason('')
       const outcome = json.data.outcome as 'saved' | 'cleared' | 'unchanged'
       toast.success(outcome === 'unchanged' ? 'No change to save' : outcome === 'cleared' ? `${setting.label} cleared` : `${setting.label} saved`)
@@ -109,17 +115,63 @@ function SettingCard({ setting, onSaved }: { setting: SettingView; onSaved: () =
         </div>
       )}
 
-      <label className={labelCls} htmlFor={`setting-${setting.key}`}>Value</label>
-      <input
-        id={`setting-${setting.key}`}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        disabled={saving}
-        placeholder="Not set"
-        aria-invalid={!!fieldError}
-        className={`${inputCls} ${fieldError ? 'border-red-500/70 focus:border-red-500' : ''}`}
-      />
+      {isSwitch ? (
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-[#0F0F0F] border border-white/10 px-4 py-3">
+          <span className="text-sm font-semibold text-white">{setting.value ? 'On' : 'Off'}</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={setting.value === true}
+            disabled={saving}
+            onClick={() => (setting.value ? save(false) : setConfirmingOn(true))}
+            className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer border-0 shrink-0 disabled:opacity-50 ${setting.value ? 'bg-neon-pink' : 'bg-white/10'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${setting.value ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        </div>
+      ) : (
+        <>
+          <label className={labelCls} htmlFor={`setting-${setting.key}`}>Value</label>
+          <input
+            id={`setting-${setting.key}`}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={saving}
+            placeholder="Not set"
+            aria-invalid={!!fieldError}
+            className={`${inputCls} ${fieldError ? 'border-red-500/70 focus:border-red-500' : ''}`}
+          />
+        </>
+      )}
       {fieldError && <p className="mt-1.5 text-xs text-red-400">{fieldError}</p>}
+
+      {isSwitch && confirmingOn && (
+        <div role="alert" className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs text-amber-100 leading-relaxed">
+          {deliveryEventsOn.length === 0 ? (
+            <p>No event has home delivery switched on, so nothing changes for customers until an event turns it on.</p>
+          ) : (
+            <>
+              <p className="mb-2">
+                {deliveryEventsOn.length === 1 ? 'This event already has' : `These ${deliveryEventsOn.length} events already have`} delivery switched
+                on and will start offering it immediately:
+              </p>
+              <ul className="list-disc pl-5 space-y-0.5 text-white">
+                {deliveryEventsOn.map(e => <li key={e.slug}>{e.name}</li>)}
+              </ul>
+            </>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => save(true)} disabled={saving}
+              className="px-4 py-2 rounded-xl bg-neon-pink text-white text-xs font-semibold border-0 cursor-pointer disabled:opacity-50">
+              Turn on delivery
+            </button>
+            <button type="button" onClick={() => setConfirmingOn(false)} disabled={saving}
+              className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-semibold cursor-pointer">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <label className={`${labelCls} mt-4`} htmlFor={`reason-${setting.key}`}>Reason (optional)</label>
       <input
@@ -133,24 +185,24 @@ function SettingCard({ setting, onSaved }: { setting: SettingView; onSaved: () =
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-[0.6875rem] text-text-gray">
-          {setting.isSet && setting.updatedAt ? `Last changed ${fmtTime(setting.updatedAt)}` : 'Not set'}
-          {' · '}Clear the field and save to remove it.
+          {setting.isSet && setting.updatedAt ? `Last changed ${fmtTime(setting.updatedAt)}` : isSwitch ? 'Using the default' : 'Not set'}
+          {!isSwitch && <>{' · '}Clear the field and save to remove it.</>}
         </p>
-        <button
+        {!isSwitch && <button
           type="button"
-          onClick={save}
+          onClick={() => save()}
           disabled={saving}
           className="px-5 py-2.5 rounded-xl bg-neon-pink text-white text-sm font-semibold hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? 'Saving…' : 'Save'}
-        </button>
+        </button>}
       </div>
     </div>
   )
 }
 
 export default function PlatformSettingsPanel() {
-  const [data, setData] = useState<{ settings: SettingView[]; changes: SettingChangeView[] } | null>(null)
+  const [data, setData] = useState<{ settings: SettingView[]; changes: SettingChangeView[]; deliveryEventsOn?: DeliveryEvent[] } | null>(null)
   const [error, setError] = useState(false)
 
   const load = useCallback(async () => {
@@ -170,9 +222,7 @@ export default function PlatformSettingsPanel() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="font-bebas text-4xl sm:text-5xl text-white tracking-wide flex items-center gap-3">
-          <Settings className="w-7 h-7 text-neon-pink" /> Platform settings
-        </h1>
+        <h1 className="font-bebas text-4xl sm:text-5xl text-white tracking-wide">Platform settings</h1>
         <p className="text-text-gray text-sm mt-1">Settings that apply to every fair. Each change is logged below.</p>
       </div>
 
@@ -192,7 +242,7 @@ export default function PlatformSettingsPanel() {
       {data && (
         <>
           <div className="space-y-4">
-            {data.settings.map((s) => <SettingCard key={s.key} setting={s} onSaved={load} />)}
+            {data.settings.map((s) => <SettingCard key={s.key} setting={s} onSaved={load} deliveryEventsOn={data.deliveryEventsOn ?? []} />)}
           </div>
 
           <section className="mt-10">

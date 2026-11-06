@@ -114,11 +114,13 @@ interface PaymentStepProps {
   orderId: string
   fairSlug: string
   summary: OrderSummary
+  /** Labels the runner fee: a curbside order's fee is a curbside fee, not a delivery fee. */
+  feeLabel: string
   onBack: () => void
   onSuccess: () => void
 }
 
-function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentStepProps) {
+function PaymentStep({ orderId, fairSlug, summary, feeLabel, onBack, onSuccess }: PaymentStepProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [paying, setPaying] = useState(false)
@@ -189,7 +191,7 @@ function PaymentStep({ orderId, fairSlug, summary, onBack, onSuccess }: PaymentS
           </div>
           {summary.deliveryFee != null && summary.deliveryFee > 0 && (
             <div className="flex justify-between">
-              <span className="text-[#A1A1A1]">Delivery Fee</span>
+              <span className="text-[#A1A1A1]">{feeLabel}</span>
               <span className="text-white">${(summary.deliveryFee ?? 0).toFixed(2)}</span>
             </div>
           )}
@@ -267,9 +269,11 @@ export default function CheckoutPage() {
   type FulfillmentType = 'BOOTH_PICKUP' | 'CURBSIDE' | 'HOME_DELIVERY'
 
   const fc = fair.fulfillmentConfig
+  // The server sends what a customer can actually choose (delivery already gated by the platform
+  // switch, lib/delivery.ts). With no config at all, booth pickup only, never every option.
   const fulfillmentOptions = ALL_FULFILLMENT_OPTIONS.filter(opt => {
-    if (opt.value === 'CURBSIDE' && fc && !fc.curbsideEnabled) return false
-    if (opt.value === 'HOME_DELIVERY' && fc && !fc.homeDeliveryEnabled) return false
+    if (opt.value === 'CURBSIDE') return !!fc?.curbsideEnabled
+    if (opt.value === 'HOME_DELIVERY') return !!fc?.homeDeliveryEnabled
     return true
   })
 
@@ -579,6 +583,7 @@ export default function CheckoutPage() {
                   orderId={orderId!}
                   fairSlug={params.fairSlug}
                   summary={orderSummary}
+                  feeLabel={fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}
                   onBack={() => { setOrderId(null); setClientSecret(null) }}
                   onSuccess={handleSuccess}
                 />

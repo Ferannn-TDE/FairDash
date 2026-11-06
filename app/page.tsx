@@ -8,8 +8,9 @@ import type { Metadata } from 'next'
 // receives them as a prop and never re-fetches — this is what kills the
 // empty→populated flicker on "Happening Now & Soon".
 export const metadata: Metadata = {
-  title: 'FairSynq - The Fair Comes To Your Door',
-  description: 'Order your favorite fair food ahead and skip the line. Pickup at the booth or delivery, from the vendors at fairs near you.',
+  // The client's exact strings (Platform Changes doc, SEO section). Absolute: no template appends.
+  title: { absolute: 'FairSynq | Skip-the-Line Ordering for Fairs & Festivals' },
+  description: 'Order fair food from your phone and pick it up at the booth or curbside. Free for vendors.',
   alternates: { canonical: '/' },
 }
 

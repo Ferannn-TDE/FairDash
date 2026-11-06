@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import MarketplaceNavbar from '../../_components/MarketplaceNavbar'
+import { usePlatformDelivery } from '@/app/_components/usePlatformDelivery'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ interface ProfileData {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AccountSettingsPage() {
+  const platformDelivery = usePlatformDelivery()
   const { user, isLoaded } = useUser()
 
   // Form state for editable profile fields
@@ -271,7 +273,10 @@ export default function AccountSettingsPage() {
                 </div>
               </div>
 
-              {/* Default Delivery Address — full width */}
+              {/* Default Delivery Address — full width. Shown only while home delivery is on for
+                  the platform (item 6); hidden while that's off or still loading. The saved value
+                  is kept either way. */}
+              {platformDelivery === true && (
               <div className="sm:col-span-2">
                 <label className={labelCls}>Default Delivery Address</label>
                 {isEditing ? (
@@ -289,6 +294,7 @@ export default function AccountSettingsPage() {
                   </div>
                 )}
               </div>
+              )}
             </div>
 
             {/* ── Edit mode action buttons (below fields, full-width on mobile) ── */}
@@ -323,7 +329,7 @@ export default function AccountSettingsPage() {
 
             <div className="space-y-4">
               {([
-                { key: 'notifOrderUpdates',      label: 'Order Updates',      desc: 'Delivery and status notifications' },
+                { key: 'notifOrderUpdates',      label: 'Order Updates',      desc: 'Status updates for your orders' },
                 { key: 'notifSmsAlerts',          label: 'SMS Alerts',         desc: 'Text messages for time-sensitive updates' },
                 { key: 'notifPromotionalEmails',  label: 'Promotional Emails', desc: 'Deals, new vendors, and fair specials' },
                 { key: 'notifNewVendors',         label: 'New Vendors',        desc: 'Alerts when new vendors join FairSynq' },

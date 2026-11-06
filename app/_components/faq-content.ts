@@ -39,8 +39,8 @@ export interface FAQCategory {
 
 export const FAQ_CATEGORIES: FAQCategory[] = [
   { id: 'customers', label: 'Customers', items: [
-    { q: 'How do I get my food?', a: "Three ways: pick it up at the vendor's booth, have it brought to your car curbside, or get it delivered to an address off-site." },
-    { q: 'What fees will I pay?', a: 'A 10% service fee on your food subtotal (not on delivery), plus a delivery fee if you choose curbside or home delivery.' },
+    { q: 'How do I get my food?', a: "Two ways: pick it up at the vendor's booth, or have it brought to your car curbside where the event offers it." },
+    { q: 'What fees will I pay?', a: 'A 10% service fee on your food subtotal, plus a curbside fee if you choose curbside (the service fee isn\'t charged on it).' },
     { q: "What happens if the vendor doesn't accept my order?", a: "If a vendor doesn't accept within 10 minutes, your order is automatically cancelled and fully refunded." },
     { q: 'Can I cancel an order?', a: "Before a vendor accepts, you can cancel and we'll refund your food — the 10% service fee isn't refunded. Once a vendor has accepted, you'll need to request a refund, and our team will review it." },
   ]},
@@ -53,7 +53,6 @@ export const FAQ_CATEGORIES: FAQCategory[] = [
   { id: 'runners', label: 'Runners', items: [
     { q: 'How do I get deliveries?', a: "You claim them. Available deliveries are first-come, and once you claim one it's locked to you." },
     { q: 'What do I earn?', a: 'A share of the delivery fee (set by the event organizer) plus 100% of any tip. Tips are never split and carry no service fee.' },
-    { q: 'How is a home delivery confirmed?', a: 'Runners confirm the drop-off in the app, with a delivery photo as proof.' },
   ]},
   { id: 'organizers', label: 'Organizers', items: [
     { q: 'Can I start running fairs as soon as I sign up?', a: "Not quite. New organizer accounts are reviewed by the FairSynq team first. You can sign in and see your status, but creating fairs and managing vendors open up once you're approved." },

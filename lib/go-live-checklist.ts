@@ -2,6 +2,7 @@ import { db } from './db'
 import { VendorStatus } from '@prisma/client'
 import { deliveryAreaConfigured } from './delivery-radius'
 import { hasVenueAddress } from './venue-address'
+import { deliveryAvailable, isDeliveryEnabled } from '@/lib/delivery'
 
 export interface GoLiveChecklist {
   hasActiveVendor:    boolean
@@ -43,14 +44,16 @@ export async function getGoLiveChecklist(
 
   const hasActiveVendor = activeVendors.length > 0
   const hasStripeVendor = activeVendors.some(v => v.stripeVerified)
+  // Delivery only counts when it's actually offered (platform switch AND event flag).
+  const deliveryOffered = deliveryAvailable(await isDeliveryEnabled(), fulfillmentConfig)
   const hasFulfillmentMode = fulfillmentConfig
-    ? fulfillmentConfig.boothPickupEnabled || fulfillmentConfig.curbsideEnabled || fulfillmentConfig.homeDeliveryEnabled
+    ? fulfillmentConfig.boothPickupEnabled || fulfillmentConfig.curbsideEnabled || deliveryOffered
     : false
   const hasCoords = coords.eventLat !== null && coords.eventLng !== null
   // Home delivery switched on before the area gate existed would otherwise refuse every order
   // silently — surface it here, with the same predicate the order route uses.
-  const hasDeliveryArea = !fulfillmentConfig?.homeDeliveryEnabled || deliveryAreaConfigured({
-    eventLat: coords.eventLat, eventLng: coords.eventLng, homeDeliveryRadiusKm: fulfillmentConfig.homeDeliveryRadiusKm,
+  const hasDeliveryArea = !deliveryOffered || deliveryAreaConfigured({
+    eventLat: coords.eventLat, eventLng: coords.eventLng, homeDeliveryRadiusKm: fulfillmentConfig!.homeDeliveryRadiusKm,
   })
 
   // No real fair goes live without a full address: customers and Google's event results need it.

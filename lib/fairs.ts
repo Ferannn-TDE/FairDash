@@ -7,6 +7,7 @@ import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { FairListItem } from '@/lib/fair-view'
 import type { FairSeo, SitemapFair } from '@/lib/seo'
 import { customerReachableScope, publicFairScope, isIndexableListing } from '@/lib/event-listing'
+import { deliveryAvailable, effectiveFulfillment, isDeliveryEnabled, NO_CONFIG_FULFILLMENT } from '@/lib/delivery'
 
 // Re-export the browser-safe view types for server-side callers' convenience.
 // (Client components must import these from '@/lib/fair-view' directly — importing
@@ -68,6 +69,9 @@ export const getFairBySlugCached = unstable_cache(
 
     const color = raw.primaryColor ?? '#FF0077'
     const fc = raw.fulfillmentConfig
+    // Delivery as customers can actually choose it (lib/delivery.ts). A fair with no config offers
+    // booth pickup only, so checkout never sees null and guesses "everything on".
+    const platformDelivery = await isDeliveryEnabled()
 
     return {
       id: raw.id,
@@ -89,12 +93,12 @@ export const getFairBySlugCached = unstable_cache(
         ? {
             boothPickupEnabled: fc.boothPickupEnabled,
             curbsideEnabled: fc.curbsideEnabled,
-            homeDeliveryEnabled: fc.homeDeliveryEnabled,
+            homeDeliveryEnabled: deliveryAvailable(platformDelivery, fc),
             homeDeliveryFee: fc.homeDeliveryFee ?? null,
             curbsideFee: fc.curbsideFee ?? 0,
             curbsideZoneDescription: fc.curbsideZoneDescription ?? null,
           }
-        : null,
+        : { ...NO_CONFIG_FULFILLMENT, homeDeliveryFee: null, curbsideFee: 0, curbsideZoneDescription: null },
       serviceChargeEnabled: raw.serviceChargeEnabled ?? false,
       serviceChargeAmount: raw.serviceChargeAmount ?? null,
       featuredVendorIds: raw.featuredVendorIds ?? [],
@@ -211,6 +215,7 @@ export const getFairSeoBySlugCached = unstable_cache(
       },
     })
     if (!e) return null
+    const platformDelivery = await isDeliveryEnabled()
     return {
       name: e.name, slug: e.urlSlug, description: e.description,
       startDate: e.startDate.toISOString(), endDate: e.endDate.toISOString(), timezone: e.timezone,
@@ -219,7 +224,7 @@ export const getFairSeoBySlugCached = unstable_cache(
       admissionFree: e.admissionFree,
       organizerName: e.organizer?.name ?? null,
       vendorCount: e._count.vendors,
-      fulfillment: e.fulfillmentConfig,
+      fulfillment: effectiveFulfillment(platformDelivery, e.fulfillmentConfig),
       // UNLISTED (the test fair) has a working page but no index, JSON-LD or canonical claim.
       indexable: isIndexableListing(e.listing),
     }

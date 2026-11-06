@@ -3,6 +3,8 @@ import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireSettingsAdmin } from '@/lib/auth'
 import { listSettings, saveSetting, SettingError } from '@/lib/settings'
+import { listEventsWithDeliveryOn } from '@/lib/delivery'
+import { revalidateTag } from 'next/cache'
 
 // GET   /api/admin/settings  → every registry setting (value, version, note) + the latest 50 changes
 // PATCH /api/admin/settings  { key, value, expectedVersion, reason? } → save or clear ONE setting
@@ -13,7 +15,9 @@ import { listSettings, saveSetting, SettingError } from '@/lib/settings'
 export async function GET(_req: NextRequest) {
   try {
     await requireSettingsAdmin()
-    return success(await listSettings())
+    const [data, deliveryEventsOn] = await Promise.all([listSettings(), listEventsWithDeliveryOn()])
+    // Shown before delivery.enabled is switched on: these events start offering it immediately.
+    return success({ ...data, deliveryEventsOn })
   } catch (err) {
     return handleApiError(err)
   }
@@ -34,6 +38,8 @@ export async function PATCH(req: NextRequest) {
         actorId: clerkId,
         actorType,
       })
+      // Fair pages cache which fulfillment modes are offered; delivery depends on this switch.
+      if (body.key === 'delivery.enabled' && result.outcome !== 'unchanged') revalidateTag('fair', 'default')
       return success(result)
     } catch (err) {
       if (err instanceof SettingError) {

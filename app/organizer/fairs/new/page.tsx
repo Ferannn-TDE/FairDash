@@ -8,6 +8,7 @@ import DateRangePicker from '@/app/_components/ui/DateRangePicker'
 import { creationDateBounds } from '@/lib/calendar-date'
 import { parseVenueAddress } from '@/lib/venue-address'
 import { ChevronLeftIcon } from '@heroicons/react/24/outline'
+import { usePlatformDelivery } from '@/app/_components/usePlatformDelivery'
 
 const STEPS = ['Basic Info', 'Dates & Location', 'Branding', 'Settings', 'Review']
 
@@ -152,6 +153,7 @@ function Step3({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
 }
 
 function Step4({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) => void }) {
+  const platformDelivery = usePlatformDelivery()
   const toggle = (k: keyof FairDraft) => onChange({ ...data, [k]: !data[k as keyof FairDraft] })
   return (
     <div>
@@ -163,7 +165,8 @@ function Step4({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
         {[
           { key: 'admissionFree' as const, label: 'Free Admission' },
           { key: 'pickupEnabled' as const, label: 'Booth Pickup' },
-          { key: 'deliveryEnabled' as const, label: 'In-fair Delivery' },
+          // Hidden entirely while delivery is off platform-wide (and while that's still loading).
+          ...(platformDelivery === true ? [{ key: 'deliveryEnabled' as const, label: 'In-fair Delivery' }] : []),
         ].map(({ key, label }) => (
           <label key={key} className="flex items-center gap-3 cursor-pointer">
             <div onClick={() => toggle(key)}

@@ -6,6 +6,7 @@ import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { checkRunnerFeeActivation } from '@/lib/runner-fee-gate'
 import { deliveryAreaConfigured } from '@/lib/delivery-radius'
 import { CurbsideMethod } from '@prisma/client'
+import { deliveryAvailable, isDeliveryEnabled, turnsDeliveryOn, DELIVERY_OFF_MESSAGE, DELIVERY_OFF_PLATFORM } from '@/lib/delivery'
 
 // GET /api/admin/events/[id]/fulfillment
 // Returns the FulfillmentConfig for the event.
@@ -100,6 +101,14 @@ export async function PATCH(
       }
     }
 
+    // ── Platform delivery switch (item 6, lib/delivery.ts) ───────────────────────
+    // While delivery is off for the whole platform, no write may switch an event's delivery ON.
+    // Keeping an existing true flag (an unrelated save) or switching it off is always allowed.
+    const platformDelivery = await isDeliveryEnabled()
+    if (!platformDelivery && turnsDeliveryOn(body.homeDeliveryEnabled, existing?.homeDeliveryEnabled)) {
+      throw new ApiError(DELIVERY_OFF_MESSAGE, 409, DELIVERY_OFF_PLATFORM)
+    }
+
     // ── Home-delivery AREA gate ─────────────────────────────────────────────────
     // Home delivery needs a delivery area: the fair's coordinates and a positive radius. Judged
     // on the state this write WOULD produce, with the SAME predicate the order route uses
@@ -107,7 +116,9 @@ export async function PATCH(
     if (body.homeDeliveryRadiusKm != null && (!Number.isFinite(body.homeDeliveryRadiusKm) || body.homeDeliveryRadiusKm <= 0)) {
       throw new ApiError('homeDeliveryRadiusKm must be a positive number of km', 400, 'VALIDATION_ERROR')
     }
-    const homeDeliveryWouldBeOn = body.homeDeliveryEnabled ?? existing?.homeDeliveryEnabled ?? false
+    // Judged on delivery as it would actually be OFFERED: with the platform switch off, an old
+    // true flag offers nothing, so it can't block an unrelated save.
+    const homeDeliveryWouldBeOn = deliveryAvailable(platformDelivery, { homeDeliveryEnabled: body.homeDeliveryEnabled ?? existing?.homeDeliveryEnabled ?? false })
     if (homeDeliveryWouldBeOn && !deliveryAreaConfigured({
       eventLat: event.eventLat,
       eventLng: event.eventLng,
@@ -125,7 +136,7 @@ export async function PATCH(
     // schema defaults for a first-time create). Enabling a runner-fulfilled mode with a
     // 0% split is refused UNLESS the admin acknowledged tips-only — a decision, not a block.
     const merged = checkRunnerFeeActivation({
-      homeDeliveryEnabled: body.homeDeliveryEnabled ?? existing?.homeDeliveryEnabled ?? false,
+      homeDeliveryEnabled: homeDeliveryWouldBeOn,
       curbsideEnabled:     body.curbsideEnabled ?? existing?.curbsideEnabled ?? false,
       curbsideMethod:      body.curbsideMethod ?? existing?.curbsideMethod ?? null,
       runnerFeePercent:    body.runnerFeePercent ?? existing?.runnerFeePercent ?? 0,

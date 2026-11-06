@@ -19,6 +19,7 @@ import { ensureDbUser } from '@/lib/ensure-db-user'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { calculateServiceFee } from '@/lib/constants'
 import { logger } from '@/lib/logger'
+import { effectiveFulfillment, isDeliveryEnabled } from '@/lib/delivery'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -218,20 +219,22 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // What a customer can actually choose (lib/delivery.ts): home delivery needs the platform
+    // switch AND the event's flag; a fair with NO config offers booth pickup only. This used to be
+    // `if (config) { … }`, so a config-less fair accepted every mode, delivery included.
     const config = event.fulfillmentConfig
-    if (config) {
-      const enabledMap: Record<FulfillmentType, boolean> = {
-        BOOTH_PICKUP: config.boothPickupEnabled,
-        CURBSIDE: config.curbsideEnabled,
-        HOME_DELIVERY: config.homeDeliveryEnabled,
-      }
-      if (!enabledMap[fulfillmentType]) {
-        throw new ApiError(
-          `${fulfillmentType} is not enabled for this event`,
-          409,
-          'FULFILLMENT_DISABLED'
-        )
-      }
+    const offered = effectiveFulfillment(await isDeliveryEnabled(), config)
+    const enabledMap: Record<FulfillmentType, boolean> = {
+      BOOTH_PICKUP: offered.boothPickupEnabled,
+      CURBSIDE: offered.curbsideEnabled,
+      HOME_DELIVERY: offered.homeDeliveryEnabled,
+    }
+    if (!enabledMap[fulfillmentType]) {
+      throw new ApiError(
+        `${fulfillmentType} is not enabled for this event`,
+        409,
+        'FULFILLMENT_DISABLED'
+      )
     }
 
     // Validate all unique vendors are active and belong to this event

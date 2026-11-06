@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import { usePlatformDelivery } from '@/app/_components/usePlatformDelivery'
+import Link from 'next/link'
 
 const DEFAULT_STATE: FulfillmentState = {
   boothPickupEnabled: true,
@@ -90,6 +92,7 @@ const INPUT = 'w-full bg-[#0f0f0f] border border-white/10 rounded-xl px-4 py-3 t
 export default function FulfillmentConfigPage() {
   const params = useParams<{ eventSlug: string }>()
   const [state, setState] = useState<FulfillmentState>(DEFAULT_STATE)
+  const platformDelivery = usePlatformDelivery()
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -331,8 +334,20 @@ export default function FulfillmentConfigPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-[#888] font-inter">Enable home delivery</p>
-              <Toggle checked={state.homeDeliveryEnabled} onChange={v => set('homeDeliveryEnabled', v)} />
+              {/* While delivery is off platform-wide it can't be switched ON here (the server refuses
+                  too); an old flag that is already on can still be switched off. */}
+              <Toggle
+                checked={state.homeDeliveryEnabled}
+                onChange={v => set('homeDeliveryEnabled', v)}
+                disabled={platformDelivery !== true && !state.homeDeliveryEnabled}
+              />
             </div>
+            {platformDelivery === false && (
+              <p className="text-xs text-amber-300 font-inter">
+                Delivery is turned off for the whole platform.{' '}
+                <Link href="/admin/settings" className="underline hover:text-white">Platform settings</Link>
+              </p>
+            )}
 
             {state.homeDeliveryEnabled && (
               <>

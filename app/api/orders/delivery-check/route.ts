@@ -8,6 +8,7 @@ import { validateDeliveryAddress } from '@/lib/delivery-address'
 import { decideDeliveryRadius, googleGeocoder } from '@/lib/delivery-radius'
 import { logger } from '@/lib/logger'
 import { customerReachableScope } from '@/lib/event-listing'
+import { deliveryAvailable, isDeliveryEnabled } from '@/lib/delivery'
 
 // POST /api/orders/delivery-check — early feedback at checkout: is this address inside the
 // fair's delivery area?
@@ -50,12 +51,12 @@ export async function POST(req: NextRequest) {
       select: { eventLat: true, eventLng: true, fulfillmentConfig: { select: { homeDeliveryEnabled: true, homeDeliveryRadiusKm: true } } },
     })
     if (!event) throw new ApiError('Event not found', 404, 'EVENT_NOT_FOUND')
-    if (!event.fulfillmentConfig?.homeDeliveryEnabled) {
+    if (!deliveryAvailable(await isDeliveryEnabled(), event.fulfillmentConfig)) {
       throw new ApiError('Home delivery isn’t available for this fair. Please choose pickup.', 409, 'FULFILLMENT_DISABLED')
     }
 
     const radius = await decideDeliveryRadius(
-      { eventLat: event.eventLat, eventLng: event.eventLng, homeDeliveryRadiusKm: event.fulfillmentConfig.homeDeliveryRadiusKm },
+      { eventLat: event.eventLat, eventLng: event.eventLng, homeDeliveryRadiusKm: event.fulfillmentConfig!.homeDeliveryRadiusKm },
       { street: body.street!.trim(), city: body.city!.trim(), state: body.state?.trim() || null, zip: body.zip!.trim() },
       googleGeocoder,
     )

@@ -6,7 +6,7 @@ import { toPublicFairCard, partitionFairCards, type PublicFairCard } from '@/lib
 
 export const metadata = {
   title: 'Discover Fairs — FairSynq',
-  description: 'Find fairs near you and order fair food ahead for pickup or delivery with FairSynq.',
+  description: 'Find fairs near you and order fair food ahead for booth pickup or curbside with FairSynq.',
   alternates: { canonical: '/fairs' },
 }
 

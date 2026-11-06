@@ -314,11 +314,11 @@ async function main() {
   let unknownThrew = false
   try {
     // @ts-expect-error — an unknown key is a type error (tsc fails this file if it ever isn't)
-    await settingsLib.getSetting('delivery.enabled')
+    await settingsLib.getSetting('sms.enabled')
   } catch { unknownThrew = true }
   assert(unknownThrew, 'getSetting on an unknown key throws at runtime too')
-  assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['alerts.email', 'alerts.phone']),
-    'item 5 ships exactly alerts.email and alerts.phone (no delivery, SMS or money keys)')
+  assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['delivery.enabled', 'alerts.email', 'alerts.phone']),
+    'the registry holds delivery.enabled (item 6) and the two alert contacts (no SMS or money keys)')
 
   // ── [7] "not in effect yet" notes ──────────────────────────────────────────────────────
   console.log('\n[7] "Not in effect yet" notes match reality')
@@ -331,7 +331,7 @@ async function main() {
     const out: string[] = []
     for (const key of settingsLib.SETTING_KEYS) {
       const readers = files.filter(f => !PLUMBING.has(f.path) && (f.text.includes(`'${key}'`) || f.text.includes(`"${key}"`)))
-      const hasNote = !!settingsLib.SETTINGS[key].notInEffect
+      const hasNote = !!(settingsLib.SETTINGS[key] as { notInEffect?: string }).notInEffect
       if (readers.length && hasNote) out.push(`${key}: read by ${readers.map(r => r.path).join(', ')}; remove its "not in effect yet" note`)
       if (!readers.length && !hasNote) out.push(`${key}: nothing reads it; it needs a "not in effect yet" note`)
     }
@@ -341,7 +341,7 @@ async function main() {
   assert(fake.some(v => v.startsWith('alerts.email: read by lib/signup-alerts.ts')), '[0] positive control: a fabricated reader makes the check demand the note\'s removal')
   const real = noteViolations(sources)
   for (const v of real) console.log(`     ↳ ${v}`)
-  assert(real.length === 0, 'both alert settings carry the note, and nothing reads them yet')
+  assert(real.length === 0, 'the alert settings carry the note (nothing reads them yet); delivery.enabled is read, so it has none')
 
   // ── [8] role sync keeps platform_manager; grant/revoke ─────────────────────────────────
   console.log('\n[8] Role sync, the hourly reconcile, grant and revoke')

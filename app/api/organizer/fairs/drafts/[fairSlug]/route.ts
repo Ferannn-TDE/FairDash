@@ -8,6 +8,7 @@ import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { resolveOwnedFair } from '@/lib/organizer-fair-context'
 import { logger } from '@/lib/logger'
+import { isDeliveryEnabled, turnsDeliveryOn, DELIVERY_OFF_MESSAGE, DELIVERY_OFF_PLATFORM } from '@/lib/delivery'
 
 // DELETE /api/organizer/fairs/drafts/[fairSlug]
 //
@@ -93,6 +94,13 @@ export async function PATCH(
       openTime, closeTime, timezone, accentColor,
       maxVendors, deliveryEnabled, pickupEnabled, admissionFree, publish,
     } = body
+
+    // Platform delivery switch (item 6): a draft can't switch delivery ON while it's off for the
+    // whole platform. Keeping an existing true flag, or switching it off, is allowed.
+    if (deliveryEnabled === true && !(await isDeliveryEnabled())) {
+      const current = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id }, select: { homeDeliveryEnabled: true } })
+      if (turnsDeliveryOn(true, current?.homeDeliveryEnabled)) throw new ApiError(DELIVERY_OFF_MESSAGE, 409, DELIVERY_OFF_PLATFORM)
+    }
 
     // Publishing enforces the same floor as creating: a real fair always has a name and dates.
     if (!name || !String(name).trim()) throw new ApiError('Fair name is required', 400, 'VALIDATION_ERROR')
