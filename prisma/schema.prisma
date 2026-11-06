@@ -1375,11 +1375,12 @@ model RunnerApplication {
   dateOfBirth DateTime
   city        String?
 
-  // Vehicle.
-  vehicleType  String
-  vehicleMake  String
-  vehicleModel String
-  vehicleYear  String
+  // Vehicle. Optional since sign-up stopped asking for one (Driver Terms 2026-11-04); rows
+  // from before then keep their values.
+  vehicleType  String?
+  vehicleMake  String?
+  vehicleModel String?
+  vehicleYear  String?
   vehicleColor String?
   vehiclePlate String?
 

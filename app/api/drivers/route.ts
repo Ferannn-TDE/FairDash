@@ -19,12 +19,12 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { personal, vehicle, agreed, bgConsent, termsVersion, fairSlug } = body ?? {}
+    const { personal, agreed, bgConsent, termsVersion, fairSlug } = body ?? {}
 
     // REAL enforcement. The wizard runs these same rules for per-field feedback, but a
     // client gate is UX only — this is the gate that counts. Same module, so the two
     // cannot disagree. Returns every bad field at once rather than one-at-a-time.
-    const fieldErrors = validateApplication({ personal, vehicle, agreed, bgConsent })
+    const fieldErrors = validateApplication({ personal, agreed, bgConsent })
     if (Object.keys(fieldErrors).length > 0) {
       throw new ApiError(
         Object.values(fieldErrors)[0],
@@ -58,12 +58,8 @@ export async function POST(req: NextRequest) {
         phone: String(personal.phone).trim(),
         dateOfBirth,
         city: personal.city?.trim() || null,
-        vehicleType: String(vehicle.type).trim(),
-        vehicleMake: String(vehicle.make).trim(),
-        vehicleModel: String(vehicle.model).trim(),
-        vehicleYear: String(vehicle.year).trim(),
-        vehicleColor: vehicle.color?.trim() || null,
-        vehiclePlate: vehicle.plate?.trim() || null,
+        // Vehicle columns are left null: sign-up no longer asks for a vehicle (Driver Terms
+        // 2026-11-04). Applications from before then keep theirs.
         termsAgreed: true,
         backgroundCheckConsent: true,
         termsVersion: termsVersion ?? null,
@@ -77,7 +73,6 @@ export async function POST(req: NextRequest) {
       applicationId: application.id,
       email: personal.email,
       city: personal.city ?? null,
-      vehicleType: vehicle.type ?? null,
       linkedUser: applicant?.id ?? null,
     })
 
@@ -114,17 +109,13 @@ export async function POST(req: NextRequest) {
               eventId: event.id,
               approvalStatus: 'PENDING',
               status: 'OFFLINE',
-              // CARRY-THROUGH: the contact + vehicle details the applicant just typed
+              // CARRY-THROUGH: the contact details the applicant just typed
               // are copied onto the Runner, which is the record the Settings page reads
               // and writes (/api/runners/me). Without this the data lived ONLY on
               // RunnerApplication and Settings rendered blank on first open — the user
               // re-typed everything they had just entered. RunnerApplication remains the
               // immutable consent/audit trail; Runner is the mutable working profile.
               phone: String(personal.phone).trim() || null,
-              vehicleMake: String(vehicle.make).trim() || null,
-              vehicleModel: String(vehicle.model).trim() || null,
-              vehicleColor: vehicle.color?.trim() || null,
-              vehiclePlate: vehicle.plate?.trim() || null,
             })
             runnerMinted = true
             // The role is added inside createRunnerRecord (lib/payee-membership): this site was

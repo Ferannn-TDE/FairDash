@@ -7,14 +7,15 @@
  * the real, unmocked route code.
  *
  *   TASK 1 — Server-side validation is the REAL gate (a client can be bypassed):
- *     1. Bad email / bad phone / whitespace-only name / under-18 DOB / bad vehicle year /
+ *     1. Bad email / bad phone / whitespace-only name / under-18 DOB /
  *        unchecked consent  → 400 VALIDATION_ERROR, per-field details, NO Runner minted
+ *        (no vehicle is asked for since Driver Terms 2026-11-04; one sent anyway is ignored)
  *     2. Same payloads pass the shared validator identically on the CLIENT side
  *        (one module, so client and server cannot drift)
  *     3. A valid payload still passes end-to-end
  *
  *   TASK 2 — Onboarding data carries through to the Settings record:
- *     4. Onboarding phone + vehicle land on the RUNNER row (what Settings reads),
+ *     4. Onboarding phone lands on the RUNNER row (what Settings reads),
  *        not only on RunnerApplication — the "Settings opens blank" bug
  *     5. GET /api/runners/me returns them; PATCH re-saves and persists
  *
@@ -74,10 +75,9 @@ async function loadHandlers() {
 
 const VALID = {
   personal: { firstName: 'Rlic', lastName: 'Driver', email: '', phone: '+15550000000', dob: '1990-01-01', city: 'Testville' },
-  vehicle: { type: 'Car', make: 'Toyota', model: 'Camry', year: '2020', color: 'Silver', plate: 'ABC 1234' },
   agreed: true,
   bgConsent: true,
-  termsVersion: '2026-01-01',
+  termsVersion: '2026-11-04',
 }
 
 function body(email: string, fairSlug: string | null, over: any = {}) {
@@ -85,7 +85,6 @@ function body(email: string, fairSlug: string | null, over: any = {}) {
     ...VALID,
     ...over,
     personal: { ...VALID.personal, email, ...(over.personal ?? {}) },
-    vehicle: { ...VALID.vehicle, ...(over.vehicle ?? {}) },
     fairSlug,
   }
 }
@@ -126,7 +125,6 @@ async function main() {
     ['implausible phone',      { personal: { phone: '12' } }],
     ['under-18 DOB',           { personal: { dob: '2015-01-01' } }],
     ['future DOB',             { personal: { dob: '2099-01-01' } }],
-    ['bad vehicle year',       { vehicle: { year: '20' } }],
     ['consent not given',      { agreed: false }],
     ['background check unchecked', { bgConsent: false }],
   ]
@@ -162,7 +160,6 @@ async function main() {
       // VALID.personal carries a blank email placeholder (body() fills it per-run), so
       // supply a real one here — we're asserting a COMPLETE payload validates clean.
       personal: { ...VALID.personal, email: `${PFX}${rand()}${MAIL}` } as any,
-      vehicle: VALID.vehicle as any,
       agreed: true,
       bgConsent: true,
     })).length === 0,
@@ -170,7 +167,7 @@ async function main() {
   )
 
   // ── TASK 2: carry-through ───────────────────────────────────────────────────
-  console.log('\n[3] Valid onboarding mints a Runner AND carries contact/vehicle onto it')
+  console.log('\n[3] Valid onboarding with NO vehicle mints a Runner AND carries contact onto it')
   login(userA.clerkId)
   const ok = await driversPOST(post('/api/drivers', body(`${PFX}${rand()}${MAIL}`, event.urlSlug)))
   const okJson: any = await ok.json()
@@ -179,24 +176,43 @@ async function main() {
   const runnerA = await prisma.runner.findUnique({ where: { userId: userA.id } })
   assert(!!runnerA, 'Runner row exists for the applicant')
   assert(
-    runnerA?.phone === '+15550000000' &&
-    runnerA?.vehicleMake === 'Toyota' &&
-    runnerA?.vehicleModel === 'Camry' &&
-    runnerA?.vehicleColor === 'Silver' &&
-    runnerA?.vehiclePlate === 'ABC 1234',
-    'onboarding phone + vehicle landed on the RUNNER row (the record Settings reads) ← carry-through'
+    runnerA?.phone === '+15550000000',
+    'onboarding phone landed on the RUNNER row (the record Settings reads) ← carry-through'
+  )
+  assert(
+    runnerA?.vehicleMake === null && runnerA?.vehicleModel === null &&
+    runnerA?.vehicleColor === null && runnerA?.vehiclePlate === null,
+    'no vehicle is invented for the runner (all vehicle columns null, never placeholder strings)'
   )
   assert(runnerA?.approvalStatus === 'PENDING' && runnerA?.status === 'OFFLINE', 'minted runner is PENDING + OFFLINE')
 
   const app = await prisma.runnerApplication.findFirst({ where: { userId: userA.id } })
   assert(!!app && app.termsAgreed && app.backgroundCheckConsent, 'consent-bearing RunnerApplication still written (audit trail intact)')
+  assert(app?.termsVersion === '2026-11-04', 'the application records the new Driver Terms version')
+  assert(
+    app?.vehicleType === null && app?.vehicleMake === null && app?.vehicleModel === null && app?.vehicleYear === null,
+    'the application stores NULL vehicle columns (needs the nullable migration), never empty strings'
+  )
+
+  // A stale tab still on the old wizard sends a vehicle: accepted, and the vehicle is ignored.
+  const userC = await mkUser('c')
+  login(userC.clerkId)
+  const stale = await driversPOST(post('/api/drivers', {
+    ...body(`${PFX}${rand()}${MAIL}`, event.urlSlug),
+    vehicle: { type: 'Car', make: 'Toyota', model: 'Camry', year: '20', color: 'Silver', plate: 'ABC 1234' },
+  }))
+  const staleApp = await prisma.runnerApplication.findFirst({ where: { userId: userC.id } })
+  const staleRunner = await prisma.runner.findUnique({ where: { userId: userC.id } })
+  assert(stale.status === 201, `an old-wizard payload WITH a (even invalid) vehicle is still accepted (status ${stale.status})`)
+  assert(staleApp?.vehicleMake === null && staleRunner?.vehicleMake === null,
+    'the stale vehicle is not stored on the application or the runner')
 
   console.log('\n[4] Settings reads it back, and re-saving persists')
   login(userA.clerkId)
   const meRes = await meGET()
   const meJson: any = await meRes.json()
   assert(
-    meJson.data?.runner?.phone === '+15550000000' && meJson.data?.runner?.vehicleMake === 'Toyota',
+    meJson.data?.runner?.phone === '+15550000000',
     'GET /api/runners/me returns the onboarding data → Settings renders pre-filled, not blank'
   )
 
@@ -208,7 +224,13 @@ async function main() {
   assert(patch.status === 200, 'PATCH /api/runners/me accepts an edit')
   const after = await prisma.runner.findUnique({ where: { userId: userA.id } })
   assert(after?.phone === '+15551234567' && after?.vehicleColor === 'Red', 'edited settings persisted')
-  assert(after?.vehicleMake === 'Toyota', 'partial PATCH did NOT clobber untouched fields')
+  login(userA.clerkId)
+  await mePATCH(new NextRequest('http://localhost/api/runners/me', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vehicleColor: 'Blue' }),
+  }))
+  const after2 = await prisma.runner.findUnique({ where: { userId: userA.id } })
+  assert(after2?.vehicleColor === 'Blue' && after2?.phone === '+15551234567', 'partial PATCH did NOT clobber untouched fields')
 
   // ── TASK 3: licence privacy + scoping ───────────────────────────────────────
   console.log('\n[5] Licence is SELF-SCOPED (no id accepted from the request)')

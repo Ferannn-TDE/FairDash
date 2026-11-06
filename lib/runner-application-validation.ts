@@ -14,11 +14,6 @@ export const MAX_LEN = {
   email: 254, // RFC 5321 practical max
   phone: 30,
   city: 80,
-  vehicleType: 40,
-  vehicleMake: 40,
-  vehicleModel: 40,
-  vehicleColor: 30,
-  vehiclePlate: 15,
 } as const
 
 // Deliberately permissive: one @, no whitespace, a dot-something TLD. Stricter
@@ -37,10 +32,6 @@ export interface ApplicationInput {
   personal?: {
     firstName?: unknown; lastName?: unknown; email?: unknown
     phone?: unknown; dob?: unknown; city?: unknown
-  }
-  vehicle?: {
-    type?: unknown; make?: unknown; model?: unknown
-    year?: unknown; color?: unknown; plate?: unknown
   }
   agreed?: unknown
   bgConsent?: unknown
@@ -94,16 +85,6 @@ export function validatePhone(raw: unknown): string | null {
   return null
 }
 
-export function validateVehicleYear(raw: unknown, now: Date = new Date()): string | null {
-  const s = str(raw)
-  if (!s) return 'Vehicle year is required'
-  if (!/^\d{4}$/.test(s)) return 'Vehicle year must be a 4-digit year'
-  const y = Number(s)
-  // +1 so next-model-year vehicles (sold ahead of the calendar year) aren't rejected.
-  if (y < 1900 || y > now.getFullYear() + 1) return 'Enter a valid vehicle year'
-  return null
-}
-
 function requiredText(raw: unknown, label: string, max: number): string | null {
   const s = str(raw)
   if (!s) return `${label} is required`
@@ -129,7 +110,6 @@ export function validateApplication(
 ): FieldErrors {
   const errors: FieldErrors = {}
   const p = input.personal ?? {}
-  const v = input.vehicle ?? {}
 
   const set = (k: string, msg: string | null) => { if (msg) errors[k] = msg }
 
@@ -140,12 +120,8 @@ export function validateApplication(
   set('dob', validateDob(p.dob, now))
   set('city', optionalText(p.city, 'City', MAX_LEN.city))
 
-  set('vehicleType', requiredText(v.type, 'Vehicle type', MAX_LEN.vehicleType))
-  set('vehicleMake', requiredText(v.make, 'Make', MAX_LEN.vehicleMake))
-  set('vehicleModel', requiredText(v.model, 'Model', MAX_LEN.vehicleModel))
-  set('vehicleYear', validateVehicleYear(v.year, now))
-  set('vehicleColor', optionalText(v.color, 'Color', MAX_LEN.vehicleColor))
-  set('vehiclePlate', optionalText(v.plate, 'License plate', MAX_LEN.vehiclePlate))
+  // No vehicle fields: the vehicle and license requirements were dropped (Driver Terms
+  // 2026-11-04). A vehicle sent by a stale tab is ignored, never validated or stored.
 
   if (input.agreed !== true) {
     errors.agreed = 'You must agree to the Driver Terms & Conditions'
@@ -160,6 +136,5 @@ export function validateApplication(
 /** Field keys owned by each wizard step — lets the client gate Next per step. */
 export const STEP_FIELDS: Record<number, readonly string[]> = {
   1: ['firstName', 'lastName', 'email', 'phone', 'dob', 'city'],
-  2: ['vehicleType', 'vehicleMake', 'vehicleModel', 'vehicleYear', 'vehicleColor', 'vehiclePlate'],
   3: ['agreed', 'bgConsent'],
 }

@@ -22,12 +22,13 @@ const inputCls = (invalid?: string) =>
     invalid ? 'border-red-500/70 focus:border-red-500' : 'border-white/10 focus:border-neon-pink'
   }`
 
-// Step 0 (FAIR_STEP) is conditional — see needsFairStep below. Steps 1–3 are the
-// classic application; step 4 is the confirmation screen.
+// Step 0 (FAIR_STEP) is conditional — see needsFairStep below. Steps 1 and 3 are the
+// application; step 4 is the confirmation screen. Step 2 (vehicle) was removed with the
+// vehicle and license requirements (Driver Terms 2026-11-04); the ids are kept so the
+// server's field errors still map to the step that owns them (STEP_FIELDS).
 const FAIR_STEP = { id: 0, label: 'Your Fair' }
 const STEPS = [
   { id: 1, label: 'Personal Info' },
-  { id: 2, label: 'Vehicle Info' },
   { id: 3, label: 'Terms' },
 ]
 
@@ -40,12 +41,12 @@ interface FairOption {
 
 const DRIVER_TERMS = `FAIRSYNQ DRIVER AGREEMENT
 
-Last Updated: January 1, 2026
+Last Updated: November 4, 2026
 
 This Driver Agreement ("Agreement") is between FairSynq LLC ("FairSynq") and you ("Driver"). By completing this application, you agree to the terms below in full.
 
 1. DRIVER ELIGIBILITY
-To drive for FairSynq you must: (a) be at least 18 years of age; (b) hold a valid U.S. driver's license; (c) own or have authorized access to a vehicle in safe, roadworthy condition; (d) consent to a background check and motor vehicle record review; and (e) carry valid auto insurance meeting state minimums. FairSynq reserves the right to reject or terminate any driver application based on background check results.
+To drive for FairSynq you must: (a) be at least 18 years of age; and (b) consent to a background check. FairSynq reserves the right to reject or terminate any driver application based on background check results.
 
 2. INDEPENDENT CONTRACTOR STATUS
 You acknowledge that you are an independent contractor, not an employee of FairSynq. You are responsible for all taxes, insurance, and expenses related to your work. FairSynq does not provide workers' compensation, health insurance, or other employee benefits. You may work for other platforms and set your own schedule, subject to fair event availability.
@@ -53,25 +54,22 @@ You acknowledge that you are an independent contractor, not an employee of FairS
 3. PAY & EARNINGS
 Drivers earn a base delivery fee per completed order plus 100% of customer tips. The base fee varies by delivery distance, typically $3.00–$6.00 per order. Pay is deposited weekly via ACH direct deposit. FairSynq may offer bonuses during peak periods at its discretion.
 
-4. VEHICLE REQUIREMENTS
-Your vehicle must: (a) pass a visual inspection if requested by FairSynq; (b) be clean and free of strong odors that could affect food; (c) have functional heat and air conditioning for appropriate food temperature maintenance; and (d) display no offensive or inappropriate markings. Bicycles and electric scooters may be approved for designated zones.
-
-5. DELIVERY STANDARDS
+4. DELIVERY STANDARDS
 You agree to: (a) pick up orders promptly from vendors and deliver within the estimated time displayed to customers; (b) handle all food packages with care to prevent spills, damage, or contamination; (c) communicate professionally with vendors and customers; and (d) maintain a customer rating of at least 4.0 stars. Repeated late deliveries or low ratings may result in account suspension.
 
-6. BACKGROUND CHECK CONSENT
-By submitting this application, you expressly authorize FairSynq and its designated background check provider to obtain a consumer report including criminal history, motor vehicle records, and identity verification. You have the right to request a copy of any report obtained and to dispute inaccurate information.
+5. BACKGROUND CHECK CONSENT
+By submitting this application, you expressly authorize FairSynq and its designated background check provider to obtain a consumer report including criminal history and identity verification. You have the right to request a copy of any report obtained and to dispute inaccurate information.
 
-7. SAFETY & CONDUCT
+6. SAFETY & CONDUCT
 Drivers must comply with all traffic laws at all times while making deliveries. FairSynq has a zero-tolerance policy for: (a) driving under the influence of alcohol or substances; (b) verbal or physical altercations with customers or vendors; (c) theft or tampering with orders. Violations may result in immediate termination and referral to law enforcement.
 
-8. TERMINATION
+7. TERMINATION
 Either party may end this Agreement at any time. FairSynq may terminate immediately for safety violations, fraud, or conduct that harms the FairSynq brand. Any earned, unpaid balance will be paid at the next regular pay cycle.
 
-9. LIMITATION OF LIABILITY
+8. LIMITATION OF LIABILITY
 FairSynq's liability for any claim shall not exceed the total earnings paid to you in the 30 days preceding the claim. FairSynq is not liable for vehicle damage, personal injury, or other losses arising from your delivery activities.
 
-10. GOVERNING LAW
+9. GOVERNING LAW
 This Agreement is governed by the laws of the State of Illinois. Disputes shall be resolved by binding arbitration in Sangamon County, IL.
 
 By checking "I agree to the Driver Terms & Conditions," you confirm that you have read, understood, and agree to this Agreement in full, including consent to a background check.`
@@ -79,7 +77,7 @@ By checking "I agree to the Driver Terms & Conditions," you confirm that you hav
 // Version identifier for DRIVER_TERMS (its "Last Updated" date). Sent with the
 // application so the consent record captures WHICH terms were agreed to. Bump this
 // whenever DRIVER_TERMS changes.
-const DRIVER_TERMS_VERSION = '2026-01-01'
+const DRIVER_TERMS_VERSION = '2026-11-04'
 
 // DOB is entered as Month/Day/Year selects — a calendar picker is the wrong tool for
 // a birth date (it forces paging back decades to reach a 1994). Order: Month, Day, Year.
@@ -91,10 +89,6 @@ const MONTHS = [
 interface Personal {
   firstName: string; lastName: string; email: string
   phone: string; dob: string; city: string
-}
-interface Vehicle {
-  make: string; model: string; year: string
-  color: string; plate: string; type: string
 }
 
 export default function BecomeDriverPage() {
@@ -160,6 +154,11 @@ export default function BecomeDriverPage() {
   const wizardSteps = needsFairStep ? [FAIR_STEP, ...STEPS] : STEPS
   // First step of the wizard: "Back" becomes "Cancel" here.
   const firstStep = needsFairStep ? 0 : 1
+  // Next/Back walk the visible steps in order (ids skip 2), then 4 is the confirmation.
+  const stepOrder = wizardSteps.map(st => st.id)
+  const stepIdx = stepOrder.indexOf(step)
+  const nextStep = stepOrder[stepIdx + 1] ?? 4
+  const prevStep = stepOrder[Math.max(0, stepIdx - 1)]
   const [submitting, setSubmitting] = useState(false)
   const [agreed, setAgreed] = useState(false)
   const [bgConsent, setBgConsent] = useState(false)
@@ -195,9 +194,6 @@ export default function BecomeDriverPage() {
   // is unchanged: it only requires a valid date).
   const currentYear = new Date().getFullYear()
   const DOB_YEARS = Array.from({ length: 85 }, (_, i) => currentYear - 16 - i)
-  const [vehicle, setVehicle] = useState<Vehicle>({
-    make: '', model: '', year: '', color: '', plate: '', type: '',
-  })
 
   // Escape hatch: a signed-in applicant with no fair to pick (none live, or the list
   // failed to load) must not be trapped on step 0. Opting into a general application
@@ -213,7 +209,7 @@ export default function BecomeDriverPage() {
   // Errors are computed on every render; `touched` decides whether to SHOW one, so a
   // field the user hasn't reached yet isn't already screaming red at them. Submitting
   // marks everything touched, revealing anything still outstanding.
-  const errors = validateApplication({ personal, vehicle, agreed, bgConsent })
+  const errors = validateApplication({ personal, agreed, bgConsent })
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const touch = (k: string) => setTouched(t => ({ ...t, [k]: true }))
   const errorFor = (k: string) => (touched[k] ? errors[k] : undefined)
@@ -223,7 +219,6 @@ export default function BecomeDriverPage() {
     setTouched(t => ({ ...t, ...Object.fromEntries((STEP_FIELDS[s] ?? []).map(f => [f, true])) }))
 
   const canProceedStep1 = stepValid(1)
-  const canProceedStep2 = stepValid(2)
   const canProceedStep3 = stepValid(3)
 
   const handleSubmit = async () => {
@@ -232,7 +227,7 @@ export default function BecomeDriverPage() {
       const res = await fetch('/api/drivers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personal, vehicle, agreed, bgConsent, termsVersion: DRIVER_TERMS_VERSION, fairSlug }),
+        body: JSON.stringify({ personal, agreed, bgConsent, termsVersion: DRIVER_TERMS_VERSION, fairSlug }),
       })
       const json = await res.json()
       if (!json.success) {
@@ -537,117 +532,6 @@ export default function BecomeDriverPage() {
             </div>
           )}
 
-          {/* Step 2: Vehicle Info */}
-          {step === 2 && (
-            <div className="bg-bg-card border border-white/10 rounded-2xl p-7">
-              <h2 className="font-bebas text-2xl tracking-wide mb-6 text-white">Vehicle Information</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
-                    Vehicle Type <span className="text-neon-pink">*</span>
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {['Car', 'SUV / Truck', 'Motorcycle', 'Bicycle', 'Electric Scooter'].map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => { setVehicle(v => ({ ...v, type: t })); touch('vehicleType') }}
-                        className={`px-4 py-2 rounded-full text-sm font-medium border cursor-pointer transition-all duration-200 ${
-                          vehicle.type === t
-                            ? 'bg-neon-pink border-neon-pink text-white'
-                            : 'bg-white/5 border-white/10 text-text-gray hover:border-white/20 hover:text-white'
-                        }`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                  <FieldError msg={errorFor('vehicleType')} />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
-                      Make <span className="text-neon-pink">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={vehicle.make}
-                      onChange={(e) => setVehicle(v => ({ ...v, make: e.target.value }))}
-                      onBlur={() => touch('vehicleMake')}
-                      aria-invalid={!!errorFor('vehicleMake')}
-                      className={inputCls(errorFor('vehicleMake'))}
-                      placeholder="Toyota"
-                    />
-                    <FieldError msg={errorFor('vehicleMake')} />
-                  </div>
-                  <div>
-                    <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
-                      Model <span className="text-neon-pink">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={vehicle.model}
-                      onChange={(e) => setVehicle(v => ({ ...v, model: e.target.value }))}
-                      onBlur={() => touch('vehicleModel')}
-                      aria-invalid={!!errorFor('vehicleModel')}
-                      className={inputCls(errorFor('vehicleModel'))}
-                      placeholder="Camry"
-                    />
-                    <FieldError msg={errorFor('vehicleModel')} />
-                  </div>
-                  <div>
-                    <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
-                      Year <span className="text-neon-pink">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={vehicle.year}
-                      onChange={(e) => setVehicle(v => ({ ...v, year: e.target.value }))}
-                      onBlur={() => touch('vehicleYear')}
-                      aria-invalid={!!errorFor('vehicleYear')}
-                      inputMode="numeric"
-                      className={inputCls(errorFor('vehicleYear'))}
-                      placeholder="2020"
-                    />
-                    <FieldError msg={errorFor('vehicleYear')} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
-                      Color
-                    </label>
-                    <input
-                      type="text"
-                      value={vehicle.color}
-                      onChange={(e) => setVehicle(v => ({ ...v, color: e.target.value }))}
-                      onBlur={() => touch('vehicleColor')}
-                      aria-invalid={!!errorFor('vehicleColor')}
-                      className={inputCls(errorFor('vehicleColor'))}
-                      placeholder="Silver"
-                    />
-                    <FieldError msg={errorFor('vehicleColor')} />
-                  </div>
-                  <div>
-                    <label className="block text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
-                      License Plate
-                    </label>
-                    <input
-                      type="text"
-                      value={vehicle.plate}
-                      onChange={(e) => setVehicle(v => ({ ...v, plate: e.target.value }))}
-                      onBlur={() => touch('vehiclePlate')}
-                      aria-invalid={!!errorFor('vehiclePlate')}
-                      className={inputCls(errorFor('vehiclePlate'))}
-                      placeholder="ABC 1234"
-                    />
-                    <FieldError msg={errorFor('vehiclePlate')} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Step 3: Terms */}
           {step === 3 && (
             <div className="bg-bg-card border border-white/10 rounded-2xl p-7">
@@ -701,7 +585,7 @@ export default function BecomeDriverPage() {
                     </button>
                     <span className="text-sm text-text-gray leading-relaxed">
                       I consent to a{' '}
-                      <span className="text-neon-pink font-semibold">background check and motor vehicle record review</span>{' '}
+                      <span className="text-neon-pink font-semibold">background check</span>{' '}
                       as a condition of my driver application.
                     </span>
                   </label>
@@ -768,7 +652,7 @@ export default function BecomeDriverPage() {
             <div className="flex justify-between mt-6">
               {step > firstStep ? (
                 <button
-                  onClick={() => setStep(s => s - 1)}
+                  onClick={() => setStep(prevStep)}
                   className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 text-white rounded-xl font-semibold text-sm hover:bg-white/10 transition-all cursor-pointer"
                 >
                   <ChevronLeftIcon className="w-4 h-4" />
@@ -790,13 +674,13 @@ export default function BecomeDriverPage() {
                   // blocks the user without telling them why; clicking instead reveals every
                   // outstanding error on this step at once. Progression is still blocked.
                   onClick={() => {
-                    const ok = step === 0 ? canProceedStep0 : step === 1 ? canProceedStep1 : canProceedStep2
+                    const ok = step === 0 ? canProceedStep0 : canProceedStep1
                     if (!ok) { touchStep(step); return }
-                    setStep(s => s + 1)
+                    setStep(nextStep)
                   }}
-                  aria-disabled={step === 0 ? !canProceedStep0 : step === 1 ? !canProceedStep1 : !canProceedStep2}
+                  aria-disabled={step === 0 ? !canProceedStep0 : !canProceedStep1}
                   className={`flex items-center gap-2 px-6 py-3 bg-neon-pink text-white rounded-xl font-semibold text-sm transition-colors cursor-pointer border-0 shadow-[0_4px_12px_rgba(255,0,119,0.3)] ${
-                    (step === 0 ? !canProceedStep0 : step === 1 ? !canProceedStep1 : !canProceedStep2)
+                    (step === 0 ? !canProceedStep0 : !canProceedStep1)
                       ? 'opacity-40 hover:bg-neon-pink'
                       : 'hover:bg-[#e0006b]'
                   }`}

@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { useUser, useClerk } from '@clerk/clerk-react'
-import { User, Phone, Mail, Car, Bell, Clock, LogOut, Wallet } from 'lucide-react'
+import { User, Phone, Mail, Bell, Clock, LogOut, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import StripeConnectCard from '../../../_components/StripeConnectCard'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
-import LicenseCard from './LicenseCard'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -124,28 +123,9 @@ export default function RunnerSettingsPage() {
         </div>
       </div>
 
-      {/* Vehicle info */}
-      <div className="bg-bg-card border border-white/10 rounded-2xl p-5 space-y-4">
-        <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold flex items-center gap-2">
-          <Car className="w-3.5 h-3.5" /> Vehicle Info
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          {([
-            ['Make', 'vehicleMake'], ['Model', 'vehicleModel'], ['Color', 'vehicleColor'], ['Plate', 'vehiclePlate'],
-          ] as const).map(([label, key]) => (
-            <div key={key}>
-              <label className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold block mb-1.5">{label}</label>
-              <input value={form[key]} onChange={e => set(key, e.target.value)} disabled={loading || saving}
-                placeholder="—"
-                className="w-full bg-bg-dark border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-neon-pink transition-colors disabled:opacity-50" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Driver's licence — sensitive PII; owns its own load/save cycle (multipart upload,
-          private bucket, signed preview), so it is NOT part of the JSON `form` PATCH. */}
-      <LicenseCard />
+      {/* No Vehicle Info or driver's licence cards: runners no longer need a vehicle or a
+          licence (Driver Terms 2026-11-04). Existing values stay in the form state, so a save
+          sends them back unchanged; the columns, the licence routes and the admin viewer remain. */}
 
       {/* Notifications */}
       <div className="bg-bg-card border border-white/10 rounded-2xl p-5 space-y-4">
