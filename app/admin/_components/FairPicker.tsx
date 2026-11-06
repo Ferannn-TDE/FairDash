@@ -35,6 +35,7 @@ export default function FairPicker() {
   const canEditSettings = isLoaded && hasSettingsRole(user?.publicMetadata)
   const [fairs, setFairs] = useState<Fair[]>([])
   const [loading, setLoading] = useState(true)
+  const [partnerPending, setPartnerPending] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -45,6 +46,7 @@ export default function FairPicker() {
         if (!active) return
         if (!json.success) { setError(json.error?.message ?? 'Failed to load fairs'); return }
         setFairs((json.data.fairs ?? []) as Fair[])
+        setPartnerPending(typeof json.data.partnerApplicationsPending === 'number' ? json.data.partnerApplicationsPending : 0)
       })
       .catch(() => { if (active) setError('Failed to load fairs') })
       .finally(() => { if (active) setLoading(false) })
@@ -61,6 +63,12 @@ export default function FairPicker() {
           <p className="text-text-gray text-sm mt-0.5">
             {loading ? 'Loading…' : `${fairs.length} fair${fairs.length === 1 ? '' : 's'} across all organizers — pick one to manage`}
           </p>
+          {/* Read-only (item 7). Shown only once loaded and only when there are some; review is item 9. */}
+          {!loading && partnerPending > 0 && (
+            <p className="text-amber-300 text-xs font-semibold mt-1.5">
+              {partnerPending} partner application{partnerPending === 1 ? '' : 's'} pending
+            </p>
+          )}
         </div>
         {/* Both panels are PLATFORM-level (one organizer owns many fairs; one operator may work
             booths at several), so they are siblings of the fair list — not something you reach by

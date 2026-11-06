@@ -16,6 +16,7 @@ export const RATE_LIMITS = {
   refund:             { requests: 10,  window: '1 m' }, // cancel, per USER (was per IP)
   publicRoutes:       { requests: 60,  window: '1 m' }, // public reads, signed in, per user
   publicAnonymous:    { requests: 600, window: '1 m' }, // public reads, signed out, per IP — a fair crowd can share one IP
+  partnerApply:       { requests: 3,   window: '1 h' }, // public partner application form, per IP (item 7)
 } as const
 
 export type RateLimitPolicy = keyof typeof RATE_LIMITS

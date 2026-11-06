@@ -40,6 +40,7 @@ const EXPECTED: Record<string, number> = {
   refund: 10,
   publicRoutes: 60,
   publicAnonymous: 600,
+  partnerApply: 3,
 }
 
 async function main() {

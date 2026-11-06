@@ -52,6 +52,13 @@ const nextConfig = {
     return config
   },
 
+  // Item 7 (Q-P3): new individual runner applications are retired in favour of partner
+  // organizations. Existing runners keep /sign-in/runner and the runner portal. Temporary (307):
+  // Batch 2 decides the runners' future.
+  async redirects() {
+    return [{ source: '/become-driver', destination: '/partners', permanent: false }]
+  },
+
   async headers() {
     return [
       {

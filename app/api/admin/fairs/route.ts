@@ -33,7 +33,11 @@ export async function GET(_req: NextRequest) {
       },
     })
 
+    // Read-only count for the picker (item 7); review and approval come with item 9.
+    const partnerApplicationsPending = await db.partnerOrganization.count({ where: { approvalStatus: 'PENDING' } })
+
     return success({
+      partnerApplicationsPending,
       fairs: fairs.map(f => ({
         id: f.id,
         name: f.name,

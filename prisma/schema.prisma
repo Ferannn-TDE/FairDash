@@ -2012,3 +2012,38 @@ model PlatformSettingChange {
   @@index([key, createdAt])
   @@index([createdAt])
 }
+
+// ── Partner organizations (Batch 1 item 7, B1.11) ────────────────────────────────────────────
+// A group (school, church, nonprofit, club…) applying to run curbside pickup at fairs. In Batch 1
+// the application IS the entity: one row, PENDING until the client approves it (item 9). Batch 2
+// adds members/login and the event link on top of this same row, so its id is stable from day one.
+model PartnerOrganization {
+  id String @id @default(cuid())
+
+  name           String
+  groupType      String  // school | church | nonprofit | club | other (lib/partner-application.ts)
+  groupTypeOther String? // set when groupType = other
+
+  contactName  String
+  contactEmail String // lowercased
+  contactPhone String
+  city         String
+  state        String // two-letter US state code
+
+  interests  String? // events or areas they're interested in
+  staffHours String? // hours the group could staff
+  note       String?
+
+  // Same approval fields as FairOrganizer, so item 9's review needs no second migration.
+  approvalStatus  ApprovalStatus @default(PENDING)
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectionReason String?
+
+  requestIp String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([approvalStatus])
+  @@index([contactEmail])
+}

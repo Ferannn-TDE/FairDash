@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-import { EnvelopeIcon, ArrowRightIcon } from '@heroicons/react/24/outline'
-import { Store, CalendarDays, Truck } from 'lucide-react'
+import { EnvelopeIcon, ArrowRightIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { Store, CalendarDays, HeartHandshake } from 'lucide-react'
 import { EASE, TIMING, Reveal, Stagger, StaggerItem } from '@/components/animations/motion'
 import MarketplaceNavbar from './_components/MarketplaceNavbar'
 import FairCard from './_components/FairCard'
@@ -15,32 +15,49 @@ import { FACEBOOK_URL, contactMailto } from '@/lib/contact-info'
 import { partitionFairCards, type PublicFairCard } from '@/lib/fair-view'
 import { useUser } from '@clerk/clerk-react'
 import { useRole } from './_contexts/RoleContext'
+import { PARTNER_CARD, PARTNERS_PATH } from '@/lib/partner-copy'
 
 // ── Role cards section ────────────────────────────────────────────────────────
 
 // Operator paths only — the customer is the hero above (browse free, no login
-// wall). Mono-pink across the board; each routes to its dedicated login page.
-const OPERATOR_CARDS = [
+// wall). Mono-pink across the board. Vendors and organizers route to their login page; partner
+// organizations to the public /partners application (item 7: the runner card was retired).
+const OPERATOR_CARDS: Array<{ icon: typeof Store; title: string; desc: string; points?: readonly string[]; href: string; cta: string }> = [
+  // Points approved 2026-11-05: only what works today; no payout timing, no "one menu for every
+  // event" (Batch 2), and no reach claims (288 orders over two seasons).
   {
     icon: Store,
     title: 'Become a Vendor',
-    desc: 'List your booth, manage your menu, and reach thousands of hungry fairgoers. Free to join.',
+    desc: 'List your booth and take orders ahead from fairgoers. Free to join.',
+    points: [
+      'No commission on your sales',
+      'Orders arrive on your phone or tablet at the booth',
+      'Customers pay by card before you start cooking',
+      'Mark items sold out anytime from your menu',
+    ],
     href: '/sign-in/vendor',
     cta: 'Vendor sign-in',
   },
   {
     icon: CalendarDays,
     title: 'Host an Event',
-    desc: 'Create fairs, approve vendors, and monitor orders live — run your event end to end.',
+    desc: 'Run your fair end to end from one dashboard.',
+    points: [
+      "Save your fair as a draft and publish when it's ready",
+      'Approve the vendors who apply to your fair',
+      'Watch orders as they come in, booth by booth',
+      'Run several fairs from one account',
+    ],
     href: '/organizer/login',
     cta: 'Organizer sign-in',
   },
   {
-    icon: Truck,
-    title: 'Deliver with FairSynq',
-    desc: 'Claim deliveries, run orders across the fairgrounds, and earn per drop.',
-    href: '/sign-in/runner',
-    cta: 'Runner sign-in',
+    icon: HeartHandshake,
+    title: PARTNER_CARD.heading,
+    desc: PARTNER_CARD.text,
+    points: PARTNER_CARD.points,
+    href: PARTNERS_PATH,
+    cta: PARTNER_CARD.button,
   },
 ]
 
@@ -65,13 +82,13 @@ function RoleSection() {
           Run the <span className="text-neon-pink">other side</span> of the fair
         </h2>
         <p className="mt-3 text-text-gray text-sm sm:text-base max-w-xl mx-auto">
-          Vendors, organizers, and runners power FairSynq. Pick your path to sign in.
+          Vendors, organizers and partner organizations power FairSynq. Pick your path.
         </p>
       </Reveal>
 
       <Stagger className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 max-w-5xl mx-auto">
-        {OPERATOR_CARDS.map(({ icon: Icon, title, desc, href, cta }) => (
-          <StaggerItem key={href}>
+        {OPERATOR_CARDS.map(({ icon: Icon, title, desc, points, href, cta }) => (
+          <StaggerItem key={href} className="h-full">
             <Link
               href={href}
               className="group flex flex-col h-full p-6 bg-white/[0.03] border border-white/[0.08] rounded-2xl hover:border-neon-pink/30 hover:bg-white/[0.05] hover:shadow-[0_8px_32px_rgba(255,0,119,0.12)] motion-safe:hover:-translate-y-0.5 transition-all duration-300 no-underline"
@@ -80,7 +97,17 @@ function RoleSection() {
                 <Icon className="w-5 h-5 text-neon-pink" />
               </div>
               <p className="font-bebas text-2xl tracking-wide text-white mb-1.5">{title}</p>
-              <p className="text-text-gray text-xs leading-relaxed flex-1">{desc}</p>
+              <p className={`text-text-gray text-xs leading-relaxed ${points ? '' : 'flex-1'}`}>{desc}</p>
+              {points && (
+                <ul className="mt-3 space-y-1.5 flex-1">
+                  {points.map(pt => (
+                    <li key={pt} className="flex items-start gap-2 text-text-gray text-xs leading-relaxed">
+                      <CheckIcon className="w-3.5 h-3.5 text-neon-pink shrink-0 mt-0.5" />
+                      <span>{pt}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <div className="flex items-center gap-1.5 mt-5 text-xs font-semibold text-neon-pink">
                 {cta}
                 <ArrowRightIcon className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" />
@@ -299,7 +326,7 @@ function SiteFooter() {
                 <Link href="/fairs" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Discover Fairs</Link>
                 <Link href="/sign-in/vendor" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Vendor sign-in</Link>
                 <Link href="/organizer/login" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Organizer sign-in</Link>
-                <Link href="/sign-in/runner" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Runner sign-in</Link>
+                <Link href={PARTNERS_PATH} className="text-sm text-text-gray hover:text-white transition-colors font-inter">Partner organizations</Link>
               </div>
             </div>
             <div>

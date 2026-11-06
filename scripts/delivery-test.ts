@@ -258,7 +258,6 @@ async function main() {
   // Every remaining hit, file by file, with the exact count and why it stays. A NEW mention, even
   // in a listed file, changes the count and fails.
   const ALLOW: Record<string, { count: number; why: string }> = {
-    'app/MarketplaceLanding.tsx': { count: 2, why: 'runner card "Deliver with FairSynq" — replaced by the partner card in item 7 (B1.8)' },
     'app/sign-in/runner/page.tsx': { count: 2, why: 'runner sign-in copy — runner/partner rework, item 7' },
     'app/become-driver/layout.tsx': { count: 1, why: 'runner application metadata — runner/partner rework, item 7' },
     'app/become-driver/page.tsx': { count: 9, why: 'runner wizard + Driver Terms — runner rework (item 7) and legal pages (item 11)' },
