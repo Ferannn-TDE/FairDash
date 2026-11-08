@@ -7,22 +7,27 @@
  * DELIVERED orders (reconcile sets completedAt only for COMPLETED — `reconcile-order-status.ts`).
  * So the bar completed (it derives from status) while the timeline stopped at "Picked up".
  *
- * The trap we did NOT fall into: backfilling completedAt on DELIVERED orders. `COMPLETE_STATES`
- * = [COMPLETED, DELIVERED] (`reconciler.ts:137`), and Pattern C (payout backstop) + Pattern S
- * (earning restore) scan `status IN COMPLETE_STATES AND completedAt >= windowStart`. The null
- * completedAt is what keeps the 44 DELIVERED orders OUT of those money windows — backfilling
- * would pull them in. So the timeline reads RunnerEarning.createdAt (the honest delivery-accrual
- * time) instead, and completedAt is left untouched.
+ * completedAt on DELIVERED — THE RULE CHANGED ON PURPOSE (payout-safety fix, 2026-11).
+ * Until then reconcile set completedAt only for COMPLETED, and the null on DELIVERED kept every
+ * delivered order out of Pattern C (payout backstop) and Pattern S (earning restore), which scan
+ * `status IN COMPLETE_STATES AND completedAt >= windowStart`. That null also hid real misses:
+ * four delivered orders whose delayed payout job never ran were invisible to every backstop.
+ * Now reconcile stamps completedAt when an order reaches DELIVERED, so orders delivered AFTER the
+ * fix ships are covered like COMPLETED ones. There is NO backfill: the older DELIVERED orders
+ * have no honest delivery time, and a backfilled date would either sit outside the backstop
+ * windows (no benefit) or pull an old order into one (an unwanted payout). Their completedAt
+ * stays null for good. The timeline still reads RunnerEarning.createdAt, because legacy rows
+ * have no completedAt to show.
  *
  *   [1] TIMELINE keys on status === 'DELIVERED' and reads runnerEarning.createdAt (NOT completedAt).
  *   [2] The order route exposes runnerEarning.createdAt.
- *   [3] SAFETY — completedAt is still set ONLY for COMPLETED in reconcile, never DELIVERED, so
- *       Pattern C/S windows are unchanged.
+ *   [3] RULE — completedAt is set for COMPLETED, and for DELIVERED going forward; nothing
+ *       backfills it onto existing DELIVERED orders.
  *
  * Run:  npx tsx scripts/delivered-timeline-guard.ts
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
@@ -49,10 +54,20 @@ console.log('\n[2] order route exposes the delivery timestamp')
 const route = readFileSync(new URL('../app/api/orders/[id]/route.ts', import.meta.url), 'utf8')
 assert(/runnerEarning:\s*\{\s*select:\s*\{\s*createdAt:\s*true/.test(route), 'route selects runnerEarning.createdAt')
 
-console.log('\n[3] SAFETY: completedAt is set only for COMPLETED, never DELIVERED (Pattern C/S windows unchanged)')
+console.log('\n[3] RULE: completedAt set for COMPLETED and, going forward, DELIVERED; no backfill')
 const reconcile = readFileSync(new URL('../lib/reconcile-order-status.ts', import.meta.url), 'utf8')
-assert(/target === 'COMPLETED'\s*\?\s*\{ completedAt: new Date\(\) \}/.test(reconcile), "reconcile sets completedAt for COMPLETED only")
-assert(!/target === 'DELIVERED'[^\n]*completedAt: new Date/.test(reconcile), 'reconcile does NOT set completedAt on DELIVERED (the load-bearing null is preserved)')
+assert(/target === 'COMPLETED'\s*\?\s*\{ completedAt: new Date\(\) \}/.test(reconcile), 'reconcile sets completedAt for COMPLETED')
+assert(/target === 'DELIVERED'\s*\?\s*\{ completedAt: new Date\(\) \}/.test(reconcile), 'reconcile sets completedAt for DELIVERED (orders delivered after the fix)')
+// No backfill, anywhere: no migration writes completedAt onto existing orders. A data migration is
+// the only way old DELIVERED rows could acquire one, and the rule above is forward-only by design.
+const migDir = new URL('../prisma/migrations/', import.meta.url)
+const backfills = readdirSync(migDir).filter((d) => {
+  try { return /UPDATE\s+"Order"[\s\S]*?"completedAt"/i.test(readFileSync(new URL(`${d}/migration.sql`, migDir), 'utf8')) } catch { return false }
+})
+assert(backfills.length === 0, `no migration backfills Order.completedAt (found: ${backfills.join(', ') || 'none'})`)
+// Positive control on that probe: the regex does match a backfill-shaped statement.
+assert(/UPDATE\s+"Order"[\s\S]*?"completedAt"/i.test('UPDATE "Order" SET "completedAt" = "updatedAt" WHERE status = \'DELIVERED\''),
+  'probe control: the backfill regex matches a backfill statement')
 
 console.log(`\n${'─'.repeat(52)}\n${fail === 0 ? '✅' : '❌'} delivered-timeline-guard: ${pass} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)

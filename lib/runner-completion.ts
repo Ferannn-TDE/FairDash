@@ -40,8 +40,8 @@ import { db } from './db'
  * delivered-assigned orders; the numerator is delivered-assigned.
  *
  * The "today" bucket keys on the 'collected' event's timestamp, falling back to dispatchedAt
- * (claim time) when the tap was skipped: no deliveredAt column exists (Order.completedAt is a
- * load-bearing null on DELIVERED — Pattern C/S money windows — and OrderEvent is not written
+ * (claim time) when the tap was skipped: no deliveredAt column exists (Order.completedAt is set
+ * on DELIVERED only since the payout-safety fix, 2026-11, never backfilled — and OrderEvent is not written
  * on the DELIVERED transition). Claim→collect→deliver is minutes on a fair day, so the
  * possession-window start is the honest available day-bucket; the only distortion is an order
  * picked up before midnight and delivered after.

@@ -39,8 +39,9 @@ import { splitStripeFee } from './payout-split'
 import { logger } from './logger'
 import { classifyStripeError, type StripeFailureVerdict } from './stripe-error-class'
 
-/** Why the admin gate refused to pay a slice. Never gets a PayoutHold row. */
-export type PayoutBlockReason = 'admin_hold' | 'admin_cancelled' | 'payouts_frozen'
+/** Why a slice was refused without a transfer. Never gets a PayoutHold row. The first three are
+ *  the admin gate; `transfer_exists` is the second double-pay guard (see classifyVendorSlice). */
+export type PayoutBlockReason = 'admin_hold' | 'admin_cancelled' | 'payouts_frozen' | 'transfer_exists'
 
 export type VendorPayoutOutcome = 'pay' | 'hold' | 'skip' | 'blocked' | 'already_paid'
 
@@ -51,11 +52,22 @@ export type VendorPayoutOutcome = 'pay' | 'hold' | 'skip' | 'blocked' | 'already
  * (`paid → already_paid`) be proven with a positive control. Check ORDER is load-bearing:
  *   declined  → skip        (customer's refund, owned by the decline/refund flow)
  *   PAID      → already_paid (durable double-pay guard — refuse re-transfer BEFORE Stripe)
+ *   TRANSFER EXISTS → blocked/transfer_exists (second double-pay guard, below)
  *   cancelled → blocked      (C1 admin gate)
  *   held      → blocked      (C1 admin gate)
  *   frozen    → blocked      (vendor payouts frozen)
  *   !connected/non-positive → hold
  *   else      → pay
+ *
+ * TRANSFER EXISTS (payout-safety fix, 2026-11). A Payout row for this order + vendor means a
+ * transfer was already created (pending, paid, or since reversed by a refund or dispute
+ * clawback), even though the earning isn't marked paid. Re-paying would call transfers.create on
+ * an expired idempotency key — money out — and then crash on uq_payout_order_vendor, leaving the
+ * transfer unrecorded. Production had exactly this shape: a disputed order whose transfers were
+ * reversed by the dispute while its earnings stayed 'accrued'. The code can't tell "owed again"
+ * from "charged back", so it refuses and a human decides; reconciler Pattern Y alerts on it.
+ * Blocked, not already_paid: a reversed transfer is money the vendor no longer has, so the
+ * earning must NOT be marked paid. No hold either (Pattern D would drain it).
  */
 export function classifyVendorSlice(input: {
   declined: boolean
@@ -63,10 +75,13 @@ export function classifyVendorSlice(input: {
   connected: boolean
   payoutsFrozen: boolean
   transferCents: number
+  /** A Payout row (any status) exists for this order + vendor. */
+  transferExists?: boolean
 }): { outcome: VendorPayoutOutcome; heldReason: 'unconnected' | 'non_positive' | null; blockedReason: PayoutBlockReason | null } {
-  const { declined, earningStatus, connected, payoutsFrozen, transferCents } = input
+  const { declined, earningStatus, connected, payoutsFrozen, transferCents, transferExists } = input
   if (declined)                      return { outcome: 'skip',         heldReason: null,          blockedReason: null }
   if (earningStatus === 'paid')      return { outcome: 'already_paid', heldReason: null,          blockedReason: null }
+  if (transferExists)                return { outcome: 'blocked',      heldReason: null,          blockedReason: 'transfer_exists' }
   if (earningStatus === 'cancelled') return { outcome: 'blocked',      heldReason: null,          blockedReason: 'admin_cancelled' }
   if (earningStatus === 'held')      return { outcome: 'blocked',      heldReason: null,          blockedReason: 'admin_hold' }
   if (payoutsFrozen)                 return { outcome: 'blocked',      heldReason: null,          blockedReason: 'payouts_frozen' }
@@ -362,7 +377,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   const lines = splitStripeFee(vendorSubtotalsCents, stripeFeeCents)
 
   const vendorIds = lines.map(l => l.vendorId)
-  const [vendors, statuses, earnings] = await Promise.all([
+  const [vendors, statuses, earnings, existingPayouts] = await Promise.all([
     db.vendor.findMany({
       where: { id: { in: vendorIds } },
       // C1: payoutsFrozenAt — the vendor-wide admin kill-switch.
@@ -377,10 +392,16 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       where: { orderId },
       select: { id: true, vendorId: true, status: true },
     }),
+    // transfer_exists guard: any Payout row (pending / paid / reversed) = a transfer was made.
+    db.payout.findMany({
+      where: { orderId },
+      select: { vendorId: true },
+    }),
   ])
   const vendorMap = new Map(vendors.map(v => [v.id, v]))
   const statusMap = new Map(statuses.map(s => [s.vendorId, s.status]))
   const earningMap = new Map(earnings.map(e => [e.vendorId, e]))
+  const transferVendorIds = new Set(existingPayouts.map(p => p.vendorId))
 
   // Decide outcome per vendor BEFORE moving any money.
   //   pay     — connected, completed, positive slice → transfer
@@ -415,6 +436,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       connected,
       payoutsFrozen: !!v?.payoutsFrozenAt,
       transferCents: line.transferCents,
+      transferExists: transferVendorIds.has(line.vendorId),
     })
 
     return {
@@ -458,8 +480,11 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     if (p.outcome === 'blocked') {
       // NO transfer, NO PayoutHold row. The VendorEarning row (status held/cancelled)
       // or the vendor's freeze flag IS the hold; the money stays in the platform
-      // balance where the admin can release or cancel it.
-      logger.warn('[Payout] vendor slice BLOCKED by admin gate — no transfer', {
+      // balance where the admin can release or cancel it. transfer_exists: a transfer for
+      // this slice was already made; nothing changes until a human decides (Pattern Y).
+      logger.warn(p.blockedReason === 'transfer_exists'
+        ? '[Payout] vendor slice BLOCKED — a transfer for this order and vendor already exists; not re-paying (Pattern Y alerts)'
+        : '[Payout] vendor slice BLOCKED by admin gate — no transfer', {
         orderId, vendorId: p.vendorId, sliceCents: p.transferCents, reason: p.blockedReason,
       })
       result.blocked.push({ vendorId: p.vendorId, sliceCents: p.transferCents, reason: p.blockedReason! })

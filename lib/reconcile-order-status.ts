@@ -267,9 +267,15 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
   const tsPatch: Record<string, unknown> =
     target === 'READY'       ? { readyAt: new Date() }
   : target === 'COMPLETED'   ? { completedAt: new Date() }
+  // DELIVERED stamps completedAt too (payout-safety fix, 2026-11). It used to stay null, which
+  // kept every delivered order out of reconciler Patterns C (payout backstop) and S (earning
+  // restore): a delivered order whose delayed payout job never ran could never be caught.
+  // Forward-only: orders delivered before this shipped keep a null completedAt (no backfill;
+  // they have no honest delivery time). Pinned by scripts/delivered-timeline-guard.ts [3].
+  : target === 'DELIVERED'   ? { completedAt: new Date() }
   : target === 'UNCOLLECTED' ? { uncollectedAt: new Date() }
   : target === 'CANCELLED'   ? { cancelledAt: new Date(), cancelledBy: cancelBy, ...(cancelReason ? { cancellationReason: cancelReason } : {}) }
-  :                            {} // RUNNER_COLLECTED (dispatchedAt set by the claim), DELIVERED (photo is the proof), UNDELIVERABLE
+  :                            {} // RUNNER_COLLECTED (dispatchedAt set by the claim), UNDELIVERABLE
 
   // Monotonic, race-safe flip: only a still-eligible row matches.
   const res = await db.order.updateMany({

@@ -49,9 +49,9 @@ export async function GET(
         refunds: { select: { vendorId: true, status: true, amountCents: true } },
         // Delivered-time for the customer timeline. RunnerEarning is created in the SAME
         // DELIVERED transition that accrues the runner's earning, so its createdAt is the
-        // honest delivery timestamp — deliberately NOT Order.completedAt, which stays null on
-        // DELIVERED orders because reconciler Pattern C/S treat that null as load-bearing
-        // (a delivered order is kept out of their completedAt-windowed payout/restore scans).
+        // honest delivery timestamp. Not Order.completedAt: that is stamped on DELIVERED only for
+        // orders delivered after the payout-safety fix (2026-11); older delivered orders keep a
+        // null completedAt for good (no backfill), so it can't serve as the delivery time.
         runnerEarning: { select: { createdAt: true } },
       },
     })

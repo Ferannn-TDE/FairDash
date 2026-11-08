@@ -200,7 +200,7 @@ const COMPLETE_STATES: OrderStatus[] = [OrderStatus.COMPLETED, OrderStatus.DELIV
  *              with honest either/or wording, because silencing it could hide a real leak.
  *
  * ONLY patterns that increment `sum.repaired` can reach the warning; alert-only patterns
- * (J, K, L, M, O, U, V, W) never do and are deliberately absent rather than listed as no-ops.
+ * (J, K, L, M, O, U, V, W, Y) never do and are deliberately absent rather than listed as no-ops.
  */
 const PATTERN_KIND: Record<string, { kind: 'backstop' | 'designed' | 'mixed'; why: string }> = {
   A: { kind: 'backstop', why: 'paid in Stripe but not fully placed — placement leaked' },
@@ -279,6 +279,7 @@ export async function runReconciliationSweep(opts: SweepOptions = {}): Promise<S
     await patternI(sum, { maxPerPattern, dryRun })
     await patternJ(sum, { maxPerPattern })
     await patternK(sum, { maxPerPattern })
+    await patternY(sum, { maxPerPattern })
     await patternL(sum, { windowStart, maxPerPattern })
     await patternM(sum, { maxPerPattern, scanCeiling })
     await patternN(sum, { maxPerPattern, scanCeiling, backstopEnabled })
@@ -565,24 +566,33 @@ async function patternB(
   }
 }
 
-// ─── PATTERN C — COMPLETED without payout (boundary 4, the critical one) ─────
-// For each terminal-complete order, every PAYABLE vendor must be covered by a
-// Payout row, a PayoutHold, or a DECLINED status. A vendor covered by none was
-// never paid → the enqueue dropped (worker/Redis down). enqueueOrderPayout is
-// idempotent (jobId dedup + Stripe per-order+vendor idempotency keys + Payout
-// upsert), so re-running can never double-pay — but we still gate detection so
-// covered orders are never re-enqueued needlessly.
-async function patternC(
-  sum: SweepSummary,
-  o: { windowStart: Date; maxPerPattern: number; dryRun: boolean },
-) {
-  // WINDOW BOUNDARY (decision C2): payout fires at completedAt + REFUND_WINDOW_MS.
-  // Pattern C must ONLY flag orders whose window has CLOSED — otherwise it would
-  // pay every order immediately and defeat the refund window. The band is:
-  //   windowStart (boundedness lower bound) ≤ completedAt < now − REFUND_WINDOW_MS
-  // i.e. completed long enough ago that the delayed payout should already have
-  // fired, but recent enough to still be in scan range.
-  const windowClosedBefore = new Date(Date.now() - REFUND_WINDOW_MS)
+/**
+ * PATTERN C SELECTION — shared by the sweep and the read-only production dry run
+ * (scripts/payout-safety-dryrun.ts), so the dry run proves exactly what the sweep would pick.
+ * Pure read: no writes, no Stripe, no enqueue.
+ *
+ * WINDOW BOUNDARY (decision C2): payout fires at completedAt + REFUND_WINDOW_MS. Pattern C must
+ * ONLY flag orders whose window has CLOSED — otherwise it would pay every order immediately and
+ * defeat the refund window. The band is:
+ *   windowStart (boundedness lower bound) ≤ completedAt < now − REFUND_WINDOW_MS
+ * `now` is a parameter so the dry run can ask "what would C select after deploy + N hours".
+ * A null completedAt never matches `gte`, so DELIVERED orders delivered before the
+ * payout-safety fix (completedAt null, never backfilled) stay out for good.
+ *
+ * Returns only orders with a GAP: a payable vendor with no payout, no hold, not admin-blocked,
+ * not declined, NOT refunded. `identityOk` is the pre-flight of the customer-side money
+ * identity processOrderPayout asserts first; false = the sweep alerts instead of paying.
+ */
+export interface PatternCCandidate {
+  orderId: string
+  eventId: string
+  gapVendorIds: string[]
+  identityOk: boolean
+  identityDetail: string
+}
+
+export async function selectPatternCCandidates(o: { windowStart: Date; now: Date; maxPerPattern: number }): Promise<PatternCCandidate[]> {
+  const windowClosedBefore = new Date(o.now.getTime() - REFUND_WINDOW_MS)
   const orders = await db.order.findMany({
     where: {
       status: { in: COMPLETE_STATES },
@@ -606,8 +616,8 @@ async function patternC(
     orderBy: { completedAt: 'asc' },
     take: o.maxPerPattern,
   })
-  sum.scanned.completedOrders += orders.length
 
+  const out: PatternCCandidate[] = []
   for (const ord of orders) {
     const payableVendors = new Set(ord.orderItems.map(i => i.vendorId))
     const paid = new Set(ord.payouts.map(p => p.vendorId))
@@ -627,20 +637,11 @@ async function patternC(
         .filter(e => e.status === 'held' || e.status === 'cancelled')
         .map(e => e.vendorId),
     )
-
-    // A gap = a payable vendor with no payout, no hold, not admin-blocked, not
-    // declined, NOT refunded. (A refunded vendor must never be paid — their slice
-    // went back to the customer.)
-    const gap = [...payableVendors].some(
+    const gapVendorIds = [...payableVendors].filter(
       v => !paid.has(v) && !held.has(v) && !adminBlocked.has(v) && !declined.has(v) && !refunded.has(v),
     )
-    if (!gap) continue
+    if (gapVendorIds.length === 0) continue
 
-    // Pre-flight the SAME customer-side money identity processOrderPayout asserts
-    // first. If it doesn't hold (e.g. total omits the service fee — malformed
-    // data), the payout would HALT and never settle. Re-enqueuing it every sweep
-    // is futile noise, so we DON'T act on this ambiguous money — we ALERT it for
-    // a human. Under-pay-and-flag beats churning an unreconcilable order forever.
     const subtotalCents = ord.orderItems.reduce((s, i) => s + Math.round(i.subtotal * 100), 0)
     const customerSide = subtotalCents
       + Math.round(ord.fairSynqFee * 100)
@@ -648,23 +649,54 @@ async function patternC(
       + Math.round((ord.serviceCharge ?? 0) * 100)
       + Math.round((ord.tip ?? 0) * 100)
     const totalCents = Math.round(ord.total * 100)
-    if (customerSide !== totalCents) {
+    out.push({
+      orderId: ord.id,
+      eventId: ord.eventId,
+      gapVendorIds,
+      identityOk: customerSide === totalCents,
+      identityDetail:
+        `charge ${totalCents}¢ ≠ subtotal ${subtotalCents} + fee ${Math.round(ord.fairSynqFee * 100)} ` +
+        `+ delivery ${Math.round((ord.deliveryFee ?? 0) * 100)} + serviceCharge ${Math.round((ord.serviceCharge ?? 0) * 100)} ` +
+        `+ tip ${Math.round((ord.tip ?? 0) * 100)}`,
+    })
+  }
+  return out
+}
+
+// ─── PATTERN C — COMPLETED without payout (boundary 4, the critical one) ─────
+// For each terminal-complete order, every PAYABLE vendor must be covered by a
+// Payout row, a PayoutHold, or a DECLINED status. A vendor covered by none was
+// never paid → the enqueue dropped (worker/Redis down). enqueueOrderPayout is
+// idempotent (jobId dedup + Stripe per-order+vendor idempotency keys + Payout
+// upsert), and the executor refuses a slice whose transfer already exists, so
+// re-running can never double-pay. Selection: selectPatternCCandidates above.
+async function patternC(
+  sum: SweepSummary,
+  o: { windowStart: Date; maxPerPattern: number; dryRun: boolean },
+) {
+  const candidates = await selectPatternCCandidates({ windowStart: o.windowStart, now: new Date(), maxPerPattern: o.maxPerPattern })
+  sum.scanned.completedOrders += candidates.length
+
+  for (const c of candidates) {
+    // Pre-flighted money identity doesn't hold (e.g. total omits the service fee —
+    // malformed data): the payout would HALT and never settle. Re-enqueuing it every
+    // sweep is futile noise, so we DON'T act on this ambiguous money — we ALERT it for
+    // a human. Under-pay-and-flag beats churning an unreconcilable order forever.
+    if (!c.identityOk) {
       sum.ambiguousSkipped++
       sum.alerted.push(
-        `Pattern C: order ${ord.id} has an UNRECONCILABLE money identity ` +
-        `(charge ${totalCents}¢ ≠ subtotal ${subtotalCents} + fee ${Math.round(ord.fairSynqFee * 100)} ` +
-        `+ delivery ${Math.round((ord.deliveryFee ?? 0) * 100)} + serviceCharge ${Math.round((ord.serviceCharge ?? 0) * 100)} ` +
-        `+ tip ${Math.round((ord.tip ?? 0) * 100)}) ` +
+        `Pattern C: order ${c.orderId} has an UNRECONCILABLE money identity ` +
+        `(${c.identityDetail}) ` +
         `— payout would halt; manual review (do NOT auto-pay)`,
       )
       continue
     }
 
-    if (o.dryRun) { sum.repaired.C++; sum.details.C.push(ord.id); continue }
+    if (o.dryRun) { sum.repaired.C++; sum.details.C.push(c.orderId); continue }
     // enqueueOrderPayout → worker runs processOrderPayout (proven, idempotent).
-    const ok = await enqueueOrderPayout({ orderId: ord.id, eventId: ord.eventId })
-    if (ok) { sum.repaired.C++; sum.details.C.push(ord.id) }
-    else { sum.alerted.push(`Pattern C: payout enqueue DROPPED for order ${ord.id} — Redis/queue down`) }
+    const ok = await enqueueOrderPayout({ orderId: c.orderId, eventId: c.eventId })
+    if (ok) { sum.repaired.C++; sum.details.C.push(c.orderId) }
+    else { sum.alerted.push(`Pattern C: payout enqueue DROPPED for order ${c.orderId} — Redis/queue down`) }
   }
 }
 
@@ -672,11 +704,10 @@ async function patternC(
 // A held slice whose vendor has since completed Stripe onboarding can now be
 // paid. enqueueOrderPayout → worker pays the connected vendor and resolves the
 // hold (processOrderPayout marks resolved on a successful transfer).
-async function patternD(
-  sum: SweepSummary,
-  o: { maxPerPattern: number; dryRun: boolean },
-) {
-  const holds = await db.payoutHold.findMany({
+/** PATTERN D SELECTION — unresolved holds for a now-connected, unfrozen vendor. Shared with the
+ *  read-only production dry run. Pure read. */
+export async function selectPatternDCandidates(o: { maxPerPattern: number }): Promise<{ orderId: string; eventId: string; vendorId: string }[]> {
+  return db.payoutHold.findMany({
     where: {
       resolved: false,
       // C1: a frozen vendor's holds are NOT drained. Anti-churn only — an admin hold
@@ -689,6 +720,13 @@ async function patternD(
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
+}
+
+async function patternD(
+  sum: SweepSummary,
+  o: { maxPerPattern: number; dryRun: boolean },
+) {
+  const holds = await selectPatternDCandidates({ maxPerPattern: o.maxPerPattern })
   sum.scanned.unresolvedHolds += holds.length
 
   // One enqueue per order (a single payout run covers all that order's holds).
@@ -960,6 +998,53 @@ async function patternK(
   }
   if (debts.length > 0) {
     sum.alerted.push(`Pattern K: ${debts.length} open dispute debt(s) totalling ${total}¢ — vendors owe FairSynq (chase; no auto-deduct)`)
+  }
+}
+
+// ─── PATTERN Y — Owed earning whose transfer already exists → surface (decide) ──
+// An 'accrued' VendorEarning with a Payout row for the same order + vendor: a transfer was
+// already created (pending, paid, or since reversed by a refund or dispute clawback) but the
+// ledger still says the vendor is owed. The executor refuses to re-pay it (transfer_exists in
+// classifyVendorSlice), so no money can move; this pattern makes the refused slice visible
+// even when no payout run ever reaches it. Read-only, alert-only, never repairs: whether the
+// vendor is owed again or was rightly charged back is a human decision. (Found in production,
+// 2026-11: a disputed order whose transfers the dispute reversed while its earnings stayed
+// accrued.) Selection shared with the read-only production dry run.
+export interface TransferExistsEarning {
+  earningId: string
+  orderId: string
+  vendorId: string
+  subtotalCents: number
+  transferId: string
+  transferStatus: string
+}
+
+export async function selectTransferExistsEarnings(o: { maxPerPattern: number }): Promise<TransferExistsEarning[]> {
+  const rows = await db.vendorEarning.findMany({
+    where: { status: 'accrued', order: { payouts: { some: {} } } },
+    select: {
+      id: true, orderId: true, vendorId: true, subtotalCents: true,
+      order: { select: { payouts: { select: { vendorId: true, stripeTransferId: true, stripeStatus: true } } } },
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: o.maxPerPattern,
+  })
+  const out: TransferExistsEarning[] = []
+  for (const r of rows) {
+    const p = r.order.payouts.find(x => x.vendorId === r.vendorId)
+    if (!p) continue // the order has a transfer, but to another vendor
+    out.push({ earningId: r.id, orderId: r.orderId, vendorId: r.vendorId, subtotalCents: r.subtotalCents, transferId: p.stripeTransferId, transferStatus: p.stripeStatus })
+  }
+  return out
+}
+
+async function patternY(sum: SweepSummary, o: { maxPerPattern: number }) {
+  const rows = await selectTransferExistsEarnings({ maxPerPattern: o.maxPerPattern })
+  for (const r of rows) {
+    sum.alerted.push(
+      `Pattern Y: order ${r.orderId} vendor ${r.vendorId} — earning ${r.earningId} (${r.subtotalCents}¢) is still owed but transfer ` +
+      `${r.transferId} (${r.transferStatus}) already exists; payouts refuse it (transfer_exists). Decide: owed again, or cancel the earning.`,
+    )
   }
 }
 
@@ -1304,10 +1389,10 @@ async function patternR(
 //
 // Any repair increments sum.repaired.S, which the sweep turns into a BACKSTOP WARNING
 // — the loud signal that the real-time completion path is failing and needs a look.
-async function patternS(
-  sum: SweepSummary,
-  o: { windowStart: Date; maxPerPattern: number; dryRun: boolean },
-) {
+/** PATTERN S SELECTION — complete orders in the window with a payable vendor that has no
+ *  VendorEarning. Shared with the read-only production dry run. Pure read. A null completedAt
+ *  never matches, so legacy DELIVERED orders stay out. */
+export async function selectPatternSCandidates(o: { windowStart: Date; maxPerPattern: number }): Promise<{ orderId: string; missingVendorIds: string[] }[]> {
   const orders = await db.order.findMany({
     where: {
       status: { in: COMPLETE_STATES },
@@ -1325,6 +1410,7 @@ async function patternS(
   })
 
   const { payableVendorIds } = await import('./process-payout')
+  const out: { orderId: string; missingVendorIds: string[] }[] = []
   for (const ord of orders) {
     // ONE payable definition, shared with accrueVendorEarnings: a REFUNDED/DECLINED/
     // CANCELLED portion is owed NOTHING — counting it here made S write phantom
@@ -1332,7 +1418,19 @@ async function patternS(
     const payable = payableVendorIds(ord.orderItems, ord.vendorOrderStatuses)
     const accrued = new Set(ord.vendorEarnings.map(e => e.vendorId))
     const missing = [...payable].filter(v => !accrued.has(v))
-    if (missing.length === 0) continue
+    if (missing.length > 0) out.push({ orderId: ord.id, missingVendorIds: missing })
+  }
+  return out
+}
+
+async function patternS(
+  sum: SweepSummary,
+  o: { windowStart: Date; maxPerPattern: number; dryRun: boolean },
+) {
+  const candidates = await selectPatternSCandidates({ windowStart: o.windowStart, maxPerPattern: o.maxPerPattern })
+  for (const c of candidates) {
+    const ord = { id: c.orderId }
+    const missing = c.missingVendorIds
 
     sum.details.S.push(ord.id)
     sum.alerted.push(

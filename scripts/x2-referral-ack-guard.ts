@@ -173,7 +173,10 @@ async function main() {
 
     console.log('\n[5] static — Pattern S was NOT widened, and the set is declared TEMPORARY')
     const rec = readFileSync('lib/reconciler.ts', 'utf8')
-    const sBody = rec.slice(rec.indexOf('async function patternS'), rec.indexOf('PATTERN T —'))
+    // Pattern S's query lives in selectPatternSCandidates (shared with the payout-safety dry run),
+    // directly above patternS, so the slice starts there.
+    const sBody = rec.slice(rec.indexOf('export async function selectPatternSCandidates'), rec.indexOf('PATTERN T —'))
+    assert(rec.indexOf('export async function selectPatternSCandidates') !== -1, 'probe: Pattern S selection function found')
     assert(/completedAt:\s*\{\s*gte:\s*o\.windowStart\s*\}/.test(sBody),
       "patternS STILL windows on completedAt >= windowStart — the recorded decision not to widen it holds")
     assert(/voidedAt:\s*null/.test(sBody), 'patternS STILL excludes voided orders (correct — never re-accrue a struck order)')
