@@ -44,7 +44,7 @@ const OPERATOR_CARDS: Array<{ icon: typeof Store; title: string; desc: string; p
     desc: 'Run your fair end to end from one dashboard.',
     points: [
       "Save your fair as a draft and publish when it's ready",
-      'Approve the vendors who apply to your fair',
+      'See and manage the vendors at your fair',
       'Watch orders as they come in, booth by booth',
       'Run several fairs from one account',
     ],
