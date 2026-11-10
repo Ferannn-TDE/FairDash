@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { runnerFeedWhere, runnerOrderDetailWhere } from '@/lib/runner-feed'
+import { RUNNER_ORDER_SELECT, toRunnerOrderView } from '@/lib/runner-order-view'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
@@ -22,6 +23,12 @@ export async function GET(req: NextRequest) {
     const runner = await db.runner.findUnique({ where: { userId: dbUser.id } })
     if (!runner) return apiError('No runner record found', 404, 'RUNNER_NOT_FOUND')
 
+    // Approval gate (audit H3). Same check and answer as the claim in
+    // app/api/orders/[id]/status/route.ts: an unapproved runner sees no orders.
+    if (runner.approvalStatus !== 'APPROVED') {
+      return apiError('Runner account is not approved', 403, 'RUNNER_NOT_APPROVED')
+    }
+
     const { searchParams } = new URL(req.url)
     const orderId = searchParams.get('orderId')
 
@@ -35,16 +42,11 @@ export async function GET(req: NextRequest) {
       // binds to that predicate, so this route and the guard cannot diverge.
       const order = await db.order.findFirst({
         where: runnerOrderDetailWhere(orderId, runner.eventId, runner.id),
-        include: {
-          vendor: { select: { name: true, boothNumber: true } },
-          orderItems: {
-            include: { menuItem: { select: { name: true, imageUrl: true } } },
-          },
-        },
+        select: RUNNER_ORDER_SELECT,
       })
 
       if (!order) return apiError('Order not found', 404, 'ORDER_NOT_FOUND')
-      return success({ order })
+      return success({ order: toRunnerOrderView(order, runner.id) })
     }
 
     // List: READY (unassigned or this runner) + RUNNER_COLLECTED (this runner).
@@ -52,15 +54,10 @@ export async function GET(req: NextRequest) {
     const orders = await db.order.findMany({
       where: runnerFeedWhere(runner.eventId, runner.id),
       orderBy: { readyAt: 'asc' },
-      include: {
-        vendor: { select: { name: true, boothNumber: true } },
-        orderItems: {
-          include: { menuItem: { select: { name: true } } },
-        },
-      },
+      select: RUNNER_ORDER_SELECT,
     })
 
-    return success({ orders, runnerId: runner.id })
+    return success({ orders: orders.map(o => toRunnerOrderView(o, runner.id)), runnerId: runner.id })
   } catch (err) {
     return handleApiError(err)
   }

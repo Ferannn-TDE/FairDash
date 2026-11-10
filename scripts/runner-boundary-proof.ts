@@ -122,21 +122,27 @@ async function mkVendor(eventId: string) {
  * That is exactly what had happened: the gate shipped, this seed didn't follow, and the
  * cross-fair assertions were "passing" on the WRONG 403. See the assertCode() note below.
  */
-async function mkRunner(eventId: string, approvalStatus: 'APPROVED' | 'PENDING' = 'APPROVED') {
+async function mkRunner(eventId: string, approvalStatus: 'APPROVED' | 'PENDING' | 'REJECTED' = 'APPROVED') {
   const u = await mkUser('runner')
   const r = await prisma.runner.create({
     data: { userId: u.id, eventId, status: 'ACTIVE', approvalStatus },
   })
   return { runner: r, user: u }
 }
-async function mkOrder(eventId: string, vendorId: string, status: 'READY' = 'READY') {
+async function mkOrder(
+  eventId: string,
+  vendorId: string,
+  status: 'READY' = 'READY',
+  fulfillmentType: 'HOME_DELIVERY' | 'CURBSIDE' = 'HOME_DELIVERY',
+) {
   const customer = await mkUser('customer')
   const order = await prisma.order.create({
     data: {
-      eventId, customerId: customer.id, vendorId, status, fulfillmentType: 'HOME_DELIVERY',
+      eventId, customerId: customer.id, vendorId, status, fulfillmentType,
       subtotal: 15, fairSynqFee: 1.5, deliveryFee: 10, total: 26.5, vendorPayout: 15,
       customerName: 'RB Customer', customerPhone: '+10000000000',
       deliveryStreet: '1 Test St', deliveryCity: 'Testville', deliveryZip: '00000',
+      ...(fulfillmentType === 'CURBSIDE' && { vehicleMake: 'Toyota', vehicleColor: 'Silver', vehiclePlate: 'RB 1234' }),
       stripeChargeId: `ch_${PFX}${rand()}`,
     },
   })
@@ -164,6 +170,18 @@ async function cleanup() {
   await prisma.user.deleteMany({ where: { email: { endsWith: MAIL } } })
 }
 
+// H3: customer fields a runner may only see on an order assigned to them, and fields no runner
+// response may ever carry. Checked on the real JSON the route returns.
+const CUSTOMER_KEYS = [
+  'customerName', 'customerPhone', 'vehicleMake', 'vehicleColor', 'vehiclePlate', 'pickupLocation',
+  'deliveryStreet', 'deliveryUnit', 'deliveryCity', 'deliveryState', 'deliveryZip', 'deliveryGeoPrecision',
+]
+const NEVER_KEYS = [
+  'customerId', 'deliveryLat', 'deliveryLng', 'stripePaymentIntentId', 'stripeChargeId', 'stripeTransferId',
+  'subtotal', 'total', 'fairSynqFee', 'vendorPayout', 'serviceCharge', 'deliveryProofPath',
+]
+const presentKeys = (o: object | null | undefined, keys: string[]) => keys.filter(k => !!o && k in o)
+
 const runnerIdOf = async (orderId: string) => (await prisma.order.findUnique({ where: { id: orderId }, select: { runnerId: true } }))?.runnerId ?? null
 const statusOf   = async (orderId: string) => (await prisma.order.findUnique({ where: { id: orderId }, select: { status: true } }))?.status
 
@@ -180,9 +198,11 @@ async function main() {
     const A2 = await mkRunner(evA.id)   // fair A, a DIFFERENT runner
     const B  = await mkRunner(evB.id)   // fair B
     const pendingA = await mkRunner(evA.id, 'PENDING') // fair A, NOT yet approved
+    const rejectedA = await mkRunner(evA.id, 'REJECTED') // fair A, application declined
     const plain = await mkUser('customer') // authenticated, but NO Runner row
     const orderA = await mkOrder(evA.id, venA.id) // READY, unclaimed, fair A
     const orderB = await mkOrder(evB.id, venB.id) // READY, unclaimed, fair B (B's own)
+    const orderCurb = await mkOrder(evA.id, venA.id, 'READY', 'CURBSIDE') // READY, unclaimed, fair A
 
     // ── G. APPROVAL GATE: an unapproved runner cannot act at all ────────────────
     // This property used to be tested only BY ACCIDENT — every runner in this proof was
@@ -193,6 +213,31 @@ async function main() {
     const g1 = await patchStatus(pendingA.user.clerkId!, orderA.id, { status: 'RUNNER_COLLECTED' })
     assertRejected(g1, 403, 'RUNNER_NOT_APPROVED', 'unapproved runner claim')
     assert(await runnerIdOf(orderA.id) === null, 'orderA still unclaimed after the unapproved runner tried')
+
+    // ── H3a. APPROVAL GATE ON THE FEED: an unapproved runner sees no orders ──────
+    console.log('\n[H3a] PENDING and REJECTED runners cannot read the order feed (audit H3)')
+    for (const [label, who] of [['PENDING', pendingA], ['REJECTED', rejectedA]] as const) {
+      assertRejected(await getOrders(who.user.clerkId!), 403, 'RUNNER_NOT_APPROVED', `${label} runner GET /me/orders`)
+      assertRejected(await getOrders(who.user.clerkId!, orderA.id), 403, 'RUNNER_NOT_APPROVED', `${label} runner GET /me/orders?orderId=`)
+    }
+    // Positive control: an APPROVED runner at the same fair reads the same feed and order, so
+    // the 403s above come from approval, not from scoping.
+    const h3list = await getOrders(A2.user.clerkId!)
+    assert(h3list.status === 200, `APPROVED runner GET /me/orders → 200 (got ${h3list.status})`)
+    const h3one = await getOrders(A2.user.clerkId!, orderA.id)
+    assert(h3one.status === 200 && !!h3one.json?.data?.order, `APPROVED runner GET ?orderId= on an unclaimed order → 200 (got ${h3one.status})`)
+
+    // ── H3b. NO CUSTOMER DATA BEFORE CLAIM ──────────────────────────────────────
+    console.log('\n[H3b] an unclaimed order carries no customer data, in the feed or by ?orderId= (audit H3)')
+    const feed: Array<{ id: string }> = h3list.json?.data?.orders ?? []
+    for (const [label, ord] of [['HOME_DELIVERY', orderA], ['CURBSIDE', orderCurb]] as const) {
+      const entry = feed.find(o => o.id === ord.id)
+      assert(!!entry, `positive control: the unclaimed ${label} order IS in the feed`)
+      const leaked = presentKeys(entry, [...CUSTOMER_KEYS, ...NEVER_KEYS])
+      assert(leaked.length === 0, `feed entry for the unclaimed ${label} order has no customer or forbidden key (leaked: [${leaked.join(', ')}])`)
+    }
+    const oneLeaked = presentKeys(h3one.json?.data?.order, [...CUSTOMER_KEYS, ...NEVER_KEYS])
+    assert(oneLeaked.length === 0, `?orderId= on the unclaimed order has no customer or forbidden key (leaked: [${oneLeaked.join(', ')}])`)
 
     // ── C. non-runner cannot claim ─────────────────────────────────────────────
     console.log('\n[C] a signed-in user with NO Runner row cannot claim')
@@ -267,6 +312,28 @@ async function main() {
     // positive control: A1 CAN read its own
     const d2 = await getOrders(A1.user.clerkId!, orderA.id)
     assert(d2.status === 200 && !!d2.json?.data?.order, 'A1 CAN read its own order detail (flow intact)')
+
+    // ── H3c. OWN ORDER: customer data limited per fulfillment type ──────────────
+    console.log('\n[H3c] own orders carry only what that fulfillment type needs (audit H3)')
+    const ownHome = d2.json?.data?.order
+    const homeMissing = ['customerPhone', 'deliveryStreet', 'deliveryCity', 'deliveryZip'].filter(k => !(ownHome && k in ownHome))
+    assert(homeMissing.length === 0, `own HOME_DELIVERY order carries phone and address (missing: [${homeMissing.join(', ')}])`)
+    const homeExtra = presentKeys(ownHome, ['customerName', 'vehicleMake', 'vehicleColor', 'vehiclePlate', 'pickupLocation', ...NEVER_KEYS])
+    assert(homeExtra.length === 0, `own HOME_DELIVERY order has no name, vehicle or forbidden key (found: [${homeExtra.join(', ')}])`)
+
+    // A2 claims the curbside order (A2 has no active delivery), then reads it.
+    const claimCurb = await patchStatus(A2.user.clerkId!, orderCurb.id, { status: 'RUNNER_COLLECTED' })
+    assert(claimCurb.status === 200, `A2 claims the CURBSIDE order → 200 (got ${claimCurb.status} ${claimCurb.json?.error?.code ?? ''})`)
+    const ownCurbRes = await getOrders(A2.user.clerkId!, orderCurb.id)
+    const ownCurb = ownCurbRes.json?.data?.order
+    assert(ownCurbRes.status === 200 && ownCurb?.customerName === 'RB C.',
+      `own CURBSIDE order shows first name + last initial (got ${ownCurbRes.status} ${JSON.stringify(ownCurb?.customerName)})`)
+    const curbMissing = ['customerPhone', 'vehicleMake', 'vehicleColor', 'vehiclePlate'].filter(k => !(ownCurb && k in ownCurb))
+    assert(curbMissing.length === 0, `own CURBSIDE order carries phone and vehicle (missing: [${curbMissing.join(', ')}])`)
+    const curbExtra = presentKeys(ownCurb, ['deliveryStreet', 'deliveryUnit', 'deliveryCity', 'deliveryState', 'deliveryZip', 'deliveryGeoPrecision', ...NEVER_KEYS])
+    assert(curbExtra.length === 0, `own CURBSIDE order has no address or forbidden key (found: [${curbExtra.join(', ')}])`)
+    // Another runner at the same fair cannot read it now that it is claimed.
+    assertRejected(await getOrders(A1.user.clerkId!, orderCurb.id), 404, 'ORDER_NOT_FOUND', 'A1 reading A2’s claimed CURBSIDE order')
 
     // A FAILING RUN MUST NOT BE READABLE AS A PASSING ONE.
     //
