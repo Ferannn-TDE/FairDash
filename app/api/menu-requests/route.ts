@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, requireVendorMayEditMenu } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import {
@@ -11,6 +11,7 @@ import {
   validateMenuRequestItem,
   type MenuRequestItemInput,
 } from '@/lib/menu-requests/validate-item'
+import { checkMenuRequestItemOwnership } from '@/lib/menu-requests/item-ownership'
 import { randomUUID } from 'node:crypto'
 
 // POST /api/menu-requests — submit menu change requests for organizer approval.
@@ -42,7 +43,8 @@ export async function POST(req: NextRequest) {
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
     const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    if (!isMember) return apiError('Vendor not found', 404, 'NOT_FOUND')
+    await requireVendorMayEditMenu(dbUser.id, vendorId)
 
     const isBatchForm = Array.isArray(items)
     const inputs: MenuRequestItemInput[] = isBatchForm
@@ -77,6 +79,17 @@ export async function POST(req: NextRequest) {
           rejection.code,
         )
       }
+    }
+
+    // OWNERSHIP (audit H4). Every item an EDIT, DELETE or RESTORE names must be this vendor's
+    // own, in the right removed state. Checked before anything is written, like validation.
+    const ownership = await checkMenuRequestItemOwnership(vendorId, inputs)
+    if (ownership) {
+      return apiError(
+        isBatchForm ? `Item ${ownership.index + 1}: ${ownership.message}` : ownership.message,
+        ownership.status,
+        ownership.code,
+      )
     }
 
     // Opaque, server-minted, and never accepted from the client — a caller must not be able to
@@ -133,7 +146,7 @@ export async function GET(req: NextRequest) {
 
     if (vendorId) {
       const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-      if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+      if (!isMember) return apiError('Vendor not found', 404, 'NOT_FOUND')
 
       const requests = await db.menuRequest.findMany({
         where: { vendorId },
@@ -150,7 +163,8 @@ export async function GET(req: NextRequest) {
       if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
       if (event.organizerId) {
         const isOrg = await db.orgMember.findFirst({ where: { organizerId: event.organizerId, userId: dbUser.id } })
-        if (!isOrg) return apiError('Access denied', 403, 'FORBIDDEN')
+        // Same answer as a fair that doesn't exist, so fair ids can't be probed.
+        if (!isOrg) return apiError('Event not found', 404, 'NOT_FOUND')
       }
 
       const requests = await db.menuRequest.findMany({

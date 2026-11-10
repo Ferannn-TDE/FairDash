@@ -1,9 +1,8 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireVendorAuth } from '@/lib/auth'
+import { requireVendorMenuItemAccess, requireVendorMayEditMenu } from '@/lib/auth'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
 
 // GET /api/menu/:id
@@ -24,21 +23,25 @@ export async function GET(
 }
 
 // PATCH /api/menu/:id
-// Update availability (sold-out toggle) or item details. Vendor auth required.
+// Update availability (sold-out toggle) or item details.
+// Only a member of the item's own vendor may do this (audit C1): anyone else gets the same 404
+// as a missing item. The booth and the operator must also be allowed to edit the menu.
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireVendorAuth()
+    const { userId, item } = await requireVendorMenuItemAccess((await params).id, req)
+    await requireVendorMayEditMenu(userId, item.vendorId)
+
     const body = await req.json()
     const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
 
     // Same bypass door as POST /api/menu — an update can smuggle a data: URI just as easily.
     assertSafeImageUrl(imageUrl)
 
-    const item = await db.menuItem.update({
-      where: { id: (await params).id },
+    const updated = await db.menuItem.update({
+      where: { id: item.id },
       data: {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
@@ -51,24 +54,35 @@ export async function PATCH(
     })
 
     revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
-    return success(item)
+    return success(updated)
   } catch (err) {
     return handleApiError(err)
   }
 }
 
 // DELETE /api/menu/:id
-// Vendor auth required.
+// Takes the item off the menu immediately. Same ownership and edit rules as PATCH.
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireVendorAuth()
-    const id = (await params).id
-    const item = await db.menuItem.findUnique({ where: { id }, select: { vendorId: true } })
-    await db.menuItem.delete({ where: { id } })
-    if (item) revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
+    const { userId, item } = await requireVendorMenuItemAccess((await params).id, req)
+    await requireVendorMayEditMenu(userId, item.vendorId)
+
+    if (item.removedAt) {
+      return apiError('This item is already removed from the menu', 409, 'CONFLICT')
+    }
+
+    // REMOVED, not deleted. OrderItem's FK to MenuItem is RESTRICT, so an ordered item cannot be
+    // hard-deleted at all, and a hard delete would SET NULL the MenuRequest rows that reference
+    // it, cutting the request trail. This is the same write the organizer-approved DELETE makes.
+    await db.menuItem.update({
+      where: { id: item.id },
+      data: { removedAt: new Date() },
+    })
+
+    revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
     return success({ deleted: true })
   } catch (err) {
     return handleApiError(err)

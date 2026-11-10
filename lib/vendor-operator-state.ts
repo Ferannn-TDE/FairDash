@@ -61,6 +61,39 @@ export function boothOperatingMessage(status: string): string | null {
   }
 }
 
+/**
+ * THE MENU-EDIT AXIS — "may this operator change this booth's menu".
+ *
+ * Deliberately looser than boothMayOperate: a PENDING booth is still building the menu it will
+ * be reviewed on, so it may edit. PAUSED, SUSPENDED and REJECTED booths may not.
+ */
+export function boothMayEditMenu(status: string): boolean {
+  return status === 'PENDING' || status === 'ACTIVE'
+}
+
+export type MenuEditRefusal = { message: string; code: 'VENDOR_MENU_EDIT_BLOCKED' }
+
+/**
+ * Why this operator may not change this booth's menu, or null when they may. One wording for
+ * the API refusal and any UI message.
+ *
+ * The operator axis is checked first, the same precedence requireVendorMayOperate uses. Only
+ * PENDING and APPROVED operators pass; anything else, including an unknown value, fails closed.
+ */
+export function menuEditRefusal(boothStatus: string, memberApproval: string): MenuEditRefusal | null {
+  const code = 'VENDOR_MENU_EDIT_BLOCKED' as const
+  if (memberApproval !== 'PENDING' && memberApproval !== 'APPROVED') {
+    return { code, message: 'Your access to this booth was declined, so you cannot change its menu.' }
+  }
+  if (boothMayEditMenu(boothStatus)) return null
+  switch (boothStatus) {
+    case 'PAUSED':    return { code, message: 'This booth has been paused by the organizer, so its menu cannot be changed. Contact them to be reactivated.' }
+    case 'SUSPENDED': return { code, message: 'This booth has been suspended, so its menu cannot be changed. Contact the organizer.' }
+    case 'REJECTED':  return { code, message: 'This booth’s application was declined, so its menu cannot be changed.' }
+    default:          return { code, message: 'This booth is not in a state that allows menu changes.' }
+  }
+}
+
 /** ADMITTED → the portal. AWAITING/DECLINED → the gate screen. */
 export type VendorOperatorState = 'ADMITTED' | 'AWAITING' | 'DECLINED'
 

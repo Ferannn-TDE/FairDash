@@ -9,6 +9,7 @@ import { getRealtimeDb } from '@/lib/firebase-admin'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { logger } from '@/lib/logger'
 import { assertNeverRequestType, type MenuRequestTypeInput } from '@/lib/menu-requests/validate-item'
+import { menuRequestTargetsOwnItem } from '@/lib/menu-requests/item-ownership'
 
 // PATCH /api/organizer/fairs/[fairSlug]/menu-requests/[id]
 // { action: 'APPROVE' | 'REJECT', reason?: string }
@@ -56,6 +57,19 @@ export async function PATCH(
     // here rather than falling through to approval theatre at runtime.
     if (action === 'APPROVE') {
       const requestType: MenuRequestTypeInput = menuRequest.type
+
+      // OWNERSHIP RE-CHECK (audit H4, defence in depth). Filing now refuses another vendor's
+      // item, but a row written before that check existed could still name one. Refuse to apply
+      // it; the request stays PENDING so the organizer can reject it.
+      if (requestType !== 'ADD') {
+        if (!menuRequest.menuItemId) {
+          return apiError(`${requestType} request missing menuItemId`, 422, 'UNPROCESSABLE')
+        }
+        if (!(await menuRequestTargetsOwnItem(menuRequest.menuItemId, vendorId))) {
+          return apiError('This request names a menu item that does not belong to this vendor', 422, 'UNPROCESSABLE')
+        }
+      }
+
       switch (requestType) {
       case 'ADD': {
         if (!menuRequest.name || menuRequest.price === null || !menuRequest.category) {

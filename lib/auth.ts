@@ -5,7 +5,7 @@ import { getVendorAuth, type VendorAuthPayload } from './vendor-auth-cache'
 import { hasRole, hasStrictAdminRole, settingsActorRole, type SettingsRole } from './roles'
 import { organizerSuspensionError } from './organizer-suspension'
 import { organizerApprovalError } from './organizer-approval'
-import { boothOperatingMessage, vendorOperatorState } from './vendor-operator-state'
+import { boothOperatingMessage, menuEditRefusal, vendorOperatorState } from './vendor-operator-state'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -217,6 +217,51 @@ export async function requireVendorMayOperate(userId: string, vendorId: string):
   if (boothProblem) {
     throw new ApiError(boothProblem, 403, 'VENDOR_BOOTH_NOT_OPERATING')
   }
+}
+
+const menuItemNotFound = () => new ApiError('Menu item not found', 404, 'NOT_FOUND')
+
+/**
+ * Loads a menu item ONLY if the user is a member of the item's vendor (audit C1).
+ *
+ * A missing item and someone else's item answer with the same 404, so item ids cannot be
+ * probed. Membership comes through getVendorAuth; the fresh status re-read is
+ * requireVendorMayEditMenu, which every write path calls next.
+ */
+export async function resolveOwnedMenuItem(userId: string, itemId: string, req?: object) {
+  const item = await db.menuItem.findUnique({
+    where:  { id: itemId },
+    select: { id: true, vendorId: true, price: true, name: true, removedAt: true },
+  })
+  if (!item) throw menuItemNotFound()
+  const membership = await getVendorAuth(userId, item.vendorId, req)
+  if (!membership) throw menuItemNotFound()
+  return item
+}
+
+/** Signed-in caller + a menu item on one of their own booths. Returns the DB user id and the item. */
+export async function requireVendorMenuItemAccess(itemId: string, req?: object) {
+  const clerkId = await requireAuth()
+  const user = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
+  if (!user) throw menuItemNotFound()
+  return { userId: user.id, item: await resolveOwnedMenuItem(user.id, itemId, req) }
+}
+
+/**
+ * May this user change this booth's menu right now?
+ *
+ * Read FRESH, not through getVendorAuth, for the reason requireVendorMayOperate gives: a pause
+ * or a rejection must bite on the next request, not when a cache entry expires. Callers prove
+ * membership first; a miss here means it vanished mid-request, so it fails closed.
+ */
+export async function requireVendorMayEditMenu(userId: string, vendorId: string): Promise<void> {
+  const member = await db.vendorMember.findFirst({
+    where:  { userId, vendorId },
+    select: { approvalStatus: true, vendor: { select: { status: true } } },
+  })
+  if (!member) throw new ApiError('Access denied', 403, 'FORBIDDEN')
+  const refusal = menuEditRefusal(member.vendor.status, member.approvalStatus)
+  if (refusal) throw new ApiError(refusal.message, 403, refusal.code)
 }
 
 /** Require auth + admin role. Returns Clerk userId.

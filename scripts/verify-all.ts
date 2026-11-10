@@ -20,6 +20,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 
 interface Suite { group: string; name: string; file: string }
 
@@ -84,6 +85,7 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'vendor-operator-admittance', file: 'scripts/vendor-operator-admittance-test.ts' },
   { group: 'boundary',    name: 'vendor-operator-gate',      file: 'scripts/vendor-operator-gate-test.ts' },
   { group: 'boundary',    name: 'vendor-accept-verb',        file: 'scripts/vendor-accept-verb-test.ts' },
+  { group: 'boundary',    name: 'menu-ownership',            file: 'scripts/menu-ownership-guard.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },
@@ -281,7 +283,13 @@ const expectedFailed: string[] = []
 const unexpectedPass: string[] = []
 let lastGroup = ''
 
-const runSuite = (file: string) => spawnSync('npx', ['tsx', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+// Run each suite as `node <tsx cli> <file>` instead of `npx tsx <file>`. On Windows npx is
+// npx.cmd, which spawnSync cannot start without a shell (ENOENT, status null), so every suite
+// "failed" without running; and shell: true trips Node's DEP0190 warning. Starting tsx's CLI
+// with the current node binary behaves the same on every platform and needs no shell.
+const TSX_CLI = createRequire(import.meta.url).resolve('tsx/cli')
+const runSuite = (file: string) =>
+  spawnSync(process.execPath, [TSX_CLI, file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 // The failure evidence display: the suite's own ❌ lines + the actionable stderr TAIL with
 // benign noise removed — never the FIRST line, which is often a graceful-degradation warn.
