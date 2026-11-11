@@ -212,7 +212,8 @@ async function main() {
   const READINESS_FILES = [
     'lib/vendor-readiness.ts',
     'lib/fair-vendors.ts',
-    'app/api/vendors/route.ts',
+    // The /api/vendors list count moved out of the route into its public select (audit H2).
+    'lib/public-vendor-select.ts',
     'app/api/vendors/[id]/route.ts',
     'app/api/vendors/[id]/menu/route.ts',
     'app/api/orders/route.ts',
@@ -227,6 +228,10 @@ async function main() {
     assert(!BARE.test(s), `${f}: no hand-written isAvailable readiness filter — uses SELLABLE`)
     assert(/SELLABLE/.test(s), `${f}: imports and uses the shared SELLABLE predicate`)
   }
+  // An import alone would satisfy the loop above, so pin the count itself in the public select.
+  assert(/_count:\s*\{\s*select:\s*\{\s*menuItems:\s*\{\s*where:\s*SELLABLE\s*\}\s*\}\s*\}/
+    .test(readFileSync('lib/public-vendor-select.ts', 'utf8')),
+    'lib/public-vendor-select.ts: the public vendor list counts menuItems with where: SELLABLE')
 
   const soloVendor = await prisma.vendor.create({
     data: { eventId: event.id, name: `${PFX}solo`, slug: `${PFX}s-${rand()}`, cuisineType: 'Test', status: 'ACTIVE' },

@@ -8,7 +8,7 @@ import { createVendorWithOwner, syncPayeeRoles } from '@/lib/payee-membership'
 import { enqueueSignupAlert } from '@/lib/notifications'
 import { VENDOR_AGREEMENT_VERSION } from '@/lib/legal/vendor-agreement'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
-import { SELLABLE } from '@/lib/menu/on-menu'
+import { PUBLIC_VENDOR_SELECT } from '@/lib/public-vendor-select'
 import { customerReachableScope } from '@/lib/event-listing'
 
 // GET /api/vendors?eventSlug=springfield-fair-2026&page=1&limit=20
@@ -48,9 +48,8 @@ export async function GET(req: Request) {
         where,
         skip,
         take: limit,
-        include: {
-          _count: { select: { menuItems: { where: SELLABLE } } },
-        },
+        // Public, no auth: the select is the boundary (audit H2). See lib/public-vendor-select.ts.
+        select: PUBLIC_VENDOR_SELECT,
         orderBy: { name: 'asc' },
       }),
       db.vendor.count({ where }),
