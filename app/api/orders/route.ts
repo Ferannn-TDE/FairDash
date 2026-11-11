@@ -18,6 +18,7 @@ import { requireAuth } from '@/lib/auth'
 import { ensureDbUser } from '@/lib/ensure-db-user'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { calculateServiceFee } from '@/lib/constants'
+import { checkoutRefusal } from '@/lib/checkout-floor'
 import { logger } from '@/lib/logger'
 import { effectiveFulfillment, isDeliveryEnabled } from '@/lib/delivery'
 
@@ -415,6 +416,14 @@ export async function POST(req: NextRequest) {
     // + serviceCharge + tip. 10% is on subtotal ONLY — never on the fee or tip.
     const total = parseFloat((subtotal + (deliveryFee ?? 0) + serviceCharge + serviceFee + tip).toFixed(2))
     const itemCount = lineItems.reduce((sum, i) => sum + i.quantity, 0)
+
+    // ── Checkout floor (audit H5, Step 2b) ─────────────────────────────────────
+    // No food, food smaller than the estimated card fee on the full charge, or a charge under
+    // Stripe's $0.50 minimum. Refused HERE, before the user upsert, the Stripe call and the order
+    // transaction below, so a refused order writes nothing and charges nothing. See
+    // lib/checkout-floor.ts. totalCents is computed exactly as the PaymentIntent amount is.
+    const floorRefusal = checkoutRefusal({ subtotalCents: Math.round(subtotal * 100), totalCents: Math.round(total * 100) })
+    if (floorRefusal) throw new ApiError(floorRefusal.message, 400, floorRefusal.code)
 
     // Primary vendor — first item's vendor (used for Order.vendorId and RTDB routing)
     const primaryVendorId = items[0].vendorId
