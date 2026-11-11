@@ -5,6 +5,7 @@ import { requireAuth, requireVendorMayEditMenu } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { getGroupedMenuItemsByEvent } from '@/lib/menu/getGroupedMenuItems'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
+import { parseInPersonPrice } from '@/lib/menu/price'
 
 // GET /api/menu?eventSlug=&vendorId=
 // Public. Returns pre-grouped menu items for a fair; vendorId narrows to one booth.
@@ -40,6 +41,10 @@ export async function POST(req: Request) {
     if (typeof vendorId !== 'string' || !vendorId || !name || price == null || !category) {
       return apiError('vendorId, name, price, and category are required', 400, 'VALIDATION_ERROR')
     }
+    // The one price rule every write path shares (lib/menu/price.ts, audit H5): this route
+    // used to store Number(price) with no bounds, so a negative or NaN price went straight live.
+    const parsedPrice = parseInPersonPrice(price)
+    if (!parsedPrice.ok) return apiError(parsedPrice.message, 400, 'VALIDATION_ERROR')
     // imageUrl is a LINK, not a payload — a data: URI here would be an upload-cap bypass with
     // no file upload involved. See lib/upload-limits.ts.
     assertSafeImageUrl(imageUrl)
@@ -57,7 +62,7 @@ export async function POST(req: Request) {
         vendorId,
         name,
         description,
-        price: Number(price),
+        price: parsedPrice.value,
         category,
         imageUrl,
         ...(prepTime != null && { prepTime: Number(prepTime) }),

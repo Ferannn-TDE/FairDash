@@ -17,6 +17,7 @@
 // browser needs it.
 
 import { UploadRejection, assertSafeImageUrl } from '../upload-limits'
+import { parseInPersonPrice } from '../menu/price'
 
 export const MENU_REQUEST_TYPES = ['ADD', 'EDIT', 'DELETE', 'RESTORE'] as const
 export type MenuRequestTypeInput = (typeof MENU_REQUEST_TYPES)[number]
@@ -94,11 +95,11 @@ export function validateMenuRequestItem(item: MenuRequestItemInput): ItemRejecti
     return reject('name, price, and category are required for ADD')
   }
 
+  // The one price rule every write path shares (lib/menu/price.ts, audit H5): $1.00–$10,000,
+  // at most 2 decimals.
   if (price !== undefined) {
-    const p = Number(price)
-    if (isNaN(p) || p <= 0 || p > 10_000) {
-      return reject('Price must be between $0.01 and $10,000')
-    }
+    const parsed = parseInPersonPrice(price)
+    if (!parsed.ok) return reject(parsed.message)
   }
 
   // EDIT, DELETE and RESTORE all name an EXISTING item; only ADD invents one.
@@ -134,6 +135,13 @@ export interface MenuRequestRowContext {
  */
 export function buildMenuRequestData(item: MenuRequestItemInput, ctx: MenuRequestRowContext) {
   const { type, menuItemId, name, description, price, category, prepTime, imageUrl } = item
+  // Store the parsed value ("12.50" → 12.5), not a second Number() of the raw input.
+  let storedPrice: number | null = null
+  if (price !== undefined) {
+    const parsed = parseInPersonPrice(price)
+    if (!parsed.ok) throw new Error(`buildMenuRequestData called with an unvalidated price: ${parsed.message}`)
+    storedPrice = parsed.value
+  }
   return {
     vendorId: ctx.vendorId,
     requestedBy: ctx.requestedBy,
@@ -142,7 +150,7 @@ export function buildMenuRequestData(item: MenuRequestItemInput, ctx: MenuReques
     menuItemId: (menuItemId as string | undefined) ?? null,
     name: (name as string | undefined) ?? null,
     description: (description as string | undefined) ?? null,
-    price: price !== undefined ? Number(price) : null,
+    price: storedPrice,
     category: (category as string | undefined) ?? null,
     prepTime: prepTime !== undefined ? Number(prepTime) : null,
     imageUrl: (imageUrl as string | undefined) ?? null,

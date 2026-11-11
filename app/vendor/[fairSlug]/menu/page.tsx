@@ -11,6 +11,7 @@ import {
 import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { downscaleImage } from '@/lib/downscale-image'
+import { MIN_PRICE_CENTS, PRICE_MIN_MESSAGE } from '@/lib/menu/price'
 import {
   STAGE_BUTTON_LABEL,
   addStaged,
@@ -220,7 +221,8 @@ function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
     e.preventDefault()
     if (uploading) { toast.error('Wait for the photo to finish uploading'); return }
     if (!form.name.trim()) { toast.error('Name is required'); return }
-    if (form.price <= 0) { toast.error('Price must be greater than 0'); return }
+    // The server is the gate (lib/menu/price.ts); this only saves a round trip.
+    if (!(form.price * 100 >= MIN_PRICE_CENTS)) { toast.error(PRICE_MIN_MESSAGE); return }
     onSubmit(form)
   }
 
@@ -245,7 +247,7 @@ function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
         </div>
         <div>
           <label className={labelCls}>Price (USD) *</label>
-          <input required type="number" min="0.01" step="0.01" value={form.price || ''} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} placeholder="0.00" className={inputCls} />
+          <input required type="number" min="1.00" step="0.01" value={form.price || ''} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} placeholder="0.00" className={inputCls} />
         </div>
         <div>
           <label className={labelCls}>Prep Time (min)</label>
@@ -362,6 +364,7 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
         onSubmit={e => {
           e.preventDefault()
           if (uploading) { toast.error('Wait for the photo to finish uploading'); return }
+          if (!(form.price * 100 >= MIN_PRICE_CENTS)) { toast.error(PRICE_MIN_MESSAGE); return }
           onSubmit(item.id, form)
           onClose()
         }}>
@@ -376,7 +379,7 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Price</label>
-              <input required type="number" min="0.01" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputCls} />
+              <input required type="number" min="1.00" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Prep (min)</label>
@@ -815,7 +818,7 @@ export default function VendorMenuPage() {
                   <p className="text-text-gray text-xs">${s.price.toFixed(2)} · {s.category || 'Uncategorised'}</p>
                 </div>
                 <input
-                  type="number" min="0.01" step="0.01" value={s.price}
+                  type="number" min="1.00" step="0.01" value={s.price}
                   onChange={e => handleEditStaged(s.stageId, { price: parseFloat(e.target.value) || 0 })}
                   disabled={submitting}
                   title="Edit price (not sent until you submit)"

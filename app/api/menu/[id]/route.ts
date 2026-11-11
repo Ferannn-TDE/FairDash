@@ -4,6 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorMenuItemAccess, requireVendorMayEditMenu } from '@/lib/auth'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
+import { parseInPersonPrice } from '@/lib/menu/price'
 
 // GET /api/menu/:id
 export async function GET(
@@ -37,6 +38,15 @@ export async function PATCH(
     const body = await req.json()
     const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
 
+    // The one price rule every write path shares (lib/menu/price.ts, audit H5). A PATCH that
+    // leaves price out keeps the stored price; one that sends it must pass the rule.
+    let parsedPrice: number | undefined
+    if (price !== undefined) {
+      const parsed = parseInPersonPrice(price)
+      if (!parsed.ok) return apiError(parsed.message, 400, 'VALIDATION_ERROR')
+      parsedPrice = parsed.value
+    }
+
     // Same bypass door as POST /api/menu — an update can smuggle a data: URI just as easily.
     assertSafeImageUrl(imageUrl)
 
@@ -45,7 +55,7 @@ export async function PATCH(
       data: {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
-        ...(price !== undefined && { price: Number(price) }),
+        ...(parsedPrice !== undefined && { price: parsedPrice }),
         ...(category !== undefined && { category }),
         ...(imageUrl !== undefined && { imageUrl }),
         ...(isAvailable !== undefined && { isAvailable: Boolean(isAvailable) }),
