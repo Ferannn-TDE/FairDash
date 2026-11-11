@@ -17,6 +17,7 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
 import { calculateServiceFee } from '@/lib/constants'
+import { checkoutRefusal } from '@/lib/checkout-floor'
 import { validateDeliveryAddress, streetLineFromPlace, type DeliveryAddressError } from '@/lib/delivery-address'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
@@ -339,6 +340,13 @@ export default function CheckoutPage() {
   const estimatedTotal = parseFloat(
     (subtotal + estimatedDeliveryFee + serviceChargeAmount + estimatedServiceFee + tipAmount).toFixed(2),
   )
+  // Checkout floor (audit H5, Step 2b): the SAME function POST /api/orders runs, on the same five
+  // terms, so the customer sees the refusal before submitting instead of after. The server is
+  // still the gate: it re-prices from the database and refuses on its own numbers.
+  const floorRefusal = checkoutRefusal({
+    subtotalCents: Math.round(subtotal * 100),
+    totalCents: Math.round(estimatedTotal * 100),
+  })
 
   const estimatedReadyMin = useMemo(() => {
     const times = items.map(i => i.prepTime).filter((t): t is number => t != null)
@@ -448,6 +456,8 @@ export default function CheckoutPage() {
       return
     }
     if (!validate()) return
+    // The button is disabled while the floor refuses; this covers any other way of calling it.
+    if (floorRefusal) return
     setSubmitting(true)
     try {
       const res = await fetch('/api/orders', {
@@ -813,9 +823,14 @@ export default function CheckoutPage() {
                   </div>
                 )}
 
+                {floorRefusal && (
+                  <p role="alert" className="mb-3 text-sm text-red-400">
+                    {floorRefusal.message}
+                  </p>
+                )}
                 <button
                   onClick={handlePlaceOrder}
-                  disabled={submitting}
+                  disabled={submitting || !!floorRefusal}
                   className="w-full flex items-center justify-center gap-2 py-4 bg-[#FF0077] text-black font-bold rounded-xl hover:bg-[#ff3399] transition-colors duration-200 uppercase tracking-wide border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
