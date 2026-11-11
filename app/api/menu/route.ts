@@ -6,6 +6,7 @@ import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { getGroupedMenuItemsByEvent } from '@/lib/menu/getGroupedMenuItems'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
 import { parseInPersonPrice } from '@/lib/menu/price'
+import { recordMenuPriceChange } from '@/lib/menu/price-audit'
 
 // GET /api/menu?eventSlug=&vendorId=
 // Public. Returns pre-grouped menu items for a fair; vendorId narrows to one booth.
@@ -57,18 +58,27 @@ export async function POST(req: Request) {
     if (!isMember) return apiError('Vendor not found', 404, 'NOT_FOUND')
     await requireVendorMayEditMenu(dbUser.id, vendorId)
 
-    const item = await db.menuItem.create({
-      data: {
-        vendorId,
-        name,
-        description,
-        price: parsedPrice.value,
-        category,
-        imageUrl,
-        ...(prepTime != null && { prepTime: Number(prepTime) }),
-        ...(variantGroup && { variantGroup }),
-        ...(variantLabel && { variantLabel }),
-      },
+    // The item and its price audit row are one transaction (audit H5, 2f): if the audit row
+    // cannot be written, the item is not created.
+    const item = await db.$transaction(async tx => {
+      const created = await tx.menuItem.create({
+        data: {
+          vendorId,
+          name,
+          description,
+          price: parsedPrice.value,
+          category,
+          imageUrl,
+          ...(prepTime != null && { prepTime: Number(prepTime) }),
+          ...(variantGroup && { variantGroup }),
+          ...(variantLabel && { variantLabel }),
+        },
+      })
+      await recordMenuPriceChange(tx, {
+        vendorId, userId: dbUser.id, menuItemId: created.id, name: created.name,
+        previousPrice: null, newPrice: created.price, source: 'DIRECT_CREATE',
+      })
+      return created
     })
 
     return success(item, 201)

@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireVendorMenuItemAccess, requireVendorMayEditMenu } from '@/lib/auth'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
 import { parseInPersonPrice } from '@/lib/menu/price'
+import { priceChanged, recordMenuPriceChange } from '@/lib/menu/price-audit'
 
 // GET /api/menu/:id
 export async function GET(
@@ -50,17 +51,29 @@ export async function PATCH(
     // Same bypass door as POST /api/menu — an update can smuggle a data: URI just as easily.
     assertSafeImageUrl(imageUrl)
 
-    const updated = await db.menuItem.update({
-      where: { id: item.id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        ...(parsedPrice !== undefined && { price: parsedPrice }),
-        ...(category !== undefined && { category }),
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(isAvailable !== undefined && { isAvailable: Boolean(isAvailable) }),
-        ...(prepTime !== undefined && { prepTime: Number(prepTime) }),
-      },
+    // The update and its price audit row are one transaction (audit H5, 2f). The previous price
+    // is re-read inside it, and a row is written only when the price actually changes.
+    const updated = await db.$transaction(async tx => {
+      const before = await tx.menuItem.findUniqueOrThrow({ where: { id: item.id }, select: { price: true } })
+      const after = await tx.menuItem.update({
+        where: { id: item.id },
+        data: {
+          ...(name !== undefined && { name }),
+          ...(description !== undefined && { description }),
+          ...(parsedPrice !== undefined && { price: parsedPrice }),
+          ...(category !== undefined && { category }),
+          ...(imageUrl !== undefined && { imageUrl }),
+          ...(isAvailable !== undefined && { isAvailable: Boolean(isAvailable) }),
+          ...(prepTime !== undefined && { prepTime: Number(prepTime) }),
+        },
+      })
+      if (parsedPrice !== undefined && priceChanged(before.price, parsedPrice)) {
+        await recordMenuPriceChange(tx, {
+          vendorId: item.vendorId, userId, menuItemId: item.id, name: after.name,
+          previousPrice: before.price, newPrice: after.price, source: 'DIRECT_EDIT',
+        })
+      }
+      return after
     })
 
     revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
