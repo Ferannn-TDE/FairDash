@@ -22,7 +22,8 @@ const notFound = (index: number): IndexedItemRejection =>
  * Every item a submission names must belong to THIS vendor. One query for the whole batch.
  *
  * A missing id and another vendor's id get the same 404, so item ids cannot be probed. Also
- * refuses DELETE of an item that is already removed and RESTORE of one that isn't (409).
+ * refuses DELETE of an item that is already removed, RESTORE of one that isn't, and EDIT of a
+ * removed item (409).
  * An ADD that carries a menuItemId is checked too: the id would otherwise be stored on the
  * request even though approving an ADD ignores it.
  *
@@ -56,6 +57,11 @@ export async function checkMenuRequestItemOwnership(
     }
     if (n.type === 'RESTORE' && row.removedAt === null) {
       return { index: n.index, message: 'This item is on the menu, so there is nothing to restore', status: 409, code: 'CONFLICT' }
+    }
+    // An EDIT applies at once (H5 2g), so editing a removed item would let its price be raised and
+    // then restored "at the same price", around the restore rule. Restore first, then edit.
+    if (n.type === 'EDIT' && row.removedAt !== null) {
+      return { index: n.index, message: 'This item is removed from the menu. Restore it first, then edit it.', status: 409, code: 'CONFLICT' }
     }
   }
   return null

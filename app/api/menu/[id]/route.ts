@@ -36,6 +36,13 @@ export async function PATCH(
     const { userId, item } = await requireVendorMenuItemAccess((await params).id, req)
     await requireVendorMayEditMenu(userId, item.vendorId)
 
+    // A removed item comes back only through a restore, where a HIGHER price waits for the
+    // approver (audit H5, 2g). Editing it here first would raise its price and then let it be
+    // restored "at the same price", around that rule.
+    if (item.removedAt) {
+      return apiError('This item is removed from the menu. Restore it first, then edit it.', 409, 'CONFLICT')
+    }
+
     const body = await req.json()
     const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
 

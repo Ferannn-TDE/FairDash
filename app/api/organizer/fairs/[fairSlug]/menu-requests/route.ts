@@ -5,6 +5,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { MenuRequestStatus } from '@prisma/client'
+import { reviewPriceChange } from '@/lib/menu-requests/review-price'
 
 const ALL_STATUSES: MenuRequestStatus[] = ['PENDING', 'APPROVED', 'REJECTED']
 
@@ -97,6 +98,8 @@ export async function GET(
       // Linked item (current state for diff)
       menuItemId: r.menuItemId,
       currentItem: r.menuItem ?? null,
+      // Current → requested, computed from the item's price as it is NOW (audit H5, 2g).
+      priceChange: reviewPriceChange(r),
       reviewNote: r.reviewNote,
       createdAt: r.createdAt,
       vendor: { id: r.vendor.id, name: r.vendor.name },

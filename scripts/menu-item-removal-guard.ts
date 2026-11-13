@@ -330,23 +330,33 @@ async function main() {
   assert(afterSoldOut?.isAvailable !== afterAvailable?.isAvailable,
     '[0] positive control: the two items end in DIFFERENT states — the cycle preserved each one, it did not normalise them')
 
-  // ── [9] RESTORE AUTHORITY — mirrors removal ────────────────────────────────────────────
-  // Verified at HEAD: setting removedAt is ORGANIZER-gated (the approval route runs
-  // requireOrganizerAuth + resolveOwnedFair), while isAvailable is vendor-direct
-  // (/api/menu-items/[id]/availability needs only getVendorAuth). So clearing removedAt must be
-  // organizer-gated too, or a vendor could unilaterally undo an organizer's decision.
-  console.log('\n[9] restore carries the same authority as removal')
-  const approvalSrc = readFileSync('app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts', 'utf8')
+  // ── [9] RESTORE AUTHORITY ──────────────────────────────────────────────────────────────
+  // Since H5 Step 2g, removal and restore have two doors, and only two:
+  //   - the menu-request submission (POST /api/menu-requests → lib/menu-requests/file-item.ts):
+  //     a removal applies at once, and a restore applies at once only when it does not RAISE the
+  //     price (priceNeedsApproval); a higher-priced restore is written PENDING;
+  //   - the approver's decision (lib/menu-requests/apply-decision.ts), reached through the
+  //     organizer route (requireOrganizerAuth) or, for a fair with no organizer, the admin route.
+  // The vendor-direct availability route (/api/menu-items/[id]/availability) writes isAvailable
+  // only and must never touch removedAt.
+  console.log('\n[9] restore runs only through the menu-request doors')
+  const approvalRouteSrc = readFileSync('app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts', 'utf8')
+  const approvalSrc = readFileSync('lib/menu-requests/apply-decision.ts', 'utf8')
+  const fileItemSrc = readFileSync('lib/menu-requests/file-item.ts', 'utf8')
   const availabilitySrc = readFileSync('app/api/menu-items/[id]/availability/route.ts', 'utf8')
 
-  assert(/requireOrganizerAuth\(\)/.test(approvalSrc),
-    'removal (and restore) run through the organizer-gated approval route')
-  assert(/case 'RESTORE'/.test(approvalSrc) && /data: \{ removedAt: null \}/.test(approvalSrc),
-    'the RESTORE branch and its removedAt:null write live in that organizer-gated route')
+  assert(/requireOrganizerAuth\(\)/.test(approvalRouteSrc) && /applyMenuRequestDecision\(/.test(approvalRouteSrc),
+    'the organizer approval route is organizer-gated and delegates to the shared decision')
+  assert(/case 'RESTORE'/.test(approvalSrc) && /data: \{\s*removedAt: null,/.test(approvalSrc),
+    'the shared decision has the RESTORE branch and its removedAt:null write')
   assert(/assertNeverRequestType/.test(approvalSrc),
     'and the switch is exhaustive — a fifth type fails tsc rather than silently approving nothing')
+  const gateAt = fileItemSrc.indexOf('priceNeedsApproval(item.price, requested)')
+  const directRestoreAt = fileItemSrc.indexOf('data: { removedAt: null,')
+  assert(gateAt > 0 && directRestoreAt > gateAt,
+    'the vendor submission clears removedAt only AFTER the higher-price check has sent increases to PENDING')
   assert(!/removedAt/.test(availabilitySrc),
-    'the VENDOR-DIRECT availability route cannot touch removedAt — a vendor cannot self-restore')
+    'the VENDOR-DIRECT availability route cannot touch removedAt — a vendor cannot self-restore there')
   // [0] control: that route CAN write the field it is allowed to write, so the assertion above
   // is about removedAt specifically and not about the route being inert.
   assert(/data: \{ isAvailable \}/.test(availabilitySrc),

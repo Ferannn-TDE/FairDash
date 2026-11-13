@@ -12,14 +12,17 @@ import { AUDIT_ACTIONS } from '../vendor-audit'
 
 /** Where a price write came from. One value per write path. */
 export type MenuPriceChangeSource =
-  | 'DIRECT_CREATE'          // POST /api/menu
-  | 'DIRECT_EDIT'            // PATCH /api/menu/[id]
-  | 'REQUEST_APPROVED_ADD'   // organizer approves an ADD menu request
-  | 'REQUEST_APPROVED_EDIT'  // organizer approves an EDIT menu request that carries a price
+  | 'DIRECT_CREATE'            // POST /api/menu
+  | 'DIRECT_EDIT'              // PATCH /api/menu/[id]
+  | 'REQUEST_APPROVED_ADD'     // the approver approves an ADD menu request
+  | 'REQUEST_APPROVED_EDIT'    // the approver approves an EDIT menu request that carries a price
+  | 'REQUEST_APPLIED_EDIT'     // a vendor EDIT of a live item, applied at once (2g)
+  | 'REQUEST_APPLIED_RESTORE'  // a vendor restore at the same or a lower price, applied at once (2g)
+  | 'REQUEST_APPROVED_RESTORE' // the approver approves a restore at a higher price (2g)
 
 export interface MenuPriceChange {
   vendorId: string
-  /** The User who made the change: the vendor operator, or the approving organizer. */
+  /** The User who made the change: the vendor operator, or the approving organizer or admin. */
   userId: string
   menuItemId: string
   name: string
@@ -58,6 +61,39 @@ export async function recordMenuPriceChange(tx: Prisma.TransactionClient, change
         newCents: toCents(change.newPrice),
         source: change.source,
         requestId: change.requestId ?? null,
+      },
+    },
+  })
+}
+
+export interface MenuItemRemoval {
+  vendorId: string
+  /** The vendor operator who removed it, or the approver of an older pending DELETE. */
+  userId: string
+  menuItemId: string
+  name: string
+  /** The price the item had when it left the menu: what a later restore is compared against. */
+  price: number
+  requestId: string
+}
+
+/**
+ * Write the MENU_ITEM_REMOVED audit row inside the caller's transaction (audit H5, 2g). Same
+ * contract as recordMenuPriceChange: it throws on failure, so a removal that cannot be recorded
+ * rolls back.
+ */
+export async function recordMenuItemRemoved(tx: Prisma.TransactionClient, removal: MenuItemRemoval): Promise<void> {
+  await tx.vendorAuditLog.create({
+    data: {
+      vendorId: removal.vendorId,
+      userId: removal.userId,
+      action: AUDIT_ACTIONS.MENU_ITEM_REMOVED,
+      metadata: {
+        menuItemId: removal.menuItemId,
+        name: removal.name,
+        price: removal.price,
+        priceCents: toCents(removal.price),
+        requestId: removal.requestId,
       },
     },
   })

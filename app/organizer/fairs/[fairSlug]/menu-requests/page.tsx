@@ -12,6 +12,7 @@ import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { groupByVendor } from '@/lib/menu-requests/group-by-vendor'
 import type { BatchGroup } from '@/lib/menu-requests/group-by-batch'
+import { formatPriceChange, type PriceChangeSummary } from '@/lib/menu/price-gate'
 
 interface CurrentItem {
   id: string
@@ -39,6 +40,8 @@ interface MenuRequest {
   imageUrl: string | null
   menuItemId: string | null
   currentItem: CurrentItem | null
+  /** Current → requested, computed by the server from the item's price as it is now. */
+  priceChange: PriceChangeSummary | null
   reviewNote: string | null
   createdAt: string
   vendor: { id: string; name: string }
@@ -154,6 +157,18 @@ function RequestCard({
 
       {/* Body */}
       <div className="px-4 pb-4 space-y-3">
+
+        {/* PRICE CHANGE — current → requested, against the price as it is NOW. If the vendor
+            lowered the live price while this waited, this shows the real jump being approved. */}
+        {req.priceChange && req.priceChange.direction !== 'same' && (
+          <p className={`text-xs font-inter font-semibold px-2.5 py-1.5 rounded-lg border w-fit ${
+            req.priceChange.direction === 'up'
+              ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+              : 'bg-white/[0.04] border-white/10 text-white/70'
+          }`}>
+            Price {formatPriceChange(req.priceChange)}
+          </p>
+        )}
 
         {/* ADD — show proposed item */}
         {req.type === 'ADD' && (

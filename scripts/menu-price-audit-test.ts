@@ -281,7 +281,8 @@ async function main() {
 
   // ── [6] source ──────────────────────────────────────────────────────────────────────────────
   console.log('\n[6] source: writes go through tx inside db.$transaction')
-  const routes = ['app/api/menu/route.ts', 'app/api/menu/[id]/route.ts', 'app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts']
+  // The approval logic moved into the shared decision both approver routes call (H5 2g).
+  const routes = ['app/api/menu/route.ts', 'app/api/menu/[id]/route.ts', 'lib/menu-requests/apply-decision.ts']
   for (const f of routes) {
     const src = strip(readSource(f))
     const txAt = src.indexOf('db.$transaction(async tx =>')
@@ -292,8 +293,8 @@ async function main() {
   const approval = strip(readSource(routes[2]))
   const txAt = approval.indexOf('db.$transaction(async tx =>')
   assert(!/db\.menuItem\.(create|update)\(/.test(approval), 'approval route: no menu-item write outside the transaction (no db.menuItem.create/update)')
-  assert(!/db\.menuRequest\.update\(/.test(approval) && approval.indexOf('tx.menuRequest.update(') > txAt,
-    '(b) approval route: the status update is tx.menuRequest.update inside the same transaction')
+  assert(!/db\.menuRequest\.update(Many)?\(/.test(approval) && approval.indexOf('tx.menuRequest.updateMany(') > txAt,
+    '(b) approval: the status update is tx.menuRequest.updateMany (PENDING only) inside the same transaction')
   const recheckAt = approval.indexOf('parseInPersonPrice(menuRequest.price)')
   assert(recheckAt > 0 && txAt > 0 && recheckAt < txAt, '(a) approval route: the price re-check runs before the transaction')
   const plantedArg = [...'await recordMenuPriceChange(db, {'.matchAll(/recordMenuPriceChange\((\w+),/g)][0]?.[1]

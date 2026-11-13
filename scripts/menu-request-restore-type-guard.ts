@@ -140,7 +140,8 @@ async function main() {
   // APPROVED having written nothing. Unreachable today because [2] proves the API cannot mint
   // one — but asserted, so step 3 landing without the branch is RED rather than silent.
   console.log('\n[4] the approval route HANDLES RESTORE (step-2 pin, inverted by step 3)')
-  const approvalSrc = readFileSync('app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts', 'utf8')
+  // The approval switch moved into the shared decision both approver routes call (H5 2g).
+  const approvalSrc = readFileSync('lib/menu-requests/apply-decision.ts', 'utf8')
   assert(/case 'DELETE'/.test(approvalSrc),
     "[0] positive control: the scanner DOES find the existing DELETE branch")
   assert(/case 'RESTORE'/.test(approvalSrc),

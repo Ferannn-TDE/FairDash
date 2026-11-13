@@ -279,7 +279,8 @@ async function main() {
   const menuSrc = stripComments(readFileSync('app/api/menu/route.ts', 'utf8'))
   const availSrc = stripComments(readFileSync('app/api/menu-items/[id]/availability/route.ts', 'utf8'))
   const reqSrc = stripComments(readFileSync('app/api/menu-requests/route.ts', 'utf8'))
-  const approvalSrc = stripComments(readFileSync('app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts', 'utf8'))
+  // The approval logic is shared by the organizer and admin routes since H5 2g.
+  const approvalSrc = stripComments(readFileSync('lib/menu-requests/apply-decision.ts', 'utf8'))
 
   const writePaths: Array<[string, string, string[]]> = [
     ['PATCH /api/menu/[id]', handlerSource(menuIdSrc, 'PATCH'), ['requireVendorMenuItemAccess(', 'requireVendorMayEditMenu(']],

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, use } from 'react'
 import { Store, AlertTriangle } from 'lucide-react'
 import { VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
+import MenuRequestsPanel from './MenuRequestsPanel'
 
 // ─── Types (real /api/admin/events/[id]/vendors shape via getFairVendors) ──────
 
@@ -124,6 +125,9 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
           </p>
         )}
       </div>
+
+      {/* Menu requests: shown only for a fair with no organizer (the admin route 404s otherwise). */}
+      <MenuRequestsPanel eventSlug={params.eventSlug} />
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-6 bg-white/5 rounded-lg p-1 w-fit">

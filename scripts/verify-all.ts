@@ -86,6 +86,7 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'vendor-operator-gate',      file: 'scripts/vendor-operator-gate-test.ts' },
   { group: 'boundary',    name: 'vendor-accept-verb',        file: 'scripts/vendor-accept-verb-test.ts' },
   { group: 'boundary',    name: 'menu-ownership',            file: 'scripts/menu-ownership-guard.ts' },
+  { group: 'correctness', name: 'menu-immediate-delete',     file: 'scripts/menu-immediate-delete-test.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },

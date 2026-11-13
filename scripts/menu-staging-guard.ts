@@ -201,9 +201,13 @@ function main() {
     'the ADD form no longer hard-codes "Submit for Approval" (the caption that lied)')
   assert(/\{\(showAdd \|\| staged\.length > 0\) &&/.test(page),
     'the tray renders when the form is OPEN too — not only once something is staged')
-  // [0] baseline: the EditItemModal keeps its own wording, untouched by this change.
-  assert(/'Submit for Approval'/.test(page),
-    '[0] baseline: "Submit for Approval" still exists — on the edit-committed path, which is a real submit')
+  // [0] controls. The EditItemModal has its own submit: since H5 2g an edit of a live item applies
+  // at once, so it says "Save changes" (it used to say "Submit for Approval"). And the scanner does
+  // match the old caption when it is present, so the absence check above is not blind.
+  assert(/'Save changes'/.test(page.split('EditItemModal').slice(1).join('EditItemModal')),
+    '[0] baseline: the edit modal keeps its own submit, "Save changes" (edits apply immediately, H5 2g)')
+  assert(/'Submit for Approval'/.test(`{uploading ? 'Uploading photo…' : 'Submit for Approval'}`),
+    '[0] control: the caption scanner matches "Submit for Approval" when it is present')
 
   console.log(`\n${'─'.repeat(70)}`)
   if (fail === 0) console.log(`  ${pass} passed, 0 failed`)
