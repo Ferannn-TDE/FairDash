@@ -62,7 +62,13 @@ export interface MenuRequestItemInput {
   category?: unknown
   prepTime?: unknown
   imageUrl?: unknown
+  /** Sizes (H5 Fix B): rows sharing a variantGroup are one dish; variantLabel names the size. */
+  variantGroup?: unknown
+  variantLabel?: unknown
 }
+
+export const MAX_VARIANT_GROUP = 120
+export const MAX_VARIANT_LABEL = 60
 
 export interface ItemRejection {
   message: string
@@ -107,6 +113,30 @@ export function validateMenuRequestItem(item: MenuRequestItemInput): ItemRejecti
     return reject(`menuItemId is required for ${type}`)
   }
 
+  // SIZES (H5 Fix B). An ADD may carry both a group and a size label, or neither. An EDIT may
+  // rename a size (variantLabel) but not move it to another dish (variantGroup). DELETE and
+  // RESTORE act on an existing row as it is.
+  const { variantGroup, variantLabel } = item
+  const sizeText = (v: unknown, max: number, what: string): ItemRejection | null => {
+    if (v === undefined || v === null) return null
+    if (typeof v !== 'string' || v.trim() === '') return reject(`${what} must be text`)
+    if (v.trim().length > max) return reject(`${what} must be at most ${max} characters`)
+    return null
+  }
+  const groupBad = sizeText(variantGroup, MAX_VARIANT_GROUP, 'The item a size belongs to')
+  if (groupBad) return groupBad
+  const labelBad = sizeText(variantLabel, MAX_VARIANT_LABEL, 'The size name')
+  if (labelBad) return labelBad
+  const hasGroup = variantGroup !== undefined && variantGroup !== null
+  const hasLabel = variantLabel !== undefined && variantLabel !== null
+  if (type === 'ADD' && hasGroup !== hasLabel) {
+    return reject('A size needs both the item it belongs to and its size name')
+  }
+  if (type === 'EDIT' && hasGroup) return reject('A size cannot be moved to a different item')
+  if ((type === 'DELETE' || type === 'RESTORE') && (hasGroup || hasLabel)) {
+    return reject(`Size details can't be changed on ${type === 'DELETE' ? 'a removal' : 'a restore'}`)
+  }
+
   // A menu request is copied verbatim onto the MenuItem at approval time, so an unvalidated
   // imageUrl here is the same bypass one approval later. See lib/upload-limits.ts.
   try {
@@ -134,7 +164,7 @@ export interface MenuRequestRowContext {
  * Call only on an item that validateMenuRequestItem() accepted.
  */
 export function buildMenuRequestData(item: MenuRequestItemInput, ctx: MenuRequestRowContext) {
-  const { type, menuItemId, name, description, price, category, prepTime, imageUrl } = item
+  const { type, menuItemId, name, description, price, category, prepTime, imageUrl, variantGroup, variantLabel } = item
   // Store the parsed value ("12.50" → 12.5), not a second Number() of the raw input.
   let storedPrice: number | null = null
   if (price !== undefined) {
@@ -154,5 +184,7 @@ export function buildMenuRequestData(item: MenuRequestItemInput, ctx: MenuReques
     category: (category as string | undefined) ?? null,
     prepTime: prepTime !== undefined ? Number(prepTime) : null,
     imageUrl: (imageUrl as string | undefined) ?? null,
+    variantGroup: typeof variantGroup === 'string' ? variantGroup.trim() : null,
+    variantLabel: typeof variantLabel === 'string' ? variantLabel.trim() : null,
   }
 }

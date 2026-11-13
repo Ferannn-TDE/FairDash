@@ -10,7 +10,7 @@ import { currentUser } from '@clerk/nextjs/server'
 
 // PATCH /api/admin/vendors/[id]/approve   Body: { boothNumber?: string }
 // The fair Vendors page's approve button. Same single decision as the approvals page
-// (lib/approvals.ts decideVendor: documents gate, booth + owner together, owner exceptions, audit,
+// (lib/approvals.ts decideVendor: go-live checklist, booth + owner together, owner exceptions, audit,
 // applicant email). Strict admins only since item 9: "only the client approves" (C-9), so
 // event_operator no longer approves vendors.
 export async function PATCH(
@@ -28,8 +28,9 @@ export async function PATCH(
       boothNumber = typeof body.boothNumber === 'string' && body.boothNumber.trim() ? body.boothNumber.trim() : undefined
     } catch { /* body is optional */ }
 
-    await decideVendor(id, 'approve', null, { clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin' })
-    if (boothNumber) await db.vendor.update({ where: { id }, data: { boothNumber } })
+    // The booth number is written inside the decision's own transaction and counts toward the
+    // go-live checklist the approval runs (lib/vendor-go-live.ts).
+    await decideVendor(id, 'approve', null, { clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin' }, { boothNumber })
     const updated = await db.vendor.findUnique({ where: { id }, select: { id: true, name: true, status: true, boothNumber: true } })
 
     // Now ACTIVE → orderable. Bust the cached customer discovery list ('vendors', 120s in

@@ -17,6 +17,7 @@ export type MenuPriceChangeSource =
   | 'REQUEST_APPROVED_ADD'     // the approver approves an ADD menu request
   | 'REQUEST_APPROVED_EDIT'    // the approver approves an EDIT menu request that carries a price
   | 'REQUEST_APPLIED_EDIT'     // a vendor EDIT of a live item, applied at once (2g)
+  | 'REQUEST_APPLIED_SIZE'     // a new size added to a live item, applied at once (Fix B)
   | 'REQUEST_APPLIED_RESTORE'  // a vendor restore at the same or a lower price, applied at once (2g)
   | 'REQUEST_APPROVED_RESTORE' // the approver approves a restore at a higher price (2g)
 

@@ -507,6 +507,13 @@ model MenuRequest {
   prepTime    Int?
   imageUrl    String?
 
+  // SIZES ARE PART OF THE ITEM (H5 Fix B, Nov 12). The same pair as MenuItem: rows sharing a
+  // variantGroup are one dish in several sizes. A brand-new item's sizes wait for approval
+  // together (approving one approves every PENDING ADD of that vendor with the same group); a
+  // new size of an item that is already live is a live edit and applies at once.
+  variantGroup String?
+  variantLabel String?
+
   // For EDIT and DELETE — the existing item being modified
   menuItemId String?
   menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)

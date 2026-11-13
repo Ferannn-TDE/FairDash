@@ -211,8 +211,9 @@ async function main() {
       assert(res.status === 400 && b?.error?.code === 'VALIDATION_ERROR', `${label}: 400 VALIDATION_ERROR (got ${res.status} ${b?.error?.code})`)
     }
     assert(await itemCount() === before, `no item was created by any refused price (count ${before} → ${await itemCount()})`)
+    // Since H5 Fix B a brand-new item waits for approval: accepted is 202, not 201.
     const ok = await create(12.5)
-    assert(ok.status === 201, `[0] positive control: the same request with 12.5 is created (got ${ok.status})`)
+    assert(ok.status === 202, `[0] positive control: the same request with 12.5 is accepted for approval, 202 (got ${ok.status})`)
   }
 
   // ── [3] PATCH /api/menu/[id] ────────────────────────────────────────────────────────────────
@@ -253,9 +254,13 @@ async function main() {
   // ── [5] accepted prices, stored as parsed ───────────────────────────────────────────────────
   console.log('\n[5] accepted prices land on every path, stored as the parsed value')
   for (const [label, price, stored] of ACCEPTED) {
+    // A brand-new item through POST /api/menu waits for approval (H5 Fix B): 202, and the pending
+    // request stores the parsed price.
     const c = await create(price)
     const cb = await bodyOf(c)
-    assert(c.status === 201 && cb?.data?.price === stored, `POST /api/menu ${label}: 201, stored ${stored} (got ${c.status}, ${cb?.data?.price})`)
+    const pending = cb?.data?.request as { price?: number; status?: string } | undefined
+    assert(c.status === 202 && pending?.status === 'PENDING' && pending?.price === stored,
+      `POST /api/menu ${label}: 202, request stored ${stored} (got ${c.status}, ${pending?.price})`)
 
     const p = await patch(price)
     assert(p.status === 200 && await storedPrice() === stored, `PATCH ${label}: 200, stored ${stored} (got ${p.status}, ${await storedPrice()})`)
@@ -272,7 +277,9 @@ async function main() {
   const files = ['app/api/menu/route.ts', 'app/api/menu/[id]/route.ts', 'lib/menu-requests/validate-item.ts']
   for (const f of files) {
     const src = strip(readSource(f))
-    assert(/parseInPersonPrice\(/.test(src), `${f}: calls parseInPersonPrice`)
+    // POST /api/menu runs the shared per-item validator since H5 Fix B, which is where the rule lives.
+    const usesRule = f === 'app/api/menu/route.ts' ? /validateMenuRequestItem\(/.test(src) : /parseInPersonPrice\(/.test(src)
+    assert(usesRule, `${f}: ${f === 'app/api/menu/route.ts' ? 'calls validateMenuRequestItem (which applies parseInPersonPrice)' : 'calls parseInPersonPrice'}`)
     assert(!/Number\(price\)/.test(src), `${f}: no Number(price) left`)
   }
   assert(/Number\(price\)/.test('price: Number(price),'), '[0] control: the Number(price) scan does match the old form')

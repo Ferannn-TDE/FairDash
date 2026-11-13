@@ -18,6 +18,10 @@ interface PendingMenuRequest {
   category: string | null
   currentItem: { name: string; price: number; removedAt: string | null } | null
   priceChange: PriceChangeSummary | null
+  variantGroup: string | null
+  variantLabel: string | null
+  /** How many pending sizes deciding this row decides (H5 Fix B); null when not a size. */
+  sizesInGroup: number | null
   createdAt: string
   vendor: { id: string; name: string }
 }
@@ -60,7 +64,12 @@ export default function MenuRequestsPanel({ eventSlug }: { eventSlug: string }) 
       })
       const json = await res.json()
       if (!json.success) { setError(json.error?.message ?? 'Action failed'); return }
-      setRequests(prev => (prev ?? []).filter(r => r.id !== id))
+      // Deciding one size of a brand-new item decides all its pending sizes, so they all leave the list.
+      setRequests(prev => {
+        const decided = (prev ?? []).find(r => r.id === id)
+        return (prev ?? []).filter(r => r.id !== id && !(decided?.type === 'ADD' && decided.variantGroup
+          && r.type === 'ADD' && r.vendor.id === decided.vendor.id && r.variantGroup === decided.variantGroup))
+      })
     } catch {
       setError('Network error')
     } finally {
@@ -89,7 +98,13 @@ export default function MenuRequestsPanel({ eventSlug }: { eventSlug: string }) 
                 <p className="text-sm font-inter text-white truncate">
                   <span className="text-[10px] uppercase font-semibold text-[#888] mr-2">{TYPE_LABEL[r.type]}</span>
                   {r.type === 'ADD' ? r.name : r.currentItem?.name ?? r.name ?? '—'}
+                  {r.variantLabel && <span className="text-[#888]"> · Size: {r.variantLabel}</span>}
                 </p>
+                {r.sizesInGroup != null && r.sizesInGroup > 1 && (
+                  <p className="text-[11px] text-amber-300/80 font-inter">
+                    {r.sizesInGroup} sizes of {r.variantGroup} — approving or rejecting one decides all {r.sizesInGroup}
+                  </p>
+                )}
                 <p className="text-xs text-[#666] font-inter truncate">
                   {r.vendor.name}
                   {r.type === 'ADD' && r.price !== null && ` · $${r.price.toFixed(2)}`}

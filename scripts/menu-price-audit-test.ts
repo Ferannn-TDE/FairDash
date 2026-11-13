@@ -8,7 +8,8 @@
  *
  *   [1] the helper: priceChanged in cents; a failing audit write rolls the price back (real
  *       transaction), with a positive control that the same write commits with a real user
- *   [2] POST /api/menu: one row, previous null, DIRECT_CREATE, the vendor's user
+ *   [2] POST /api/menu (since H5 Fix B): a brand-new item writes no item and no row until it is
+ *       approved; a new size of a live item writes one REQUEST_APPLIED_SIZE row, previous null
  *   [3] PATCH /api/menu/[id]: one row on a real change; none for the same price, no price, or a
  *       description-only edit; none for a refused price
  *   [4] organizer approval: ADD and price-changing EDIT write REQUEST_APPROVED_* rows with the
@@ -161,20 +162,32 @@ async function main() {
     (r: NextRequest, c: { params: Promise<{ fairSlug: string; id: string }> }) => Promise<Response>
 
   // ── [2] direct create ───────────────────────────────────────────────────────────────────────
-  console.log('\n[2] POST /api/menu writes one DIRECT_CREATE row')
+  // Since H5 Fix B, POST /api/menu sends a brand-new item for approval: no item and no price row
+  // until it is approved (approval writes REQUEST_APPROVED_ADD, section [4]). A new SIZE of an item
+  // that is already live is a live edit: created at once with one REQUEST_APPLIED_SIZE row.
+  console.log('\n[2] POST /api/menu: a brand-new item writes nothing yet; a new size of a live item writes one row')
   login(vUser.clerkId)
-  const created = await menuPOST(jsonReq('/api/menu', 'POST', { vendorId: vendor.id, name: `${PFX}taco`, price: 12.5, category: 'Mains' }))
-  const createdBody = await bodyOf(created)
-  const itemId = createdBody?.data?.id as string
   {
+    const fresh = await menuPOST(jsonReq('/api/menu', 'POST', { vendorId: vendor.id, name: `${PFX}fresh`, price: 12.5, category: 'Mains' }))
+    const items = await prisma.menuItem.count({ where: { vendorId: vendor.id, name: `${PFX}fresh` } })
+    assert(fresh.status === 202 && items === 0 && (await auditRows()).length === 0,
+      `brand-new item → 202, no item, no MENU_PRICE_CHANGED row (got ${fresh.status}, ${items} items)`)
+
+    await prisma.menuItem.create({ data: { vendorId: vendor.id, name: `${PFX}soda Small`, price: 2, category: 'Drinks', variantGroup: `${PFX}soda`, variantLabel: 'Small' } })
+    const size = await menuPOST(jsonReq('/api/menu', 'POST', {
+      vendorId: vendor.id, name: `${PFX}soda Large`, price: 3.5, category: 'Drinks', variantGroup: `${PFX}soda`, variantLabel: 'Large',
+    }))
+    const sizeBody = await bodyOf(size)
     const rows = await auditRows()
     const m = rows[0]?.meta
-    assert(created.status === 201 && rows.length === 1, `201 and exactly one MENU_PRICE_CHANGED row (got ${created.status}, ${rows.length})`)
-    assert(m?.source === 'DIRECT_CREATE' && m.previousPrice === null && m.previousCents === null && m.newPrice === 12.5 && m.newCents === 1250,
-      `row: DIRECT_CREATE, previous null, new 12.5 / 1250¢ (got ${JSON.stringify(m)})`)
-    assert(rows[0]?.userId === vUser.id && m?.menuItemId === itemId && m?.name === `${PFX}taco`,
-      'row names the vendor operator, the created item and its name')
+    assert(size.status === 201 && sizeBody?.data?.variantLabel === 'Large' && rows.length === 1,
+      `new size of a live item → 201, created, one MENU_PRICE_CHANGED row (got ${size.status}, ${rows.length})`)
+    assert(m?.source === 'REQUEST_APPLIED_SIZE' && m.previousPrice === null && m.newPrice === 3.5 && m.newCents === 350
+      && rows[0]?.userId === vUser.id && m.menuItemId === sizeBody?.data?.id,
+    `row: REQUEST_APPLIED_SIZE, previous null, new 3.50 / 350¢, by the operator, naming the new size (got ${JSON.stringify(m)})`)
+    await prisma.vendorAuditLog.deleteMany({ where: { vendorId: vendor.id } })
   }
+  const itemId = (await prisma.menuItem.create({ data: { vendorId: vendor.id, name: `${PFX}taco`, price: 12.5, category: 'Mains' } })).id
 
   // ── [3] direct edit ─────────────────────────────────────────────────────────────────────────
   console.log('\n[3] PATCH /api/menu/[id] writes a row only for a real price change')
@@ -183,22 +196,22 @@ async function main() {
   {
     const p1 = await patch({ price: 9.5 })
     let rows = await auditRows()
-    const m = rows[1]?.meta
-    assert(p1.status === 200 && rows.length === 2, `12.50 → 9.50: 200 and one new row (got ${p1.status}, ${rows.length} rows)`)
-    assert(m?.source === 'DIRECT_EDIT' && m.previousPrice === 12.5 && m.newPrice === 9.5 && m.previousCents === 1250 && m.newCents === 950 && rows[1]?.userId === vUser.id,
+    const m = rows[0]?.meta
+    assert(p1.status === 200 && rows.length === 1, `12.50 → 9.50: 200 and one new row (got ${p1.status}, ${rows.length} rows)`)
+    assert(m?.source === 'DIRECT_EDIT' && m.previousPrice === 12.5 && m.newPrice === 9.5 && m.previousCents === 1250 && m.newCents === 950 && rows[0]?.userId === vUser.id,
       `row: DIRECT_EDIT, 12.5 → 9.5, by the operator (got ${JSON.stringify(m)})`)
 
     const same = await patch({ price: '9.50' })
     const noPrice = await patch({ isAvailable: false })
     const descOnly = await patch({ description: 'spicy' })
     rows = await auditRows()
-    assert(same.status === 200 && noPrice.status === 200 && descOnly.status === 200 && rows.length === 2,
+    assert(same.status === 200 && noPrice.status === 200 && descOnly.status === 200 && rows.length === 1,
       `the same price ("9.50"), no price, and a description-only edit add no row (statuses ${same.status}/${noPrice.status}/${descOnly.status}, ${rows.length} rows)`)
 
     const refusedPatch = await patch({ price: -1 })
     const refusedPost = await menuPOST(jsonReq('/api/menu', 'POST', { vendorId: vendor.id, name: `${PFX}cheap`, price: 0.5, category: 'Mains' }))
     rows = await auditRows()
-    assert(refusedPatch.status === 400 && refusedPost.status === 400 && rows.length === 2,
+    assert(refusedPatch.status === 400 && refusedPost.status === 400 && rows.length === 1,
       `a refused price (PATCH -1, POST 0.50) writes no row (got ${refusedPatch.status}/${refusedPost.status}, ${rows.length} rows)`)
     assert(await priceOf(itemId) === 9.5, 'and the stored price is still 9.5')
   }
@@ -282,7 +295,19 @@ async function main() {
   // ── [6] source ──────────────────────────────────────────────────────────────────────────────
   console.log('\n[6] source: writes go through tx inside db.$transaction')
   // The approval logic moved into the shared decision both approver routes call (H5 2g).
-  const routes = ['app/api/menu/route.ts', 'app/api/menu/[id]/route.ts', 'lib/menu-requests/apply-decision.ts']
+  // POST /api/menu files through lib/menu-requests/file-item.ts since H5 Fix B; that module is
+  // handed the caller's transaction, so its calls must all pass that `tx`, and the route must call
+  // it inside db.$transaction.
+  {
+    const fileItem = strip(readSource('lib/menu-requests/file-item.ts'))
+    const calls = [...fileItem.matchAll(/record(?:MenuPriceChange|MenuItemRemoved)\((\w+),/g)]
+    assert(calls.length >= 4 && calls.every(c => c[1] === 'tx'),
+      `lib/menu-requests/file-item.ts: every audit write passes the caller's tx (${calls.length} call(s))`)
+    const menuRoute = strip(readSource('app/api/menu/route.ts'))
+    assert(/db\.\$transaction\(tx =>\s*\n?\s*fileMenuRequestItem\(tx,/.test(menuRoute),
+      'app/api/menu/route.ts: POST files the item inside db.$transaction, passing its tx')
+  }
+  const routes = ['app/api/menu/[id]/route.ts', 'lib/menu-requests/apply-decision.ts']
   for (const f of routes) {
     const src = strip(readSource(f))
     const txAt = src.indexOf('db.$transaction(async tx =>')
@@ -290,7 +315,7 @@ async function main() {
     assert(txAt > 0 && calls.length > 0 && calls.every(c => c[1] === 'tx' && (c.index ?? -1) > txAt),
       `${f}: every recordMenuPriceChange( passes tx, after db.$transaction(async tx => (${calls.length} call(s))`)
   }
-  const approval = strip(readSource(routes[2]))
+  const approval = strip(readSource('lib/menu-requests/apply-decision.ts'))
   const txAt = approval.indexOf('db.$transaction(async tx =>')
   assert(!/db\.menuItem\.(create|update)\(/.test(approval), 'approval route: no menu-item write outside the transaction (no db.menuItem.create/update)')
   assert(!/db\.menuRequest\.update(Many)?\(/.test(approval) && approval.indexOf('tx.menuRequest.updateMany(') > txAt,

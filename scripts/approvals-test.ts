@@ -85,14 +85,20 @@ async function main() {
   await prisma.orgMember.create({ data: { organizerId: ownerOrg.id, userId: orgUser.id, role: 'owner' } })
   const ev = await prisma.event.create({ data: { name: `${PFX}fair`, urlSlug: `${PFX}${rand()}`, status: EventStatus.UPCOMING, organizerId: ownerOrg.id, startDate: new Date(), endDate: new Date(Date.now() + 864e5) } })
 
-  const mkVendor = async (opts: { docs?: boolean; withStaff?: boolean } = {}) => {
+  // Approving puts a booth live, so since M1 (Fix B) it needs the whole go-live checklist:
+  // documents, payouts, a booth number and a sellable menu item. Fixtures are complete unless a
+  // case turns one item off.
+  const mkVendor = async (opts: { docs?: boolean; withStaff?: boolean; payouts?: boolean; booth?: boolean; menu?: boolean } = {}) => {
     const u = await prisma.user.create({ data: { clerkId: `${PFX}vu-${rand()}`, email: `vu-${rand()}${MAIL}`, name: 'Owner' } })
     const docs = opts.docs === false ? {} : { foodHandlerPermitPath: 'x/fh.pdf', insurancePath: 'x/ins.pdf', businessLicensePath: 'x/bl.pdf' }
     const v = await prisma.vendor.create({
       data: {
         eventId: ev.id, name: `${PFX}Booth ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Tacos', status: VendorStatus.PENDING,
         contactName: 'Ana', contactEmail: `ana-${rand()}${MAIL}`, ...docs,
+        stripeVerified: opts.payouts !== false,
+        ...(opts.booth !== false && { boothNumber: 'A1' }),
         vendorMembers: { create: { userId: u.id, role: 'owner' } },
+        ...(opts.menu !== false && { menuItems: { create: { name: 'Taco', price: 5, category: 'Mains', isAvailable: true } } }),
       },
       include: { vendorMembers: true },
     })
@@ -179,11 +185,19 @@ async function main() {
   assert(rf.status === 200 && sf.booth === 'REJECTED' && sf.owner === 'REJECTED' && sf.ownerReason === 'Earlier no', 'owner already REJECTED → reject changes only the booth (owner keeps its own reason)')
 
   // ── [3] documents, reasons, double decisions ───────────────────────────────────────────
-  console.log('\n[3] Documents gate, reasons, double decisions')
+  console.log('\n[3] Go-live checklist, reasons, double decisions')
   const h = await mkVendor({ docs: false })
   const rh = await decideAs(PM, 'vendor', h.vendor.id, { decision: 'approve' })
-  assert(rh.status === 409 && rh.code === 'DOCS_INCOMPLETE' && Array.isArray(rh.details?.missing) && rh.details.missing.length === 3, 'missing documents → 409 DOCS_INCOMPLETE listing what is missing')
+  assert(rh.status === 409 && rh.code === 'VENDOR_NOT_READY_TO_GO_LIVE' && Array.isArray(rh.details?.missing) && rh.details.missing.length === 3
+    && rh.details.missing.includes('Food Handler Permit'),
+  `missing documents → 409 VENDOR_NOT_READY_TO_GO_LIVE naming each missing document (got ${rh.status} ${rh.code} ${JSON.stringify(rh.details?.missing)})`)
   assert((await state(h.vendor.id, h.ownerId)).booth === 'PENDING', 'and nothing changed')
+  const notReady = await mkVendor({ payouts: false, booth: false, menu: false })
+  const rnr = await decideAs(PM, 'vendor', notReady.vendor.id, { decision: 'approve' })
+  assert(rnr.status === 409 && rnr.code === 'VENDOR_NOT_READY_TO_GO_LIVE'
+    && JSON.stringify(rnr.details?.missing) === JSON.stringify(['Add your menu', 'Connect payouts', 'Set booth number'])
+    && (await state(notReady.vendor.id, notReady.ownerId)).booth === 'PENDING',
+  `documents on file but no menu, payouts or booth → 409 naming those three, booth still PENDING (got ${JSON.stringify(rnr.details?.missing)})`)
   const noReason = await decideAs(PM, 'vendor', h.vendor.id, { decision: 'reject', reason: '   ' })
   assert(noReason.status === 400, 'reject with no reason → 400')
   const again = await decideAs(PM, 'vendor', a.vendor.id, { decision: 'reject', reason: 'Too late' })
@@ -219,6 +233,11 @@ async function main() {
   const rk = await call(oldApprove(req(`/api/admin/vendors/${k.vendor.id}/approve`, 'PATCH', { boothNumber: 'B12' }), { params: Promise.resolve({ id: k.vendor.id }) }))
   const sk = await state(k.vendor.id, k.ownerId)
   assert(rk.status === 200 && sk.booth === 'ACTIVE' && sk.owner === 'APPROVED' && rk.data?.vendor?.boothNumber === 'B12', 'super_admin on the fair page: booth + owner approved together, booth number kept')
+  const kb = await mkVendor({ booth: false })
+  const noBooth = await call(oldApprove(req(`/api/admin/vendors/${kb.vendor.id}/approve`, 'PATCH', {}), { params: Promise.resolve({ id: kb.vendor.id }) }))
+  const withBooth = await call(oldApprove(req(`/api/admin/vendors/${kb.vendor.id}/approve`, 'PATCH', { boothNumber: 'C7' }), { params: Promise.resolve({ id: kb.vendor.id }) }))
+  assert(noBooth.status === 409 && withBooth.status === 200 && withBooth.data?.vendor?.boothNumber === 'C7' && (await state(kb.vendor.id, kb.ownerId)).booth === 'ACTIVE',
+    `no booth number → 409; the same approval sending boothNumber "C7" counts it and goes ACTIVE (got ${noBooth.status}/${withBooth.status})`)
 
   // ── [6] organizers can't decide pending vendors ────────────────────────────────────────
   console.log('\n[6] Organizer approval of vendors is off (C-9)')

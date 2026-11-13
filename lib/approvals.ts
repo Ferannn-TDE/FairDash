@@ -5,7 +5,8 @@
 // update), one transaction with its ApprovalAction audit row and the applicant's email (outbox).
 //
 // VENDOR rules (agreed 2026-11-05; approval is per booth, the owner row is created PENDING):
-//   approve — documents gate first. Owner row PENDING → booth ACTIVE + owner APPROVED.
+//   approve — go-live checklist first (documents, menu, payouts, booth number; lib/vendor-go-live.ts).
+//             Owner row PENDING → booth ACTIVE + owner APPROVED.
 //             Owner already APPROVED (decided on Booth Operators) → only the booth changes.
 //             Owner already REJECTED → refused (never override an explicit earlier rejection).
 //   reject  — reason required. Owner row PENDING → booth + owner REJECTED. Owner already APPROVED
@@ -15,7 +16,8 @@
 import { VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api-error'
-import { vendorDocsComplete, REQUIRED_VENDOR_DOCS, VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
+import { REQUIRED_VENDOR_DOCS, VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
+import { GO_LIVE_LABELS, GO_LIVE_VENDOR_SELECT, vendorGoLiveRefusal } from '@/lib/vendor-go-live'
 import { enqueueDecisionEmail, type ApplicationKind } from '@/lib/notifications'
 import type { SettingsRole } from '@/lib/roles'
 
@@ -36,24 +38,33 @@ function requireReason(decision: Decision, reason: unknown): string | null {
 const alreadyDecided = () => new ApiError('Already decided', 409, 'ALREADY_DECIDED')
 
 // ── Vendor ──────────────────────────────────────────────────────────────────────────────────
-export async function decideVendor(vendorId: string, decision: Decision, reasonIn: unknown, actor: Actor) {
+// Approving puts the booth ACTIVE (live), so it runs the same go-live checklist as every other
+// move into ACTIVE (lib/vendor-go-live.ts, audit M1, decided Nov 12): documents, a sellable menu
+// item, payouts and a booth number. `opts.boothNumber`, when given, is written in the same
+// transaction and counts toward the checklist.
+export async function decideVendor(vendorId: string, decision: Decision, reasonIn: unknown, actor: Actor, opts: { boothNumber?: string } = {}) {
   const reason = requireReason(decision, reasonIn)
   const vendor = await db.vendor.findUnique({
     where: { id: vendorId },
     select: {
-      id: true, name: true, status: true, contactName: true, contactEmail: true,
-      foodHandlerPermitPath: true, insurancePath: true, businessLicensePath: true,
+      status: true, contactName: true, contactEmail: true,
+      ...GO_LIVE_VENDOR_SELECT,
       vendorMembers: { where: { role: 'owner' }, select: { id: true, approvalStatus: true, user: { select: { email: true } } }, take: 1 },
     },
   })
   if (!vendor) throw new ApiError('Vendor not found', 404, 'VENDOR_NOT_FOUND')
   if (vendor.status !== VendorStatus.PENDING) throw alreadyDecided()
   const owner = vendor.vendorMembers[0] ?? null
+  const boothNumber = opts.boothNumber?.trim() ? opts.boothNumber.trim().slice(0, 20) : undefined
 
   if (decision === 'approve') {
-    if (!vendorDocsComplete(vendor)) {
-      const missing = REQUIRED_VENDOR_DOCS.filter(d => vendor[DOC_PATH[d]] === null).map(d => VENDOR_DOC_LABELS[d])
-      throw new ApiError(`${vendor.name} can't be approved until all required documents are uploaded.`, 409, 'DOCS_INCOMPLETE', { missing })
+    const refusal = await vendorGoLiveRefusal(db, { ...vendor, boothNumber: boothNumber ?? vendor.boothNumber }, { approving: true })
+    if (refusal) {
+      // Name each missing document, as the approvals page always has; the other items by label.
+      const missing = refusal.missing.flatMap(m => m === 'documents'
+        ? REQUIRED_VENDOR_DOCS.filter(d => vendor[DOC_PATH[d]] === null).map(d => VENDOR_DOC_LABELS[d])
+        : [GO_LIVE_LABELS[m]])
+      throw new ApiError(`${vendor.name} can't be approved yet: it isn't ready to go live.`, 409, refusal.code, { missing })
     }
     if (owner?.approvalStatus === 'REJECTED') {
       throw new ApiError('The owner was rejected separately; resolve that on Booth Operators first.', 409, 'OWNER_REJECTED')
@@ -69,7 +80,10 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
   await db.$transaction(async tx => {
     const flip = await tx.vendor.updateMany({
       where: { id: vendorId, status: VendorStatus.PENDING },
-      data: { status: decision === 'approve' ? VendorStatus.ACTIVE : VendorStatus.REJECTED },
+      data: {
+        status: decision === 'approve' ? VendorStatus.ACTIVE : VendorStatus.REJECTED,
+        ...(decision === 'approve' && boothNumber !== undefined && { boothNumber }),
+      },
     })
     if (flip.count === 0) throw alreadyDecided()
     if (owner && ownerPending) {

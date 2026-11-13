@@ -80,9 +80,22 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
   const requestType: MenuRequestTypeInput = menuRequest.type
   const menuItemId = menuRequest.menuItemId
 
+  // SIZES ARE PART OF THE ITEM (Nov 12). A brand-new item's sizes are PENDING ADDs sharing a
+  // variantGroup; deciding one decides them all, in this one transaction. Every other request is
+  // decided on its own.
+  const group = requestType === 'ADD' && menuRequest.variantGroup !== null
+    ? await db.menuRequest.findMany({
+      where: { vendorId, type: 'ADD', status: 'PENDING', variantGroup: menuRequest.variantGroup },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    })
+    : [menuRequest]
+  const groupIds = group.map(r => r.id)
+
   // ── Checks before anything is written ──────────────────────────────────────────────────
   // Each refusal returns 422 and leaves the request PENDING, so the approver can reject it.
   let approvedPrice: number | null = null
+  /** ADD only: each size's price after the rule check, by request id. */
+  const addPrices = new Map<string, number>()
   if (action === 'APPROVE') {
     // OWNERSHIP RE-CHECK (audit H4, defence in depth). Filing now refuses another vendor's item,
     // but a row written before that check existed could still name one.
@@ -92,8 +105,17 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
         throw unprocessable('This request names a menu item that does not belong to this vendor')
       }
     }
-    if (requestType === 'ADD' && (!menuRequest.name || menuRequest.price === null || !menuRequest.category)) {
-      throw unprocessable('Malformed ADD request — missing required fields')
+    if (requestType === 'ADD') {
+      // Every size of the item must be well-formed and within the price rule, or none is applied.
+      for (const r of group) {
+        if (!r.name || r.price === null || !r.category) throw unprocessable('Malformed ADD request — missing required fields')
+        const parsed = parseInPersonPrice(r.price)
+        if (!parsed.ok) {
+          const which = group.length > 1 ? ` (size ${r.variantLabel ?? r.name})` : ''
+          throw unprocessable(`This request's price can't be approved${which}: ${parsed.message}. Reject it and ask the vendor to resubmit.`)
+        }
+        addPrices.set(r.id, parsed.value)
+      }
     }
     // PRICE RE-CHECK (audit H5, 2f). A request filed before the $1.00–$10,000 rule (2a) can carry
     // a price the rule now refuses. A RESTORE carries a price since 2g, so it is checked too.
@@ -114,22 +136,27 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
       // instead of flipping to APPROVED having written nothing.
       switch (requestType) {
       case 'ADD': {
-        const created = await tx.menuItem.create({
-          data: {
-            vendorId,
-            name: menuRequest.name as string,
-            description: menuRequest.description ?? undefined,
-            price: approvedPrice as number,
-            category: menuRequest.category as string,
-            prepTime: menuRequest.prepTime ?? 15,
-            imageUrl: menuRequest.imageUrl ?? undefined,
-            isAvailable: true,
-          },
-        })
-        await recordMenuPriceChange(tx, {
-          vendorId, userId: reviewerUserId, menuItemId: created.id, name: created.name,
-          previousPrice: null, newPrice: created.price, source: 'REQUEST_APPROVED_ADD', requestId,
-        })
+        // One row per size (one row when the item has no sizes), each with its own audit row.
+        for (const r of group) {
+          const created = await tx.menuItem.create({
+            data: {
+              vendorId,
+              name: r.name as string,
+              description: r.description ?? undefined,
+              price: addPrices.get(r.id) as number, // checked above for every size
+              category: r.category as string,
+              prepTime: r.prepTime ?? 15,
+              imageUrl: r.imageUrl ?? undefined,
+              variantGroup: r.variantGroup,
+              variantLabel: r.variantLabel,
+              isAvailable: true,
+            },
+          })
+          await recordMenuPriceChange(tx, {
+            vendorId, userId: reviewerUserId, menuItemId: created.id, name: created.name,
+            previousPrice: null, newPrice: created.price, source: 'REQUEST_APPROVED_ADD', requestId: r.id,
+          })
+        }
         break
       }
       case 'EDIT': {
@@ -218,13 +245,14 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
       }
     }
 
-    // Only a row that is STILL PENDING flips. A concurrent decision already flipped it: throw, and
-    // everything this transaction wrote rolls back.
+    // Only rows that are STILL PENDING flip: this request, or every size of a brand-new item. If a
+    // concurrent decision already flipped any of them, throw, and everything this transaction wrote
+    // rolls back.
     const flipped = await tx.menuRequest.updateMany({
-      where: { id: requestId, status: 'PENDING' },
+      where: { id: { in: groupIds }, status: 'PENDING' },
       data: { status: newStatus, reviewedBy: reviewerUserId, reviewedAt: now, reviewNote: reason },
     })
-    if (flipped.count === 0) throw new ApiError('Request already reviewed', 409, 'CONFLICT')
+    if (flipped.count !== groupIds.length) throw new ApiError('Request already reviewed', 409, 'CONFLICT')
     return tx.menuRequest.findUniqueOrThrow({
       where: { id: requestId },
       select: { id: true, status: true, reviewNote: true, reviewedAt: true },
@@ -255,15 +283,20 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
     }
   })()
 
-  logVendorAction(vendorId, reviewerUserId, AUDIT_ACTIONS.MENU_CHANGE_REVIEWED, {
-    requestId,
-    requestType: menuRequest.type,
-    action,
-    approver: approver.kind,
-    itemName: menuRequest.name ?? null,
-    menuItemId: menuRequest.menuItemId ?? null,
-    reason,
-  })
+  // One review entry per request row, so each size of a brand-new item is recorded as decided.
+  for (const r of group) {
+    logVendorAction(vendorId, reviewerUserId, AUDIT_ACTIONS.MENU_CHANGE_REVIEWED, {
+      requestId: r.id,
+      requestType: r.type,
+      action,
+      approver: approver.kind,
+      itemName: r.name ?? null,
+      menuItemId: r.menuItemId ?? null,
+      variantGroup: r.variantGroup,
+      variantLabel: r.variantLabel,
+      reason,
+    })
+  }
 
   return updated
 }

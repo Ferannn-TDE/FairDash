@@ -20,7 +20,9 @@
 //   ADD      If the name is one of the vendor's removed items (re-add.ts), it IS that item coming
 //            back: a RESTORE of the matched row under the same price rule, carrying the
 //            description, category, photo and prep time the vendor typed (the stored name is
-//            kept). Otherwise a brand-new item: PENDING.
+//            kept). If its variantGroup matches a LIVE item of the vendor, it is a new size of an
+//            approved item: created now (REQUEST_APPLIED_SIZE audit row). Otherwise a brand-new
+//            item, with all its sizes: PENDING, approved together (apply-decision.ts).
 //
 // ONE PENDING PRICE CHANGE PER ITEM: before an EDIT that carries a price, or any RESTORE, older
 // PENDING price changes for that item are closed (supersede.ts).
@@ -43,6 +45,7 @@ import {
 export const REMOVED_NOTE = 'Removed immediately by vendor'
 export const RESTORED_NOTE = 'Restored immediately by vendor'
 export const EDITED_NOTE = 'Applied immediately by vendor'
+export const SIZE_ADDED_NOTE = 'New size of a live item, applied immediately'
 export const EDIT_REMOVED_MESSAGE = 'This item is removed from the menu. Restore it first, then edit it.'
 
 type RowData = ReturnType<typeof buildMenuRequestData>
@@ -77,6 +80,15 @@ export async function fileMenuRequestItem(
   case 'ADD': {
     const match = await findRemovedNameMatch(tx, ctx.vendorId, data.name as string)
     if (match) return fileRestore(tx, data, match.id, now)
+    // A new SIZE of an item that is already live is a live edit (Nov 12): created at once.
+    if (data.variantGroup !== null) {
+      const liveSibling = await tx.menuItem.findFirst({
+        where: { vendorId: data.vendorId, variantGroup: data.variantGroup, removedAt: null },
+        select: { id: true },
+      })
+      if (liveSibling) return applyNewSize(tx, data, now)
+    }
+    // Brand-new item (with or without sizes): waits for the approver.
     return tx.menuRequest.create({ data })
   }
   default:
@@ -129,6 +141,8 @@ async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date)
     data: {
       ...(data.name  !== null && { name: data.name }),
       ...(data.price !== null && { price: data.price }),
+      // Renaming a size is a live edit too (Nov 12); moving it to another item is refused upstream.
+      ...(data.variantLabel !== null && { variantLabel: data.variantLabel }),
       ...carriedFields(data),
     },
   })
@@ -178,6 +192,9 @@ async function fileRestore(tx: Prisma.TransactionClient, data: RowData, menuItem
     category: data.category,
     prepTime: data.prepTime,
     imageUrl: data.imageUrl,
+    // A restore brings back the row as it was; its size group and label are not changed.
+    variantGroup: null,
+    variantLabel: null,
   }
 
   // A HIGHER price waits for the approver; the item stays removed at its old price meanwhile.
@@ -202,5 +219,37 @@ async function fileRestore(tx: Prisma.TransactionClient, data: RowData, menuItem
       previousPrice: item.price, newPrice: requested, source: 'REQUEST_APPLIED_RESTORE', requestId: row.id,
     })
   }
+  return row
+}
+
+/**
+ * A new size of an item that is already live (an ADD whose variantGroup matches a live row of this
+ * vendor). Sizes are part of the item, and the item is approved, so this is a live edit (Nov 12):
+ * the row is created now, the request written APPROVED, and the price recorded as a
+ * MENU_PRICE_CHANGED row (source REQUEST_APPLIED_SIZE, previous null) in the same transaction, in
+ * VendorAuditLog where the organizer price-change log reads it.
+ */
+async function applyNewSize(tx: Prisma.TransactionClient, data: RowData, now: Date): Promise<MenuRequest> {
+  const created = await tx.menuItem.create({
+    data: {
+      vendorId: data.vendorId,
+      name: data.name as string,
+      description: data.description ?? undefined,
+      price: data.price as number,
+      category: data.category as string,
+      prepTime: data.prepTime ?? 15,
+      imageUrl: data.imageUrl ?? undefined,
+      variantGroup: data.variantGroup,
+      variantLabel: data.variantLabel,
+      isAvailable: true,
+    },
+  })
+  const row = await tx.menuRequest.create({
+    data: { ...data, menuItemId: created.id, status: 'APPROVED', reviewedBy: data.requestedBy, reviewedAt: now, reviewNote: SIZE_ADDED_NOTE },
+  })
+  await recordMenuPriceChange(tx, {
+    vendorId: data.vendorId, userId: data.requestedBy, menuItemId: created.id, name: created.name,
+    previousPrice: null, newPrice: created.price, source: 'REQUEST_APPLIED_SIZE', requestId: row.id,
+  })
   return row
 }

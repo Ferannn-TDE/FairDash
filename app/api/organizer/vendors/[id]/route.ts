@@ -7,7 +7,8 @@ import { requireOrganizerAuth } from '@/lib/auth'
 import { notifyVendorStatusChange } from '@/lib/notify'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
-import { vendorDocsComplete, vendorDocsPresence } from '@/lib/vendor-documents'
+import { vendorDocsPresence } from '@/lib/vendor-documents'
+import { GO_LIVE_VENDOR_SELECT, vendorGoLiveRefusal } from '@/lib/vendor-go-live'
 import { VendorStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
@@ -195,14 +196,10 @@ export async function PATCH(
     const vendor = await db.vendor.findFirst({
       where: await resolveVendorWhere(vendorParam, fairSlug),
       select: {
-        id: true,
         event: { select: { organizerId: true, name: true } },
-        name: true,
         status: true,
-        // Inputs for the docs gate below (PENDING → ACTIVE requires all three).
-        foodHandlerPermitPath: true,
-        insurancePath:         true,
-        businessLicensePath:   true,
+        // id, name, and the inputs for the go-live check below (every move into ACTIVE, audit M1).
+        ...GO_LIVE_VENDOR_SELECT,
       },
     })
     if (!vendor) return apiError('Vendor not found', 404, 'NOT_FOUND')
@@ -246,17 +243,9 @@ export async function PATCH(
       })
     }
 
-    // ── DOCUMENTS GATE — door 1 of 2 ────────────────────────────────────────────
-    // A vendor cannot be APPROVED without every required compliance document on file.
-    // Shares ONE predicate with the platform-admin approve route
-    // (app/api/admin/vendors/[id]/approve), so admin is a second door to the same rule,
-    // not a bypass.
-    //
-    // DELIBERATELY SCOPED TO PENDING → ACTIVE. Reactivate (PAUSED/SUSPENDED → ACTIVE) and
-    // re-approve (REJECTED → ACTIVE) all route through this same handler with
-    // status='ACTIVE'; gating those too would turn "pause a vendor" into a one-way door
-    // for any booth that predates this requirement.
     // ── ORGANIZER APPROVAL OF VENDORS IS SWITCHED OFF (item 9, pending C-9) ─────────────────
+    // Conflicts with the locked Nov 12 decision (the event's organizer approves vendors for their
+    // own event); it is turned on with the reviewer-name work, not in this fix.
     // "Only the client approves": a new vendor (PENDING) is approved or rejected on /admin/approvals
     // or the admin fair Vendors page, never here (a reject here would split the booth from its owner
     // and skip the applicant's email). Pausing, suspending and reactivating active vendors stay.
@@ -267,14 +256,19 @@ export async function PATCH(
         && (body.status === VendorStatus.ACTIVE || body.status === VendorStatus.REJECTED)) {
       return apiError('New vendors are approved by FairSynq. You can pause or suspend vendors once they are active.', 403, 'APPROVAL_BY_PLATFORM')
     }
-    if (statusChanging && body.status === VendorStatus.ACTIVE && vendor.status === VendorStatus.PENDING) {
-      if (!vendorDocsComplete(vendor)) {
-        return apiError(
-          `${vendor.name} can't be approved until all required documents are uploaded.`,
-          409,
-          'DOCS_INCOMPLETE',
-        )
-      }
+    // ── GO-LIVE CHECK (audit M1, decided Nov 12) ──────────────────────────────────────────
+    // EVERY move into ACTIVE, not only PENDING → ACTIVE: lifting a pause, lifting a suspension
+    // and re-activating a rejected booth all need the booth approved for this event AND the
+    // go-live checklist complete (documents, a sellable menu item, payouts, booth number). The
+    // old PENDING-only gate is what let PENDING → PAUSED → ACTIVE put a never-approved booth live.
+    // One shared check (lib/vendor-go-live.ts), also used by FairSynq's approve (decideVendor).
+    // A booth number sent in this same PATCH counts toward the checklist.
+    if (statusChanging && body.status === VendorStatus.ACTIVE) {
+      const refusal = await vendorGoLiveRefusal(db, {
+        ...vendor,
+        boothNumber: data.boothNumber !== undefined ? (data.boothNumber as string | null) : vendor.boothNumber,
+      }, { approving: vendor.status === VendorStatus.PENDING })
+      if (refusal) return apiError(refusal.message, 409, refusal.code, { missing: refusal.missingLabels })
     }
 
     const updated = await db.vendor.update({ where: { id: vendorId }, data })

@@ -4,6 +4,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAdminMenuApprover } from '@/lib/menu-requests/admin-approver'
 import { reviewPriceChange } from '@/lib/menu-requests/review-price'
+import { pendingSizeCounts, sizeCountFor } from '@/lib/menu-requests/size-groups'
 
 // GET /api/admin/events/[id]/menu-requests
 // The PENDING menu requests of a fair that has NO organizer, for a strict platform admin to
@@ -36,6 +37,8 @@ export async function GET(
       },
     })
 
+    const sizesInGroup = await pendingSizeCounts({ vendor: { eventId: event.id } })
+
     return success({
       requests: requests.map(r => ({
         id: r.id,
@@ -48,6 +51,9 @@ export async function GET(
         category: r.category,
         prepTime: r.prepTime,
         imageUrl: r.imageUrl,
+        variantGroup: r.variantGroup,
+        variantLabel: r.variantLabel,
+        sizesInGroup: sizeCountFor(sizesInGroup, r),
         menuItemId: r.menuItemId,
         currentItem: r.menuItem ?? null,
         priceChange: reviewPriceChange(r),

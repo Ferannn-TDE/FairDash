@@ -36,6 +36,11 @@
  *        approver "organizer" or "FairSynq"; rowsFromSubmitResponse keeps price and approver; the
  *        page words its toast, banner and chip with waitingFor() and opens Removed when a restore
  *        is pending (source checks: the repo has no React test framework)
+ *   [12] H5 Fix B: POST /api/menu sends a brand-new item for approval (202) and follows the
+ *        restore rule for a removed item's name; a brand-new item's sizes wait together and
+ *        approving or rejecting one decides all; a new size of a live item applies at once with a
+ *        REQUEST_APPLIED_SIZE row in VendorAuditLog; size renames and price edits are live; the
+ *        price rule applies per size
  *   [8]  approver rule: organizer / other organizer / strict admin / event_operator, with and
  *        without an organizer; GET ?eventId= on an organizer-less fair; simultaneous approvals
  *   [9]  checkout refuses an item removed while in the cart (409 ITEM_REMOVED, no order)
@@ -57,8 +62,12 @@ delete process.env.RATE_LIMIT_TEST
 delete process.env.STRIPE_SECRET_KEY
 process.env.ENFORCE_VENDOR_READINESS = 'false'
 
-import { register } from 'node:module'
+import { createRequire, register } from 'node:module'
 register('./_route-loader.mjs', import.meta.url)
+// TEST-ONLY SHIM, as in scripts/menu-price-rules-test.ts: app/api/menu/route.ts imports
+// lib/menu/getGroupedMenuItems.ts, which uses a bare `require('next/cache')` that does not exist in
+// an ES-module script. Only the import needs it; the POST path never calls unstable_cache.
+;(globalThis as unknown as { require?: NodeRequire }).require = createRequire(import.meta.url)
 
 import { NextRequest } from 'next/server'
 
@@ -591,6 +600,109 @@ async function main() {
       'page: no hard-coded "awaiting organizer approval" is left (it would be wrong on a fair with no organizer)')
     assert(/awaiting organizer approval/.test("toast.success('Request submitted — awaiting organizer approval')"),
       '[0] control: that scan does match the old wording when present')
+  }
+
+  // ── [12] POST /api/menu and sizes (H5 Fix B) ────────────────────────────────────────────────
+  console.log('\n[12] brand-new items wait (with all their sizes); a new size of a live item is a live edit')
+  login(A.user.clerkId)
+  {
+    const menuPOST = ((await importOrFail('POST /api/menu', () => import('../app/api/menu/route')))?.POST
+      ?? missingRoute) as unknown as (r: NextRequest) => Promise<Response>
+    const post = (body: Record<string, unknown>) => menuPOST(jsonReq('/api/menu', 'POST', { vendorId: A.vendor.id, category: 'Mains', ...body }))
+    const sizeRows = async (menuItemId: string) => (await audit(A.vendor.id, 'MENU_PRICE_CHANGED')).filter(x => x.meta.menuItemId === menuItemId)
+
+    // POST /api/menu, brand-new → waits.
+    const fresh = await post({ name: `${PFX}direct-new`, price: 7 })
+    const fb = await bodyOf(fresh)
+    assert(fresh.status === 202 && fb.data?.requiresApproval === true && fb.data?.approver === 'organizer'
+      && await prisma.menuItem.count({ where: { vendorId: A.vendor.id, name: `${PFX}direct-new` } }) === 0,
+    `POST /api/menu brand-new → 202 requiresApproval, approver "organizer", no item created (got ${fresh.status})`)
+
+    // POST /api/menu, name of a removed item → restore rule.
+    const lowItem = await mkItem(A.vendor.id, `${PFX}direct-low`, 8, new Date())
+    const low = await post({ name: `${PFX}direct-low`, price: 7 })
+    assert(low.status === 201 && (await itemOf(lowItem.id)).removedAt === null && (await itemOf(lowItem.id)).price === 7,
+      `POST /api/menu with a removed item's name at a lower price → 201, restored at 7 (got ${low.status})`)
+    const highItem = await mkItem(A.vendor.id, `${PFX}direct-high`, 8, new Date())
+    const high = await post({ name: `${PFX}direct-high`, price: 9 })
+    assert(high.status === 202 && (await itemOf(highItem.id)).removedAt !== null,
+      `POST /api/menu with a removed item's name at a higher price → 202, still removed (got ${high.status})`)
+
+    // A brand-new item with 3 sizes, submitted together → 3 PENDING; approving one approves all 3.
+    const group = `${PFX}Lemonade`
+    const sub = await bodyOf(await file(A.vendor.id, { items: [
+      { type: 'ADD', name: `${group} Small`, price: 3, category: 'Drinks', variantGroup: group, variantLabel: 'Small' },
+      { type: 'ADD', name: `${group} Medium`, price: 4, category: 'Drinks', variantGroup: group, variantLabel: 'Medium' },
+      { type: 'ADD', name: `${group} Large`, price: 5, category: 'Drinks', variantGroup: group, variantLabel: 'Large' },
+    ] }))
+    const subRows = (sub.data?.requests ?? []) as Array<{ id: string; status: string; variantGroup?: string; variantLabel?: string }>
+    assert(subRows.length === 3 && subRows.every(r => r.status === 'PENDING' && r.variantGroup === group),
+      `3 sizes of a brand-new item → 3 PENDING requests keeping their group (got ${subRows.map(r => r.status).join('/')})`)
+    login(orgA.user.clerkId)
+    const list = await bodyOf(await orgLIST(jsonReq(`/api/organizer/fairs/${fair.urlSlug}/menu-requests?status=PENDING&take=100`, 'GET'),
+      { params: Promise.resolve({ fairSlug: fair.urlSlug }) }))
+    const listed = ((list.data?.requests ?? []) as Array<{ id: string; sizesInGroup?: number | null; variantLabel?: string | null }>)
+      .filter(r => subRows.some(s => s.id === r.id))
+    assert(listed.length === 3 && listed.every(r => r.sizesInGroup === 3) && listed.some(r => r.variantLabel === 'Medium'),
+      'the organizer queue shows each size with "3 sizes" and its label')
+    const before = (await audit(A.vendor.id, 'MENU_PRICE_CHANGED')).length
+    const ap = await orgDecide(fair.urlSlug, subRows[1].id)
+    const created = await prisma.menuItem.findMany({ where: { vendorId: A.vendor.id, variantGroup: group }, orderBy: { price: 'asc' } })
+    const statuses = await prisma.menuRequest.findMany({ where: { id: { in: subRows.map(r => r.id) } }, select: { status: true } })
+    const after = await audit(A.vendor.id, 'MENU_PRICE_CHANGED')
+    assert(ap.status === 200 && created.length === 3 && created.map(c => c.variantLabel).join(',') === 'Small,Medium,Large'
+      && created.map(c => c.price).join(',') === '3,4,5' && statuses.every(s => s.status === 'APPROVED'),
+    `approving ONE size approves all 3: created with their labels and prices, all requests APPROVED (got ${ap.status}, ${created.length} items)`)
+    assert(after.length === before + 3 && after.slice(before).every(r => r.meta.source === 'REQUEST_APPROVED_ADD' && r.userId === orgA.user.id),
+      'three REQUEST_APPROVED_ADD rows, one per size, by the organizer')
+
+    // Rejecting one size rejects every size; nothing is created.
+    login(A.user.clerkId)
+    const rgroup = `${PFX}Fries`
+    const rsub = await bodyOf(await file(A.vendor.id, { items: [
+      { type: 'ADD', name: `${rgroup} Small`, price: 3, category: 'Sides', variantGroup: rgroup, variantLabel: 'Small' },
+      { type: 'ADD', name: `${rgroup} Large`, price: 5, category: 'Sides', variantGroup: rgroup, variantLabel: 'Large' },
+    ] }))
+    const rIds = ((rsub.data?.requests ?? []) as Array<{ id: string }>).map(r => r.id)
+    login(orgA.user.clerkId)
+    const rj = await orgDecide(fair.urlSlug, rIds[0], 'REJECT')
+    const rStatuses = await prisma.menuRequest.findMany({ where: { id: { in: rIds } }, select: { status: true } })
+    assert(rj.status === 200 && rStatuses.every(s => s.status === 'REJECTED')
+      && await prisma.menuItem.count({ where: { vendorId: A.vendor.id, variantGroup: rgroup } }) === 0,
+    'rejecting one size rejects both, and no item is created')
+
+    // A new size of an item that is now live → applied at once, audited for the price-change log.
+    login(A.user.clerkId)
+    const xl = await bodyOf(await file(A.vendor.id, { type: 'ADD', name: `${group} XL`, price: 6, category: 'Drinks', variantGroup: group, variantLabel: 'XL' }))
+    const xlItem = await prisma.menuItem.findFirst({ where: { vendorId: A.vendor.id, variantGroup: group, variantLabel: 'XL' } })
+    const xlRows = xlItem ? await sizeRows(xlItem.id) : []
+    assert(xl.data?.status === 'APPROVED' && !!xlItem && xlItem.price === 6 && xlItem.removedAt === null,
+      `a new size (XL) of the live Lemonade → applied at once, request APPROVED (got ${xl.data?.status})`)
+    assert(xlRows.length === 1 && xlRows[0].meta.source === 'REQUEST_APPLIED_SIZE' && xlRows[0].meta.previousPrice === null
+      && xlRows[0].meta.newPrice === 6 && xlRows[0].userId === A.user.id,
+    `it writes one MENU_PRICE_CHANGED row in VendorAuditLog, source REQUEST_APPLIED_SIZE, null → 6 (what the organizer price-change log will read) (got ${JSON.stringify(xlRows[0]?.meta)})`)
+    const viaPost = await post({ name: `${group} Kids`, price: 2.5, category: 'Drinks', variantGroup: group, variantLabel: 'Kids' })
+    assert(viaPost.status === 201, `the same through POST /api/menu → 201 (got ${viaPost.status})`)
+
+    // Size edits are live edits.
+    const medium = created.find(c => c.variantLabel === 'Medium')!
+    const repriced = await bodyOf(await file(A.vendor.id, { type: 'EDIT', menuItemId: medium.id, price: 4.5, variantLabel: 'Regular' }))
+    const m2 = await itemOf(medium.id)
+    const mRows = (await sizeRows(medium.id)).filter(r => r.meta.source === 'REQUEST_APPLIED_EDIT')
+    assert(repriced.data?.status === 'APPROVED' && m2.price === 4.5 && m2.variantLabel === 'Regular' && mRows.length === 1,
+      'renaming a size and changing its price → live at once, one REQUEST_APPLIED_EDIT row')
+
+    // Rules: the price rule per size, and sizes need both fields.
+    const badBatch = await file(A.vendor.id, { items: [
+      { type: 'ADD', name: `${PFX}Tea Small`, price: 2, category: 'Drinks', variantGroup: `${PFX}Tea`, variantLabel: 'Small' },
+      { type: 'ADD', name: `${PFX}Tea Large`, price: 0.5, category: 'Drinks', variantGroup: `${PFX}Tea`, variantLabel: 'Large' },
+    ] })
+    assert(badBatch.status === 400 && await prisma.menuRequest.count({ where: { vendorId: A.vendor.id, variantGroup: `${PFX}Tea` } }) === 0,
+      `one size priced $0.50 → 400 and nothing is written for any size (got ${badBatch.status})`)
+    const halfSize = await file(A.vendor.id, { type: 'ADD', name: `${PFX}Half`, price: 2, category: 'Drinks', variantGroup: `${PFX}Half` })
+    const moveSize = await file(A.vendor.id, { type: 'EDIT', menuItemId: medium.id, variantGroup: `${PFX}Other` })
+    assert(halfSize.status === 400 && moveSize.status === 400,
+      `a size without its size name → 400; moving a size to another item → 400 (got ${halfSize.status}/${moveSize.status})`)
   }
 
   // ── [9] checkout refuses an item removed while in the cart ──────────────────────────────────
