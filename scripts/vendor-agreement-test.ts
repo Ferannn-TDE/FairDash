@@ -148,7 +148,9 @@ async function main() {
   assert(!isProtected('/vendor-agreement'), '/vendor-agreement is public (not caught by the vendor portal gate)')
   assert(toRe('/vendor(.*)').test('/vendor-agreement'), '[0] positive control: the old pattern /vendor(.*) WOULD have caught it')
   const signIn = readFileSync('app/sign-in/vendor/page.tsx', 'utf8')
-  assert(/pitch=\{<VendorPitch \/>\}/.test(signIn) && /VENDOR_PITCH/.test(signIn), 'the pitch is rendered on vendor sign-in')
+  const signInClient = readFileSync('app/sign-in/vendor/VendorSignIn.tsx', 'utf8')
+  assert(/<VendorSignIn\b/.test(signIn), 'the vendor sign-in page renders VendorSignIn')
+  assert(/pitch=\{<VendorPitch\b/.test(signInClient) && /VENDOR_PITCH/.test(signInClient), 'the pitch is rendered on vendor sign-in')
 }
 
 main()

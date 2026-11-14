@@ -77,6 +77,48 @@ function parseBoolean(raw: unknown): Parsed<boolean> {
   return { ok: false, error: 'Choose on or off' }
 }
 
+// ── video.<slot>.url / .posterUrl ──────────────────────────────────────────────────────────
+// Item 12 (B1.15, 2a). Any https link whose path ends in .mp4 or .webm; poster .jpg/.png/.webp.
+// The host is not checked, so moving from Vercel Blob to Bunny.net is only a new URL (§9b).
+export const MAX_URL_LENGTH = 2048
+
+function parseHttpsFile(raw: unknown, exts: readonly string[], what: string): Parsed<string> {
+  if (raw == null) return { ok: true, value: null }
+  if (typeof raw !== 'string') return { ok: false, error: `Enter the ${what} link as text` }
+  const t = raw.trim()
+  if (!t) return { ok: true, value: null }
+  const list = exts.map(e => `.${e}`).join(', ')
+  if (t.length > MAX_URL_LENGTH) return { ok: false, error: `That link is too long (at most ${MAX_URL_LENGTH} characters)` }
+  let u: URL
+  try { u = new URL(t) } catch { return { ok: false, error: `Enter a full link starting with https://, ending in ${list}` } }
+  if (u.protocol !== 'https:') return { ok: false, error: 'The link must start with https://' }
+  if (u.username || u.password) return { ok: false, error: 'The link must not contain a username or password' }
+  const ext = u.pathname.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
+  if (!ext || !exts.includes(ext)) return { ok: false, error: `The ${what} link must end in ${list}` }
+  return { ok: true, value: u.toString() }
+}
+export const VIDEO_EXTS = ['mp4', 'webm'] as const
+export const POSTER_EXTS = ['jpg', 'jpeg', 'png', 'webp'] as const
+export const parseVideoUrl = (raw: unknown) => parseHttpsFile(raw, VIDEO_EXTS, 'video')
+export const parsePosterUrl = (raw: unknown) => parseHttpsFile(raw, POSTER_EXTS, 'poster image')
+
+const videoUrl = (label: string, where: string) => ({
+  label: `${label}: video`,
+  help: `Shown ${where}. Paste an https link ending in .mp4 or .webm. Upload a changed video under a new file name: the old link stays cached for up to a month.`,
+  class: 'content',
+  default: null,
+  parse: parseVideoUrl,
+  format: (v: string) => v,
+}) satisfies SettingDef<string>
+const posterUrl = (label: string) => ({
+  label: `${label}: poster image (optional)`,
+  help: 'The still image shown before the video plays. An https link ending in .jpg, .png or .webp. Without one, the video\'s first frame is used.',
+  class: 'content',
+  default: null,
+  parse: parsePosterUrl,
+  format: (v: string) => v,
+}) satisfies SettingDef<string>
+
 // ── The registry ───────────────────────────────────────────────────────────────────────────
 export const SETTINGS = {
   // Item 6 (B1.2). Home delivery is offered only when this AND the event's own flag are on
@@ -108,6 +150,12 @@ export const SETTINGS = {
     parse: parsePhone,
     format: (v: string) => v,
   } satisfies SettingDef<string>,
+  // Item 12 (B1.15). Only slots with a page are listed; the others (vendor getting started,
+  // organizer pitch, customer video A) are added with their placement.
+  'video.vendorPitch.url': videoUrl('Vendor pitch', 'on the vendor sign-in page (/sign-in/vendor) under the pitch, and at the top of /become-vendor'),
+  'video.vendorPitch.posterUrl': posterUrl('Vendor pitch'),
+  'video.partnerPitch.url': videoUrl('Partner pitch', 'on /partners, between the pitch and the application form'),
+  'video.partnerPitch.posterUrl': posterUrl('Partner pitch'),
 } as const
 
 export type SettingKey = keyof typeof SETTINGS

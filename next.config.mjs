@@ -75,8 +75,14 @@ const nextConfig = {
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://js.clerk.dev https://*.clerk.accounts.dev https://challenges.cloudflare.com https://maps.googleapis.com https://www.google.com https://*.firebaseio.com",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "img-src 'self' data: blob: https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.supabase.co https://firebasestorage.googleapis.com https://maps.gstatic.com https://maps.googleapis.com https://lh3.googleusercontent.com",
+              // The trailing https: (item 12) lets video posters come from any https host, like the
+              // videos themselves; the named hosts are kept so narrowing it again is one deletion.
+              "img-src 'self' data: blob: https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.supabase.co https://firebasestorage.googleapis.com https://maps.gstatic.com https://maps.googleapis.com https://lh3.googleusercontent.com https:",
               "font-src 'self' https://fonts.gstatic.com",
+              // Item 12: video slots take any https .mp4/.webm link (Vercel Blob now, Bunny.net later;
+              // lib/settings.ts parseVideoUrl), so media may come from any https host. Without this,
+              // default-src 'self' blocks every video ("Media load rejected by URL safety check").
+              "media-src 'self' https:",
               "frame-src https://js.stripe.com https://hooks.stripe.com https://clerk.accounts.dev https://*.clerk.accounts.dev https://challenges.cloudflare.com https://maps.google.com https://www.google.com https://maps.googleapis.com",
               "connect-src 'self' https://api.stripe.com https://r.stripe.com https://api.clerk.com https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev wss://*.clerk.accounts.dev https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co https://*.firebaseio.com wss://*.firebaseio.com https://maps.googleapis.com",
               "worker-src 'self' blob:",

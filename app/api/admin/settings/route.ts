@@ -5,6 +5,7 @@ import { requireSettingsAdmin } from '@/lib/auth'
 import { listSettings, saveSetting, SettingError } from '@/lib/settings'
 import { listEventsWithDeliveryOn } from '@/lib/delivery'
 import { revalidateTag } from 'next/cache'
+import { VIDEOS_CACHE_TAG } from '@/lib/videos'
 
 // GET   /api/admin/settings  → every registry setting (value, version, note) + the latest 50 changes
 // PATCH /api/admin/settings  { key, value, expectedVersion, reason? } → save or clear ONE setting
@@ -40,6 +41,8 @@ export async function PATCH(req: NextRequest) {
       })
       // Fair pages cache which fulfillment modes are offered; delivery depends on this switch.
       if (body.key === 'delivery.enabled' && result.outcome !== 'unchanged') revalidateTag('fair', 'default')
+      // Pages with a video slot cache the link; refresh them when one changes.
+      if (typeof body.key === 'string' && body.key.startsWith('video.') && result.outcome !== 'unchanged') revalidateTag(VIDEOS_CACHE_TAG, 'default')
       return success(result)
     } catch (err) {
       if (err instanceof SettingError) {

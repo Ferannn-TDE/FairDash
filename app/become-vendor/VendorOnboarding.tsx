@@ -28,6 +28,8 @@ import {
   type RequiredVendorDoc,
 } from '@/lib/vendor-documents'
 import { VENDOR_AGREEMENT_TEXT, VENDOR_AGREEMENT_PATH } from '@/lib/legal/vendor-agreement'
+import PitchVideo from '@/app/_components/PitchVideo'
+import type { VideoSource } from '@/lib/videos'
 
 const SUBMIT_FALLBACK = 'Couldn’t submit your application — please try again.'
 
@@ -519,7 +521,7 @@ function Step8({ data, eventSlug }: { data: FormData; eventSlug: string | null }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function VendorOnboarding() {
+export default function VendorOnboarding({ video }: { video: VideoSource | null }) {
   const [step, setStep] = useState(1)
   const [data, setData] = useState<FormData>(INITIAL)
   const [docFiles, setDocFiles] = useState<DocFiles>(INITIAL_DOCS)
@@ -683,6 +685,10 @@ export default function VendorOnboarding() {
   return (
     <div className="pt-20 min-h-screen pb-20 bg-bg-dark">
       <div className="max-w-[680px] mx-auto px-5 py-10">
+
+        {/* The vendor pitch video (item 12, B1.15) at the top of the first step only, so it
+            doesn't loop above the document and agreement steps. Nothing shows without a URL. */}
+        {step === 1 && <PitchVideo source={video} label="FairSynq for vendors" className="mb-10" />}
 
         {step < 5 && (
           <div className="text-center mb-10">

@@ -334,8 +334,30 @@ async function main() {
     await settingsLib.getSetting('sms.enabled')
   } catch { unknownThrew = true }
   assert(unknownThrew, 'getSetting on an unknown key throws at runtime too')
-  assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['delivery.enabled', 'alerts.email', 'alerts.phone']),
-    'the registry holds delivery.enabled (item 6) and the two alert contacts (no SMS or money keys)')
+  assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['delivery.enabled', 'alerts.email', 'alerts.phone',
+    'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.partnerPitch.url', 'video.partnerPitch.posterUrl']),
+    'the registry holds delivery.enabled (item 6), the two alert contacts and the two video slots (no SMS or money keys)')
+  assert(settingsLib.SETTING_KEYS.filter(k => k.startsWith('video.')).every(k => settingsLib.SETTINGS[k].class === 'content'),
+    'every video key is a content setting')
+
+  // ── [6b] video links (item 12) ─────────────────────────────────────────────────────────
+  console.log('\n[6b] Video and poster links')
+  const vOk = (raw: unknown, want: string | null) => { const r = settingsLib.parseVideoUrl(raw); return r.ok && r.value === want }
+  const vBad = (raw: unknown) => !settingsLib.parseVideoUrl(raw).ok
+  assert(vOk('https://8nu6qii9bn5wxpzs.public.blob.vercel-storage.com/videos/vendor-pitch-v11.mp4', 'https://8nu6qii9bn5wxpzs.public.blob.vercel-storage.com/videos/vendor-pitch-v11.mp4'),
+    '[0] positive control: a Blob https .mp4 link is accepted as-is')
+  assert(vOk('  https://cdn.example.b-cdn.net/v/pitch.WEBM?v=2  ', 'https://cdn.example.b-cdn.net/v/pitch.WEBM?v=2'), 'any host, .webm in any case, a query string, surrounding spaces trimmed')
+  assert(vOk('', null) && vOk('   ', null) && vOk(null, null), 'empty input clears the slot')
+  for (const bad of [
+    'https://8nu6qii9bn5wxpzs.public.blob.vercel-storage.com/videos/vendor-pitch-v10', // the first upload: no extension
+    'http://example.com/a.mp4', 'https://example.com/a.mov', 'https://example.com/a.mp4/', 'javascript:alert(1)//.mp4',
+    'example.com/a.mp4', 'https://user:pw@example.com/a.mp4', `https://example.com/${'a'.repeat(2050)}.mp4`, 42,
+  ]) assert(vBad(bad), `refused: ${String(bad).slice(0, 70)}`)
+  const pOk = settingsLib.parsePosterUrl('https://example.com/p/poster.webp')
+  assert(pOk.ok && pOk.value === 'https://example.com/p/poster.webp', 'poster: an https .webp link is accepted')
+  assert(['https://example.com/p.mp4', 'https://example.com/p.gif', 'http://example.com/p.jpg'].every(x => !settingsLib.parsePosterUrl(x).ok), 'poster: a video, a gif or plain http is refused')
+  const vRes = await PATCH({ key: 'video.vendorPitch.url', value: 'https://example.com/v.mov', expectedVersion: 'unset' })
+  assert(vRes.status === 400 && !(await prisma.platformSetting.findUnique({ where: { key: 'video.vendorPitch.url' } })), 'the API refuses a bad video link (400) and writes nothing')
 
   // ── [7] "not in effect yet" notes ──────────────────────────────────────────────────────
   console.log('\n[7] "Not in effect yet" notes match reality')
@@ -360,7 +382,7 @@ async function main() {
     'alerts.email is read by the outbox (lib/notifications.ts) and its note is gone; alerts.phone keeps its note')
   const real = noteViolations(sources)
   for (const v of real) console.log(`     ↳ ${v}`)
-  assert(real.length === 0, 'the alert settings carry the note (nothing reads them yet); delivery.enabled is read, so it has none')
+  assert(real.length === 0, 'notes match readers: alerts.phone keeps its note; delivery.enabled, alerts.email and the video keys (lib/videos.ts) are read, so they have none')
 
   // ── [8] role sync keeps platform_manager; grant/revoke ─────────────────────────────────
   console.log('\n[8] Role sync, the hourly reconcile, grant and revoke')

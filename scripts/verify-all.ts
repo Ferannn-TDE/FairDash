@@ -115,6 +115,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'order-itemization',      file: 'scripts/order-itemization-guard.ts' },
   { group: 'correctness', name: 'fair-card',              file: 'scripts/fair-card-guard.ts' },
   { group: 'correctness', name: 'homepage-stats',         file: 'scripts/homepage-stats-guard.ts' },
+  { group: 'correctness', name: 'video-slot',             file: 'scripts/video-slot-guard.ts' },
   { group: 'correctness', name: 'connect-card',           file: 'scripts/connect-card-state-test.ts' },
   { group: 'correctness', name: 'connect-status',         file: 'scripts/connect-status-test.ts' },
   { group: 'correctness', name: 'role-reconcile',         file: 'scripts/role-reconcile-test.ts' },
