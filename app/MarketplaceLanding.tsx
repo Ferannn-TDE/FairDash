@@ -24,7 +24,7 @@ import { PARTNER_CARD, PARTNERS_PATH } from '@/lib/partner-copy'
 // organizations to the public /partners application (item 7: the runner card was retired).
 const OPERATOR_CARDS: Array<{ icon: typeof Store; title: string; desc: string; points?: readonly string[]; href: string; cta: string }> = [
   // Points approved 2026-11-05: only what works today; no payout timing, no "one menu for every
-  // event" (Batch 2), and no reach claims (288 orders over two seasons).
+  // event" (Batch 2), and no reach claims (those live in the stats tiles only).
   {
     icon: Store,
     title: 'Become a Vendor',
@@ -197,31 +197,25 @@ function ProofSection() {
   )
 }
 
-// Three equal tiles and one caption.
+// Four equal tiles and one caption. The figures match the vendor pitch video (213 / 23 / $45,
+// "Last season"), by Feran's decision on 2026-11-13, pending the client's confirmation. This
+// replaces the signed 1.7 line ("288 orders and nearly $16k in sales over our first two seasons");
+// see docs/BATCH-1.md B1.7. scripts/homepage-stats-guard.ts locks the copy.
 const STAT_TILES = [
-  { value: '288',  label: 'orders',      prefix: null },
-  { value: '$16K', label: 'in sales',    prefix: 'nearly' },
-  { value: 'FREE', label: 'for vendors', prefix: null },
+  { value: '213',  label: 'orders' },
+  { value: '23',   label: 'vendors' },
+  { value: '$45',  label: 'average order' },
+  { value: 'FREE', label: 'for vendors' },
 ]
 
 function StatsTiles() {
   return (
     <div className="bg-white/[0.02] rounded-2xl border border-white/[0.04] px-4 py-8 sm:p-10">
-      <Stagger slow className="grid grid-cols-3 divide-x divide-white/[0.08]">
-        {STAT_TILES.map(({ value, label, prefix }) => (
+      {/* Two by two on phones (four across can't fit "average order" at 375px), one row from sm. */}
+      <Stagger slow className="grid grid-cols-2 gap-y-8 sm:grid-cols-4 sm:gap-y-0 sm:divide-x sm:divide-white/[0.08]">
+        {STAT_TILES.map(({ value, label }) => (
           <StaggerItem key={label} className="text-center px-2">
-            {/* "nearly" sits above the figure on phones (a 375px tile can't hold both on one
-                line) and inline from sm up. The other tiles reserve the same line on phones so
-                the three figures stay level. */}
-            <p className="sm:hidden h-4 font-inter text-[10px] font-semibold uppercase tracking-wider text-text-gray leading-4">
-              {prefix ?? '\u00a0'}
-            </p>
             <p className="font-bebas text-4xl sm:text-5xl text-neon-pink tracking-wide leading-none whitespace-nowrap">
-              {prefix && (
-                <span className="hidden sm:inline font-inter text-xs font-semibold uppercase tracking-wider text-text-gray align-middle mr-1">
-                  {prefix}
-                </span>
-              )}
               {value}
             </p>
             <p className="mt-2 text-xs sm:text-sm text-text-gray font-inter">{label}</p>
@@ -229,7 +223,7 @@ function StatsTiles() {
         ))}
       </Stagger>
       <p className="mt-6 text-center text-[11px] sm:text-xs text-text-gray/80 font-inter">
-        Over our first two seasons
+        Last season
       </p>
     </div>
   )
