@@ -56,6 +56,19 @@ export async function PATCH(
     // here rather than falling through to approval theatre at runtime.
     if (action === 'APPROVE') {
       const requestType: MenuRequestTypeInput = menuRequest.type
+
+      // THE ITEM MUST STILL BE THIS VENDOR'S. The request is checked against this fair above, but
+      // EDIT / DELETE / RESTORE write to menuRequest.menuItemId, which could point at another
+      // vendor's item (a row filed before /api/menu-requests checked ownership, or any future
+      // path that forgets to). Refused with nothing written; the request stays PENDING so the
+      // organizer can reject it (menu-ownership-boundary-proof [4]).
+      if (requestType !== 'ADD' && menuRequest.menuItemId) {
+        const target = await db.menuItem.findUnique({ where: { id: menuRequest.menuItemId }, select: { vendorId: true } })
+        if (!target || target.vendorId !== vendorId) {
+          return apiError("This change no longer matches the vendor's menu and can't be applied.", 409, 'ITEM_VENDOR_MISMATCH')
+        }
+      }
+
       switch (requestType) {
       case 'ADD': {
         if (!menuRequest.name || menuRequest.price === null || !menuRequest.category) {

@@ -79,6 +79,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // THE ITEM MUST BE THIS BOOTH'S. The membership check above proves the caller may act for
+    // vendorId; it says nothing about the menuItemId inside each EDIT / DELETE / RESTORE. Without
+    // this, vendor A could file a change against vendor B's item under A's own name, and A's
+    // organizer approving it would rewrite B's menu. Checked before anything is written, so a
+    // batch with one foreign item lands nothing (menu-ownership-boundary-proof [3]).
+    const targetIds = [...new Set(inputs.filter(i => i.type !== 'ADD').map(i => String(i.menuItemId)))]
+    if (targetIds.length > 0) {
+      const owned = await db.menuItem.findMany({ where: { id: { in: targetIds }, vendorId }, select: { id: true } })
+      const ownedIds = new Set(owned.map(o => o.id))
+      const i = inputs.findIndex(it => it.type !== 'ADD' && !ownedIds.has(String(it.menuItemId)))
+      if (i !== -1) {
+        return apiError(
+          isBatchForm ? `Item ${i + 1}: that menu item isn't on this booth's menu` : "That menu item isn't on this booth's menu",
+          404,
+          'MENU_ITEM_NOT_FOUND',
+        )
+      }
+    }
+
     // Opaque, server-minted, and never accepted from the client — a caller must not be able to
     // forge a batch id and graft rows onto someone else's submission.
     const batchId = isBatchForm ? `mrb_${randomUUID()}` : null
