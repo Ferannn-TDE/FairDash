@@ -5,6 +5,7 @@ import { useClerk } from '@clerk/clerk-react'
 import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 import ConfirmModal from '../../_components/ui/ConfirmModal'
 import StripeConnectCard from '../../_components/StripeConnectCard'
+import MenuAlertPreferences from '../../_components/MenuAlertPreferences'
 import {
   UserCircleIcon,
   BellIcon,
@@ -323,7 +324,7 @@ export default function OrganizerSettingsPage() {
         </p>
         {notifPrefs === null ? (
           <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
+            {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-10 bg-white/[0.03] rounded-xl animate-pulse" />
             ))}
           </div>
@@ -341,11 +342,9 @@ export default function OrganizerSettingsPage() {
                   label: 'Vendor goes offline',
                   description: 'Alert when a vendor marks themselves unavailable',
                 },
-                {
-                  key: 'notifMenuRequests' as const,
-                  label: 'Menu approval requests',
-                  description: 'Notify when vendors submit menu change requests',
-                },
+                // "Menu approval requests" (notifMenuRequests) is no longer shown: nothing ever
+                // read it, and the Menu alerts block below replaces it (audit H5, step 3b). The
+                // column and the /api/user/preferences field are kept.
                 {
                   key: 'notifDailySummary' as const,
                   label: 'Daily revenue summary',
@@ -369,6 +368,16 @@ export default function OrganizerSettingsPage() {
             ))}
           </div>
         )}
+
+        {/* Menu alerts (audit H5, step 3b): each member's own channel for menu deletes and
+            price increases waiting for approval. Saved per person, not per organization. */}
+        <div className="mt-6 pt-5 border-t border-white/[0.07]">
+          <h3 className="text-white font-semibold text-sm mb-1">Menu alerts</h3>
+          <p className="text-white/30 text-xs mb-4 font-inter">
+            Choose how you hear about vendor menu changes at your fairs.
+          </p>
+          <MenuAlertPreferences />
+        </div>
       </Section>
 
       {/* ── Section 3: Payout & Banking ─────────────────────────────────────── */}
