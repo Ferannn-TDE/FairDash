@@ -27,12 +27,16 @@
 // ONE PENDING PRICE CHANGE PER ITEM: before an EDIT that carries a price, or any RESTORE, older
 // PENDING price changes for that item are closed (supersede.ts).
 //
+// ALERTS (audit H5, step 3): a DELETE and a PENDING higher-priced restore each record a menu
+// change for the approvers' notifications (lib/menu-notify/record.ts) in the same transaction.
+//
 // Every refusal throws ApiError, which rolls the whole submission back.
 
 import type { MenuRequest, Prisma } from '@prisma/client'
 import { ApiError } from '../api-error'
 import { priceNeedsApproval } from '../menu/price-gate'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '../menu/price-audit'
+import { recordMenuDeleted, recordPriceChangePending } from '../menu-notify/record'
 import { findRemovedNameMatch } from './re-add'
 import { supersedePendingPriceChanges } from './supersede'
 import {
@@ -118,6 +122,10 @@ async function applyDelete(tx: Prisma.TransactionClient, data: RowData, now: Dat
     vendorId: data.vendorId, userId: data.requestedBy, menuItemId,
     name: item.name, price: item.price, requestId: row.id,
   })
+  // The approvers are told (grouped per vendor for 10 minutes), in this same transaction.
+  await recordMenuDeleted(tx, {
+    vendorId: data.vendorId, menuItemId, name: item.name, price: item.price, menuRequestId: row.id,
+  })
   return row
 }
 
@@ -197,9 +205,16 @@ async function fileRestore(tx: Prisma.TransactionClient, data: RowData, menuItem
     variantLabel: null,
   }
 
-  // A HIGHER price waits for the approver; the item stays removed at its old price meanwhile.
+  // A HIGHER price waits for the approver; the item stays removed at its old price meanwhile. The
+  // approvers are told on the worker's next tick, recorded in this same transaction.
   if (requested !== null && priceNeedsApproval(item.price, requested)) {
-    return tx.menuRequest.create({ data: rowData })
+    const pending = await tx.menuRequest.create({ data: rowData })
+    await recordPriceChangePending(tx, {
+      vendorId: data.vendorId, menuItemId, menuRequestId: pending.id, batchId: data.batchId,
+      name: item.name, previousPrice: item.price, requestedPrice: requested,
+      reason: data.type === 'ADD' ? 'READD' : 'RESTORE',
+    })
+    return pending
   }
 
   const flipped = await tx.menuItem.updateMany({

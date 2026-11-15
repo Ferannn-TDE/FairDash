@@ -9,7 +9,9 @@
 //   time; with none set they wait (held: NO_ALERT_EMAIL).
 // NO PROVIDER (production today): nothing is sent, logged or marked SENT; rows are held with
 //   NO_EMAIL_PROVIDER. When a provider is connected later, held ADMIN alerts older than 48 hours
-//   are marked SKIPPED (kept, not deleted); applicant emails go out whatever their age.
+//   are marked SKIPPED (kept, not deleted), held MENU-ALERT emails older than 48 hours are marked
+//   EXPIRED (kept, never sent; audit H5 step 3), and applicant emails go out whatever their age.
+// MENU ALERTS: queued by lib/menu-notify/digest.ts with audience 'user' and a `to` address.
 
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { db } from '@/lib/db'
@@ -17,6 +19,8 @@ import { getSetting } from '@/lib/settings'
 import { SITE_URL } from '@/lib/seo'
 import { CONTACT_EMAIL } from '@/lib/contact-info'
 import { getEmailTransport, type EmailTransport, type OutgoingEmail } from '@/lib/email/transport'
+import { MENU_ALERT_TEMPLATE, MENU_ALERT_TEMPLATES, MENU_ALERT_EMAIL_EXPIRY_MS } from '@/lib/menu-notify/constants'
+import type { MenuAlertEmailPayload } from '@/lib/menu-notify/digest'
 
 type Tx = Pick<PrismaClient, 'notification'> | Prisma.TransactionClient
 
@@ -59,6 +63,28 @@ export function renderEmail(template: string, payload: unknown): { subject: stri
       text: `Hi ${p.contactName || p.name}, we're not able to approve ${p.name} right now. Reason: ${p.reason ?? ''}. If you have questions, contact ${CONTACT_EMAIL}.`,
     }
   }
+  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
+  if (template === MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED) {
+    const p = payload as MenuAlertEmailPayload
+    const n = p.lines.length
+    return {
+      subject: `${p.vendorName} removed ${n} menu item${n === 1 ? '' : 's'} at ${p.fairName}`,
+      text: `${p.vendorName} removed ${n === 1 ? 'this item' : 'these items'} from their menu at ${p.fairName}:\n`
+        + p.lines.map(l => `- ${l}`).join('\n')
+        + `\n\nSee the vendor's menu requests: ${p.link}`,
+    }
+  }
+  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
+  if (template === MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING) {
+    const p = payload as MenuAlertEmailPayload
+    const n = p.lines.length
+    return {
+      subject: `${n === 1 ? 'A price increase is' : `${n} price increases are`} waiting for your approval: ${p.vendorName}`,
+      text: `${p.vendorName} at ${p.fairName} asked for ${n === 1 ? 'this price increase' : 'these price increases'}. Nothing changes on the menu until it is approved:\n`
+        + p.lines.map(l => `- ${l}`).join('\n')
+        + `\n\nApprove or reject: ${p.link}`,
+    }
+  }
   throw new Error(`Unknown email template: ${template}`)
 }
 
@@ -89,7 +115,7 @@ export interface DeliverDeps {
   alertEmails?: () => Promise<string[]>
   limit?: number
 }
-export interface DeliverResult { sent: number; retried: number; failed: number; held: number; skipped: number }
+export interface DeliverResult { sent: number; retried: number; failed: number; held: number; skipped: number; expired: number }
 
 async function defaultAlertEmails(): Promise<string[]> {
   return ((await getSetting('alerts.email')) as string[] | null) ?? []
@@ -99,7 +125,7 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
   const now = deps.now ?? new Date()
   const transport = deps.transport ?? getEmailTransport()
   const alertEmails = deps.alertEmails ?? defaultAlertEmails
-  const res: DeliverResult = { sent: 0, retried: 0, failed: 0, held: 0, skipped: 0 }
+  const res: DeliverResult = { sent: 0, retried: 0, failed: 0, held: 0, skipped: 0, expired: 0 }
 
   // A worker that died mid-send leaves SENDING rows; give them back after 10 minutes.
   await db.notification.updateMany({
@@ -125,6 +151,16 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
     data: { status: 'SKIPPED', lastError: 'Older than 48 hours when email was connected' },
   })
   res.skipped = skipped.count
+  // Menu alerts held for no provider and older than 48 hours are out of date: EXPIRED, kept, never
+  // sent (Jordan, Nov 15). Must run before the release below, or they would go out.
+  const expired = await db.notification.updateMany({
+    where: {
+      status: 'PENDING', heldReason: 'NO_EMAIL_PROVIDER', template: { in: [...MENU_ALERT_TEMPLATES] },
+      createdAt: { lt: new Date(now.getTime() - MENU_ALERT_EMAIL_EXPIRY_MS) },
+    },
+    data: { status: 'EXPIRED', lastError: 'Expired: older than 48 hours when email was connected' },
+  })
+  res.expired = expired.count
   await db.notification.updateMany({ where: { status: 'PENDING', heldReason: 'NO_EMAIL_PROVIDER' }, data: { heldReason: null } })
 
   const due = await db.notification.findMany({

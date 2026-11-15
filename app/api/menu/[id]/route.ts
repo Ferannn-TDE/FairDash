@@ -1,11 +1,12 @@
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
-import { handleApiError } from '@/lib/api-error'
+import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireVendorMenuItemAccess, requireVendorMayEditMenu } from '@/lib/auth'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
 import { parseInPersonPrice } from '@/lib/menu/price'
-import { priceChanged, recordMenuPriceChange } from '@/lib/menu/price-audit'
+import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '@/lib/menu/price-audit'
+import { recordMenuDeleted } from '@/lib/menu-notify/record'
 
 // GET /api/menu/:id
 export async function GET(
@@ -107,9 +108,23 @@ export async function DELETE(
     // REMOVED, not deleted. OrderItem's FK to MenuItem is RESTRICT, so an ordered item cannot be
     // hard-deleted at all, and a hard delete would SET NULL the MenuRequest rows that reference
     // it, cutting the request trail. This is the same write the organizer-approved DELETE makes.
-    await db.menuItem.update({
-      where: { id: item.id },
-      data: { removedAt: new Date() },
+    //
+    // One transaction (audit H5, step 3): the removal, its MENU_ITEM_REMOVED audit row (same shape
+    // as the other delete paths; requestId null, since this route files no request) and the
+    // approvers' alert record. If either record fails, the item stays on the menu.
+    await db.$transaction(async tx => {
+      // Only an item still on the menu flips; a concurrent removal finds nothing and refuses.
+      const flipped = await tx.menuItem.updateMany({
+        where: { id: item.id, removedAt: null },
+        data: { removedAt: new Date() },
+      })
+      if (flipped.count === 0) throw new ApiError('This item is already removed from the menu', 409, 'CONFLICT')
+      await recordMenuItemRemoved(tx, {
+        vendorId: item.vendorId, userId, menuItemId: item.id, name: item.name, price: item.price, requestId: null,
+      })
+      await recordMenuDeleted(tx, {
+        vendorId: item.vendorId, menuItemId: item.id, name: item.name, price: item.price, menuRequestId: null,
+      })
     })
 
     revalidateTag(`vendor-menu-${item.vendorId}`, 'default')

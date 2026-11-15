@@ -106,6 +106,7 @@ model Event {
   runners           Runner[]
   postEventReport   PostEventReport?
   organizerPayouts  OrganizerPayout[]
+  menuChangeEvents  MenuChangeEvent[]
 
   @@index([urlSlug])
   @@index([status])
@@ -235,6 +236,8 @@ model User {
   orgMembers         OrgMember[]
   favoriteItems      FavoriteItem[]
   vendorAuditLogs    VendorAuditLog[]
+  notificationPreferences NotificationPreference[]
+  inAppNotifications      InAppNotification[]
 
   @@index([clerkId])
   @@index([email])
@@ -351,6 +354,7 @@ model Vendor {
   refunds             Refund[]
   refundRequests      RefundRequest[]
   vendorEarnings      VendorEarning[]
+  menuChangeEvents    MenuChangeEvent[]
 
   @@unique([eventId, slug], map: "uq_vendor_event_slug")
   @@index([eventId, status], map: "idx_vendor_event_status")
@@ -2068,7 +2072,9 @@ model Notification {
   template String
   payload  Json
 
-  /// PENDING | SENDING | SENT | FAILED | SKIPPED
+  /// PENDING | SENDING | SENT | FAILED | SKIPPED | EXPIRED
+  /// EXPIRED: a menu-alert email held for no provider and older than 48 hours when a provider
+  /// was connected (lib/notifications.ts); kept, never sent. Bell notifications are separate.
   status        String    @default("PENDING")
   /// Why a PENDING row is waiting: NO_EMAIL_PROVIDER | NO_ALERT_EMAIL (null = due normally).
   heldReason    String?
@@ -2085,6 +2091,67 @@ model Notification {
 
   @@index([status, nextAttemptAt])
   @@index([audience, status])
+}
+
+// ── Menu-alert notifications (audit H5, step 3) ──────────────────────────────────────────────
+// Organizers and strict admins are told about vendor menu deletes and pending price increases.
+// eventType, channel, type and kind are plain text checked against constants in lib/menu-notify,
+// not database enums, so a new alert type needs no migration.
+
+/// One person's channel for one alert type. No row = the default (both).
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// MENU_ITEMS_DELETED | MENU_PRICE_CHANGE_PENDING
+  eventType String
+  /// EMAIL | IN_APP | BOTH | NONE (NONE is allowed for MENU_ITEMS_DELETED only)
+  channel   String
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, eventType])
+}
+
+/// A bell notification in the organizer or admin portal. Holds its own copy of the text.
+model InAppNotification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The alert type: MENU_ITEMS_DELETED | MENU_PRICE_CHANGE_PENDING
+  type      String
+  title     String
+  body      String
+  link      String?
+  payload   Json
+  readAt    DateTime?
+  /// menu:{kind}:{digestId}:{userId}: a retried worker tick can't create it twice.
+  dedupeKey String    @unique
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+/// The grouping queue: one row per delete or pending price increase, written in the same
+/// transaction as the change. The worker claims rows (digestId) and turns each group into one
+/// notification. Item and request ids are deliberately not foreign keys.
+model MenuChangeEvent {
+  id            String   @id @default(cuid())
+  /// DELETE | PRICE_PENDING
+  kind          String
+  vendorId      String
+  vendor        Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  menuItemId    String?
+  menuRequestId String?
+  batchId       String?
+  /// Item name and price, or previous and new price, plus reason.
+  payload       Json
+  /// null = not yet sent; set when a worker claims the row into a notification.
+  digestId      String?
+  createdAt     DateTime @default(now())
+
+  @@index([digestId, kind, vendorId, createdAt])
 }
 
 /// Audit for the approvals page (item 9): every approve, reject and document view. Append-only.

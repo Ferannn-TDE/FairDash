@@ -75,7 +75,8 @@ export interface MenuItemRemoval {
   name: string
   /** The price the item had when it left the menu: what a later restore is compared against. */
   price: number
-  requestId: string
+  /** The DELETE request that removed it, or null for DELETE /api/menu/[id], which files none. */
+  requestId: string | null
 }
 
 /**

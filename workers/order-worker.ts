@@ -1019,12 +1019,23 @@ export function startOrderWorker() {
   // the role reconcile above (no BullMQ repeat). Claims are atomic, so an overlapping replica is
   // harmless; a run still going is skipped. With no email provider (production today) it only
   // marks rows held: nothing is sent, logged or marked SENT.
+  //
+  // Menu alerts (audit H5, step 3) run first in the same tick: recorded deletes and pending price
+  // increases become bell notifications and queued emails (lib/menu-notify/digest.ts), so a new
+  // email can go out in this same run. A menu-alert failure is logged and never blocks delivery.
   const notifyEveryMs = Number(process.env.WORKER_NOTIFICATIONS_INTERVAL_MS ?? 60_000)
   if (notifyEveryMs > 0) {
     let notifyRunning = false
     const runNotifications = async () => {
       if (notifyRunning) return
       notifyRunning = true
+      try {
+        const { runMenuNotificationDigests } = await import('../lib/menu-notify/digest')
+        const m = await runMenuNotificationDigests()
+        if (m.errors > 0) console.warn('[Worker] menu alerts: some groups failed; next run retries', m)
+      } catch (e) {
+        console.error('[Worker] menu alerts failed; next run retries:', e)
+      }
       try {
         const { deliverDueNotifications } = await import('../lib/notifications')
         const r = await deliverDueNotifications()

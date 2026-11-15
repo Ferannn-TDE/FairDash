@@ -22,6 +22,7 @@ import { assertNeverRequestType, type MenuRequestTypeInput } from './validate-it
 import { menuRequestTargetsOwnItem } from './item-ownership'
 import { parseInPersonPrice } from '../menu/price'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '../menu/price-audit'
+import { recordMenuDeleted } from '../menu-notify/record'
 
 export type MenuApprover =
   | { kind: 'organizer'; organizerId: string }
@@ -202,6 +203,10 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
         await recordMenuItemRemoved(tx, {
           vendorId, userId: reviewerUserId, menuItemId: menuItemId as string,
           name: item.name, price: item.price, requestId,
+        })
+        // The approvers are told, grouped with the vendor's other deletes (audit H5, step 3).
+        await recordMenuDeleted(tx, {
+          vendorId, menuItemId: menuItemId as string, name: item.name, price: item.price, menuRequestId: requestId,
         })
         break
       }
