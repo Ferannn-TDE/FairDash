@@ -38,6 +38,8 @@ export interface FairData {
   fulfillmentConfig: FulfillmentConfig | null
   serviceChargeEnabled: boolean
   serviceChargeAmount: number | null
+  /** Online price markup in basis points (audit H5, 2h); fed to lib/checkout-total.ts. */
+  onlineMarkupBps: number
   // Optional fields not present in DB — pages handle them with conditional rendering
   tagline?: string
   location: { address: string; city: string; state: string }
@@ -105,6 +107,7 @@ function placeholderFair(fairSlug: string): FairData {
     fulfillmentConfig: { boothPickupEnabled: true, curbsideEnabled: false, homeDeliveryEnabled: false, homeDeliveryFee: null, curbsideFee: 0, curbsideZoneDescription: null },
     serviceChargeEnabled: false,
     serviceChargeAmount: null,
+    onlineMarkupBps: 0,
     location: { address: '', city: '', state: '' },
     operatingHours: { open: '', close: '' },
     admissionFree: false,
@@ -140,6 +143,9 @@ function normalizeEvent(raw: any): FairData {
     } : null,
     serviceChargeEnabled: raw.serviceChargeEnabled ?? false,
     serviceChargeAmount: raw.serviceChargeAmount ?? null,
+    // Missing → 0: the page would then show a LOWER total than the server's, which the server
+    // answers with 409 PRICE_CHANGED and the real total for the customer to confirm. Never more.
+    onlineMarkupBps: typeof raw.onlineMarkupBps === 'number' ? raw.onlineMarkupBps : 0,
     location: {
       address: raw.address ?? raw.location ?? '',
       city: raw.city ?? '',

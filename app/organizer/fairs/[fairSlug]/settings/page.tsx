@@ -6,6 +6,11 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { OrganizerBreadcrumb } from '../../../_components/Breadcrumb'
 import { statementPreview, STATEMENT_SUFFIX_MAX } from '@/lib/statement-descriptor'
+import { bpsToPercent, parseMarkupPercentInput, MARKUP_LOCKED_MESSAGE } from '@/lib/menu/price'
+import { onlineUnitPrice } from '@/lib/checkout-total'
+
+/** The example item the markup preview prices: "On a $10.00 item, customers pay …". */
+const MARKUP_EXAMPLE_PRICE = 10
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,6 +27,9 @@ interface FairSettings {
   maxVendorsPerOrder: number
   // Platform
   isPaused: boolean
+  // Online price markup (audit H5, 2h): basis points, 0–1000. markupLocked = the event has started.
+  onlineMarkupBps: number
+  markupLocked: boolean
   // Owner-only
   isOwner: boolean
 }
@@ -125,11 +133,19 @@ export default function FairSettingsPage() {
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
   const [dirty, setDirty]       = useState(false)
+  // The markup as typed, in percent. Checked by parseMarkupPercentInput: never clamped.
+  const [markupInput, setMarkupInput] = useState('')
+  const [markupError, setMarkupError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`/api/organizer/fairs/${fairSlug}/settings`)
       .then(r => r.json())
-      .then(json => { if (json.data) setSettings(json.data) })
+      .then(json => {
+        if (json.data) {
+          setSettings(json.data)
+          setMarkupInput(String(bpsToPercent(json.data.onlineMarkupBps ?? 0)))
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [fairSlug])
@@ -139,8 +155,22 @@ export default function FairSettingsPage() {
     setDirty(true)
   }, [])
 
+  const markupParse = parseMarkupPercentInput(markupInput)
+
   async function handleSave() {
     if (!settings) return
+    // A markup over 10% (or not a number) is shown as an error and blocks the save: nothing is
+    // clamped and nothing is saved until it is fixed.
+    if (!settings.markupLocked && !markupParse.ok) {
+      setMarkupError(markupParse.message)
+      toast.error(markupParse.message)
+      return
+    }
+    // Sent only when changed and the event has not started (the server refuses an organizer change
+    // after the start with 409 MARKUP_LOCKED).
+    const markupBps = !settings.markupLocked && markupParse.ok && markupParse.bps !== settings.onlineMarkupBps
+      ? markupParse.bps
+      : undefined
     setSaving(true)
     try {
       const res = await fetch(`/api/organizer/fairs/${fairSlug}/settings`, {
@@ -155,13 +185,25 @@ export default function FairSettingsPage() {
           vendorOfflineHideSec:     settings.vendorOfflineHideSec,
           maxVendorsPerOrder:       settings.maxVendorsPerOrder,
           isPaused:                 settings.isPaused,
+          ...(markupBps !== undefined && { onlineMarkupBps: markupBps }),
         }),
       })
       const json = await res.json()
       if (json.success) {
         toast.success('Settings saved')
         setDirty(false)
+        setMarkupError(null)
+        setSettings(prev => prev ? { ...prev, onlineMarkupBps: json.data.onlineMarkupBps, markupLocked: json.data.markupLocked } : prev)
+        setMarkupInput(String(bpsToPercent(json.data.onlineMarkupBps)))
+      } else if (json.error?.code === 'MARKUP_LOCKED') {
+        // The event started while this page was open. The server saved NOTHING (it refuses the whole
+        // request), so lock the field, put the saved markup back, and let the other changes be saved.
+        setSettings(prev => prev ? { ...prev, markupLocked: true } : prev)
+        setMarkupInput(String(bpsToPercent(settings.onlineMarkupBps)))
+        setMarkupError(null)
+        toast.error(`${json.error.message} Nothing was saved; press Save again to save your other changes.`)
       } else {
+        if (markupBps !== undefined && json.error?.code === 'VALIDATION_ERROR') setMarkupError(json.error.message)
         toast.error(json.error?.message ?? 'Failed to save')
       }
     } catch {
@@ -299,6 +341,49 @@ export default function FairSettingsPage() {
           unit="vendors" min={1} max={10}
           onChange={v => update('maxVendorsPerOrder', v)}
         />
+      </Section>
+
+      {/* Online prices (audit H5, 2h) */}
+      <Section title="Online Prices" desc="A markup added to every menu price for online orders. It goes to the vendors; FairSynq's service fee stays on the booth price.">
+        <div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-white text-sm font-medium font-inter">Online price markup</p>
+              <p className="text-white/35 text-xs font-inter mt-0.5">From 0% (online price = booth price) to 10%</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={markupInput}
+                disabled={settings.markupLocked}
+                aria-invalid={!!markupError}
+                aria-describedby="markup-help"
+                onChange={e => {
+                  setMarkupInput(e.target.value)
+                  const p = parseMarkupPercentInput(e.target.value)
+                  setMarkupError(p.ok ? null : p.message)
+                  setDirty(true)
+                }}
+                className={`w-20 bg-white/[0.05] border rounded-lg px-2 py-1.5 text-white text-sm text-center outline-none font-inter disabled:opacity-40 disabled:cursor-not-allowed ${markupError ? 'border-red-500 focus:border-red-500' : 'border-white/10 focus:border-neon-pink'}`}
+              />
+              <span className="text-white/30 text-xs font-inter whitespace-nowrap">%</span>
+            </div>
+          </div>
+          <div id="markup-help" className="mt-2">
+            {settings.markupLocked ? (
+              <p role="status" className="text-amber-400 text-xs font-inter">🔒 {MARKUP_LOCKED_MESSAGE}</p>
+            ) : markupError ? (
+              <p role="alert" className="text-red-400 text-xs font-inter">{markupError}</p>
+            ) : null}
+            {markupParse.ok && (
+              <p className="text-white/40 text-xs font-inter mt-1">
+                On a ${MARKUP_EXAMPLE_PRICE.toFixed(2)} item, customers pay{' '}
+                <span className="text-white/70">${onlineUnitPrice(MARKUP_EXAMPLE_PRICE, markupParse.bps).toFixed(2)}</span> online.
+              </p>
+            )}
+          </div>
+        </div>
       </Section>
 
       {/* Save button */}

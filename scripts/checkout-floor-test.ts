@@ -200,7 +200,9 @@ async function main() {
   // ── [3] accepted orders get past the floor ──────────────────────────────────────────────────
   console.log('\n[3] accepted orders pass the floor and stop at the Stripe key check')
   const tenDollar = await mkFair([10])
-  const ten = await place(tenDollar)
+  // Accepted orders send the total the customer was shown (audit H5, 2h: checked right after the
+  // floor, before any write). The refusals in [2] never reach that check, so they send none.
+  const ten = await place(tenDollar, { expectedTotalCents: 1100 })
   assert(ten.status === 503 && ten.code === 'STRIPE_NOT_CONFIGURED',
     `$10 item at booth pickup (total 1100¢, estimate 62¢) → past the floor, 503 STRIPE_NOT_CONFIGURED (got ${ten.status} ${ten.code})`)
   assert(await userRows() === 1,
@@ -210,15 +212,16 @@ async function main() {
   // ── [4] the boundary, the tip, and multi-vendor ─────────────────────────────────────────────
   console.log('\n[4] boundary: food = estimate is accepted, 1¢ under is refused')
   const atFee = await mkFair([1], { serviceCharge: 23.21 })
-  const atR = await place(atFee)
+  const atR = await place(atFee, { expectedTotalCents: 2431 })
   assert(atR.status === 503 && atR.code === 'STRIPE_NOT_CONFIGURED',
     `$1 item + $23.21 service charge (total 2431¢, estimate 100¢ = food) → accepted (got ${atR.status} ${atR.code})`)
   // The $23.22 case is the refusal already asserted in [2].
 
   console.log('\n[4b] the tip is part of the full charge (curbside)')
   const curb = await mkFair([1], { curbside: true })
-  const curbExtra = (tip: number) => ({ fulfillmentType: 'CURBSIDE', vehicleMake: 'Honda', vehicleColor: 'Blue', tip })
-  const tipOk = await place(curb, curbExtra(23.21))
+  const curbExtra = (tip: number, expectedTotalCents?: number) =>
+    ({ fulfillmentType: 'CURBSIDE', vehicleMake: 'Honda', vehicleColor: 'Blue', tip, ...(expectedTotalCents !== undefined && { expectedTotalCents }) })
+  const tipOk = await place(curb, curbExtra(23.21, 2431))
   assert(tipOk.status === 503 && tipOk.code === 'STRIPE_NOT_CONFIGURED',
     `$1 item + $23.21 tip (total 2431¢) → accepted (got ${tipOk.status} ${tipOk.code})`)
   const tipOver = await place(curb, curbExtra(23.22))
@@ -231,7 +234,7 @@ async function main() {
   // $2 food + $0.20 fee + $23.21 = 2541¢ → estimate floor((73689+500)/1000)+30 = 104¢ ≤ 200¢.
   // Each vendor's $1 alone would be under 104¢; the order passes because the rule is order-wide.
   assert(estimatedStripeFeeCents(2541) === 104, 'estimate for the two-vendor total is 104¢ (more than either vendor\'s 100¢)')
-  const twoR = await place(two)
+  const twoR = await place(two, { expectedTotalCents: 2541 })
   assert(twoR.status === 503 && twoR.code === 'STRIPE_NOT_CONFIGURED',
     `two vendors, $1 each, $23.21 service charge → accepted on the order-wide subtotal (got ${twoR.status} ${twoR.code})`)
 

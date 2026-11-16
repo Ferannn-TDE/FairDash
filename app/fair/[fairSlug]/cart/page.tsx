@@ -10,7 +10,9 @@ import Breadcrumb from '../_components/Breadcrumb'
 export default function FairCartPage() {
   const router = useRouter()
   const { fair } = useFair()
-  const { items, itemCount, subtotal, updateQty, removeItem } = useFairCart()
+  // Prices come from the cart's lib/checkout-total.ts pricing (the calculator checkout charges with).
+  const { items, itemCount, subtotal, pricing, updateQty, removeItem } = useFairCart()
+  const money = (cents: number | undefined) => `$${((cents ?? 0) / 100).toFixed(2)}`
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
   const handleCheckout = () => {
@@ -58,7 +60,7 @@ export default function FairCartPage() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-medium text-sm sm:text-base truncate">{item.name}</p>
-                      <p className="text-text-gray text-xs sm:text-sm tabular-nums">${(item.price ?? 0).toFixed(2)} each</p>
+                      <p className="text-text-gray text-xs sm:text-sm tabular-nums">{money(pricing.unitCents[item.menuItemId])} each</p>
                     </div>
 
                     {/* Qty controls */}
@@ -82,7 +84,7 @@ export default function FairCartPage() {
                     {/* Line total */}
                     <div className="text-right shrink-0 w-14 sm:w-16">
                       <p className="text-white font-semibold text-sm sm:text-base tabular-nums">
-                        ${(item.price * item.quantity).toFixed(2)}
+                        {money(pricing.lineCents[item.menuItemId])}
                       </p>
                     </div>
                     <button

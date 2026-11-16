@@ -4,11 +4,19 @@ import { db } from '@/lib/db'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { ON_MENU } from './on-menu'
 import { customerReachableScope } from '@/lib/event-listing'
+import { onlineUnitPrice } from '@/lib/checkout-total'
 
+// ONLINE PRICE (audit H5, step 2h): `price` is the ONLINE price customers see and pay, worked out
+// from the stored in-person price and the event's markup by lib/checkout-total.ts (the same function
+// checkout charges with). `inPersonPrice` is carried for the cart's calculator and the vendor's own
+// edit form; customer screens never display it.
 export interface MenuVariant {
   id: string
   label: string      // e.g. "Small", "Medium", "Regular"
+  /** The online price (what the customer pays). */
   price: number
+  /** The stored in-person (booth) price. For the calculator and the vendor's edit form only. */
+  inPersonPrice: number
   available: boolean
 }
 
@@ -39,7 +47,7 @@ async function _getGroupedMenuItemsByVendor(vendorId: string): Promise<GroupedMe
       isAvailable: true,
       variantGroup: true,
       variantLabel: true,
-      vendor: { select: { name: true } },
+      vendor: { select: { name: true, event: { select: { onlineMarkupBps: true } } } },
     },
     orderBy: [{ category: 'asc' }, { variantGroup: 'asc' }, { price: 'asc' }],
   })
@@ -47,6 +55,7 @@ async function _getGroupedMenuItemsByVendor(vendorId: string): Promise<GroupedMe
   const groups = new Map<string, GroupedMenuItem>()
 
   for (const item of items) {
+    const markupBps = item.vendor.event.onlineMarkupBps
     const groupKey = item.variantGroup
       ? `${vendorId}::${item.variantGroup}`
       : item.id
@@ -73,7 +82,8 @@ async function _getGroupedMenuItemsByVendor(vendorId: string): Promise<GroupedMe
     group.variants.push({
       id: item.id,
       label: item.variantLabel ?? 'Regular',
-      price: item.price,
+      price: onlineUnitPrice(item.price, markupBps),
+      inPersonPrice: item.price,
       available: item.isAvailable,
     })
   }
@@ -97,6 +107,7 @@ async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMe
     // Can't browse a soft-deleted fair's menu.
     where: { urlSlug: eventSlug, archivedAt: null, ...customerReachableScope() },
     select: {
+      onlineMarkupBps: true,
       vendors: {
         // Same readiness gate every other customer surface applies — when
         // enforcement is on, only ready vendors' items (and therefore vendor
@@ -158,7 +169,8 @@ async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMe
     group.variants.push({
       id: item.id,
       label: item.variantLabel ?? 'Regular',
-      price: item.price,
+      price: onlineUnitPrice(item.price, event.onlineMarkupBps),
+      inPersonPrice: item.price,
       available: item.isAvailable,
     })
   }

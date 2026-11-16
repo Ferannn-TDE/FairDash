@@ -169,7 +169,15 @@ export default function OrderTrackingPage() {
     clearCart()
     order.orderItems.forEach(item => {
       addItem(
-        { id: item.menuItemId, name: item.menuItem.name, price: item.unitPrice, prepTime: item.menuItem.prepTime ?? undefined, imageUrl: item.menuItem.imageUrl },
+        {
+          id: item.menuItemId, name: item.menuItem.name, price: item.unitPrice,
+          // The calculator works from the in-person price (audit H5, 2h). An order from before 2h has
+          // none stored; it was placed at 0% markup, so its unitPrice WAS the in-person price.
+          // Today's prices may differ: checkout re-prices, and a changed total is answered with
+          // 409 PRICE_CHANGED for the customer to confirm.
+          inPersonPrice: item.inPersonUnitPrice ?? item.unitPrice,
+          prepTime: item.menuItem.prepTime ?? undefined, imageUrl: item.menuItem.imageUrl,
+        },
         { id: item.vendor?.id ?? item.vendorId, name: item.vendor?.name ?? order.vendor.name }
       )
     })

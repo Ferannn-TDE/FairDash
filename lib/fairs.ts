@@ -46,6 +46,7 @@ export const getFairBySlugCached = unstable_cache(
         endDate: true,
         serviceChargeEnabled: true,
         serviceChargeAmount: true,
+        onlineMarkupBps: true,
         featuredVendorIds: true,
         featuredLabel: true,
         featuredEnabled: true,
@@ -101,6 +102,8 @@ export const getFairBySlugCached = unstable_cache(
         : { ...NO_CONFIG_FULFILLMENT, homeDeliveryFee: null, curbsideFee: 0, curbsideZoneDescription: null },
       serviceChargeEnabled: raw.serviceChargeEnabled ?? false,
       serviceChargeAmount: raw.serviceChargeAmount ?? null,
+      // Online price markup (audit H5, 2h): the cart and checkout feed it to lib/checkout-total.ts.
+      onlineMarkupBps: raw.onlineMarkupBps,
       featuredVendorIds: raw.featuredVendorIds ?? [],
       featuredLabel: raw.featuredLabel ?? null,
       featuredEnabled: raw.featuredEnabled ?? true,

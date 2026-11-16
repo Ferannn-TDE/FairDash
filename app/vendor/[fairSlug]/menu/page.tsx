@@ -11,7 +11,8 @@ import {
 import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { downscaleImage } from '@/lib/downscale-image'
-import { MIN_PRICE_CENTS, PRICE_MIN_MESSAGE } from '@/lib/menu/price'
+import { MIN_PRICE_CENTS, PRICE_MIN_MESSAGE, bpsToPercent } from '@/lib/menu/price'
+import { onlineUnitPrice } from '@/lib/checkout-total'
 import { waitingFor, type MenuApproverLabel } from '@/lib/menu-requests/approver-label'
 import {
   STAGE_BUTTON_LABEL,
@@ -36,10 +37,15 @@ import {
   isWithinUploadCap,
 } from '@/lib/upload-limits'
 
+// IN-PERSON PRICES ONLY (audit H5, 2h). Every price on this page is the in-person (booth) price the
+// vendor sets and the server stores; it is loaded from `variant.inPersonPrice`, never from the
+// online `price` customers see. Loading the online price here would raise the stored price by the
+// markup on every save. The online price is only SHOWN, by OnlinePriceHint, via lib/checkout-total.ts.
 interface MenuItem {
   id: string
   name: string
   description: string
+  /** The in-person price (MenuItem.price). */
   price: number
   prepTime: number
   category: string
@@ -78,6 +84,29 @@ const labelCls = 'block text-[0.6875rem] uppercase tracking-wide text-text-gray 
 const BLANK = {
   name: '', description: '', price: 0, prepTime: 10,
   category: '', imageUrl: '', isAvailable: true,
+}
+
+/**
+ * "Customers pay $X online (+N%)" under an in-person price: the online price, from the same
+ * function checkout charges with (lib/checkout-total.ts) and the fair's markup. Display only; the
+ * vendor always edits and saves the in-person price. Nothing is shown until the price is valid.
+ */
+function OnlinePriceHint({ inPersonPrice, compact = false }: { inPersonPrice: number; compact?: boolean }) {
+  const { onlineMarkupBps } = useVendorMeta()
+  if (!(inPersonPrice * 100 >= MIN_PRICE_CENTS)) return null
+  const online = onlineUnitPrice(inPersonPrice, onlineMarkupBps).toFixed(2)
+  if (compact) {
+    return onlineMarkupBps > 0
+      ? <span className="text-text-gray text-[0.6rem]">${online} online</span>
+      : null
+  }
+  return (
+    <p className="mt-1 text-[0.6875rem] text-text-gray">
+      {onlineMarkupBps > 0
+        ? `Customers pay $${online} online (+${bpsToPercent(onlineMarkupBps)}%)`
+        : `Customers pay $${online} online (same as in person)`}
+    </p>
+  )
 }
 
 // ─── Image upload ─────────────────────────────────────────────────────────────
@@ -253,6 +282,7 @@ function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
         <div>
           <label className={labelCls}>Price (USD) *</label>
           <input required type="number" min="1.00" step="0.01" value={form.price || ''} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} placeholder="0.00" className={inputCls} />
+          <OnlinePriceHint inPersonPrice={form.price} />
         </div>
         <div>
           <label className={labelCls}>Prep Time (min)</label>
@@ -310,6 +340,7 @@ function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-neon-pink font-semibold text-xs">${(item.price ?? 0).toFixed(2)}</span>
+          <OnlinePriceHint inPersonPrice={item.price} compact />
           {item.prepTime && (
             <span className="flex items-center gap-0.5 text-text-gray text-[0.6rem]">
               <ClockIcon className="w-2.5 h-2.5" />{item.prepTime}m
@@ -385,6 +416,7 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
             <div>
               <label className={labelCls}>Price</label>
               <input required type="number" min="1.00" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputCls} />
+              <OnlinePriceHint inPersonPrice={form.price} />
             </div>
             <div>
               <label className={labelCls}>Prep (min)</label>
@@ -483,7 +515,9 @@ export default function VendorMenuPage() {
                 id: variant.id,
                 name: group.variants.length > 1 ? `${group.baseName} (${variant.label})` : group.baseName,
                 description: group.description ?? '',
-                price: variant.price,
+                // The IN-PERSON price, never variant.price (the online price): saving the online
+                // price back would raise the stored price by the markup on every save (audit H5, 2h).
+                price: variant.inPersonPrice,
                 prepTime: group.prepTime ?? 10,
                 category: group.category,
                 imageUrl: group.imageUrl ?? '',

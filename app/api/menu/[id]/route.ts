@@ -4,7 +4,8 @@ import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireVendorMenuItemAccess, requireVendorMayEditMenu } from '@/lib/auth'
 import { assertSafeImageUrl } from '@/lib/upload-limits'
-import { parseInPersonPrice } from '@/lib/menu/price'
+import { parseInPersonPrice, clientPriceKey, CLIENT_PRICE_MESSAGE } from '@/lib/menu/price'
+import { onlineUnitPrice } from '@/lib/checkout-total'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '@/lib/menu/price-audit'
 import { recordMenuDeleted } from '@/lib/menu-notify/record'
 
@@ -19,7 +20,13 @@ export async function GET(
       include: { vendor: { select: { id: true, name: true, boothNumber: true } } },
     })
     if (!item) return apiError('Menu item not found', 404, 'NOT_FOUND')
-    return success(item)
+    // ONLINE PRICE (audit H5, 2h): this is a public read, so `price` is the online price customers
+    // pay, from lib/checkout-total.ts. `inPersonPrice` is the stored price, for the calculator only.
+    const { event } = await db.vendor.findUniqueOrThrow({
+      where: { id: item.vendorId },
+      select: { event: { select: { onlineMarkupBps: true } } },
+    })
+    return success({ ...item, price: onlineUnitPrice(item.price, event.onlineMarkupBps), inPersonPrice: item.price })
   } catch (err) {
     return handleApiError(err)
   }
@@ -45,6 +52,8 @@ export async function PATCH(
     }
 
     const body = await req.json()
+    // The online price is worked out by FairSynq (audit H5, 2h): refuse a body that sends one.
+    if (clientPriceKey(body)) return apiError(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
     const { name, description, price, category, imageUrl, isAvailable, prepTime } = body
 
     // The one price rule every write path shares (lib/menu/price.ts, audit H5). A PATCH that

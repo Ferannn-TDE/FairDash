@@ -27,6 +27,9 @@ export const PUBLIC_EVENT_SELECT = {
   endDate: true,
   serviceChargeEnabled: true,
   serviceChargeAmount: true,
+  // Online price markup, basis points (audit H5, 2h; approved by Jordan, Nov 15). Customers already
+  // see its effect in every online price; the checkout calculator needs the value itself.
+  onlineMarkupBps: true,
   admissionFree: true,
   openTime: true,
   closeTime: true,

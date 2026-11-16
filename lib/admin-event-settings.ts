@@ -1,6 +1,19 @@
 import { ApiError } from './api-error'
 
 /**
+ * The fields buildSafeSettingsUpdate may write. `onlineMarkupBps` is NOT one of them: it is set
+ * through lib/event-markup.ts (refused out of range, logged in the same transaction; audit H5, 2h).
+ */
+export const SAFE_SETTINGS_FIELDS = [
+  'name', 'startDate', 'endDate', 'eventLat', 'eventLng', 'serviceChargeEnabled', 'serviceChargeAmount',
+] as const
+
+/** True when the body carries at least one field buildSafeSettingsUpdate would write. */
+export function hasSafeSettingsField(body: Record<string, unknown>): boolean {
+  return SAFE_SETTINGS_FIELDS.some(f => body[f] !== undefined)
+}
+
+/**
  * Build the Event update for the admin settings PATCH — the SAFE-FIELD ALLOWLIST.
  *
  * This is the load-bearing safety boundary of the settings route, extracted so it can be

@@ -17,7 +17,7 @@
 // browser needs it.
 
 import { UploadRejection, assertSafeImageUrl } from '../upload-limits'
-import { parseInPersonPrice } from '../menu/price'
+import { parseInPersonPrice, clientPriceKey, CLIENT_PRICE_MESSAGE } from '../menu/price'
 
 export const MENU_REQUEST_TYPES = ['ADD', 'EDIT', 'DELETE', 'RESTORE'] as const
 export type MenuRequestTypeInput = (typeof MENU_REQUEST_TYPES)[number]
@@ -88,6 +88,10 @@ const reject = (message: string, status = 400, code = 'VALIDATION_ERROR'): ItemR
  */
 export function validateMenuRequestItem(item: MenuRequestItemInput): ItemRejection | null {
   const { type, menuItemId, name, price, category, imageUrl } = item
+
+  // The online price is worked out by FairSynq from this in-person price and the event's markup
+  // (audit H5, 2h). An item carrying onlinePrice / onlineMarkupBps / markup is refused.
+  if (clientPriceKey(item)) return reject(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
 
   // Plain wording: rejections are surfaced straight to the vendor via toast.error(...), and in
   // the batch form they arrive prefixed "Item 4: …". "type" is internal jargon (ADD/EDIT/DELETE)

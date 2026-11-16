@@ -6,6 +6,7 @@ import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { revalidateTag } from 'next/cache'
 import { getGroupedMenuItemsByEvent } from '@/lib/menu/getGroupedMenuItems'
 import { validateMenuRequestItem } from '@/lib/menu-requests/validate-item'
+import { clientPriceKey, CLIENT_PRICE_MESSAGE } from '@/lib/menu/price'
 import { fileMenuRequestItem } from '@/lib/menu-requests/file-item'
 import { menuApproverLabel } from '@/lib/menu-requests/approver-label'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
@@ -46,6 +47,8 @@ export async function POST(req: Request) {
   try {
     const clerkId = await requireAuth()
     const body = await req.json()
+    // The online price is worked out by FairSynq (audit H5, 2h): refuse a body that sends one.
+    if (clientPriceKey(body)) return apiError(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
     const { vendorId, name, description, price, category, imageUrl, prepTime, variantGroup, variantLabel } = body
 
     if (typeof vendorId !== 'string' || !vendorId || !name || price == null || !category) {

@@ -34,9 +34,10 @@ function assert(cond: boolean, label: string) {
   else { fail++; console.log(`  ❌ ${label}`) }
 }
 
+// onlineMarkupBps added by Jordan's approval, Nov 15 (audit H5, 2h: the checkout calculator).
 const APPROVED_EVENT_KEYS = [
   'id', 'name', 'urlSlug', 'description', 'status', 'primaryColor', 'startDate', 'endDate',
-  'serviceChargeEnabled', 'serviceChargeAmount', 'admissionFree', 'openTime', 'closeTime',
+  'serviceChargeEnabled', 'serviceChargeAmount', 'onlineMarkupBps', 'admissionFree', 'openTime', 'closeTime',
   'fulfillmentConfig', '_count',
 ]
 const APPROVED_FULFILLMENT_KEYS = [

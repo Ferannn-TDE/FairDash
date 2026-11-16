@@ -13,6 +13,7 @@ import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
 import { callerMayViewInactiveVendor } from '@/lib/vendor-visibility'
 import { SELLABLE } from '@/lib/menu/on-menu'
+import { onlineUnitPrice } from '@/lib/checkout-total'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -122,7 +123,21 @@ export async function GET(
 
     // Strip the gate-only field so it never reaches the wire.
     const { stripeVerified: _gateOnly, ...publicVendor } = vendor
-    return success(publicVendor)
+
+    // ONLINE PRICE (audit H5, 2h): customers see the online price, from lib/checkout-total.ts (the
+    // function checkout charges with). The markup is read from the vendor's own event here rather
+    // than added to the select above, so the public select stays exactly the boundary it documents.
+    // `inPersonPrice` is for the cart's calculator only; customer screens show `price`.
+    const { onlineMarkupBps } = await db.event.findUniqueOrThrow({
+      where: { id: vendor.eventId },
+      select: { onlineMarkupBps: true },
+    })
+    const menuItems = publicVendor.menuItems.map(mi => ({
+      ...mi,
+      price: onlineUnitPrice(mi.price, onlineMarkupBps),
+      inPersonPrice: mi.price,
+    }))
+    return success({ ...publicVendor, menuItems })
   } catch (err) {
     return handleApiError(err)
   }

@@ -4,6 +4,11 @@ import { useState, useEffect, use, useCallback, useMemo } from 'react'
 import { CheckCircleIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import DateRangePicker from '@/app/_components/ui/DateRangePicker'
 import { editDateBounds } from '@/lib/calendar-date'
+import { bpsToPercent, parseMarkupPercentInput } from '@/lib/menu/price'
+import { onlineUnitPrice } from '@/lib/checkout-total'
+
+/** The example item the markup preview prices: "On a $10.00 item, customers pay …". */
+const MARKUP_EXAMPLE_PRICE = 10
 
 const INPUT = 'w-full bg-[#0f0f0f] border border-white/10 rounded-xl px-4 py-3 text-white text-sm font-inter outline-none focus:border-[#FF0077] transition-colors placeholder:text-[#444]'
 
@@ -16,6 +21,8 @@ interface Settings {
   eventLng: number | null
   serviceChargeEnabled: boolean
   serviceChargeAmount: number | null
+  /** Online price markup, basis points 0–1000 (audit H5, 2h). */
+  onlineMarkupBps: number
 }
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -52,6 +59,10 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
   const [eventLng, setEventLng] = useState('')
   const [serviceChargeEnabled, setServiceChargeEnabled] = useState(false)
   const [serviceChargeAmount, setServiceChargeAmount] = useState('')
+  // Online price markup (audit H5, 2h): typed in percent, checked by parseMarkupPercentInput (never
+  // clamped). savedMarkupBps is the server's value, so only a real change is sent (and logged).
+  const [markupInput, setMarkupInput] = useState('')
+  const [savedMarkupBps, setSavedMarkupBps] = useState(0)
 
   // Honest save states: idle | saving | saved | error. No fake "Saved!" that isn't a real
   // round-trip — 'saved' is set ONLY after the PATCH resolves and we adopt the re-read values.
@@ -68,6 +79,8 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
     setEventLng(s.eventLng != null ? String(s.eventLng) : '')
     setServiceChargeEnabled(s.serviceChargeEnabled)
     setServiceChargeAmount(s.serviceChargeAmount != null ? String(s.serviceChargeAmount) : '')
+    setSavedMarkupBps(s.onlineMarkupBps ?? 0)
+    setMarkupInput(String(bpsToPercent(s.onlineMarkupBps ?? 0)))
   }, [])
 
   useEffect(() => {
@@ -100,7 +113,17 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
     [startDate, endDate],
   )
 
+  const markupParse = parseMarkupPercentInput(markupInput)
+
   const handleSave = async () => {
+    // An invalid markup (over 10%, below 0, not a number, too many decimals) blocks the WHOLE save:
+    // nothing is clamped and nothing is half-saved.
+    if (!markupParse.ok) {
+      setSaveError(markupParse.message)
+      setSaveState('error')
+      return
+    }
+    const markupChanged = markupParse.bps !== savedMarkupBps
     setSaveState('saving')
     setSaveError(null)
     try {
@@ -115,6 +138,9 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
           eventLng: eventLng.trim() === '' ? null : eventLng,
           serviceChargeEnabled,
           serviceChargeAmount: serviceChargeEnabled ? serviceChargeAmount : null,
+          // Only a real change is sent; the server logs it (EventMarkupChange) in the same
+          // transaction. Strict admins are not locked after the event starts.
+          ...(markupChanged && { onlineMarkupBps: markupParse.bps }),
         }),
       })
       const json = await res.json()
@@ -231,6 +257,35 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
                 <input type="number" step="0.01" min="0" max="100" value={serviceChargeAmount} onChange={e => setServiceChargeAmount(e.target.value)} placeholder="1.50" className={`${INPUT} max-w-xs`} />
               </Field>
             )}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Online Prices">
+          <div className="space-y-3">
+            <p className="text-sm text-[#666] font-inter">
+              A markup added to every menu price for online orders. It goes to the vendors; FairSynq&apos;s service fee stays on the booth price.
+            </p>
+            <Field label="Online Price Markup (%)" hint="0% (online price = booth price) to 10%">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={markupInput}
+                onChange={e => setMarkupInput(e.target.value)}
+                aria-invalid={!markupParse.ok}
+                className={`${INPUT} max-w-xs ${markupParse.ok ? '' : 'border-red-500 focus:border-red-500'}`}
+              />
+            </Field>
+            {!markupParse.ok ? (
+              <p role="alert" className="text-xs text-red-400 font-inter">{markupParse.message}</p>
+            ) : (
+              <p className="text-xs text-[#888] font-inter">
+                On a ${MARKUP_EXAMPLE_PRICE.toFixed(2)} item, customers pay{' '}
+                <span className="text-white">${onlineUnitPrice(MARKUP_EXAMPLE_PRICE, markupParse.bps).toFixed(2)}</span> online.
+              </p>
+            )}
+            <p className="text-xs text-[#555] font-inter">
+              Every change is logged (who, old value, new value, when). FairSynq admins can change it at any time, including after the event has started; organizers cannot once it has started.
+            </p>
           </div>
         </SectionCard>
 

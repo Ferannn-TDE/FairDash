@@ -31,10 +31,11 @@ function readSource(path: string): string {
 const sameKeys = (o: object, expected: readonly string[]) =>
   JSON.stringify(Object.keys(o).sort()) === JSON.stringify([...expected].sort())
 
-/** The approved lists (review of 2026-11-10). Changing the select means changing these too. */
+/** The approved lists (review of 2026-11-10). Changing the select means changing these too.
+ *  onlineMarkupBps added by Jordan's approval, Nov 15 (audit H5, 2h: the checkout calculator). */
 const APPROVED_EVENT_KEYS = [
   'id', 'name', 'urlSlug', 'description', 'status', 'primaryColor', 'startDate', 'endDate',
-  'serviceChargeEnabled', 'serviceChargeAmount', 'admissionFree', 'openTime', 'closeTime',
+  'serviceChargeEnabled', 'serviceChargeAmount', 'onlineMarkupBps', 'admissionFree', 'openTime', 'closeTime',
   'fulfillmentConfig',
 ] as const
 const APPROVED_FULFILLMENT_KEYS = [

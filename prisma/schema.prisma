@@ -84,6 +84,10 @@ model Event {
   serviceChargeAmount     Float? // e.g., 1.50 per order
   operatorStripeAccountId String? // destination for service charge + delivery fee transfers
 
+  // Online price markup (audit H5, step 2h), basis points: 0 = 0%, 1000 = 10%. Default 0: the online
+  // price equals the in-person price. The 10% cap is a code constant (lib/menu/price.ts), not stored.
+  onlineMarkupBps Int @default(0)
+
   // Organizer
   organizerId String?
   organizer   FairOrganizer? @relation(fields: [organizerId], references: [id])
@@ -107,6 +111,7 @@ model Event {
   postEventReport   PostEventReport?
   organizerPayouts  OrganizerPayout[]
   menuChangeEvents  MenuChangeEvent[]
+  markupChanges     EventMarkupChange[]
 
   @@index([urlSlug])
   @@index([status])
@@ -599,6 +604,11 @@ model Order {
   total        Float // subtotal + serviceFee(10%×subtotal) + deliveryFee + serviceCharge + tip
   fairSynqFee  Float // FairSynq revenue = 10% service fee charged to the customer on top (on subtotal only)
   vendorPayout Float // = subtotal in full — vendor keeps everything, no commission deducted
+  /// The in-person subtotal the 10% service fee was computed on (audit H5, 2h). Null on orders before 2h,
+  /// whose fee was computed on `subtotal`.
+  serviceFeeBase  Float?
+  /// The event's markup at checkout, basis points (2h). Null on orders before 2h.
+  onlineMarkupBps Int?
 
   // Customer info
   customerName   String
@@ -808,6 +818,9 @@ model OrderItem {
   totalPrice          Float // unitPrice * quantity, stored at creation time
   subtotal            Float
   specialInstructions String?
+  /// The in-person (booth) unit price at checkout (audit H5, 2h). unitPrice is the online price the
+  /// customer paid. Null on items ordered before 2h.
+  inPersonUnitPrice   Float?
 
   createdAt DateTime @default(now())
 
@@ -2173,4 +2186,22 @@ model ApprovalAction {
   @@index([applicationType, applicationId])
   @@index([actorId])
   @@index([createdAt])
+}
+
+/// One row per change of an event's online price markup (audit H5, step 2h). Written in the same
+/// transaction as the change, by lib/event-markup.ts. Restrict on delete: the log cannot vanish.
+model EventMarkupChange {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  /// ORGANIZER | ADMIN
+  actorRole    String
+  actorClerkId String
+  /// User.id when the actor has a User row.
+  actorUserId  String?
+  oldBps       Int
+  newBps       Int
+  createdAt    DateTime @default(now())
+
+  @@index([eventId, createdAt])
 }

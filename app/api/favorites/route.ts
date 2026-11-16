@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { onlineUnitPrice } from '@/lib/checkout-total'
 
 // GET /api/favorites
 // Returns the authenticated user's favorited menu items with vendor + event context.
@@ -22,7 +23,7 @@ export async function GET() {
             vendor: {
               select: {
                 id: true, name: true, boothNumber: true, eventId: true,
-                event: { select: { urlSlug: true, name: true } },
+                event: { select: { urlSlug: true, name: true, onlineMarkupBps: true } },
               },
             },
           },
@@ -30,7 +31,23 @@ export async function GET() {
       },
     })
 
-    return success({ favorites })
+    // ONLINE PRICE (audit H5, 2h): the favorites page shows `menuItem.price`, so it must be the
+    // online price, from lib/checkout-total.ts. The stored price goes out as `inPersonPrice` (for the
+    // calculator only); the markup itself is not sent.
+    const withOnlinePrices = favorites.map(f => {
+      const { onlineMarkupBps, ...event } = f.menuItem.vendor.event
+      return {
+        ...f,
+        menuItem: {
+          ...f.menuItem,
+          price: onlineUnitPrice(f.menuItem.price, onlineMarkupBps),
+          inPersonPrice: f.menuItem.price,
+          vendor: { ...f.menuItem.vendor, event },
+        },
+      }
+    })
+
+    return success({ favorites: withOnlinePrices })
   } catch (err) {
     return handleApiError(err)
   }

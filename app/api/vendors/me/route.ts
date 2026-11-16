@@ -30,7 +30,12 @@ export async function GET(req: Request) {
       },
       include: {
         vendor: {
-          include: { menuItems: { orderBy: [{ category: 'asc' }, { name: 'asc' }] } },
+          include: {
+            menuItems: { orderBy: [{ category: 'asc' }, { name: 'asc' }] },
+            // The fair's online price markup (audit H5, 2h): the vendor's menu page shows
+            // "Customers pay $X online (+N%)" under the in-person price the vendor sets.
+            event: { select: { onlineMarkupBps: true } },
+          },
         },
       },
       // DETERMINISTIC: the ORIGINAL application (oldest) wins — never "newest".

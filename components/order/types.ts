@@ -6,7 +6,10 @@ export interface OrderItem {
   menuItemId: string
   vendorId: string
   quantity: number
+  /** The online unit price the customer paid. */
   unitPrice: number
+  /** The in-person unit price at checkout (audit H5, 2h). Null on orders placed before 2h. */
+  inPersonUnitPrice?: number | null
   subtotal: number
   specialInstructions?: string | null
   menuItem: { name: string; imageUrl?: string | null; prepTime?: number | null }

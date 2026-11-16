@@ -68,6 +68,8 @@ export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFav
         id: selected.id,
         name: `${group.baseName}${variantSuffix}`,
         price: selected.price,
+        // For the cart's calculator (lib/checkout-total.ts); never displayed (audit H5, 2h).
+        inPersonPrice: selected.inPersonPrice,
         prepTime: group.prepTime ?? undefined,
         imageUrl: group.imageUrl,
       },
