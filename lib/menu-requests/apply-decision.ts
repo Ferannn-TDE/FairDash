@@ -13,6 +13,7 @@
 // answer as a request that does not exist.
 
 import { revalidateTag } from 'next/cache'
+import { expireVendorMenu } from '@/lib/menu/menu-cache'
 import { db } from '../db'
 import { ApiError } from '../api-error'
 import { getRealtimeDb } from '../firebase-admin'
@@ -265,7 +266,7 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
   })
 
   // Cache busts only after the commit, so they never advertise a change that rolled back.
-  if (action === 'APPROVE') revalidateTag(`vendor-menu-${vendorId}`, 'default')
+  if (action === 'APPROVE') expireVendorMenu(vendorId)
   revalidateTag(`event-badges-${event.id}`, 'default')
 
   // Fire-and-forget: Firebase vendor notification + review log.

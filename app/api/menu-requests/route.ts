@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { revalidateTag } from 'next/cache'
+import { expireVendorMenu } from '@/lib/menu/menu-cache'
 import type { MenuRequest } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     )
 
     // The live menu changed only if something was applied now.
-    if (rows.some(r => r.status === 'APPROVED')) revalidateTag(`vendor-menu-${vendorId}`, 'default')
+    if (rows.some(r => r.status === 'APPROVED')) expireVendorMenu(vendorId)
 
     // ONE AUDIT ENTRY PER ROW — never one per submission. The audit log is the per-decision
     // record: collapsing a batch of 8 into a single entry would lose seven of them, and the

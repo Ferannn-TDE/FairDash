@@ -1,4 +1,4 @@
-import { revalidateTag } from 'next/cache'
+import { expireVendorMenu } from '@/lib/menu/menu-cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -93,7 +93,7 @@ export async function PATCH(
       return after
     })
 
-    revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
+    expireVendorMenu(item.vendorId)
     return success(updated)
   } catch (err) {
     return handleApiError(err)
@@ -136,7 +136,7 @@ export async function DELETE(
       })
     })
 
-    revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
+    expireVendorMenu(item.vendorId)
     return success({ deleted: true })
   } catch (err) {
     return handleApiError(err)

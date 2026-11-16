@@ -126,6 +126,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'connect-status',         file: 'scripts/connect-status-test.ts' },
   { group: 'correctness', name: 'role-reconcile',         file: 'scripts/role-reconcile-test.ts' },
   { group: 'correctness', name: 'seed-dev-fair',          file: 'scripts/seed-dev-fair-test.ts' },
+  { group: 'correctness', name: 'vendor-menu-cache',      file: 'scripts/vendor-menu-cache-test.ts' },
   { group: 'correctness', name: 'migration-drift',        file: 'scripts/migration-drift-guard.ts' },
   { group: 'correctness', name: 'order-map-center',       file: 'scripts/order-map-center-guard.ts' },
   { group: 'correctness', name: 'rate-limit',             file: 'scripts/rate-limit-test.ts' },

@@ -3,7 +3,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth, requireVendorMayEditMenu } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
-import { revalidateTag } from 'next/cache'
+import { expireVendorMenu } from '@/lib/menu/menu-cache'
 import { getGroupedMenuItemsByEvent } from '@/lib/menu/getGroupedMenuItems'
 import { validateMenuRequestItem } from '@/lib/menu-requests/validate-item'
 import { clientPriceKey, CLIENT_PRICE_MESSAGE } from '@/lib/menu/price'
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     if (row.status === 'PENDING') {
       return success({ requiresApproval: true, request: { ...row, approver }, approver }, 202)
     }
-    revalidateTag(`vendor-menu-${vendorId}`, 'default')
+    expireVendorMenu(vendorId)
     const live = await db.menuItem.findUniqueOrThrow({ where: { id: row.menuItemId as string } })
     return success(live, 201)
   } catch (err) {

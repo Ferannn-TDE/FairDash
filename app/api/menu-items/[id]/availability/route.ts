@@ -4,7 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireVendorMenuItemAccess, requireVendorMayEditMenu } from '@/lib/auth'
 
-import { revalidateTag } from 'next/cache'
+import { expireVendorMenu } from '@/lib/menu/menu-cache'
 
 // PATCH /api/menu-items/:id/availability — instant sold-out toggle (no approval needed)
 export async function PATCH(
@@ -27,7 +27,7 @@ export async function PATCH(
       data: { isAvailable },
     })
 
-    revalidateTag(`vendor-menu-${item.vendorId}`, 'default')
+    expireVendorMenu(item.vendorId)
 
     return success({ id: updated.id, isAvailable: updated.isAvailable })
   } catch (err) {
