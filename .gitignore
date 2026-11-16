@@ -97,3 +97,6 @@ index.html
 
 # Video files: hosted on Vercel Blob (later Bunny.net), never in git (BATCH-1 §9a)
 *.mp4
+
+# Local media and client documents folder: never in git, whatever the file type
+media/
