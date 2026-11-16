@@ -6,6 +6,7 @@
  *   [3] Delivery with a working transport: claimed, sent, SENT; admin rows go to alerts.email
  *   [4] Admin rows with no alerts.email: held (NO_ALERT_EMAIL), not sent, attempts unchanged
  *   [5] Failing transport: retries 1/5/15/60 then FAILED after 5 attempts
+ *   [5b] Control: the database-vs-computer clock race (see dueAt), reproduced and removed
  *   [6] No provider ('none'): nothing SENT, nothing logged, rows held NO_EMAIL_PROVIDER
  *   [7] Provider connected later: held admin alerts older than 48h → SKIPPED (kept); applicant
  *       emails of any age are sent
@@ -35,6 +36,22 @@ let pass = 0, fail = 0
 function assert(cond: boolean, label: string) {
   if (cond) { pass++; console.log(`  ✅ ${label}`) }
   else { fail++; console.log(`  ❌ ${label}`) }
+}
+
+/**
+ * THE EARLIEST MOMENT THESE ROWS ARE DUE ON BOTH CLOCKS.
+ *
+ * A new row's nextAttemptAt is set by the DATABASE clock (@default(now())), but
+ * deliverDueNotifications compares it with a `now` from THIS computer's clock. Delivering a
+ * millisecond after inserting raced the two: with the database clock even slightly ahead, the row
+ * was "not due yet" and checks failed at random (2 of 4 runs at 09469ce, Nov 16). Every
+ * insert-then-deliver below passes `now: await dueAt(...)`, the later of the computer's clock and
+ * the rows' own nextAttemptAt, so the outcome no longer depends on the two clocks agreeing.
+ */
+async function dueAt(...dedupeKeys: string[]): Promise<Date> {
+  const rows = await prisma.notification.findMany({ where: { dedupeKey: { in: dedupeKeys } }, select: { nextAttemptAt: true } })
+  if (rows.length !== dedupeKeys.length) throw new Error(`dueAt: expected ${dedupeKeys.length} row(s), found ${rows.length}`)
+  return new Date(Math.max(Date.now(), ...rows.map(r => r.nextAttemptAt.getTime())))
 }
 
 async function cleanup() {
@@ -97,7 +114,10 @@ async function main() {
   const sent: { to: string[]; subject: string; text: string }[] = []
   const okT = { kind: 'log' as const, canSend: true, send: async (e: any) => { sent.push(e) } }
   await prisma.$transaction(async tx => { await N.enqueueDecisionEmail(tx, `${PFX}app1`, 'approved', `applicant${MAIL}`, { kind: 'partner', name: `${PFX}Scouts`, contactName: 'Pat' }) })
-  const r1 = await N.deliverDueNotifications({ transport: okT, alertEmails: async () => ['ops@client.test', 'two@client.test'] })
+  const r1 = await N.deliverDueNotifications({
+    transport: okT, alertEmails: async () => ['ops@client.test', 'two@client.test'],
+    now: await dueAt(`signup:partner:${PFX}ok`, `decision:partner:${PFX}app1:approved`),
+  })
   const adminRow = await prisma.notification.findUnique({ where: { dedupeKey: `signup:partner:${PFX}ok` } })
   const appRow = await prisma.notification.findUnique({ where: { dedupeKey: `decision:partner:${PFX}app1:approved` } })
   assert(r1.sent === 2 && adminRow?.status === 'SENT' && appRow?.status === 'SENT' && !!adminRow.sentAt, '[0] positive control: the probe sees SENT rows after a delivery run')
@@ -109,10 +129,11 @@ async function main() {
   // ── [4] no alerts.email ────────────────────────────────────────────────────────────────
   console.log('\n[4] Admin alerts with no alert email set')
   await prisma.$transaction(async tx => { await N.enqueueSignupAlert(tx, `${PFX}noaddr`, alert('noaddr')) })
-  const r2 = await N.deliverDueNotifications({ transport: okT, alertEmails: async () => [] })
+  const t4 = await dueAt(`signup:partner:${PFX}noaddr`)
+  const r2 = await N.deliverDueNotifications({ transport: okT, alertEmails: async () => [], now: t4 })
   const held = await prisma.notification.findUnique({ where: { dedupeKey: `signup:partner:${PFX}noaddr` } })
   assert(r2.held === 1 && held?.status === 'PENDING' && held.heldReason === 'NO_ALERT_EMAIL' && held.attempts === 0, 'held with NO_ALERT_EMAIL, attempts unchanged, nothing sent')
-  const later = new Date(Date.now() + N.NO_ALERT_EMAIL_RECHECK_MS + 1000)
+  const later = new Date(t4.getTime() + N.NO_ALERT_EMAIL_RECHECK_MS + 1000)
   const r2b = await N.deliverDueNotifications({ transport: okT, alertEmails: async () => ['ops@client.test'], now: later })
   assert(r2b.sent === 1 && (await prisma.notification.findUnique({ where: { id: held!.id } }))?.status === 'SENT', '[0] control: once an address is set, the held alert goes out')
 
@@ -120,7 +141,7 @@ async function main() {
   console.log('\n[5] Retries, then FAILED')
   const badT = { kind: 'log' as const, canSend: true, send: async () => { throw new Error('provider 500') } }
   await prisma.$transaction(async tx => { await N.enqueueDecisionEmail(tx, `${PFX}app2`, 'rejected', `fail${MAIL}`, { kind: 'partner', name: `${PFX}X`, contactName: null, reason: 'Not this season' }) })
-  let t = Date.now()
+  let t = (await dueAt(`decision:partner:${PFX}app2:rejected`)).getTime()
   const gaps: number[] = []
   for (let i = 0; i < 5; i++) {
     await N.deliverDueNotifications({ transport: badT, now: new Date(t) })
@@ -130,6 +151,27 @@ async function main() {
   const failed = await prisma.notification.findUnique({ where: { dedupeKey: `decision:partner:${PFX}app2:rejected` } })
   assert(JSON.stringify(gaps) === JSON.stringify([1, 5, 15, 60]), `retry gaps are 1, 5, 15, 60 minutes (got ${gaps.join(',')})`)
   assert(failed?.status === 'FAILED' && failed.attempts === 5 && failed.lastError === 'provider 500', 'after 5 attempts → FAILED, with the last error kept')
+
+  // ── [5b] the clock race, reproduced on purpose ─────────────────────────────────────────
+  // A row due 5 s in the future stands in for "the database clock is ahead". Delivering at the
+  // computer's clock (the old timing) does not see it; delivering at dueAt() does. (5 s, not a few
+  // ms, so this control cannot itself race; nothing waits, the time is passed in.)
+  console.log('\n[5b] Control: the database-vs-computer clock race')
+  const raceKey = `${PFX}race`
+  await prisma.notification.create({ data: {
+    audience: 'applicant', to: `race${MAIL}`, template: 'decision_approved',
+    payload: { kind: 'partner', name: `${PFX}Race`, contactName: null }, dedupeKey: raceKey,
+    nextAttemptAt: new Date(Date.now() + 5000),
+  } })
+  const sentBeforeRace = sent.length
+  const rOld = await N.deliverDueNotifications({ transport: okT, now: new Date() })
+  const raceRow = await prisma.notification.findUnique({ where: { dedupeKey: raceKey } })
+  assert(rOld.sent === 0 && raceRow?.status === 'PENDING', '[0] control: at the computer\'s clock, a row due a moment later is NOT delivered (the old race)')
+  const raceDue = await dueAt(raceKey)
+  assert(raceDue.getTime() >= raceRow!.nextAttemptAt.getTime(), '[0] control: dueAt() is never earlier than the row\'s own nextAttemptAt')
+  const rNew = await N.deliverDueNotifications({ transport: okT, now: raceDue })
+  assert(rNew.sent === 1 && (await prisma.notification.findUnique({ where: { dedupeKey: raceKey } }))?.status === 'SENT' && sent.length === sentBeforeRace + 1,
+    '[0] control: at dueAt(), the same row IS delivered')
 
   // ── [6] no provider ────────────────────────────────────────────────────────────────────
   console.log('\n[6] No email provider (production today)')
@@ -142,7 +184,8 @@ async function main() {
   const origLog = console.log; const origWarn = console.warn; const captured: string[] = []
   console.log = (...a: unknown[]) => { captured.push(a.join(' ')) }; console.warn = (...a: unknown[]) => { captured.push(a.join(' ')) }
   let r3: Awaited<ReturnType<typeof N.deliverDueNotifications>>
-  try { r3 = await N.deliverDueNotifications({ transport: noneT, alertEmails: async () => ['ops@client.test'] }) } finally { console.log = origLog; console.warn = origWarn }
+  const t6 = await dueAt(`signup:partner:${PFX}prod1`, `decision:partner:${PFX}prod2:approved`)
+  try { r3 = await N.deliverDueNotifications({ transport: noneT, alertEmails: async () => ['ops@client.test'], now: t6 }) } finally { console.log = origLog; console.warn = origWarn }
   const p1 = await prisma.notification.findUnique({ where: { dedupeKey: `signup:partner:${PFX}prod1` } })
   const p2 = await prisma.notification.findUnique({ where: { dedupeKey: `decision:partner:${PFX}prod2:approved` } })
   assert(r3!.sent === 0 && p1?.status === 'PENDING' && p2?.status === 'PENDING', 'nothing is marked SENT')
@@ -157,7 +200,10 @@ async function main() {
   await prisma.notification.update({ where: { id: p1!.id }, data: { createdAt: old } })
   await prisma.notification.update({ where: { id: p2!.id }, data: { createdAt: old } })
   const sentBefore = sent.length
-  const r4 = await N.deliverDueNotifications({ transport: okT, alertEmails: async () => ['ops@client.test'] })
+  const r4 = await N.deliverDueNotifications({
+    transport: okT, alertEmails: async () => ['ops@client.test'],
+    now: await dueAt(`signup:partner:${PFX}prod1`, `decision:partner:${PFX}prod2:approved`),
+  })
   const p1b = await prisma.notification.findUnique({ where: { id: p1!.id } }), p2b = await prisma.notification.findUnique({ where: { id: p2!.id } })
   assert(p1b?.status === 'SKIPPED' && p1b.lastError === 'Older than 48 hours when email was connected', 'a held admin alert older than 48h → SKIPPED, with the reason')
   assert(!!p1b, 'and it is kept, not deleted')
