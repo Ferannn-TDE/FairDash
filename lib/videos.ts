@@ -6,13 +6,14 @@ import { unstable_cache } from 'next/cache'
 import { getSetting } from '@/lib/settings'
 
 export interface VideoSource { url: string; posterUrl: string | null }
-export type VideoSlot = 'vendorPitch' | 'partnerPitch'
+export type VideoSlot = 'vendorPitch' | 'partnerPitch' | 'organizerPitch'
 export const VIDEOS_CACHE_TAG = 'videos'
 
 // Keys are spelled out (not built from the slot name) so the settings test can see each reader.
 const KEYS = {
   vendorPitch: ['video.vendorPitch.url', 'video.vendorPitch.posterUrl'],
   partnerPitch: ['video.partnerPitch.url', 'video.partnerPitch.posterUrl'],
+  organizerPitch: ['video.organizerPitch.url', 'video.organizerPitch.posterUrl'],
 } as const
 
 async function readSlot(slot: VideoSlot): Promise<VideoSource | null> {

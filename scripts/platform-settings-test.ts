@@ -335,8 +335,18 @@ async function main() {
   } catch { unknownThrew = true }
   assert(unknownThrew, 'getSetting on an unknown key throws at runtime too')
   assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['delivery.enabled', 'alerts.email', 'alerts.phone',
-    'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.partnerPitch.url', 'video.partnerPitch.posterUrl']),
-    'the registry holds delivery.enabled (item 6), the two alert contacts and the two video slots (no SMS or money keys)')
+    'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.partnerPitch.url', 'video.partnerPitch.posterUrl',
+    'video.organizerPitch.url', 'video.organizerPitch.posterUrl']),
+    'the registry holds delivery.enabled (item 6), the two alert contacts and the three video slots (no SMS or money keys)')
+  // Positive control: the vendor card carries the usual help line with no held warning.
+  assert(settingsLib.SETTINGS['video.vendorPitch.url'].help.startsWith('Shown on the vendor sign-in page')
+    && !settingsLib.SETTINGS['video.vendorPitch.url'].help.includes('Held'),
+    'control: the vendor video card shows only the usual help line')
+  assert(settingsLib.SETTINGS['video.organizerPitch.url'].help ===
+    "Held until a corrected cut arrives. The current v2 video makes claims the site can't back up yet, so don't save it. "
+    + 'Shown on /organizers, under the intro and buttons. Paste an https link ending in .mp4 or .webm. '
+    + 'Upload a changed video under a new file name: the old link stays cached for up to a month.',
+    'the organizer video card shows the held warning first, then the usual help line (BATCH-1 §21, Q4)')
   assert(settingsLib.SETTING_KEYS.filter(k => k.startsWith('video.')).every(k => settingsLib.SETTINGS[k].class === 'content'),
     'every video key is a content setting')
 

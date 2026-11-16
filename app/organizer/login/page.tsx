@@ -1,6 +1,7 @@
 "use client";
 import { CalendarDays } from "lucide-react";
 import RoleAuthCard from "@/app/_components/RoleAuthCard";
+import { ORGANIZER_LOGIN_BLURB } from "@/lib/organizer-copy";
 
 export default function OrganizerLoginPage() {
   return (
@@ -9,7 +10,7 @@ export default function OrganizerLoginPage() {
       Icon={CalendarDays}
       eyebrow="Organizer sign-in"
       heading="Host your event"
-      blurb="Create fairs, approve vendors, monitor orders live, and run your event end to end."
+      blurb={ORGANIZER_LOGIN_BLURB}
       redirectTo="/organizer"
     />
   );

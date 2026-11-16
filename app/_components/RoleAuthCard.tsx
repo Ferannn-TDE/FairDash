@@ -7,6 +7,7 @@ import { SignIn, SignUp, useUser, useClerk } from "@clerk/clerk-react";
 import { ArrowLeft, LogOut, type LucideIcon } from "lucide-react";
 import { safeRedirect } from "@/lib/safe-redirect";
 import { clerkAppearance } from "@/lib/clerk-appearance";
+import { initialAuthMode, toggleAuthMode, AUTH_MODE_PARAM, type AuthMode } from "@/lib/auth-mode";
 
 // Shared mono-pink auth shell for every role login (vendor / runner / organizer /
 // admin). One reusable component so all operator logins are consistent with the
@@ -47,7 +48,9 @@ function RoleAuthInner({
   const { isSignedIn, isLoaded, user } = useUser();
   const { signOut } = useClerk();
   const dest = safeRedirect(searchParams.get("redirect"), redirectTo);
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
+  // ?mode=apply opens on sign-up where sign-up is allowed (lib/auth-mode.ts); the toggle below still
+  // switches both ways.
+  const [mode, setMode] = useState<AuthMode>(() => initialAuthMode(searchParams.get(AUTH_MODE_PARAM), allowSignUp));
 
   // Access gate: when signed in, ask the server whether this account actually has
   // the role — checked the SAME way the destination guard checks it. Only then do
@@ -224,14 +227,14 @@ function RoleAuthInner({
                 {mode === "sign-in" ? (
                   <p className="text-xs text-gray-500 font-inter">
                     New here?{" "}
-                    <button onClick={() => setMode("sign-up")} className="text-[#FF0077] hover:text-white font-medium transition-colors cursor-pointer bg-transparent border-0 p-0">
+                    <button onClick={() => setMode(toggleAuthMode)} className="text-[#FF0077] hover:text-white font-medium transition-colors cursor-pointer bg-transparent border-0 p-0">
                       Create an account
                     </button>
                   </p>
                 ) : (
                   <p className="text-xs text-gray-500 font-inter">
                     Already registered?{" "}
-                    <button onClick={() => setMode("sign-in")} className="text-[#FF0077] hover:text-white font-medium transition-colors cursor-pointer bg-transparent border-0 p-0">
+                    <button onClick={() => setMode(toggleAuthMode)} className="text-[#FF0077] hover:text-white font-medium transition-colors cursor-pointer bg-transparent border-0 p-0">
                       Sign in
                     </button>
                   </p>

@@ -5,7 +5,8 @@
  *   [1] PitchVideo renders nothing without a source or after a load error, fetches nothing
  *       before it is near the viewport (preload="none", src only when near), plays inline,
  *       sets muted on the element, and never autoplays for reduced-motion visitors
- *   [2] the placements: /sign-in/vendor and /become-vendor read vendorPitch, /partners reads partnerPitch, all
+ *   [2] the placements: /sign-in/vendor and /become-vendor read vendorPitch, /partners reads partnerPitch,
+ *       /organizers reads organizerPitch (under the intro and buttons), all
  *       through lib/videos (cached under the tag the settings API revalidates)
  *   [3] no video goes through Supabase storage
  *
@@ -49,6 +50,12 @@ const becomeClient = readFileSync('app/become-vendor/VendorOnboarding.tsx', 'utf
 assert(has(become, "getVideoSlot('vendorPitch')") && has(becomeClient, "{step === 1 && <PitchVideo source={video}"), '/become-vendor shows the vendor pitch at the top of step 1')
 const partners = readFileSync('app/partners/PartnerVideoSlot.tsx', 'utf8')
 assert(has(partners, "getVideoSlot('partnerPitch')") && has(partners, '<PitchVideo'), '/partners shows the partner pitch')
+const orgSlot = readFileSync('app/organizers/OrganizerVideoSlot.tsx', 'utf8')
+const orgPage = readFileSync('app/organizers/page.tsx', 'utf8')
+assert(has(orgSlot, "getVideoSlot('organizerPitch')") && has(orgSlot, '<PitchVideo'), '/organizers shows the organizer pitch')
+assert(orgPage.indexOf('{P.secondaryButton.label}') > 0 && orgPage.indexOf('<OrganizerVideoSlot />') > orgPage.indexOf('{P.secondaryButton.label}')
+  && orgPage.indexOf('<OrganizerVideoSlot />') < orgPage.indexOf('P.canDo.heading'), '/organizers places it under the intro and buttons, above "What you can do"')
+assert(has(vids, "organizerPitch: ['video.organizerPitch.url', 'video.organizerPitch.posterUrl']"), 'lib/videos reads the organizer keys')
 
 console.log('[2b] the Content-Security-Policy lets videos and posters load')
 const cfg = readFileSync('next.config.mjs', 'utf8')
@@ -60,7 +67,7 @@ function walk(dir: string, out: string[] = []) {
   for (const n of readdirSync(dir)) { const q = join(dir, n); statSync(q).isDirectory() ? walk(q, out) : /\.tsx?$/.test(n) && out.push(q) }
   return out
 }
-const videoFiles = ['app/_components/PitchVideo.tsx', 'lib/videos.ts', 'app/partners/PartnerVideoSlot.tsx', 'app/sign-in/vendor/page.tsx', 'app/sign-in/vendor/VendorSignIn.tsx', 'app/become-vendor/page.tsx', 'app/become-vendor/VendorOnboarding.tsx']
+const videoFiles = ['app/_components/PitchVideo.tsx', 'lib/videos.ts', 'app/partners/PartnerVideoSlot.tsx', 'app/organizers/OrganizerVideoSlot.tsx', 'app/sign-in/vendor/page.tsx', 'app/sign-in/vendor/VendorSignIn.tsx', 'app/become-vendor/page.tsx', 'app/become-vendor/VendorOnboarding.tsx']
 assert(walk('app').length > 50, 'scanned the app tree')
 assert(videoFiles.every(f => !/supabase/i.test(readFileSync(f, 'utf8'))), 'no video file mentions Supabase')
 

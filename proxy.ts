@@ -9,7 +9,10 @@ const isProtectedRoute = createRouteMatcher([
   // (item 8), sending signed-out applicants to sign in before they could read the terms.
   '/vendor',
   '/vendor/(.*)',
-  '/organizer(.*)',
+  // '/organizer' and its sub-paths only. '/organizer(.*)' also matched the PUBLIC /organizers page
+  // ("For Fairs & Festivals"), sending signed-out visitors to sign in before they could read it.
+  '/organizer',
+  '/organizer/(.*)',
   '/become-driver(.*)',
   '/runner(.*)',
   '/admin(.*)',

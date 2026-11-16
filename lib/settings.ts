@@ -102,9 +102,10 @@ export const POSTER_EXTS = ['jpg', 'jpeg', 'png', 'webp'] as const
 export const parseVideoUrl = (raw: unknown) => parseHttpsFile(raw, VIDEO_EXTS, 'video')
 export const parsePosterUrl = (raw: unknown) => parseHttpsFile(raw, POSTER_EXTS, 'poster image')
 
-const videoUrl = (label: string, where: string) => ({
+// `held` goes first when a slot must stay empty for now; the usual help line follows it.
+const videoUrl = (label: string, where: string, held?: string) => ({
   label: `${label}: video`,
-  help: `Shown ${where}. Paste an https link ending in .mp4 or .webm. Upload a changed video under a new file name: the old link stays cached for up to a month.`,
+  help: `${held ? `${held} ` : ''}Shown ${where}. Paste an https link ending in .mp4 or .webm. Upload a changed video under a new file name: the old link stays cached for up to a month.`,
   class: 'content',
   default: null,
   parse: parseVideoUrl,
@@ -151,11 +152,16 @@ export const SETTINGS = {
     format: (v: string) => v,
   } satisfies SettingDef<string>,
   // Item 12 (B1.15). Only slots with a page are listed; the others (vendor getting started,
-  // organizer pitch, customer video A) are added with their placement.
+  // customer video A) are added with their placement.
   'video.vendorPitch.url': videoUrl('Vendor pitch', 'on the vendor sign-in page (/sign-in/vendor) under the pitch, and at the top of /become-vendor'),
   'video.vendorPitch.posterUrl': posterUrl('Vendor pitch'),
   'video.partnerPitch.url': videoUrl('Partner pitch', 'on /partners, between the pitch and the application form'),
   'video.partnerPitch.posterUrl': posterUrl('Partner pitch'),
+  // Organizer pitch (BATCH-1 §21, Q4): the slot exists on /organizers but stays empty. The v2 cut
+  // makes claims the site can't back up (approving vendors, one-link invites, messaging, signs).
+  'video.organizerPitch.url': videoUrl('Organizer pitch', 'on /organizers, under the intro and buttons',
+    "Held until a corrected cut arrives. The current v2 video makes claims the site can't back up yet, so don't save it."),
+  'video.organizerPitch.posterUrl': posterUrl('Organizer pitch'),
 } as const
 
 export type SettingKey = keyof typeof SETTINGS

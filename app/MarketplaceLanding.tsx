@@ -16,6 +16,7 @@ import { partitionFairCards, type PublicFairCard } from '@/lib/fair-view'
 import { useUser } from '@clerk/clerk-react'
 import { useRole } from './_contexts/RoleContext'
 import { PARTNER_CARD, PARTNERS_PATH } from '@/lib/partner-copy'
+import { ORGANIZERS_PATH } from '@/lib/organizer-copy'
 
 // ── Role cards section ────────────────────────────────────────────────────────
 
@@ -48,8 +49,9 @@ const OPERATOR_CARDS: Array<{ icon: typeof Store; title: string; desc: string; p
       'Watch orders as they come in, booth by booth',
       'Run several fairs from one account',
     ],
-    href: '/organizer/login',
-    cta: 'Organizer sign-in',
+    // Leads to the /organizers pitch page (BATCH-1 §21, Q3). The footer keeps the direct sign-in link.
+    href: ORGANIZERS_PATH,
+    cta: 'Learn more',
   },
   {
     icon: HeartHandshake,
