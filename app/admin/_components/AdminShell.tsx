@@ -11,7 +11,6 @@ import {
   Cog6ToothIcon,
   Bars3Icon,
   XMarkIcon,
-  BellIcon,
   BoltIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -22,6 +21,8 @@ import {
   UserGroupIcon,
   IdentificationIcon,
 } from '@heroicons/react/24/outline'
+import NotificationBell from '@/app/_components/NotificationBell'
+
 interface Props {
   children: React.ReactNode
   userName: string
@@ -251,10 +252,7 @@ export default function AdminShell({ children, userName, userInitials, userEmail
           </button>
           <div className="hidden lg:block" />
           <div className="flex items-center gap-2">
-            <button className="relative p-2 rounded-lg hover:bg-white/5 transition-colors">
-              <BellIcon className="w-5 h-5 text-[#888]" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#FF0077]" />
-            </button>
+            <NotificationBell />
             <div className="w-8 h-8 rounded-full bg-[#FF0077]/20 flex items-center justify-center lg:hidden">
               <span className="text-xs font-semibold text-[#FF0077]">{userInitials}</span>
             </div>

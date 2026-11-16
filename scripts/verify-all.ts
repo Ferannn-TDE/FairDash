@@ -89,6 +89,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'menu-immediate-delete',     file: 'scripts/menu-immediate-delete-test.ts' },
   { group: 'correctness', name: 'menu-notifications',        file: 'scripts/menu-notifications-test.ts' },
   { group: 'boundary',    name: 'menu-alert-preferences',    file: 'scripts/menu-alert-preferences-test.ts' },
+  { group: 'boundary',    name: 'notification-feed',         file: 'scripts/notification-feed-test.ts' },
   { group: 'boundary',    name: 'vendor-go-live',            file: 'scripts/vendor-go-live-test.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
