@@ -47,6 +47,10 @@ const nextConfig = {
   // Opt into Turbopack explicitly to silence the experimental flag conflict
   turbopack: {},
 
+  // C2 (Next 16.4): `next dev` writes an AGENTS.md into the repo when it detects an AI coding
+  // agent, and re-creates it whenever it's removed. Off: project instructions live in CLAUDE.md.
+  agentRules: false,
+
   webpack: (config) => {
     config.resolve.fallback = { ...config.resolve.fallback, fs: false }
     return config
