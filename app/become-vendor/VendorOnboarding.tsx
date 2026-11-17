@@ -688,7 +688,7 @@ export default function VendorOnboarding({ video }: { video: VideoSource | null 
 
         {/* The vendor pitch video (item 12, B1.15) at the top of the first step only, so it
             doesn't loop above the document and agreement steps. Nothing shows without a URL. */}
-        {step === 1 && <PitchVideo source={video} label="FairSynq for vendors" className="mb-10" />}
+        {step === 1 && <PitchVideo source={video} label="FairSynq for vendors" allowPhoneCut={false} className="mb-10" />}
 
         {step < 5 && (
           <div className="text-center mb-10">

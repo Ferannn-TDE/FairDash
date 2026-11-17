@@ -118,6 +118,23 @@ const posterUrl = (label: string) => ({
   parse: parsePosterUrl,
   format: (v: string) => v,
 }) satisfies SettingDef<string>
+// The optional phone cut (BATCH-1 §21 Q6): played instead of the main video under 640px wide.
+const phoneVideoUrl = (label: string) => ({
+  label: `${label}: phone video (optional)`,
+  help: 'Played instead of the video above on screens narrower than 640px (phones), for a tall phone cut. An https link ending in .mp4 or .webm. Leave it empty and phones play the video above.',
+  class: 'content',
+  default: null,
+  parse: parseVideoUrl,
+  format: (v: string) => v,
+}) satisfies SettingDef<string>
+const phonePosterUrl = (label: string) => ({
+  label: `${label}: phone poster image (optional)`,
+  help: 'The still image shown before the phone video plays. An https link ending in .jpg, .png or .webp. Without one, the poster above is used, cropped to fit.',
+  class: 'content',
+  default: null,
+  parse: parsePosterUrl,
+  format: (v: string) => v,
+}) satisfies SettingDef<string>
 
 // ── The registry ───────────────────────────────────────────────────────────────────────────
 export const SETTINGS = {
@@ -154,11 +171,15 @@ export const SETTINGS = {
   // customer video A) are added with their placement.
   'video.vendorPitch.url': videoUrl('Vendor pitch', 'on the vendor sign-in page (/sign-in/vendor) under the pitch, and at the top of /become-vendor'),
   'video.vendorPitch.posterUrl': posterUrl('Vendor pitch'),
+  'video.vendorPitch.phoneUrl': phoneVideoUrl('Vendor pitch'),
+  'video.vendorPitch.phonePosterUrl': phonePosterUrl('Vendor pitch'),
   'video.partnerPitch.url': videoUrl('Partner pitch', 'on /partners, between the pitch and the application form'),
   'video.partnerPitch.posterUrl': posterUrl('Partner pitch'),
   // Organizer pitch on /organizers. Unheld 2026-11-17 (Feran): v3 goes live as is (BATCH-1 §21).
   'video.organizerPitch.url': videoUrl('Organizer pitch', 'on /organizers, under the intro and buttons'),
   'video.organizerPitch.posterUrl': posterUrl('Organizer pitch'),
+  'video.organizerPitch.phoneUrl': phoneVideoUrl('Organizer pitch'),
+  'video.organizerPitch.phonePosterUrl': phonePosterUrl('Organizer pitch'),
 } as const
 
 export type SettingKey = keyof typeof SETTINGS

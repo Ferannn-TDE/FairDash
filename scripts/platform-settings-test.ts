@@ -335,9 +335,19 @@ async function main() {
   } catch { unknownThrew = true }
   assert(unknownThrew, 'getSetting on an unknown key throws at runtime too')
   assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['delivery.enabled', 'alerts.email', 'alerts.phone',
-    'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.partnerPitch.url', 'video.partnerPitch.posterUrl',
-    'video.organizerPitch.url', 'video.organizerPitch.posterUrl']),
-    'the registry holds delivery.enabled (item 6), the two alert contacts and the three video slots (no SMS or money keys)')
+    'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.vendorPitch.phoneUrl', 'video.vendorPitch.phonePosterUrl',
+    'video.partnerPitch.url', 'video.partnerPitch.posterUrl',
+    'video.organizerPitch.url', 'video.organizerPitch.posterUrl', 'video.organizerPitch.phoneUrl', 'video.organizerPitch.phonePosterUrl']),
+    'the registry holds delivery.enabled (item 6), the two alert contacts and the three video slots, vendor and organizer with a phone cut (no SMS or money keys)')
+  // Phone cut cards (BATCH-1 §21 Q6): optional, same link rules as the main video and poster.
+  for (const slot of ['vendorPitch', 'organizerPitch'] as const) {
+    const v = settingsLib.SETTINGS[`video.${slot}.phoneUrl`], pp = settingsLib.SETTINGS[`video.${slot}.phonePosterUrl`]
+    assert(v.help === 'Played instead of the video above on screens narrower than 640px (phones), for a tall phone cut. An https link ending in .mp4 or .webm. Leave it empty and phones play the video above.'
+      && v.parse === settingsLib.parseVideoUrl && v.default === null && v.label.endsWith(': phone video (optional)'), `${slot}: the phone video card (optional, video link rules)`)
+    assert(pp.help === 'The still image shown before the phone video plays. An https link ending in .jpg, .png or .webp. Without one, the poster above is used, cropped to fit.'
+      && pp.parse === settingsLib.parsePosterUrl && pp.default === null && pp.label.endsWith(': phone poster image (optional)'), `${slot}: the phone poster card (optional, poster link rules)`)
+  }
+  assert(!('video.partnerPitch.phoneUrl' in settingsLib.SETTINGS), 'the partner slot has no phone cut card')
   // Control: the vendor card's usual help line, the shape the organizer card must match.
   assert(settingsLib.SETTINGS['video.vendorPitch.url'].help ===
     'Shown on the vendor sign-in page (/sign-in/vendor) under the pitch, and at the top of /become-vendor. '
