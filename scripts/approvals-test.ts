@@ -3,8 +3,10 @@
  *
  *   [1] Gates: approvals routes admit admin / super_admin / platform_manager only; the per-fair
  *       vendor approve/reject no longer admit event_operator
- *   [2] Vendor owner rows (approval is per booth): every agreed case, owner pre-set through the
- *       existing Booth Operators routes — incl. reject leaving an already-APPROVED owner untouched
+ *   [2] Vendor owner rows (approval is per booth): every agreed case, a REJECTED owner pre-set through
+ *       the Booth Operators reject route, an APPROVED one written directly (since sub-step C admitting
+ *       a pending booth's owner there approves the booth too) — incl. reject leaving an
+ *       already-APPROVED owner untouched
  *   [3] Documents gate, required reject reason, double decision → 409, staff never touched
  *   [4] Organizer and partner decisions; applicant emails queued; audit rows
  *   [5] The per-fair admin vendor routes run the same single decision
@@ -133,7 +135,6 @@ async function main() {
   const decideAs = (who: { id: string; roles: string[] }, kind: string, id: string, body: object) => {
     login(who.id, who.roles); return call(decideRoute(req(`/api/admin/approvals/${kind}/${id}`, 'POST', body), { params: Promise.resolve({ kind, id }) }))
   }
-  const memberApprove = (await import('../app/api/admin/vendor-members/[id]/approve/route')).PATCH
   const memberReject = (await import('../app/api/admin/vendor-members/[id]/reject/route')).PATCH
 
   // ── [1] gates ──────────────────────────────────────────────────────────────────────────
@@ -159,9 +160,15 @@ async function main() {
   assert(ra.status === 200 && sa.booth === 'ACTIVE' && sa.owner === 'APPROVED', '[0] control: a new application → booth ACTIVE and owner APPROVED in one decision')
   assert((await prisma.vendorMember.findUnique({ where: { id: a.staffId! } }))?.approvalStatus === 'PENDING', 'staff added later are never touched')
 
+  // Owner APPROVED, booth still PENDING. Since sub-step C (Nov 16), admitting the owner on Booth
+  // Operators on a fair with no organizer approves the booth too, so this pair now arises only on an
+  // organizer's fair; the setup writes the owner row directly (scripts/booth-operators-approve-test.ts
+  // covers the Booth Operators route itself).
+  const ownerApprovedSeparately = (ownerId: string) => prisma.vendorMember.update({
+    where: { id: ownerId }, data: { approvalStatus: 'APPROVED', approvedAt: new Date(), approvedBy: 'apr-setup' },
+  })
   const b = await mkVendor()
-  login(SUPER.id, SUPER.roles)
-  await memberApprove(req(`/api/admin/vendor-members/${b.ownerId}/approve`, 'PATCH', {}), { params: Promise.resolve({ id: b.ownerId }) })
+  await ownerApprovedSeparately(b.ownerId)
   const before = await state(b.vendor.id, b.ownerId)
   assert(before.owner === 'APPROVED' && before.booth === 'PENDING', '[0] setup: owner approved separately on Booth Operators, booth still pending')
   const rb = await decideAs(PM, 'vendor', b.vendor.id, { decision: 'approve' })
@@ -182,8 +189,7 @@ async function main() {
   assert((await prisma.vendorMember.findUnique({ where: { id: d.staffId! } }))?.approvalStatus === 'PENDING', 'staff untouched by a reject too')
 
   const e = await mkVendor()
-  login(SUPER.id, SUPER.roles)
-  await memberApprove(req(`/api/admin/vendor-members/${e.ownerId}/approve`, 'PATCH', {}), { params: Promise.resolve({ id: e.ownerId }) })
+  await ownerApprovedSeparately(e.ownerId)
   const eBefore = await state(e.vendor.id, e.ownerId)
   const re = await decideAs(PM, 'vendor', e.vendor.id, { decision: 'reject', reason: 'Booth space full' })
   const se = await state(e.vendor.id, e.ownerId)

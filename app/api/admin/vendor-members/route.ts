@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest) {
             id: true, name: true, slug: true,
             status: true, // the BOOTH axis — deliberately distinct from approvalStatus above
             stripeVerified: true,
-            event: { select: { id: true, name: true, urlSlug: true } },
+            event: { select: { id: true, name: true, urlSlug: true, organizerId: true } },
           },
         },
       },
@@ -74,8 +74,10 @@ export async function GET(_req: NextRequest) {
             status: m.vendor.status,
             stripeVerified: m.vendor.stripeVerified,
           },
+          // organizerApproves: the fair has an organizer, who approves its booths (Nov 16). The panel
+          // uses it to say whether admitting a pending booth's owner also approves the booth.
           fair: m.vendor.event
-            ? { id: m.vendor.event.id, name: m.vendor.event.name, slug: m.vendor.event.urlSlug }
+            ? { id: m.vendor.event.id, name: m.vendor.event.name, slug: m.vendor.event.urlSlug, organizerApproves: !!m.vendor.event.organizerId }
             : null,
         })),
     })

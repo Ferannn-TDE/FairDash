@@ -273,7 +273,22 @@ async function main() {
                      'app/api/admin/vendor-members/[id]/reject/route.ts']) {
       const code = stripComments(readFileSync(f, 'utf8'))
       assert(!/\bvendor\.update\(/.test(code) && !/\bvendor\.updateMany\(/.test(code),
-        `${f.split('/').slice(-2).join('/')} never writes the BOOTH axis (no vendor.update)`)
+        `${f.split('/').slice(-2).join('/')} has no plain write to the BOOTH axis (no vendor.update)`)
+    }
+    // Since Nov 16 (sub-step C) the approve route changes the booth in ONE case only — the owner of
+    // a PENDING booth on a fair with no organizer — and only through the shared full approval
+    // (decideVendor: Stripe, checklist, audit, email). The reject route never touches the booth.
+    // scripts/booth-operators-approve-test.ts proves the behaviour; this pins the shape.
+    {
+      const approveCode = stripComments(readFileSync('app/api/admin/vendor-members/[id]/approve/route.ts', 'utf8'))
+      const rejectCode = stripComments(readFileSync('app/api/admin/vendor-members/[id]/reject/route.ts', 'utf8'))
+      assert((approveCode.match(/decideVendor\(/g) ?? []).length === 1
+        && /const boothApproved = ownerOfPendingBooth && !member\.vendor\.event\.organizerId/.test(approveCode)
+        && /const ownerOfPendingBooth = member\.role === 'owner' && member\.vendor\.status === VendorStatus\.PENDING/.test(approveCode)
+        && /if \(boothApproved\) \{[\s\S]{0,200}await decideVendor\(member\.vendorId, 'approve'/.test(approveCode),
+      'approve route: the booth changes only via ONE decideVendor call, only for the owner of a PENDING booth on a fair with no organizer')
+      assert(!/decideVendor|rejectLiveVendor|reconsiderVendor/.test(rejectCode),
+        'reject route: never touches the booth (no shared vendor decision)')
     }
 
     console.log(`\n── RESULT: ${pass} passed, ${fail} failed ──`)

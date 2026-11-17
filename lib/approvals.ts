@@ -162,7 +162,13 @@ async function memberApproverId(actor: Actor): Promise<string> {
   return u?.id ?? actor.clerkId
 }
 
-export async function decideVendor(vendorId: string, decision: Decision, reasonIn: unknown, actor: Actor, opts: { boothNumber?: string } = {}) {
+/**
+ * `opts.readmitOwner` (Booth Operators, sub-step C, Jordan Nov 16): the admin is admitting the
+ * OWNER explicitly, so an owner row that was REJECTED is re-admitted with the booth instead of the
+ * approval being refused. `opts.via` is recorded on the ApprovalAction (where the decision was made).
+ */
+export async function decideVendor(vendorId: string, decision: Decision, reasonIn: unknown, actor: Actor,
+  opts: { boothNumber?: string; readmitOwner?: boolean; via?: 'booth-operators' } = {}) {
   const vendor = await loadVendorForDecision(vendorId)
   const ctx = decisionContext(vendor, actor, reasonIn)
   // An override always carries its reason (required above); otherwise only a reject needs one.
@@ -170,16 +176,18 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
   if (vendor.status !== VendorStatus.PENDING) throw alreadyDecided()
   const owner = vendor.vendorMembers[0] ?? null
   const boothNumber = cleanBooth(opts.boothNumber)
+  const readmit = decision === 'approve' && !!opts.readmitOwner && owner?.approvalStatus === 'REJECTED'
 
   if (decision === 'approve') {
     await assertReadyToApprove(vendor, boothNumber)
-    if (owner?.approvalStatus === 'REJECTED') {
+    if (owner?.approvalStatus === 'REJECTED' && !readmit) {
       throw new ApiError('The owner was rejected separately; resolve that on Booth Operators first.', 409, 'OWNER_REJECTED')
     }
   }
 
   const memberApprover = await memberApproverId(actor)
   const ownerPending = owner?.approvalStatus === 'PENDING'
+  const ownerChanges = !!owner && (ownerPending || readmit)
   const actorName = await recordedActorName(actor)
 
   await db.$transaction(async tx => {
@@ -191,9 +199,9 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
       },
     })
     if (flip.count === 0) throw alreadyDecided()
-    if (owner && ownerPending) {
+    if (owner && ownerChanges) {
       await tx.vendorMember.updateMany({
-        where: { id: owner.id, approvalStatus: 'PENDING' },
+        where: { id: owner.id, approvalStatus: owner.approvalStatus },
         data: decision === 'approve'
           ? { approvalStatus: 'APPROVED', approvedAt: new Date(), approvedBy: memberApprover, rejectionReason: null }
           : { approvalStatus: 'REJECTED', rejectionReason: reason },
@@ -203,13 +211,16 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
       data: {
         action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'vendor', applicationId: vendorId,
         actorId: actor.clerkId, actorType: actor.actorType, actorName, reason,
-        detail: { ownerMemberId: owner?.id ?? null, ownerBefore: owner?.approvalStatus ?? null, ownerChanged: !!(owner && ownerPending), ...ctx.detail },
+        detail: {
+          ownerMemberId: owner?.id ?? null, ownerBefore: owner?.approvalStatus ?? null, ownerChanged: ownerChanges,
+          ...(opts.via && { via: opts.via }), ...ctx.detail,
+        },
       },
       select: { id: true },
     })
     await queueVendorDecisionMail(tx, vendor, { decision, actor, actorName, ctx, reason, actionId: action.id, laterDecision: false })
   })
-  return { id: vendorId, status: decision === 'approve' ? VendorStatus.ACTIVE : VendorStatus.REJECTED, ownerChanged: !!(owner && ownerPending) }
+  return { id: vendorId, status: decision === 'approve' ? VendorStatus.ACTIVE : VendorStatus.REJECTED, ownerChanged: ownerChanges }
 }
 
 /**
