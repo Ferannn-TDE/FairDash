@@ -8,6 +8,10 @@
  *       unknown and missing keys all count as LIVE (fails closed)
  *   [2] the switch: strict admins only; logged (DEMO_ON / DEMO_OFF, name, role) in the same
  *       transaction; same value again → no change, no log; bad body 400; unknown vendor 404
+ *  [2c] leaving demo (F3, Nov 17): a booth that is not PENDING is asked fresh about Stripe payouts;
+ *       not ready / unreachable → refused and NOTHING changes; a change during the Stripe call is
+ *       refused; ready → switched, recorded "Stripe checked"; PENDING and demo ON unchanged;
+ *       F13: every demo switch expires its caches at once ({ expire: 0 })
  *   [3] nobody else can set it: organizer PATCH, the vendor's own PATCH; source: one writer
  *   [4] approval: a demo booth needs no Stripe (not asked); documents, menu and booth still
  *       required; an organizer can lift a demo booth's pause without payouts; non-demo controls
@@ -93,6 +97,11 @@ const PM: Who = { id: `${PFX}pm`, roles: ['platform_manager'] }
 const EVOP: Who = { id: `${PFX}evop`, roles: ['event_operator'] }
 
 let stripeStatusCalls = 0
+const askedAccounts: string[] = []
+const payoutsStub = new Map<string, { readyToReceivePayments: boolean; payoutsEnabled: boolean } | Error>()
+let duringCheck: ((acct: string) => Promise<void>) | null = null
+// The route's cache calls (scripts/_route-loader.mjs answers `next/cache` with this same module).
+const cacheCalls = () => (nextCacheMock as unknown as { revalidatedWith: { tag: string; profile: unknown }[] }).revalidatedWith
 
 async function cleanup() {
   const evs = await prisma.event.findMany({ where: { urlSlug: { startsWith: PFX } }, select: { id: true } })
@@ -140,7 +149,16 @@ async function main() {
 
   // ── fixtures ────────────────────────────────────────────────────────────────────────────
   const payouts = await import('../lib/vendor-payouts-check')
-  payouts.__setStripePayoutsStatusForTest(async () => { stripeStatusCalls++; return { readyToReceivePayments: true, payoutsEnabled: true } })
+  // Per account: a status, or an Error to throw. Unset → ready. `duringCheck` runs while Stripe is
+  // "being asked", so [2c] can change the booth in that gap (the race the route guards against).
+  payouts.__setStripePayoutsStatusForTest(async (acct: string) => {
+    stripeStatusCalls++
+    askedAccounts.push(acct)
+    if (duringCheck) await duringCheck(acct)
+    const a = payoutsStub.get(acct) ?? { readyToReceivePayments: true, payoutsEnabled: true }
+    if (a instanceof Error) throw a
+    return a
+  })
   const rl = await import('../lib/ratelimit')
   const allowAll = { limit: async () => ({ success: true, limit: 999, remaining: 999, reset: Date.now() + 3600e3 }) }
   rl.__setStateForTest({ type: 'ready', limiters: new Proxy({}, { get: () => allowAll }) as never })
@@ -186,7 +204,9 @@ async function main() {
   console.log('\n[2] The demo switch: strict admins only, logged')
   const demoRoute = (await import('../app/api/admin/vendors/[id]/demo/route')).PATCH
   const setDemo = (who: Who | null, id: string, body: unknown) => { login(who); return call(demoRoute(req(`/api/admin/vendors/${id}/demo`, 'PATCH', body), { params: Promise.resolve({ id }) })) }
-  const sw = await mkVendor({ eventId: liveFair.id })
+  // A linked account (the stub answers "ready"): since F3, switching an ACTIVE booth out of demo
+  // asks Stripe, and a booth with no account is refused ([2c] covers that).
+  const sw = await mkVendor({ eventId: liveFair.id, account: `acct_${PFX}${rand()}` })
   const on = await setDemo(SUPER, sw.vendor.id, { demo: true })
   const logs1 = await prisma.approvalAction.findMany({ where: { applicationId: sw.vendor.id } })
   assert(on.status === 200 && on.data?.changed === true && await isDemoOf(sw.vendor.id) === true, `super_admin → demo on (got ${on.status})`)
@@ -214,6 +234,89 @@ async function main() {
   assert(anon.status === 401 && await isDemoOf(sw.vendor.id) === false, `signed out → 401 (got ${anon.status})`)
   const unknown = await setDemo(SUPER, 'no-such-vendor', { demo: true })
   assert(unknown.status === 404, `unknown vendor → 404 (got ${unknown.status})`)
+
+  // ── [2c] leaving demo re-checks payouts (review F3, F13) ────────────────────────────────
+  console.log('\n[2c] Demo off on a booth that is not PENDING asks Stripe fresh; refused → nothing changes')
+  // Its own fair, so these booths never count in the reader checks on liveFair ([6]).
+  const offFair = await prisma.event.create({ data: { name: `${PFX}Off Fair`, urlSlug: `${PFX}off-${rand()}`, status: EventStatus.ACTIVE, startDate: new Date(now - 864e5), endDate: new Date(now + 864e5) } })
+  const FIVE_TAGS = (slug: string, id: string) => ['vendors', 'fair', 'vendor-menu', `vendor-${id}`, `event-menu-${slug}`].sort()
+  const offLogs = (id: string) => prisma.approvalAction.count({ where: { applicationId: id, action: 'DEMO_OFF' } })
+  const statusOf = async (id: string) => (await prisma.vendor.findUniqueOrThrow({ where: { id }, select: { status: true } })).status
+  /** A refused DEMO_OFF: still demo, same status, no DEMO_OFF row, no cache busted. */
+  const refusedOff = async (label: string, x: { vendor: { id: string; name: string; status: VendorStatus } }, want: { status: number; code: string }) => {
+    const cacheBefore = cacheCalls().length
+    const r = await setDemo(ADMIN, x.vendor.id, { demo: false })
+    assert(r.status === want.status && r.code === want.code && !!r.message?.includes('Nothing was changed')
+      && (want.status !== 409 || want.code === 'ALREADY_CHANGED' || !!r.message?.includes(x.vendor.name)),
+    `${label} → ${want.status} ${want.code}, message names the booth and says nothing changed (got ${r.status} ${r.code}: ${r.message})`)
+    assert(await isDemoOf(x.vendor.id) === true && await statusOf(x.vendor.id) === x.vendor.status && await offLogs(x.vendor.id) === 0
+      && cacheCalls().length === cacheBefore,
+    '…and nothing changed: still a demo booth, same status, no DEMO_OFF record, no cache busted')
+  }
+  const mkDemoBooth = (status: VendorStatus, account: string | null) => mkVendor({ eventId: offFair.id, status, isDemo: true, account })
+
+  await refusedOff('ACTIVE demo booth, no Stripe account', await mkDemoBooth(VendorStatus.ACTIVE, null), { status: 409, code: 'VENDOR_STRIPE_NOT_LINKED' })
+  const npAcct = `acct_${PFX}np-${rand()}`
+  payoutsStub.set(npAcct, { readyToReceivePayments: true, payoutsEnabled: false })
+  await refusedOff('ACTIVE demo booth, payouts not enabled', await mkDemoBooth(VendorStatus.ACTIVE, npAcct), { status: 409, code: 'VENDOR_PAYOUTS_NOT_ENABLED' })
+  const downAcct = `acct_${PFX}down-${rand()}`
+  payoutsStub.set(downAcct, new Error('stripe down (stub)'))
+  await refusedOff('ACTIVE demo booth, Stripe unreachable', await mkDemoBooth(VendorStatus.ACTIVE, downAcct), { status: 503, code: 'STRIPE_CHECK_FAILED' })
+  for (const st of [VendorStatus.PAUSED, VendorStatus.SUSPENDED, VendorStatus.REJECTED]) {
+    await refusedOff(`${st} demo booth, no Stripe account`, await mkDemoBooth(st, null), { status: 409, code: 'VENDOR_STRIPE_NOT_LINKED' })
+  }
+
+  // The race: the booth changes WHILE Stripe is being asked → the flip is refused, not let through.
+  for (const [label, change] of [
+    ['its Stripe account is swapped', { stripeAccountId: `acct_${PFX}other-${rand()}` }],
+    ['it is paused', { status: VendorStatus.PAUSED }],
+  ] as const) {
+    const rc = await mkDemoBooth(VendorStatus.ACTIVE, `acct_${PFX}race-${rand()}`)
+    duringCheck = async () => { await prisma.vendor.update({ where: { id: rc.vendor.id }, data: change }) }
+    const r = await setDemo(ADMIN, rc.vendor.id, { demo: false })
+    duringCheck = null
+    assert(r.status === 409 && r.code === 'ALREADY_CHANGED' && await isDemoOf(rc.vendor.id) === true && await offLogs(rc.vendor.id) === 0,
+      `race: ${label} while Stripe is asked → 409 ALREADY_CHANGED, still a demo booth, no DEMO_OFF record (got ${r.status} ${r.code})`)
+  }
+
+  // Ready → switched; Stripe asked once, for THIS booth; recorded with "Stripe checked"; cache expired at once.
+  const ready = await mkDemoBooth(VendorStatus.ACTIVE, `acct_${PFX}ok-${rand()}`)
+  const askedBefore = askedAccounts.length
+  const cacheBeforeOk = cacheCalls().length
+  const okOff = await setDemo(ADMIN, ready.vendor.id, { demo: false })
+  const okRow = await prisma.approvalAction.findFirst({ where: { applicationId: ready.vendor.id, action: 'DEMO_OFF' } })
+  const okDetail = okRow?.detail as { stripeChecked?: unknown; status?: unknown } | null
+  assert(okOff.status === 200 && await isDemoOf(ready.vendor.id) === false && await statusOf(ready.vendor.id) === 'ACTIVE',
+    `ACTIVE demo booth, payouts ready → 200, no longer demo, still ACTIVE (never sent back to PENDING) (got ${okOff.status} ${okOff.code ?? ''})`)
+  assert(JSON.stringify(askedAccounts.slice(askedBefore)) === JSON.stringify([ready.vendor.stripeAccountId]),
+    `Stripe was asked exactly once, for THIS booth's account (got ${JSON.stringify(askedAccounts.slice(askedBefore))})`)
+  assert(okRow?.actorName === 'Avery Admin' && okRow.actorType === 'admin' && okDetail?.stripeChecked === true && okDetail?.status === 'ACTIVE',
+    `the DEMO_OFF record says who (name, role) and "Stripe checked" (got ${okRow?.actorName}/${okRow?.actorType}/${JSON.stringify(okRow?.detail)})`)
+  const okCache = cacheCalls().slice(cacheBeforeOk)
+  assert(JSON.stringify(okCache.map(c => c.tag).sort()) === JSON.stringify(FIVE_TAGS(offFair.urlSlug, ready.vendor.id))
+    && okCache.every(c => JSON.stringify(c.profile) === JSON.stringify({ expire: 0 })),
+  `F13: demo off expires the 5 caches at once ({ expire: 0 }), none merely marked stale (got ${JSON.stringify(okCache)})`)
+
+  // PENDING: unchanged behaviour (approval will ask), plus the record says Stripe was NOT checked here.
+  const pend = await mkVendor({ eventId: offFair.id, status: VendorStatus.PENDING, isDemo: true, account: null })
+  const askedBeforeP = askedAccounts.length
+  const pOff = await setDemo(ADMIN, pend.vendor.id, { demo: false })
+  const pRow = await prisma.approvalAction.findFirst({ where: { applicationId: pend.vendor.id, action: 'DEMO_OFF' } })
+  assert(pOff.status === 200 && await isDemoOf(pend.vendor.id) === false && askedAccounts.length === askedBeforeP
+    && (pRow?.detail as { stripeChecked?: unknown } | null)?.stripeChecked === false,
+  `PENDING demo booth, no account → 200, Stripe NOT asked (approval will), recorded as not checked (got ${pOff.status}, ${JSON.stringify(pRow?.detail)})`)
+
+  // DEMO_ON: unchanged — no Stripe question, even with no account; caches expired at once too.
+  const onB = await mkVendor({ eventId: offFair.id, status: VendorStatus.ACTIVE, account: null })
+  const askedBeforeOn = askedAccounts.length
+  const cacheBeforeOn = cacheCalls().length
+  const onR = await setDemo(ADMIN, onB.vendor.id, { demo: true })
+  const onCache = cacheCalls().slice(cacheBeforeOn)
+  assert(onR.status === 200 && await isDemoOf(onB.vendor.id) === true && askedAccounts.length === askedBeforeOn,
+    `[0] control: demo ON for an ACTIVE booth with no account → 200, Stripe not asked (got ${onR.status})`)
+  assert(JSON.stringify(onCache.map(c => c.tag).sort()) === JSON.stringify(FIVE_TAGS(offFair.urlSlug, onB.vendor.id))
+    && onCache.every(c => JSON.stringify(c.profile) === JSON.stringify({ expire: 0 })),
+  `F13: demo on expires the 5 caches at once ({ expire: 0 }) (got ${JSON.stringify(onCache)})`)
 
   // ── [3] nobody else can set it ──────────────────────────────────────────────────────────
   console.log('\n[3] Nobody else can set it')

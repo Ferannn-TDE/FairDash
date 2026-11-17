@@ -11,9 +11,15 @@
 //
 // Every customer reader spreads demoHiddenWhere() into its vendor `where` (lists and counts) or
 // asks demoVendorHidden() (single-vendor routes). scripts/demo-vendor-test.ts pins each reader.
+//
+// LEAVING DEMO (Jordan, Nov 17; review F3). Because approval skipped Stripe, switching demo OFF on a
+// booth that is not PENDING asks Stripe fresh, as approval would (lib/vendor-payouts-check.ts):
+// not ready → 409 and nothing changes (the booth stays a hidden demo); Stripe unreachable → 503.
+// A PENDING booth switches freely: its approval will ask. The booth is never sent back to PENDING.
 
 import type { Prisma } from '@prisma/client'
 import { stripeLiveMode } from './stripe-mode'
+import type { PayoutsRefusalCode } from './vendor-payouts-check'
 
 /** The vendor `where` fragment for customer readers: demo booths left out when live. */
 export function demoHiddenWhere(): Prisma.VendorWhereInput {
@@ -27,3 +33,10 @@ export function demoVendorHidden(vendor: { isDemo: boolean }): boolean {
 
 export const VENDOR_DEMO_CODE = 'VENDOR_DEMO'
 export const demoRefusalMessage = (name: string) => `${name} is a demo booth and can't take real orders.`
+
+/** Why a booth can't leave demo yet (the payouts check refused). Same codes as approval. */
+export function demoOffRefusalMessage(name: string, code: PayoutsRefusalCode): string {
+  return code === 'VENDOR_STRIPE_NOT_LINKED'
+    ? `${name} stays a demo booth: they haven't linked a Stripe account for payouts. Nothing was changed. Ask them to finish "Connect payouts" in their vendor settings.`
+    : `${name} stays a demo booth: Stripe hasn't enabled payouts on their account yet. Nothing was changed.`
+}
