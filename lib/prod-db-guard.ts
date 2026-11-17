@@ -114,6 +114,34 @@ export function decideQueueAccess(
   }
 }
 
+/**
+ * PURE — may this process use this Redis (an ioredis URL or an Upstash REST address)? The same
+ * rule as the queue: a local process gets a local host only, unless CONFIRM_PROD_DB is set;
+ * deployed runtimes are exempt (a build runs with NODE_ENV=production, and VERCEL counts too).
+ *
+ * WHY (found Nov 16): the health check / sweep heartbeat (lib/health.ts), the rate limiter
+ * (lib/ratelimit.ts) and the vendor auth cache (lib/redis.ts) had no guard, so a local process
+ * whose .env.local named a remote Redis wrote heartbeats and rate-limit counters there. Each
+ * caller asks this on FIRST USE of its client, never at import, and a refusal takes the same
+ * "no client" path as an unset variable. The reason names the HOST only — never the URL, user,
+ * password or token.
+ */
+export function decideRedisAccess(
+  env: Record<string, string | undefined>,
+  url: string | undefined,
+  what: string,
+): Decision {
+  if (isDeployedRuntime(env) || !url || isLocalHost(url)) return { allowed: true }
+  if (env.CONFIRM_PROD_DB) return { allowed: true }
+  return {
+    allowed: false,
+    reason:
+      `this local process has a REMOTE ${what} (host ${parse(url)?.hostname ?? '?'}).\n` +
+      `  Local processes use the Docker dev or test stack (npm run dev:db:up / npm run test:db:up),\n` +
+      `  or set CONFIRM_PROD_DB for a deliberate operation.`,
+  }
+}
+
 /** Throws ProdDbAccessRefused unless the database URLs are allowed for this process. */
 export function assertNotProductionDatabase(
   label: string,

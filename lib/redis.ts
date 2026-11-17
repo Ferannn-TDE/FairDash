@@ -7,6 +7,7 @@
  */
 
 import { Redis } from '@upstash/redis'
+import { decideRedisAccess } from './prod-db-guard'
 
 const globalForRedis = globalThis as unknown as { __redis: Redis | null | undefined }
 
@@ -14,6 +15,15 @@ function buildRedis(): Redis | null {
   const url   = process.env.UPSTASH_REDIS_REST_URL
   const token = process.env.UPSTASH_REDIS_REST_TOKEN
   if (!url || !token) return null
+  // A local process never uses a REMOTE cache: the same rule as the job queue
+  // (lib/prod-db-guard.ts), asked here on first use, never at import. Refused = null, the same
+  // as no settings (callers degrade: lib/vendor-auth-cache.ts reads the database instead).
+  // Deployed runtimes are exempt, so production is unchanged.
+  const access = decideRedisAccess(process.env, url, 'vendor auth cache (UPSTASH_REDIS_REST_URL)')
+  if (!access.allowed) {
+    console.error(`[Redis] 🛑 REFUSING: ${access.reason}`)
+    return null
+  }
   try {
     return new Redis({ url, token })
   } catch {

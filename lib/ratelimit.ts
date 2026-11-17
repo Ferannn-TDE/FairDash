@@ -1,5 +1,6 @@
 import { Ratelimit } from '@upstash/ratelimit'
 import { Redis } from '@upstash/redis'
+import { decideRedisAccess } from './prod-db-guard'
 
 // ─── Centralized policies ─────────────────────────────────────────────────────
 
@@ -59,6 +60,16 @@ async function initRatelimit(): Promise<RateLimitState> {
       )
     }
     console.warn('[Ratelimit] Redis not configured — rate limiting disabled')
+    return { type: 'disabled' }
+  }
+
+  // A local process never counts into a REMOTE rate limiter: the same rule as the job queue
+  // (lib/prod-db-guard.ts), asked here on first use, never at import. Refused = the same
+  // 'disabled' state as no settings (failClosed routes refuse locally, as they already do with no
+  // limiter). Deployed runtimes are exempt, so production is unchanged.
+  const access = decideRedisAccess(process.env, url, 'rate limiter (UPSTASH_REDIS_REST_URL)')
+  if (!access.allowed) {
+    console.error(`[Ratelimit] 🛑 REFUSING: ${access.reason}`)
     return { type: 'disabled' }
   }
 
