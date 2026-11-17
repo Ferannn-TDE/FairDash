@@ -23,7 +23,7 @@
 import { readFileSync } from 'node:fs'
 import { stripComments } from './_strip-comments'
 
-process.env.UPSTASH_REDIS_REST_URL = process.env.TEST_UPSTASH_URL ?? 'http://localhost:58080'
+process.env.UPSTASH_REDIS_REST_URL = process.env.TEST_UPSTASH_URL ?? 'http://127.0.0.1:58080'
 process.env.UPSTASH_REDIS_REST_TOKEN = 'fairsynq-test-token'
 delete process.env.RATE_LIMIT_TEST
 

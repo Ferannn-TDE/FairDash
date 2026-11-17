@@ -35,7 +35,7 @@ console.log('\n════ TEST-ISOLATION GUARD ════')
 // ── [0] the resolver refuses every way back to production ────────────────────
 console.log('\n[0] POSITIVE CONTROLS: the resolver REFUSES, it does not fall back')
 const PROD = 'postgresql://u:p@aws-1-us-east-1.pooler.supabase.com:6543/postgres'
-const TEST = 'postgresql://fairsynq:fairsynq@localhost:55432/fairsynq_test'
+const TEST = 'postgresql://fairsynq:fairsynq@127.0.0.1:55432/fairsynq_test' // the wrapper's default (127.0.0.1, see with-test-db.sh)
 
 assert(refuses({ DATABASE_URL: PROD }),
   'TEST_DATABASE_URL unset → THROWS (never silently uses DATABASE_URL — the whole point)')

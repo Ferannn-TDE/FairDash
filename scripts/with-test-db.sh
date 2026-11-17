@@ -23,7 +23,10 @@
 
 set -euo pipefail
 
-TEST_DB="${TEST_DATABASE_URL_OVERRIDE:-postgresql://fairsynq:fairsynq@localhost:55432/fairsynq_test}"
+# 127.0.0.1, not localhost (2026-11-17): with "localhost", a burst of new Prisma connections lost one
+# about once in 50 bursts (never reached Postgres; P1001 after the 5s connect timeout) — the approvals
+# suite flake. With 127.0.0.1: 0 in 1,000 bursts.
+TEST_DB="${TEST_DATABASE_URL_OVERRIDE:-postgresql://fairsynq:fairsynq@127.0.0.1:55432/fairsynq_test}"
 
 host="$(printf '%s' "$TEST_DB" | sed -E 's#^[^:]+://([^@]*@)?([^:/]+).*#\2#')"
 case "$host" in
