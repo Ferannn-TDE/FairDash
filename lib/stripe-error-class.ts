@@ -113,6 +113,21 @@ const TRANSIENT_TYPES: Record<string, string> = {
   StripeAPIError: "Stripe-side error; Stripe's own guidance is to retry",
 }
 
+/**
+ * IS THIS A STRIPE ERROR AT ALL? — the one identity rule, shared by every reader in this file.
+ *
+ * REQUIRE A STRIPE IDENTITY, not merely "some recognised field". An earlier version of the
+ * classifier's gate accepted any error carrying a `code`, and its own test caught the consequence:
+ * a NON-Stripe error with `code: 'resource_missing'` classified as TERMINAL. `code` is a wildly
+ * common property — Prisma uses it (`P2002`), Node uses it (`ECONNRESET`) — so a collision is
+ * not hypothetical, and the failure is in the expensive direction. `type` is the only
+ * non-optional field on StripeError and every subclass sets it to a 'Stripe…' literal, so it
+ * is the identity; rawType is accepted as the alternative for a raw-payload-constructed error.
+ */
+function hasStripeIdentity(type: string | undefined, rawType: string | undefined): boolean {
+  return (type != null && type.startsWith('Stripe')) || rawType != null
+}
+
 const v = (
   c: StripeFailureClass,
   reason: string,
@@ -138,17 +153,8 @@ export function classifyStripeError(err: unknown): StripeFailureVerdict {
   const f = { type, code, statusCode, param }
 
   // A non-Stripe error (a Prisma failure, a TypeError) must NEVER be called terminal — that
-  // would stop retrying a payout because of an unrelated bug.
-  //
-  // REQUIRE A STRIPE IDENTITY, not merely "some recognised field". An earlier version of this
-  // gate accepted any error carrying a `code`, and its own test caught the consequence: a
-  // NON-Stripe error with `code: 'resource_missing'` classified as TERMINAL. `code` is a wildly
-  // common property — Prisma uses it (`P2002`), Node uses it (`ECONNRESET`) — so a collision is
-  // not hypothetical, and the failure is in the expensive direction. `type` is the only
-  // non-optional field on StripeError and every subclass sets it to a 'Stripe…' literal, so it
-  // is the identity; rawType is accepted as the alternative for a raw-payload-constructed error.
-  const looksStripe = (type != null && type.startsWith('Stripe')) || rawType != null
-  if (!looksStripe) {
+  // would stop retrying a payout because of an unrelated bug. Identity rule: hasStripeIdentity.
+  if (!hasStripeIdentity(type, rawType)) {
     return v('unknown', 'no Stripe error identity (type/rawType absent) — not a Stripe error, retries preserved', f)
   }
 
@@ -186,3 +192,25 @@ export function classifyStripeError(err: unknown): StripeFailureVerdict {
  * NOTE `unknown` is deliberately NOT terminal: an unrecognised failure keeps its retries.
  */
 export const isTerminalStripeError = (err: unknown): boolean => classifyStripeError(err).class === 'terminal'
+
+/**
+ * DID STRIPE SAY "THAT OBJECT DOES NOT EXIST"? — for a READ of one object (e.g. the vendor
+ * payouts check asking for a connected account), where "not found" is an ANSWER, not a failure.
+ *
+ * True only for a real Stripe error (same identity rule as the classifier) that is either
+ *   • code `resource_missing` (v1 shape: 400 or 404), or
+ *   • HTTP 404 with any or no code (the v2 accounts API reaches here through the SDK's v1
+ *     factory, and its "not found" code is not guaranteed to be `resource_missing`).
+ * Anything else — auth, permission, rate limit, 5xx, network, and EVERY non-Stripe error even if
+ * it carries `code: 'resource_missing'` or `statusCode: 404` — is false, so the caller fails
+ * closed. Deliberately separate from `classifyStripeError`: "terminal" answers a retry question
+ * (a 404 with no code is `unknown` there), this answers an existence question.
+ */
+export function isMissingStripeObject(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { type?: unknown; rawType?: unknown; code?: unknown; statusCode?: unknown }
+  const type = typeof e.type === 'string' ? e.type : undefined
+  const rawType = typeof e.rawType === 'string' ? e.rawType : undefined
+  if (!hasStripeIdentity(type, rawType)) return false
+  return e.code === 'resource_missing' || e.statusCode === 404
+}

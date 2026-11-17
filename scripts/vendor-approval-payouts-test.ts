@@ -6,6 +6,8 @@
  *       staff as "FairSynq"; vendors: never a person) and the recorded-name fallbacks
  *   [2] Every FairSynq approval door refuses without a linked account / with payouts not enabled /
  *       when Stripe can't be asked, and changes NOTHING when it refuses
+ *  [2b] What each thrown Stripe read answers: only a REAL Stripe "not found" is 409 not linked;
+ *       every other error, and every non-Stripe error, is 503 and changes nothing
  *   [3] Stripe is asked fresh: a stale stored flag neither blocks nor allows; the stored flag
  *       catches up; the vendor's own account is the one asked
  *   [4] Every decision records the reviewer's name, role and time with its email, in ONE
@@ -27,6 +29,7 @@ register('./_route-loader.mjs', import.meta.url)
 
 import { readFileSync } from 'node:fs'
 import { NextRequest } from 'next/server'
+import Stripe from 'stripe'
 import { EventStatus, VendorStatus } from '@prisma/client'
 
 const prisma = testPrisma()
@@ -69,9 +72,15 @@ const SUPER: Who = { id: `${PFX}super`, roles: ['super_admin'], fullName: 'Sam S
 const NONAME: Who = { id: `${PFX}noname`, roles: ['admin'] }
 
 // ── Stripe stub ─────────────────────────────────────────────────────────────────────────────
-type StubAnswer = { readyToReceivePayments: boolean; payoutsEnabled: boolean } | 'throw' | 'missing'
+// An Error answer is thrown as is, so a check can hand the stub a REAL Stripe SDK error.
+type StubAnswer = { readyToReceivePayments: boolean; payoutsEnabled: boolean } | 'throw' | 'missing' | Error
 const stub = new Map<string, StubAnswer>()
 const asked: string[] = []
+
+// REAL Stripe SDK errors (the same method as scripts/stripe-error-class-guard.ts): built with the
+// SDK's own classes from raw payloads in Stripe's shape, never a hand-made { code } object.
+const STRIPE_ERRORS = (Stripe as unknown as { errors: Record<string, new (raw: Record<string, unknown>) => Error> }).errors
+const stripeErr = (cls: string, raw: Record<string, unknown>) => new STRIPE_ERRORS[cls](raw)
 
 async function dropTrigger() {
   await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS vap_fail_audit ON "ApprovalAction"`)
@@ -128,8 +137,11 @@ async function main() {
   payouts.__setStripePayoutsStatusForTest(async (acct: string) => {
     asked.push(acct)
     const a = stub.get(acct) ?? { readyToReceivePayments: true, payoutsEnabled: true }
+    if (a instanceof Error) throw a
     if (a === 'throw') throw new Error('stripe down (stub)')
-    if (a === 'missing') throw Object.assign(new Error('No such account (stub)'), { code: 'resource_missing', statusCode: 404 })
+    if (a === 'missing') {
+      throw stripeErr('StripeInvalidRequestError', { message: 'No such account (stub)', type: 'invalid_request_error', code: 'resource_missing', statusCode: 404 })
+    }
     return a
   })
 
@@ -219,6 +231,44 @@ async function main() {
     const r6 = await door.approve(ok.vendor.id)
     assert(r6.status === 200 && (await snapshot(ok.vendor.id, ok.ownerId)) === 'ACTIVE|APPROVED|1|1',
       `[0] control: linked, transfers + payouts active → approved: booth ACTIVE, owner APPROVED, one audit row, one email (got ${r6.status} ${await snapshot(ok.vendor.id, ok.ownerId)})`)
+  }
+
+  // ── [2b] how a thrown Stripe read is answered ───────────────────────────────────────────
+  // The mapping lives in ONE function (isMissingStripeObject, lib/stripe-error-class.ts), and [6]
+  // proves every door goes through assertReadyToApprove, so one door covers it. Only a REAL Stripe
+  // "not found" means "not linked"; everything else fails closed with 503 and changes nothing.
+  console.log('\n[2b] What an approval answers when the Stripe read throws (approvals page as admin)')
+  const NOT_LINKED = { status: 409, code: 'VENDOR_STRIPE_NOT_LINKED' } as const
+  const CHECK_FAILED = { status: 503, code: 'STRIPE_CHECK_FAILED' } as const
+  const THROWN: [string, Error, typeof NOT_LINKED | typeof CHECK_FAILED][] = [
+    ['real Stripe error, resource_missing, HTTP 400 (v1 shape)',
+      stripeErr('StripeInvalidRequestError', { message: 'No such account (stub)', type: 'invalid_request_error', code: 'resource_missing', statusCode: 400 }), NOT_LINKED],
+    ['real Stripe error, HTTP 404, no code',
+      stripeErr('StripeInvalidRequestError', { message: 'Not found (stub)', type: 'invalid_request_error', statusCode: 404 }), NOT_LINKED],
+    ['real Stripe error, HTTP 404, another code',
+      stripeErr('StripeInvalidRequestError', { message: 'Not found (stub)', type: 'invalid_request_error', code: 'not_found', statusCode: 404 }), NOT_LINKED],
+    ['real Stripe authentication error (401)',
+      stripeErr('StripeAuthenticationError', { message: 'bad key (stub)', type: 'authentication_error', statusCode: 401 }), CHECK_FAILED],
+    ['real Stripe permission error (403)',
+      stripeErr('StripePermissionError', { message: 'not permitted (stub)', type: 'invalid_request_error', statusCode: 403 }), CHECK_FAILED],
+    ['real Stripe rate limit (429)',
+      stripeErr('StripeRateLimitError', { message: 'too many requests (stub)', type: 'rate_limit_error', statusCode: 429 }), CHECK_FAILED],
+    ['real Stripe 5xx',
+      stripeErr('StripeAPIError', { message: 'server error (stub)', type: 'api_error', statusCode: 500 }), CHECK_FAILED],
+    ['real Stripe network error (no status)',
+      stripeErr('StripeConnectionError', { message: 'socket hang up (stub)' }), CHECK_FAILED],
+    ['NON-Stripe error carrying code resource_missing',
+      Object.assign(new Error('not Stripe (stub)'), { code: 'resource_missing' }), CHECK_FAILED],
+    ['NON-Stripe error carrying resource_missing AND 404 (the old hand-made stub)',
+      Object.assign(new Error('not Stripe (stub)'), { code: 'resource_missing', statusCode: 404 }), CHECK_FAILED],
+  ]
+  for (const [label, thrown, want] of THROWN) {
+    const t = await mkVendor()
+    stub.set(t.account!, thrown)
+    const r = await DOORS[1].approve(t.vendor.id)
+    const msgOk = want === CHECK_FAILED ? !!r.message?.includes('Nothing was changed') : !!r.message?.includes(t.vendor.name)
+    assert(r.status === want.status && r.code === want.code && msgOk, `${label} → ${want.status} ${want.code} (got ${r.status} ${r.code})`)
+    assert(await snapshot(t.vendor.id, t.ownerId) === UNCHANGED, '…and nothing changed')
   }
 
   // ── [3] asked fresh ─────────────────────────────────────────────────────────────────────

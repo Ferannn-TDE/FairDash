@@ -8,8 +8,10 @@
 //   demo booth (Vendor.isDemo)           → ok, Stripe not asked (lib/demo-vendor.ts)
 //   no stripeAccountId                   → refused, VENDOR_STRIPE_NOT_LINKED
 //   Stripe can't find that account       → refused, VENDOR_STRIPE_NOT_LINKED
+//     (a real Stripe error saying "not found": isMissingStripeObject in lib/stripe-error-class.ts,
+//      the one place that reads Stripe errors; a non-Stripe error never counts, it fails closed)
 //   transfers or payouts not active      → refused, VENDOR_PAYOUTS_NOT_ENABLED
-//   Stripe unreachable / not configured  → 503 STRIPE_CHECK_FAILED, nothing changes (fails closed)
+//   Stripe unreachable / not configured / any other error → 503 STRIPE_CHECK_FAILED, nothing changes (fails closed)
 //   both active                          → ok
 //
 // The fresh result is also handed to applyConnectStatus (the ONE writer of stripeVerified), so
@@ -21,6 +23,7 @@ import { ApiError } from './api-error'
 import { getConnectStatus } from './stripe-connect'
 import { applyConnectStatus } from './connect-status'
 import { logger } from './logger'
+import { isMissingStripeObject } from './stripe-error-class'
 
 export interface PayoutsStatus { readyToReceivePayments: boolean; payoutsEnabled: boolean }
 type GetStatus = (accountId: string) => Promise<PayoutsStatus>
@@ -40,11 +43,6 @@ export const notEnabledMessage = (name: string) =>
   `${name} can't be approved yet: Stripe hasn't enabled payouts on their account. They need to finish Stripe's setup (Connect payouts).`
 export const STRIPE_CHECK_FAILED_MESSAGE = "Couldn't check Stripe just now. Nothing was changed; try again."
 
-function isMissingAccount(err: unknown): boolean {
-  const e = err as { code?: unknown; statusCode?: unknown } | null
-  return e?.code === 'resource_missing' || e?.statusCode === 404
-}
-
 /**
  * Is this vendor's Stripe account linked with payouts enabled? Returns a refusal (409 material)
  * or ok; THROWS 503 STRIPE_CHECK_FAILED when Stripe can't be asked.
@@ -60,7 +58,7 @@ export async function checkVendorPayouts(vendor: PayoutsVendor): Promise<Payouts
   try {
     status = _testGetStatus ? await _testGetStatus(accountId) : await getConnectStatus(accountId)
   } catch (err) {
-    if (isMissingAccount(err)) {
+    if (isMissingStripeObject(err)) {
       logger.warn('[VendorPayoutsCheck] Stripe account on file not found', { vendorId: vendor.id })
       return { ok: false, code: 'VENDOR_STRIPE_NOT_LINKED', message: notLinkedMessage(vendor.name) }
     }
