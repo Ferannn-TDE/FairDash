@@ -31,6 +31,22 @@ let pass = 0, fail = 0
 const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  ✅ ${label}`) } else { fail++; console.log(`  ❌ ${label}`) } }
 const run = Math.random().toString(36).slice(2, 8)
 
+// WINDOW BOUNDARIES (2026-11-17). Upstash's slidingWindow keeps one counter per fixed window, aligned
+// to the clock, and estimates "the last window" as the current counter plus a weighted share of the
+// previous one. A burst that straddles a boundary is under-counted, so request n+1 can be allowed:
+// the 600-request publicAnonymous loop (~1-1.5 s) did that in ~2% of runs, and every time when started
+// 1 s before a minute boundary. So each burst starts with at least `needMs` left in its window.
+const WINDOW_MS: Record<string, number> = { '2 s': 2_000, '1 m': 60_000, '1 h': 3_600_000 }
+async function clearOfBoundary(window: string, needMs: number) {
+  const ms = WINDOW_MS[window]
+  if (!ms) throw new Error(`clearOfBoundary: unknown window ${window}`)
+  const left = ms - (Date.now() % ms)
+  if (left < needMs) {
+    console.log(`     (waiting ${left} ms for the ${window} window boundary, so the burst does not straddle it)`)
+    await new Promise(r => setTimeout(r, left + 50))
+  }
+}
+
 // THE EXPECTED TABLE — hard-coded, not read from RATE_LIMITS, so a changed number fails here.
 const EXPECTED: Record<string, number> = {
   vendorStatus: 120,
@@ -57,6 +73,7 @@ async function main() {
   assert(up, 'local Upstash proxy answers PING (npm run test:db:up starts it)')
   if (!up) { console.log(`\n❌ rate-limit: ${pass} passed, ${fail + 1} failed`); process.exit(1) }
   const ctl = []
+  await clearOfBoundary(rl.RATE_LIMITS.refund.window, 3_000)
   for (let i = 0; i < 11; i++) ctl.push((await rl.enforceRateLimit(`${run}:control`, 'refund')).allowed)
   assert(ctl.slice(0, 10).every(Boolean) && ctl[10] === false, 'positive control: the 11th refund request is refused — refusals are observable')
 
@@ -65,6 +82,7 @@ async function main() {
   for (const [policy, n] of Object.entries(EXPECTED)) {
     const key = `${run}:p:${policy}`
     let allowed = 0, firstLimitHeader = ''
+    await clearOfBoundary(rl.RATE_LIMITS[policy as keyof typeof rl.RATE_LIMITS].window, Math.max(3_000, n * 10))
     for (let i = 0; i < n; i++) {
       const r = await rl.enforceRateLimit(key, policy as keyof typeof rl.RATE_LIMITS)
       if (r.allowed) allowed++
@@ -76,6 +94,7 @@ async function main() {
   }
 
   console.log('[2] isolation')
+  await clearOfBoundary(rl.RATE_LIMITS.refund.window, 3_000)
   for (let i = 0; i < EXPECTED.refund; i++) await rl.enforceRateLimit(`${run}:userA`, 'refund')
   assert((await rl.enforceRateLimit(`${run}:userA`, 'refund')).allowed === false, 'user A has used up refund')
   assert((await rl.enforceRateLimit(`${run}:userA`, 'orderCreate')).allowed === true, "user A's orderCreate is unaffected (separate bucket per policy)")
@@ -83,6 +102,7 @@ async function main() {
 
   console.log('[3] window reset (2 s test window)')
   rl.__setWindowOverrideForTest('2 s')
+  await clearOfBoundary('2 s', 800)
   for (let i = 0; i < EXPECTED.refund; i++) await rl.enforceRateLimit(`${run}:w`, 'refund')
   const blocked = await rl.enforceRateLimit(`${run}:w`, 'refund')
   await new Promise(r => setTimeout(r, 2300))
