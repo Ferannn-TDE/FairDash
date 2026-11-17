@@ -8,5 +8,12 @@ export async function auth() {
 }
 export async function currentUser() {
   const u = globalThis.__MOCK_CLERK
-  return u?.userId ? { id: u.userId, publicMetadata: u.publicMetadata ?? {} } : null
+  // Name fields are optional: a test that wants a reviewer name (lib/reviewer-label.ts) sets them;
+  // every other test sees exactly the shape it always did.
+  return u?.userId ? {
+    id: u.userId, publicMetadata: u.publicMetadata ?? {},
+    ...(u.fullName !== undefined && { fullName: u.fullName }),
+    ...(u.firstName !== undefined && { firstName: u.firstName }),
+    ...(u.lastName !== undefined && { lastName: u.lastName }),
+  } : null
 }

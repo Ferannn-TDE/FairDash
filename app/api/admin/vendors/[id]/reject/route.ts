@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireStrictAdminAuth } from '@/lib/auth'
 import { decideVendor } from '@/lib/approvals'
 import { settingsActorRole } from '@/lib/roles'
+import { reviewerNameFrom } from '@/lib/reviewer-label'
 import { currentUser } from '@clerk/nextjs/server'
 
 // PATCH /api/admin/vendors/[id]/reject   Body: { reason: string }
@@ -23,7 +24,10 @@ export async function PATCH(
     let reason: unknown
     try { reason = (await req.json()).reason } catch { /* validated below */ }
 
-    await decideVendor(id, 'reject', reason, { clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin' })
+    await decideVendor(id, 'reject', reason, {
+      clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin',
+      name: reviewerNameFrom({ fullName: user?.fullName, firstName: user?.firstName, lastName: user?.lastName }),
+    })
     const updated = await db.vendor.findUnique({ where: { id }, select: { id: true, name: true, status: true } })
 
     // No longer ACTIVE → must drop from the cached customer discovery list ('vendors').

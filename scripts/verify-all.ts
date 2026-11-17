@@ -92,6 +92,7 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'notification-feed',         file: 'scripts/notification-feed-test.ts' },
   { group: 'money',       name: 'online-markup',             file: 'scripts/online-markup-test.ts' },
   { group: 'boundary',    name: 'vendor-go-live',            file: 'scripts/vendor-go-live-test.ts' },
+  { group: 'boundary',    name: 'vendor-approval-payouts',   file: 'scripts/vendor-approval-payouts-test.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },

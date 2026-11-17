@@ -96,6 +96,9 @@ async function main() {
         eventId: ev.id, name: `${PFX}Booth ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Tacos', status: VendorStatus.PENDING,
         contactName: 'Ana', contactEmail: `ana-${rand()}${MAIL}`, ...docs,
         stripeVerified: opts.payouts !== false,
+        // Approval asks Stripe fresh (lib/vendor-payouts-check.ts, Nov 16): a complete fixture has a
+        // linked account, which the stub below reports as transfers + payouts active.
+        ...(opts.payouts !== false && { stripeAccountId: `acct_${PFX}${rand()}` }),
         ...(opts.booth !== false && { boothNumber: 'A1' }),
         vendorMembers: { create: { userId: u.id, role: 'owner' } },
         ...(opts.menu !== false && { menuItems: { create: { name: 'Taco', price: 5, category: 'Mains', isAvailable: true } } }),
@@ -114,6 +117,11 @@ async function main() {
     const o = await prisma.vendorMember.findUnique({ where: { id: ownerId }, select: { approvalStatus: true, approvedAt: true, rejectionReason: true } })
     return { booth: v?.status, owner: o?.approvalStatus, ownerApprovedAt: o?.approvedAt?.getTime() ?? null, ownerReason: o?.rejectionReason ?? null }
   }
+
+  // Stripe is never called from a suite: every linked account answers "transfers + payouts active".
+  // scripts/vendor-approval-payouts-test.ts covers the refusals.
+  const payoutsCheck = await import('../lib/vendor-payouts-check')
+  payoutsCheck.__setStripePayoutsStatusForTest(async () => ({ readyToReceivePayments: true, payoutsEnabled: true }))
 
   const approvals = await import('../app/api/admin/approvals/route')
   const decideRoute = (await import('../app/api/admin/approvals/[kind]/[id]/route')).POST
@@ -194,10 +202,12 @@ async function main() {
   assert((await state(h.vendor.id, h.ownerId)).booth === 'PENDING', 'and nothing changed')
   const notReady = await mkVendor({ payouts: false, booth: false, menu: false })
   const rnr = await decideAs(PM, 'vendor', notReady.vendor.id, { decision: 'approve' })
-  assert(rnr.status === 409 && rnr.code === 'VENDOR_NOT_READY_TO_GO_LIVE'
-    && JSON.stringify(rnr.details?.missing) === JSON.stringify(['Add your menu', 'Connect payouts', 'Set booth number'])
+  // Since Nov 16 the Stripe refusal leads (its own code and message); the other missing items are
+  // still all named.
+  assert(rnr.status === 409 && rnr.code === 'VENDOR_STRIPE_NOT_LINKED'
+    && JSON.stringify(rnr.details?.missing) === JSON.stringify(['Connect payouts', 'Add your menu', 'Set booth number'])
     && (await state(notReady.vendor.id, notReady.ownerId)).booth === 'PENDING',
-  `documents on file but no menu, payouts or booth → 409 naming those three, booth still PENDING (got ${JSON.stringify(rnr.details?.missing)})`)
+  `documents on file but no menu, payouts or booth → 409 VENDOR_STRIPE_NOT_LINKED naming those three, booth still PENDING (got ${rnr.code} ${JSON.stringify(rnr.details?.missing)})`)
   const noReason = await decideAs(PM, 'vendor', h.vendor.id, { decision: 'reject', reason: '   ' })
   assert(noReason.status === 400, 'reject with no reason → 400')
   const again = await decideAs(PM, 'vendor', a.vendor.id, { decision: 'reject', reason: 'Too late' })

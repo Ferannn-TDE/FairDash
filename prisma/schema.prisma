@@ -276,6 +276,12 @@ model Vendor {
   isOffline       Boolean      @default(false) // Vendor entirely offline
   lastHeartbeatAt DateTime? // Updated every 30s by vendor dashboard; stale > 5 min → auto-hide
 
+  // Demo booth (Jordan, Nov 16). Set ONLY by a strict admin (PATCH /api/admin/vendors/[id]/demo)
+  // and by the local dev-fair seed. A demo booth skips the Stripe payouts check for approval; with
+  // live Stripe keys it is hidden from customers and checkout refuses it; in test mode it takes
+  // test orders. Never public (not in PUBLIC_VENDOR_SELECT).
+  isDemo Boolean @default(false)
+
   // ── Onboarding documents (SENSITIVE — insurance certificate, business licence) ──
   // Stores the STORAGE OBJECT PATH inside the PRIVATE `vendor-documents` bucket —
   // deliberately NOT a URL, and deliberately no longer named *Url.
@@ -2178,6 +2184,10 @@ model ApprovalAction {
   /// Clerk id of who acted, and the role they acted as (super_admin | admin | platform_manager).
   actorId   String
   actorType String
+  /// The reviewer's name AS IT WAS when they decided (a snapshot, never re-read). NULL on rows
+  /// written before names were recorded (Nov 16). Shown in full on admin screens only; who else
+  /// sees it is decided by lib/reviewer-label.ts (organizers: own org only; vendors: never).
+  actorName String?
   reason    String?
   /// The document viewed (VIEW_DOCUMENT), or decision detail (e.g. whether the owner row changed).
   detail    Json?

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, use } from 'react'
 import { Store, AlertTriangle } from 'lucide-react'
 import { VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
+import { formatAuditTimestamp } from '@/lib/audit-time'
 import MenuRequestsPanel from './MenuRequestsPanel'
 
 // ─── Types (real /api/admin/events/[id]/vendors shape via getFairVendors) ──────
@@ -21,6 +22,8 @@ interface AdminVendor {
   ordersToday: number
   revenue: number
   ready: boolean
+  /** Latest approve/reject, labelled for admins (full name; lib/reviewer-label.ts). */
+  review: { decision: 'APPROVE' | 'REJECT'; by: string; at: string } | null
 }
 
 type FilterTab = 'all' | 'PENDING' | 'ACTIVE'
@@ -172,6 +175,11 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
                   <p className="text-xs text-[#666] font-inter truncate">
                     {[vendor.cuisineType, vendor.boothNumber && `Booth ${vendor.boothNumber}`].filter(Boolean).join(' · ') || '—'}
                   </p>
+                  {vendor.review && (
+                    <p className="text-[11px] text-[#777] font-inter truncate">
+                      {vendor.review.decision === 'APPROVE' ? 'Approved' : 'Rejected'} by {vendor.review.by} · {formatAuditTimestamp(vendor.review.at)}
+                    </p>
+                  )}
                 </div>
               </div>
 

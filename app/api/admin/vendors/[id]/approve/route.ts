@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireStrictAdminAuth } from '@/lib/auth'
 import { decideVendor } from '@/lib/approvals'
 import { settingsActorRole } from '@/lib/roles'
+import { reviewerNameFrom } from '@/lib/reviewer-label'
 import { currentUser } from '@clerk/nextjs/server'
 
 // PATCH /api/admin/vendors/[id]/approve   Body: { boothNumber?: string }
@@ -30,7 +31,10 @@ export async function PATCH(
 
     // The booth number is written inside the decision's own transaction and counts toward the
     // go-live checklist the approval runs (lib/vendor-go-live.ts).
-    await decideVendor(id, 'approve', null, { clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin' }, { boothNumber })
+    await decideVendor(id, 'approve', null, {
+      clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin',
+      name: reviewerNameFrom({ fullName: user?.fullName, firstName: user?.firstName, lastName: user?.lastName }),
+    }, { boothNumber })
     const updated = await db.vendor.findUnique({ where: { id }, select: { id: true, name: true, status: true, boothNumber: true } })
 
     // Now ACTIVE → orderable. Bust the cached customer discovery list ('vendors', 120s in

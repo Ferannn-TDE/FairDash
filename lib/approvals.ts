@@ -4,8 +4,14 @@
 // Every decision: PENDING only (a second decision gets 409 ALREADY_DECIDED via a status-conditional
 // update), one transaction with its ApprovalAction audit row and the applicant's email (outbox).
 //
+// REVIEWER NAME (Jordan, Nov 16): every decision's ApprovalAction records actorName, the reviewer's
+// name as it was when they decided. Who may SEE it is lib/reviewer-label.ts (admins: full name;
+// organizers: own org only; vendors and decision emails: never a person's name).
+//
 // VENDOR rules (agreed 2026-11-05; approval is per booth, the owner row is created PENDING):
-//   approve — go-live checklist first (documents, menu, payouts, booth number; lib/vendor-go-live.ts).
+//   approve — Stripe payouts asked FRESH (linked + payouts enabled; lib/vendor-payouts-check.ts,
+//             Jordan Nov 16), then the go-live checklist (documents, menu, payouts, booth number;
+//             lib/vendor-go-live.ts).
 //             Owner row PENDING → booth ACTIVE + owner APPROVED.
 //             Owner already APPROVED (decided on Booth Operators) → only the booth changes.
 //             Owner already REJECTED → refused (never override an explicit earlier rejection).
@@ -18,10 +24,21 @@ import { db } from '@/lib/db'
 import { ApiError } from '@/lib/api-error'
 import { REQUIRED_VENDOR_DOCS, VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
 import { GO_LIVE_LABELS, GO_LIVE_VENDOR_SELECT, vendorGoLiveRefusal } from '@/lib/vendor-go-live'
+import { checkVendorPayouts } from '@/lib/vendor-payouts-check'
+import { reviewerNameFrom } from '@/lib/reviewer-label'
 import { enqueueDecisionEmail, type ApplicationKind } from '@/lib/notifications'
 import type { SettingsRole } from '@/lib/roles'
 
-export interface Actor { clerkId: string; actorType: SettingsRole }
+/** `name`: the reviewer's sign-in name when the caller has it (routes read it from Clerk). When
+ *  absent, the decision falls back to the account's name on file, then the email before the @. */
+export interface Actor { clerkId: string; actorType: SettingsRole; name?: string | null }
+
+/** The name recorded on the decision's ApprovalAction (see Actor.name). */
+async function recordedActorName(actor: Actor): Promise<string | null> {
+  if (actor.name?.trim()) return reviewerNameFrom({ fullName: actor.name })
+  const u = await db.user.findUnique({ where: { clerkId: actor.clerkId }, select: { name: true, email: true } })
+  return reviewerNameFrom({ dbName: u?.name, email: u?.email })
+}
 export type Decision = 'approve' | 'reject'
 
 const DOC_PATH: Record<RequiredVendorDoc, 'foodHandlerPermitPath' | 'insurancePath' | 'businessLicensePath'> = {
@@ -47,7 +64,7 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
   const vendor = await db.vendor.findUnique({
     where: { id: vendorId },
     select: {
-      status: true, contactName: true, contactEmail: true,
+      status: true, contactName: true, contactEmail: true, stripeAccountId: true,
       ...GO_LIVE_VENDOR_SELECT,
       vendorMembers: { where: { role: 'owner' }, select: { id: true, approvalStatus: true, user: { select: { email: true } } }, take: 1 },
     },
@@ -58,7 +75,18 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
   const boothNumber = opts.boothNumber?.trim() ? opts.boothNumber.trim().slice(0, 20) : undefined
 
   if (decision === 'approve') {
-    const refusal = await vendorGoLiveRefusal(db, { ...vendor, boothNumber: boothNumber ?? vendor.boothNumber }, { approving: true })
+    // Stripe first, asked fresh (throws 503 when Stripe can't be asked: nothing changes). Its
+    // answer replaces the stored flag for the checklist's "payouts" item, so a vendor Stripe has
+    // just enabled is not refused on a stale flag, and one it has just restricted is not approved.
+    const payouts = await checkVendorPayouts(vendor)
+    const refusal = await vendorGoLiveRefusal(db, { ...vendor, stripeVerified: payouts.ok, boothNumber: boothNumber ?? vendor.boothNumber }, { approving: true })
+    if (!payouts.ok) {
+      const others = (refusal?.missing ?? []).filter(m => m !== 'payouts').flatMap(m => m === 'documents'
+        ? REQUIRED_VENDOR_DOCS.filter(d => vendor[DOC_PATH[d]] === null).map(d => VENDOR_DOC_LABELS[d])
+        : [GO_LIVE_LABELS[m]])
+      const message = others.length ? `${payouts.message} Also still needed: ${others.join(', ')}.` : payouts.message
+      throw new ApiError(message, 409, payouts.code, { missing: [GO_LIVE_LABELS.payouts, ...others] })
+    }
     if (refusal) {
       // Name each missing document, as the approvals page always has; the other items by label.
       const missing = refusal.missing.flatMap(m => m === 'documents'
@@ -76,6 +104,7 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
   const actorUser = await db.user.findUnique({ where: { clerkId: actor.clerkId }, select: { id: true } })
   const memberApprover = actorUser?.id ?? actor.clerkId
   const ownerPending = owner?.approvalStatus === 'PENDING'
+  const actorName = await recordedActorName(actor)
 
   await db.$transaction(async tx => {
     const flip = await tx.vendor.updateMany({
@@ -97,7 +126,7 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
     await tx.approvalAction.create({
       data: {
         action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'vendor', applicationId: vendorId,
-        actorId: actor.clerkId, actorType: actor.actorType, reason,
+        actorId: actor.clerkId, actorType: actor.actorType, actorName, reason,
         detail: { ownerMemberId: owner?.id ?? null, ownerBefore: owner?.approvalStatus ?? null, ownerChanged: !!(owner && ownerPending) },
       },
     })
@@ -113,6 +142,7 @@ export async function decideOrganizer(organizerId: string, decision: Decision, r
   const org = await db.fairOrganizer.findUnique({ where: { id: organizerId }, select: { id: true, name: true, contactEmail: true, approvalStatus: true } })
   if (!org) throw new ApiError('Organizer not found', 404, 'ORGANIZER_NOT_FOUND')
   if (org.approvalStatus !== 'PENDING') throw alreadyDecided()
+  const actorName = await recordedActorName(actor)
   await db.$transaction(async tx => {
     const flip = await tx.fairOrganizer.updateMany({
       where: { id: organizerId, approvalStatus: 'PENDING' },
@@ -122,7 +152,7 @@ export async function decideOrganizer(organizerId: string, decision: Decision, r
         : { approvalStatus: 'REJECTED', rejectionReason: reason },
     })
     if (flip.count === 0) throw alreadyDecided()
-    await tx.approvalAction.create({ data: { action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'organizer', applicationId: organizerId, actorId: actor.clerkId, actorType: actor.actorType, reason } })
+    await tx.approvalAction.create({ data: { action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'organizer', applicationId: organizerId, actorId: actor.clerkId, actorType: actor.actorType, actorName, reason } })
     await enqueueDecisionEmail(tx, organizerId, decision === 'approve' ? 'approved' : 'rejected', org.contactEmail, { kind: 'organizer', name: org.name, contactName: null, ...(reason ? { reason } : {}) })
   })
   return { id: organizerId, status: decision === 'approve' ? 'APPROVED' : 'REJECTED' }
@@ -134,6 +164,7 @@ export async function decidePartner(partnerId: string, decision: Decision, reaso
   const p = await db.partnerOrganization.findUnique({ where: { id: partnerId }, select: { id: true, name: true, contactName: true, contactEmail: true, approvalStatus: true } })
   if (!p) throw new ApiError('Partner organization not found', 404, 'PARTNER_NOT_FOUND')
   if (p.approvalStatus !== 'PENDING') throw alreadyDecided()
+  const actorName = await recordedActorName(actor)
   await db.$transaction(async tx => {
     const flip = await tx.partnerOrganization.updateMany({
       where: { id: partnerId, approvalStatus: 'PENDING' },
@@ -142,7 +173,7 @@ export async function decidePartner(partnerId: string, decision: Decision, reaso
         : { approvalStatus: 'REJECTED', rejectionReason: reason },
     })
     if (flip.count === 0) throw alreadyDecided()
-    await tx.approvalAction.create({ data: { action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'partner', applicationId: partnerId, actorId: actor.clerkId, actorType: actor.actorType, reason } })
+    await tx.approvalAction.create({ data: { action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'partner', applicationId: partnerId, actorId: actor.clerkId, actorType: actor.actorType, actorName, reason } })
     await enqueueDecisionEmail(tx, partnerId, decision === 'approve' ? 'approved' : 'rejected', p.contactEmail, { kind: 'partner', name: p.name, contactName: p.contactName, ...(reason ? { reason } : {}) })
   })
   return { id: partnerId, status: decision === 'approve' ? 'APPROVED' : 'REJECTED' }

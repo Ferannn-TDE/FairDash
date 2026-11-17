@@ -6,6 +6,7 @@ import { hasRole, hasStrictAdminRole, settingsActorRole, type SettingsRole } fro
 import { organizerSuspensionError } from './organizer-suspension'
 import { organizerApprovalError } from './organizer-approval'
 import { boothOperatingMessage, menuEditRefusal, vendorOperatorState } from './vendor-operator-state'
+import { reviewerNameFrom } from './reviewer-label'
 import type { User } from '@prisma/client'
 
 export async function requireAuth(): Promise<string> {
@@ -325,11 +326,12 @@ export async function requireSettingsAdmin(): Promise<{ clerkId: string; actorTy
 /** Approvals gate (item 9): admin | super_admin | platform_manager — the client decides sign-ups.
  *  Same set as settings; platform_manager reaches nothing else. Returns the role recorded on the
  *  decision audit. */
-export async function requireApprovalsAdmin(): Promise<{ clerkId: string; actorType: SettingsRole }> {
+export async function requireApprovalsAdmin(): Promise<{ clerkId: string; actorType: SettingsRole; name: string | null }> {
   const { userId } = await auth()
   if (!userId) throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
   const user = await currentUser()
   const actorType = settingsActorRole(user?.publicMetadata)
   if (!actorType) throw new ApiError('Forbidden — approvals access required', 403, 'FORBIDDEN')
-  return { clerkId: userId, actorType }
+  // The reviewer's sign-in name, recorded on the decision (lib/approvals.ts; Jordan, Nov 16).
+  return { clerkId: userId, actorType, name: reviewerNameFrom({ fullName: user?.fullName, firstName: user?.firstName, lastName: user?.lastName }) }
 }
