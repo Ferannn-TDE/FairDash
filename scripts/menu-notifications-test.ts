@@ -29,7 +29,8 @@
  *        younger ones sent; the bell row is untouched; sign-up and decision emails as before;
  *        with no provider nothing expires
  *   [13] source: DRAFT marks on both templates; worker runs the digest before delivery; every
- *        recorder call passes the caller's tx
+ *        recorder call passes the caller's tx; every "next tick" call uses dueAt()
+ *   [5b] (after [5]) control: the database-vs-computer clock race (see dueAt), reproduced and removed
  *
  * Clerk identity, next/cache and server-only are mocked (scripts/_route-loader.mjs); the strict
  * admin list goes through a fake Clerk client (the real paging and role filter run).
@@ -255,6 +256,20 @@ async function main() {
   })
   const minutes = (m: number) => new Date(Date.now() + m * 60e3)
   const digest = (at: Date) => D.runMenuNotificationDigests({ now: at })
+  /**
+   * THE CLOCK RACE (fixed Nov 16; the same race c37fa4c fixed in scripts/notifications-test.ts).
+   * MenuChangeEvent.createdAt comes from the DATABASE clock (@default(now())), and
+   * runMenuNotificationDigests takes only rows with createdAt <= now (lib/menu-notify/digest.ts).
+   * The "next tick" calls passed `now` from THIS computer's clock a moment after recording, so with
+   * the database clock even slightly ahead a just-recorded alert was "not due yet" and every check
+   * after it failed (3 of 17 runs, Nov 16, also solo on a clean DB). dueAt() is the later of the
+   * computer's clock and the newest recorded event: a just-recorded alert is always due, and it is
+   * never more than that moment past the computer's clock ([5b] proves both).
+   */
+  const dueAt = async (): Promise<Date> => {
+    const newest = await prisma.menuChangeEvent.aggregate({ _max: { createdAt: true } })
+    return new Date(Math.max(Date.now(), newest._max.createdAt?.getTime() ?? 0))
+  }
   /** Clear the queue and every alert between sections, so each section counts only its own. */
   const resetAlerts = async () => {
     await prisma.menuChangeEvent.deleteMany({})
@@ -315,11 +330,11 @@ async function main() {
     // Move vendor A's oldest delete to 9 minutes ago: still inside the window.
     const aEvents = await events(A.vendor.id, 'DELETE')
     await prisma.menuChangeEvent.update({ where: { id: aEvents[0].id }, data: { createdAt: new Date(Date.now() - 9 * 60e3) } })
-    const nine = await digest(new Date())
+    const nine = await digest(await dueAt())
     assert(nine.notified === 0, 'oldest delete 9 minutes old: still waiting')
 
     await prisma.menuChangeEvent.update({ where: { id: aEvents[0].id }, data: { createdAt: new Date(Date.now() - 10 * 60e3 - 1000) } })
-    const ten = await digest(new Date())
+    const ten = await digest(await dueAt())
     const bellA = await bellFor(mInApp.id, 'MENU_ITEMS_DELETED')
     assert(ten.notified === 1 && bellA.length === 1,
       `oldest delete 10 minutes old: vendor A's group is sent as ONE notification (notified ${ten.notified}, bell ${bellA.length})`)
@@ -362,7 +377,7 @@ async function main() {
       && p1?.reason === 'RESTORE' && p1.previousPrice === 8 && p1.requestedPrice === 9.5,
     `a higher-priced restore: PENDING, one PRICE_PENDING event, reason RESTORE, 8 → 9.5 (${ev1.length})`)
 
-    const tick = await digest(new Date())
+    const tick = await digest(await dueAt())
     const bell = await bellFor(mInApp.id, 'MENU_PRICE_CHANGE_PENDING')
     assert(tick.notified === 1 && bell.length === 1 && bell[0].title === 'Booth A: 1 price increase waiting for approval'
       && bell[0].body.includes(`${PFX}Cannoli (back on the menu at a higher price): $8.00 → $9.50 (+$1.50, +18.8%)`),
@@ -374,7 +389,7 @@ async function main() {
     const ev2 = (await events(A.vendor.id, 'PRICE_PENDING')).filter(e => e.menuItemId === c2.id)
     assert(b2.data?.status === 'PENDING' && ev2.length === 1 && (ev2[0].payload as { reason?: string }).reason === 'READD',
       `a higher-priced re-add by name: one event, reason READD (${ev2.length})`)
-    await digest(new Date())
+    await digest(await dueAt())
     assert((await bellFor(mInApp.id, 'MENU_PRICE_CHANGE_PENDING')).some(n => n.body.includes(`${PFX}Gelato (back on the menu at a higher price): $5.00 → $6.00`)),
       'it arrives too, under the stored name')
 
@@ -385,7 +400,7 @@ async function main() {
       { type: 'RESTORE', menuItemId: c4.id, price: 3 },
     ] })
     const before = (await bellFor(mInApp.id, 'MENU_PRICE_CHANGE_PENDING')).length
-    const t3 = await digest(new Date())
+    const t3 = await digest(await dueAt())
     const after = await bellFor(mInApp.id, 'MENU_PRICE_CHANGE_PENDING')
     const last = after[after.length - 1]
     assert(r3.status === 201 && t3.notified === 1 && after.length === before + 1 && last.title === 'Booth A: 2 price increases waiting for approval'
@@ -407,9 +422,35 @@ async function main() {
       approver: { kind: 'organizer', organizerId: orgA.org.id }, reviewerUserId: mEmail.id, action: 'REJECT', reason: 'no',
     })
     const bellsBefore = (await bellFor(mInApp.id)).length
-    const t7 = await digest(new Date())
+    const t7 = await digest(await dueAt())
     assert(t7.nothingToSend === 1 && t7.notified === 0 && (await bellFor(mInApp.id)).length === bellsBefore,
       'a request decided before the tick is not announced (claimed, nothing sent)')
+  }
+
+  // ── [5b] the clock race, reproduced on purpose ─────────────────────────────────────────────
+  // A real price-increase alert moved 5 s into the future stands in for "the database clock is
+  // ahead". The computer's clock (the old timing) does not see it; dueAt() does. (5 s, not a few ms,
+  // so this control cannot itself race; nothing waits, the time is passed in.)
+  console.log('\n[5b] Control: the database-vs-computer clock race')
+  await resetAlerts()
+  login(A.user.clerkId)
+  {
+    const r = await mkItem(A.vendor.id, `${PFX}Race Cocoa`, 3, new Date(now - 365 * 864e5))
+    await file(A.vendor.id, { type: 'RESTORE', menuItemId: r.id, price: 4 })
+    const [ev] = await events(A.vendor.id, 'PRICE_PENDING')
+    const ahead = new Date(Date.now() + 5000)
+    await prisma.menuChangeEvent.update({ where: { id: ev.id }, data: { createdAt: ahead } })
+    const old = await D.runMenuNotificationDigests({ now: new Date() })
+    const stillWaiting = await prisma.menuChangeEvent.findUnique({ where: { id: ev.id }, select: { digestId: true } })
+    assert(old.notified === 0 && stillWaiting?.digestId === null,
+      `[0] control: at the computer's clock, an alert stamped a moment later is NOT sent (the old race) (notified ${old.notified})`)
+    const due = await dueAt()
+    assert(due.getTime() >= ahead.getTime() && due.getTime() - Date.now() <= 5000 + 1000,
+      '[0] control: dueAt() is never earlier than the newest alert, and never further past the computer\'s clock than it')
+    const fixed = await digest(due)
+    const bell = await bellFor(mInApp.id, 'MENU_PRICE_CHANGE_PENDING')
+    assert(fixed.notified === 1 && bell.some(n => n.body.includes(`${PFX}Race Cocoa`)),
+      `[0] control: at dueAt(), the same alert IS sent (notified ${fixed.notified})`)
   }
 
   // ── [6] rollback ────────────────────────────────────────────────────────────────────────────
@@ -535,7 +576,7 @@ async function main() {
     login(A.user.clerkId)
     const p = await mkItem(A.vendor.id, `${PFX}Choice Price`, 4, new Date(now - 864e5))
     await file(A.vendor.id, { type: 'RESTORE', menuItemId: p.id, price: 5 })
-    await digest(new Date())
+    await digest(await dueAt())
     const noP = { bell: (await bellFor(mNone.id, 'MENU_PRICE_CHANGE_PENDING')).length, mail: (await mailFor(mNone.email, 'menu_price_change_pending')).length }
     assert(noP.bell === 1 && noP.mail === 1, `a stored NONE on price increases is ignored: both (${JSON.stringify(noP)})`)
     const mail = (await mailFor(mUnsaved.email, 'menu_price_change_pending'))[0]
@@ -646,6 +687,12 @@ async function main() {
       && pri - notif.lastIndexOf(mark, pri) < mark.length + 5
       && ovr > 0 && ovr - notif.lastIndexOf(mark, ovr) < mark.length + 5,
     `both menu templates and the vendor-override notice are marked DRAFT on the line above them (${marks} mark(s))`)
+
+    // The clock-race fix stays fixed: no "next tick" call goes back to the bare computer clock
+    // ([5b]'s control calls runMenuNotificationDigests directly, on purpose).
+    const self = readFileSync('scripts/menu-notifications-test.ts', 'utf8').replace(/\r\n/g, '\n')
+    assert(!/digest\(new Date\(\)\)/.test(self) && (self.match(/digest\(await dueAt\(\)\)/g) ?? []).length === 7,
+      `every "next tick" digest call uses dueAt(), none the bare computer clock (${(self.match(/digest\(await dueAt\(\)\)/g) ?? []).length} of 7)`)
 
     const worker = readFileSync('workers/order-worker.ts', 'utf8')
     const dg = worker.indexOf('await runMenuNotificationDigests()')
