@@ -6,11 +6,44 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { OrganizerBreadcrumb } from '../../../_components/Breadcrumb'
 import { statementPreview, STATEMENT_SUFFIX_MAX } from '@/lib/statement-descriptor'
-import { bpsToPercent, parseMarkupPercentInput, MARKUP_LOCKED_MESSAGE } from '@/lib/menu/price'
+import {
+  bpsToPercent, parseMarkupPercentInput, MARKUP_LOCKED_MESSAGE, MARKUP_RANGE_MESSAGE, MARKUP_PERCENT_RANGE_MESSAGE,
+} from '@/lib/menu/price'
 import { onlineUnitPrice } from '@/lib/checkout-total'
 
 /** The example item the markup preview prices: "On a $10.00 item, customers pay …". */
 const MARKUP_EXAMPLE_PRICE = 10
+
+// ── What a failed save says ───────────────────────────────────────────────────
+// Every sentence a failed save shows is written HERE, chosen by the response's error CODE. The
+// server's message is never shown (scripts/toast-leak-guard.ts [5]); it goes to the browser
+// console only, as app/organizer/fairs/new/page.tsx does.
+
+const SAVE_FAILED = "Couldn't save settings. Try again."
+const ACCOUNT_BLOCKED = "Your organizer account can't make changes right now. Contact FairSynq support."
+
+/** Fixed copy per code the settings PATCH can send (app/api/organizer/fairs/[fairSlug]/settings/route.ts). */
+const SAVE_FAILED_COPY: Record<string, string> = {
+  'UNAUTHORIZED':           'Your session ended. Sign in again, then save.',
+  'FORBIDDEN':              ACCOUNT_BLOCKED,
+  'ORGANIZER_NOT_APPROVED': ACCOUNT_BLOCKED,
+  'ORGANIZER_REJECTED':     ACCOUNT_BLOCKED,
+  'ORGANIZER_SUSPENDED':    ACCOUNT_BLOCKED,
+  'DB_POOL_TIMEOUT':        'FairSynq is busy right now. Wait a moment, then save again.',
+  'NOT_FOUND':              "This fair can't be changed from your account. It may have been archived or removed. Reload the page to check.",
+  'VALIDATION_ERROR':       "Some settings weren't accepted. Check the fair status and the card statement name (it needs at least one letter), then try again.",
+  'MARKUP_LOCKED':          `${MARKUP_LOCKED_MESSAGE} Nothing was saved; press Save again to save your other changes.`,
+}
+
+/**
+ * The toast for a failed save. Takes the error CODE and whether the server refused the markup as
+ * over the 10% cap, never the server's message, so no server text can reach the screen.
+ */
+function saveFailedCopy(code: string | undefined, markupRangeRefused: boolean): string {
+  if (code === 'VALIDATION_ERROR' && markupRangeRefused) return MARKUP_PERCENT_RANGE_MESSAGE
+  if (code && Object.prototype.hasOwnProperty.call(SAVE_FAILED_COPY, code)) return SAVE_FAILED_COPY[code]
+  return SAVE_FAILED
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -195,19 +228,28 @@ export default function FairSettingsPage() {
         setMarkupError(null)
         setSettings(prev => prev ? { ...prev, onlineMarkupBps: json.data.onlineMarkupBps, markupLocked: json.data.markupLocked } : prev)
         setMarkupInput(String(bpsToPercent(json.data.onlineMarkupBps)))
-      } else if (json.error?.code === 'MARKUP_LOCKED') {
-        // The event started while this page was open. The server saved NOTHING (it refuses the whole
-        // request), so lock the field, put the saved markup back, and let the other changes be saved.
-        setSettings(prev => prev ? { ...prev, markupLocked: true } : prev)
-        setMarkupInput(String(bpsToPercent(settings.onlineMarkupBps)))
-        setMarkupError(null)
-        toast.error(`${json.error.message} Nothing was saved; press Save again to save your other changes.`)
       } else {
-        if (markupBps !== undefined && json.error?.code === 'VALIDATION_ERROR') setMarkupError(json.error.message)
-        toast.error(json.error?.message ?? 'Failed to save')
+        const code: string | undefined = typeof json.error?.code === 'string' ? json.error.code : undefined
+        // A markup over the 10% cap is recognised by comparing with the shared constant that
+        // lib/event-markup.ts sends (pinned by toast-leak-guard [5]); the server's text is not shown.
+        const markupRangeRefused = markupBps !== undefined && code === 'VALIDATION_ERROR'
+          && json.error?.message === MARKUP_RANGE_MESSAGE
+        console.error('[FairSettings] save failed', { status: res.status, code, message: json.error?.message })
+        if (json.error?.code === 'MARKUP_LOCKED') {
+          // The event started while this page was open. The server saved NOTHING (it refuses the whole
+          // request), so lock the field, put the saved markup back, and let the other changes be saved.
+          setSettings(prev => prev ? { ...prev, markupLocked: true } : prev)
+          setMarkupInput(String(bpsToPercent(settings.onlineMarkupBps)))
+          setMarkupError(null)
+        } else if (markupRangeRefused) {
+          setMarkupError(MARKUP_PERCENT_RANGE_MESSAGE)
+        }
+        toast.error(saveFailedCopy(code, markupRangeRefused))
       }
-    } catch {
-      toast.error('Network error')
+    } catch (err) {
+      // Network failure, or a non-JSON answer (an HTML error page) that res.json() could not read.
+      console.error('[FairSettings] save failed', err)
+      toast.error(SAVE_FAILED)
     } finally {
       setSaving(false)
     }
