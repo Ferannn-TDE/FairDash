@@ -7,17 +7,20 @@
  *       the tabs switch both ways (2026-11-17: tabs replaced the toggle links, sign-in redesign).
  *       Plus RoleAuthCard's wiring of the same function.
  *   [3] page copy (Q5): the approved text word for word, every field rendered, in order
- *   [4] homepage (Q3): Host an Event card → /organizers "Learn more", rest unchanged; footer
- *       "Organizer sign-in" still → /organizer/login; no footer link to /organizers
+ *   [4] homepage (changed 2026-11-17, deviation from Q3): Host an Event card → /organizer/login?mode=apply
+ *       "Get started", rest unchanged; footer "Organizer sign-in" still → /organizer/login
+ *   [4b] /organizers is parked: a temporary redirect to /organizer/login; nothing in the app links to it
  *   [5] /organizer/login: the old blurb is removed (sign-in redesign Q7b); no "approve vendors"
  *   [6] title, noindex, not in the sitemap (even with indexing on)
  *
  * Run:  npx tsx scripts/organizers-page-test.ts
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+const stripLineComments = (s: string) => s.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
 import { initialAuthMode } from '../lib/auth-mode'
 import { SIGNIN_COPY } from '../lib/signin-copy'
-import { ORGANIZERS_PAGE, ORGANIZERS_PATH } from '../lib/organizer-copy'
+import { ORGANIZERS_PAGE, ORGANIZERS_PATH, ORGANIZER_APPLY_PATH } from '../lib/organizer-copy'
 import { robotsFor, sitemapEntries, SITE_URL } from '../lib/seo'
 
 let pass = 0, fail = 0
@@ -107,7 +110,10 @@ assert(!/contact|mailto|support@/i.test(page), 'no contact line (waits for C-20)
 console.log('\n[4] homepage card and footer')
 const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
 const host = landing.slice(landing.indexOf("title: 'Host an Event'"), landing.indexOf('},', landing.indexOf("title: 'Host an Event'")))
-assert(host.length > 0 && /href: ORGANIZERS_PATH,/.test(host) && /cta: 'Learn more',/.test(host), 'Host an Event → /organizers, button "Learn more"')
+// Updated 2026-11-17 (BATCH-1 §21, deviation from Q3): the card goes straight to organizer sign-up.
+assert(host.length > 0 && /href: ORGANIZER_APPLY_PATH,/.test(host) && /cta: 'Get started',/.test(host) && ORGANIZER_APPLY_PATH === '/organizer/login?mode=apply',
+  'Host an Event → /organizer/login?mode=apply, button "Get started"')
+assert(initialAuthMode(new URLSearchParams(ORGANIZER_APPLY_PATH.split('?')[1]).get('mode'), true) === 'sign-up', 'that link opens the "Apply to host" tab')
 assert(host.includes("desc: 'Run your fair end to end from one dashboard.'")
   && host.includes(`"Save your fair as a draft and publish when it's ready",`)
   && host.includes("'See and manage the vendors at your fair',")
@@ -116,7 +122,23 @@ assert(host.includes("desc: 'Run your fair end to end from one dashboard.'")
 const footer = landing.slice(landing.indexOf('<footer'))
 assert(landing.indexOf('<footer') > 0 && /<Link href="\/organizer\/login"[^>]*>Organizer sign-in<\/Link>/.test(footer), 'footer "Organizer sign-in" still → /organizer/login')
 assert(!/\/organizers|ORGANIZERS_PATH/.test(footer), 'no footer link to /organizers')
-assert((landing.match(/ORGANIZERS_PATH/g) ?? []).length === 2, 'ORGANIZERS_PATH is used once on the page (import + the card)')
+assert(!/ORGANIZERS_PATH|'\/organizers'/.test(landing), 'the homepage no longer links to /organizers')
+
+// ── [4b] /organizers parked ───────────────────────────────────────────────────────────────
+console.log('\n[4b] /organizers redirects to /organizer/login')
+const nextCfg = readFileSync('next.config.mjs', 'utf8')
+assert(/\{ source: '\/organizers', destination: '\/organizer\/login', permanent: false \}/.test(nextCfg), 'a temporary (307) redirect /organizers → /organizer/login')
+assert(existsSync('app/organizers/page.tsx'), 'the page code is kept, in case the client wants it back')
+// No link to it anywhere a visitor can see: app/ and lib/ (the page's own files excepted).
+const linkRe = /['"`(]\/organizers(?![\w/-])|ORGANIZERS_PATH/
+const scan = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(d => {
+  const q = join(dir, d.name); return d.isDirectory() ? scan(q) : /\.(tsx?|jsx?)$/.test(d.name) ? [q] : [] })
+assert(linkRe.test("href: '/organizers'") && linkRe.test('href={ORGANIZERS_PATH}') && !linkRe.test("'/admin/organizers'") && !linkRe.test("'/api/admin/organizers'"),
+  '[0] control: the link scanner finds a planted /organizers link and ignores /admin/organizers')
+const linking = ['app', 'lib'].flatMap(scan)
+  .filter(f => !f.startsWith('app/organizers/') && f !== 'lib/organizer-copy.ts')
+  .filter(f => linkRe.test(stripLineComments(readFileSync(f, 'utf8'))))
+assert(linking.length === 0, `nothing links to /organizers (found: ${linking.join(', ') || 'none'})`)
 
 // ── [5] login blurb ───────────────────────────────────────────────────────────────────────
 console.log('\n[5] /organizer/login')

@@ -1,5 +1,7 @@
 // The /organizers "For Fairs & Festivals" page (C-15), approved by Feran 2026-11-14 (BATCH-1 §21,
 // Q5). Word for word; locked by scripts/organizers-page-test.ts. Change only with Feran's OK.
+// PARKED 2026-11-17: /organizers redirects to /organizer/login (next.config.mjs). The organizer
+// sign-in page still uses this copy (lib/signin-copy.ts); the page code is kept.
 //
 // Deliberately absent (false today or waiting on the client): free / fees, payout timing, reach
 // numbers, messaging vendors, booth signs, and a contact line (waits for C-20).

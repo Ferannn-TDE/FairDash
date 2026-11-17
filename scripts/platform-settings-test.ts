@@ -355,7 +355,7 @@ async function main() {
     'control: the vendor video card shows the usual help line')
   // Unheld 2026-11-17 (BATCH-1 §21): the organizer card shows only the usual help line, no held warning.
   assert(settingsLib.SETTINGS['video.organizerPitch.url'].help ===
-    'Shown on /organizers, under the intro and buttons, and on the organizer sign-in page (/organizer/login). Paste an https link ending in .mp4 or .webm. '
+    'Shown on the organizer sign-in page (/organizer/login). Paste an https link ending in .mp4 or .webm. '
     + 'Upload a changed video under a new file name: the old link stays cached for up to a month.',
     'the organizer video card shows only the usual help line (unheld)')
   assert(settingsLib.SETTING_KEYS.filter(k => k.startsWith('video.')).every(k => !/held/i.test(settingsLib.SETTINGS[k].help)),

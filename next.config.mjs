@@ -56,7 +56,12 @@ const nextConfig = {
   // organizations. Existing runners keep /sign-in/runner and the runner portal. Temporary (307):
   // Batch 2 decides the runners' future.
   async redirects() {
-    return [{ source: '/become-driver', destination: '/partners', permanent: false }]
+    return [
+      { source: '/become-driver', destination: '/partners', permanent: false },
+      // /organizers is parked (BATCH-1 §21, 2026-11-17): temporary, the page code is kept in case
+      // the client wants it back. Nothing links to it.
+      { source: '/organizers', destination: '/organizer/login', permanent: false },
+    ]
   },
 
   async headers() {

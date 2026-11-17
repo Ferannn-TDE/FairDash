@@ -175,8 +175,8 @@ export const SETTINGS = {
   'video.vendorPitch.phonePosterUrl': phonePosterUrl('Vendor pitch'),
   'video.partnerPitch.url': videoUrl('Partner pitch', 'on /partners, between the pitch and the application form'),
   'video.partnerPitch.posterUrl': posterUrl('Partner pitch'),
-  // Organizer pitch on /organizers. Unheld 2026-11-17 (Feran): v3 goes live as is (BATCH-1 §21).
-  'video.organizerPitch.url': videoUrl('Organizer pitch', 'on /organizers, under the intro and buttons, and on the organizer sign-in page (/organizer/login)'),
+  // Organizer pitch. Shown on /organizer/login only; /organizers redirects there (BATCH-1 §21, 2026-11-17).
+  'video.organizerPitch.url': videoUrl('Organizer pitch', 'on the organizer sign-in page (/organizer/login)'),
   'video.organizerPitch.posterUrl': posterUrl('Organizer pitch'),
   'video.organizerPitch.phoneUrl': phoneVideoUrl('Organizer pitch'),
   'video.organizerPitch.phonePosterUrl': phonePosterUrl('Organizer pitch'),

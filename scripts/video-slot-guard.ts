@@ -6,7 +6,7 @@
  *       before it is near the viewport (preload="none", src only when near), plays inline,
  *       sets muted on the element, and never autoplays for reduced-motion visitors
  *   [2] the placements: /sign-in/vendor and /become-vendor read vendorPitch, /partners reads partnerPitch,
- *       /organizers and /organizer/login read organizerPitch, all
+ *       /organizer/login reads organizerPitch (so does the parked /organizers page code), all
  *       through lib/videos (cached under the tag the settings API revalidates)
  *   [1b] the phone cut (BATCH-1 §21 Q6): lib/video-pick chooses the phone file and poster under
  *        640px only when a phone cut is saved; PitchVideo measures the screen once, before any src
