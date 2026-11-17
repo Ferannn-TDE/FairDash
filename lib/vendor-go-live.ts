@@ -89,6 +89,8 @@ export interface GoLiveVendor extends VendorDocPaths {
   name: string
   stripeVerified: boolean
   boothNumber: string | null
+  /** A demo booth needs no payouts (lib/demo-vendor.ts); everything else still applies. */
+  isDemo?: boolean
 }
 
 /** The columns vendorGoLiveRefusal reads, for callers' selects. */
@@ -96,6 +98,7 @@ export const GO_LIVE_VENDOR_SELECT = {
   id: true,
   name: true,
   stripeVerified: true,
+  isDemo: true,
   boothNumber: true,
   foodHandlerPermitPath: true,
   insurancePath: true,
@@ -120,7 +123,8 @@ export async function vendorGoLiveRefusal(
   if (!vendorDocsComplete(vendor)) missing.push('documents')
   const sellable = await client.menuItem.count({ where: { vendorId: vendor.id, ...SELLABLE } })
   if (sellable === 0) missing.push('menu')
-  if (!vendor.stripeVerified) missing.push('payouts')
+  // A demo booth takes no real money, so it needs no payouts (Jordan, Nov 16; lib/demo-vendor.ts).
+  if (!vendor.stripeVerified && !vendor.isDemo) missing.push('payouts')
   if (!vendor.boothNumber || vendor.boothNumber.trim() === '') missing.push('booth')
   if (missing.length === 0) return null
   const missingLabels = missing.map(m => GO_LIVE_LABELS[m])

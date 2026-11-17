@@ -15,6 +15,8 @@ interface AdminVendor {
   cuisineType: string | null
   boothNumber: string | null
   stripeVerified: boolean
+  /** Demo booth (lib/demo-vendor.ts): hidden from customers and refused at checkout with live keys. */
+  isDemo: boolean
   isOffline: boolean
   isBusy: boolean
   docs: Record<RequiredVendorDoc, boolean>
@@ -54,6 +56,45 @@ function ReadyDot({ met, label, missingLabel }: { met: boolean; label: string; m
       />
       {label}
     </span>
+  )
+}
+
+function DemoBadge() {
+  return (
+    <span title="Demo booth: hidden from customers and refused at checkout with live Stripe keys"
+      className="ml-2 align-middle px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 text-[9px] font-bold uppercase tracking-wide">
+      Demo
+    </span>
+  )
+}
+
+/** The demo switch (strict admins; this page is strict-admin only). Server: PATCH …/demo, logged. */
+function DemoToggle({ vendor, onChanged }: { vendor: AdminVendor; onChanged: (isDemo: boolean) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const flip = async () => {
+    setBusy(true); setErr(null)
+    try {
+      const res = await fetch(`/api/admin/vendors/${vendor.id}/demo`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ demo: !vendor.isDemo }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!json.success) { setErr(json.error?.message ?? 'Could not change'); return }
+      onChanged(json.data.isDemo as boolean)
+    } catch {
+      setErr('Network error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <button type="button" onClick={flip} disabled={busy}
+        className="mt-1 block w-full text-right text-[10px] font-inter text-[#777] hover:text-white bg-transparent border-0 cursor-pointer disabled:opacity-50">
+        {busy ? '…' : vendor.isDemo ? 'Not demo' : 'Mark as demo'}
+      </button>
+      {err && <span role="alert" className="block text-[10px] text-red-400 font-inter">{err}</span>}
+    </>
   )
 }
 
@@ -171,7 +212,10 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
                   <span className={`text-sm font-bebas ${vendor.ready ? 'text-[#FF0077]' : 'text-[#777]'}`}>{vendor.name[0]}</span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-inter font-medium text-white truncate">{vendor.name}</p>
+                  <p className="text-sm font-inter font-medium text-white truncate">
+                    {vendor.name}
+                    {vendor.isDemo && <DemoBadge />}
+                  </p>
                   <p className="text-xs text-[#666] font-inter truncate">
                     {[vendor.cuisineType, vendor.boothNumber && `Booth ${vendor.boothNumber}`].filter(Boolean).join(' · ') || '—'}
                   </p>
@@ -210,6 +254,10 @@ export default function AdminVendorsPage({ params: paramsPromise }: { params: Pr
                 <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${STATUS_STYLES[vendor.status] ?? STATUS_STYLES.INACTIVE}`}>
                   {vendor.status}
                 </span>
+                <DemoToggle
+                  vendor={vendor}
+                  onChanged={isDemo => setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, isDemo } : v))}
+                />
               </div>
             </div>
           ))}

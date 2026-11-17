@@ -39,6 +39,8 @@ interface Vendor {
   joinedAt: string
   stripeVerified: boolean
   stripeConnectedAt: string | null
+  /** Demo booth (set by FairSynq only): hidden from customers and refused at checkout with live keys. */
+  isDemo: boolean
   docs: VendorDocs
   isOffline: boolean
   isBusy: boolean
@@ -127,6 +129,12 @@ function VendorCard({
               {vendor.name}
             </Link>
             <VendorStatusPill status={vendor.status} />
+            {vendor.isDemo && (
+              <span title="Demo booth: set by FairSynq; not shown to customers and takes no real orders"
+                className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 text-[9px] font-bold uppercase tracking-wide">
+                Demo
+              </span>
+            )}
           </div>
           <p className="text-xs text-[#555] font-inter mt-0.5 truncate">
             {vendor.cuisineType}

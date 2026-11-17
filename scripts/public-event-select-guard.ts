@@ -106,15 +106,16 @@ function main() {
   assert(!/include:/.test(src), 'no include: is left in the route')
   assert((src.match(/\.\.\.PUBLIC_EVENT_SELECT/g) ?? []).length === 1, 'the route spreads PUBLIC_EVENT_SELECT once')
   // The whole findFirst select, end to end: the shared select, then a _count of vendors only,
-  // with the readiness filter, and nothing else before the findFirst call closes.
+  // with the readiness filter and (Nov 16, sub-step D) the demo filter — a filter on the count,
+  // not a field: nothing new reaches the response — and nothing else before the findFirst closes.
   const SELECT_BLOCK = new RegExp([
     String.raw`select:\s*\{\s*\.\.\.PUBLIC_EVENT_SELECT,`,
     String.raw`\s*_count:\s*\{\s*select:\s*\{\s*vendors:\s*\{`,
-    String.raw`\s*where:\s*\{\s*status:\s*'ACTIVE',\s*isOffline:\s*false,\s*\.\.\.readinessWhereIfEnforced\(\)\s*\},?`,
+    String.raw`\s*where:\s*\{\s*status:\s*'ACTIVE',\s*isOffline:\s*false,\s*\.\.\.readinessWhereIfEnforced\(\),\s*\.\.\.demoHiddenWhere\(\)\s*\},?`,
     String.raw`\s*\},?\s*\},?\s*\},?`,
     String.raw`\s*\},?\s*\}\)`,
   ].join(''))
-  assert(SELECT_BLOCK.test(src), 'select is exactly { ...PUBLIC_EVENT_SELECT, _count: { select: { vendors: { where: <readiness gate> } } } }')
+  assert(SELECT_BLOCK.test(src), 'select is exactly { ...PUBLIC_EVENT_SELECT, _count: { select: { vendors: { where: <readiness gate + demo filter> } } } }')
   assert(!SELECT_BLOCK.test(src.replace("_count: {", "_count: { extra: true,")),
     '[0] positive control: the block check fails if anything is added to _count')
   assert(/return success\(event\)/.test(src), 'the response is the selected row, unchanged otherwise')

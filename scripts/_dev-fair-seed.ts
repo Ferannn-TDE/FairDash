@@ -7,10 +7,15 @@
 //
 // RE-RUN RULE: a re-run moves the fair's dates so it is open today and creates any of the three
 // vendors that is missing (with its items). It never changes an existing vendor or menu item,
+// EXCEPT marking the three seed vendors as demo (Vendor.isDemo, that column only; Jordan, Nov 16),
 // because those writes have their own rules in the app: a vendor's move into ACTIVE runs the
 // go-live check (lib/vendor-go-live.ts) and every price change writes an audit row in the same
 // transaction (lib/menu/price-audit.ts). To get back to the seeded state, wipe the dev database
 // (npm run dev:db:reset) and seed again.
+//
+// DEMO VENDORS (Jordan, Nov 16; lib/demo-vendor.ts): every seed vendor is a demo booth, so the
+// local site (Stripe TEST keys) shows them and takes test orders, while a live site would hide
+// them and refuse them at checkout.
 //
 // NO STRIPE DATA: checkout does not use a vendor's Stripe account (the charge is on the platform
 // account with a transfer_group only), and every Stripe-status check sits behind
@@ -88,6 +93,8 @@ export interface SeedDevFairResult {
   endDate: Date
   createdVendors: string[]
   keptVendors: { name: string; status: VendorStatus; sellableItems: number }[]
+  /** Kept vendors this run marked as demo (they were not yet). Created vendors are demo from the start. */
+  demoMarked: string[]
   vendorLink: { email: string; vendorName: string; outcome: 'created' | 'already-member'; approvalStatus: ApprovalStatus } | null
   organizerLink: { email: string; organizerId: string; approvalStatus: ApprovalStatus } | null
 }
@@ -150,13 +157,19 @@ export async function seedDevFair(client: PrismaClient, opts: SeedDevFairOptions
 
   const createdVendors: string[] = []
   const keptVendors: SeedDevFairResult['keptVendors'] = []
+  const demoMarked: string[] = []
   for (const v of DEV_VENDORS) {
     const existing = await client.vendor.findFirst({
       where: { eventId: event.id, slug: v.slug },
-      select: { name: true, status: true, _count: { select: { menuItems: { where: { isAvailable: true, removedAt: null } } } } },
+      select: { id: true, name: true, status: true, isDemo: true, _count: { select: { menuItems: { where: { isAvailable: true, removedAt: null } } } } },
     })
     if (existing) {
       keptVendors.push({ name: existing.name, status: existing.status, sellableItems: existing._count.menuItems })
+      // The one change a re-run makes to an existing vendor: the demo mark, that column only.
+      if (!existing.isDemo) {
+        await client.vendor.update({ where: { id: existing.id }, data: { isDemo: true } })
+        demoMarked.push(existing.name)
+      }
       continue
     }
     await client.vendor.create({
@@ -168,6 +181,7 @@ export async function seedDevFair(client: PrismaClient, opts: SeedDevFairOptions
         description: v.description,
         boothNumber: v.boothNumber,
         status: VendorStatus.ACTIVE,
+        isDemo: true,
         menuItems: {
           create: v.items.map(i => ({
             name: i.name, description: i.description, price: i.price,
@@ -204,5 +218,5 @@ export async function seedDevFair(client: PrismaClient, opts: SeedDevFairOptions
     ? { email: opts.organizerEmail, organizerId: organizer.id, approvalStatus: organizer.approvalStatus }
     : null
 
-  return { eventId: event.id, startDate, endDate, createdVendors, keptVendors, vendorLink, organizerLink }
+  return { eventId: event.id, startDate, endDate, createdVendors, keptVendors, demoMarked, vendorLink, organizerLink }
 }

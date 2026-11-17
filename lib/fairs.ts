@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { EventStatus, VendorStatus } from '@prisma/client'
 import { db } from '@/lib/db'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { demoHiddenWhere } from '@/lib/demo-vendor'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { FairListItem } from '@/lib/fair-view'
 import type { FairSeo, SitemapFair } from '@/lib/seo'
@@ -129,6 +130,8 @@ export const getVendorsBySlugCached = unstable_cache(
         // Same readiness gate the /api/vendors endpoint applies, so the SSR vendor
         // list matches the hydrated one (no 17→2 flash when enforcement is on).
         ...readinessWhereIfEnforced(),
+        // Demo booths hidden with live Stripe keys (lib/demo-vendor.ts).
+        ...demoHiddenWhere(),
       },
       select: {
         id: true,
@@ -180,7 +183,7 @@ export const getAllFairsCached = unstable_cache(
         endDate: true,
         // Gated count — matches /api/fairs so the discovery card never shows "17
         // vendors" while only the ready ones are browsable.
-        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced(), ...demoHiddenWhere() } } } },
       },
     })
 
@@ -214,7 +217,7 @@ export const getFairSeoBySlugCached = unstable_cache(
         admissionFree: true, listing: true,
         organizer: { select: { name: true } },
         fulfillmentConfig: { select: { boothPickupEnabled: true, curbsideEnabled: true, homeDeliveryEnabled: true } },
-        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced(), ...demoHiddenWhere() } } } },
       },
     })
     if (!e) return null
@@ -244,7 +247,7 @@ export const getSitemapFairsCached = unstable_cache(
       orderBy: { startDate: 'asc' },
       select: {
         urlSlug: true, startDate: true, endDate: true, updatedAt: true,
-        vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() }, select: { id: true }, orderBy: { name: 'asc' } },
+        vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced(), ...demoHiddenWhere() }, select: { id: true }, orderBy: { name: 'asc' } },
       },
     })
     return events.map(e => ({

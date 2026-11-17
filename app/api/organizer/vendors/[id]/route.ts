@@ -130,6 +130,8 @@ export async function GET(
       isBusy: vendor.isBusy,
       stripeVerified: vendor.stripeVerified,
       stripeConnectedAt: vendor.stripeConnectedAt,
+      // Demo booth: shown as a badge; only a strict admin can change it (lib/demo-vendor.ts).
+      isDemo: vendor.isDemo,
       review,
       createdAt: vendor.createdAt,
       lastHeartbeatAt: vendor.lastHeartbeatAt,

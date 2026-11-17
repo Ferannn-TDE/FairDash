@@ -81,8 +81,9 @@ async function main(): Promise<number> {
     const r = await seedDevFair(prisma, args)
     const day = (d: Date) => d.toISOString().slice(0, 10)
     console.log(`✅ Dev Test Fair (/fair/${DEV_FAIR_SLUG}): ACTIVE, open ${day(r.startDate)} to ${day(r.endDate)}`)
-    for (const name of r.createdVendors) console.log(`   + created ${name} (ACTIVE, 3 items)`)
+    for (const name of r.createdVendors) console.log(`   + created ${name} (ACTIVE, demo, 3 items)`)
     for (const v of r.keptVendors) console.log(`   = kept ${v.name} as it is (${v.status}, ${v.sellableItems} sellable items)`)
+    for (const name of r.demoMarked) console.log(`   ~ marked ${name} as demo (that column only)`)
     if (r.vendorLink) {
       const what = r.vendorLink.outcome === 'created' ? 'now owner of' : 'was already a member of'
       console.log(`   vendor: ${r.vendorLink.email} ${what} ${r.vendorLink.vendorName} (${r.vendorLink.approvalStatus})`)

@@ -8,6 +8,7 @@ import { createVendorWithOwner, syncPayeeRoles } from '@/lib/payee-membership'
 import { enqueueSignupAlert } from '@/lib/notifications'
 import { VENDOR_AGREEMENT_VERSION } from '@/lib/legal/vendor-agreement'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { PUBLIC_VENDOR_SELECT } from '@/lib/public-vendor-select'
 import { customerReachableScope } from '@/lib/event-listing'
 
@@ -41,6 +42,8 @@ export async function GET(req: Request) {
       status: 'ACTIVE' as const,
       isOffline: false,
       ...readinessWhereIfEnforced(),
+      // Demo booths hidden with live Stripe keys (lib/demo-vendor.ts).
+      ...demoHiddenWhere(),
     }
 
     const [vendors, total] = await Promise.all([

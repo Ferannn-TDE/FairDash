@@ -2176,7 +2176,7 @@ model MenuChangeEvent {
 /// Audit for the approvals page (item 9): every approve, reject and document view. Append-only.
 model ApprovalAction {
   id              String   @id @default(cuid())
-  /// APPROVE | REJECT | VIEW_DOCUMENT
+  /// APPROVE | REJECT | VIEW_DOCUMENT | DEMO_ON | DEMO_OFF (the demo switch, Nov 16)
   action          String
   /// vendor | organizer | partner
   applicationType String

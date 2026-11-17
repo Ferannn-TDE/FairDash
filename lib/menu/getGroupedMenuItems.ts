@@ -2,6 +2,7 @@
 const { unstable_cache } = require('next/cache') as { unstable_cache: typeof import('next/cache').unstable_cache }
 import { db } from '@/lib/db'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { ON_MENU } from './on-menu'
 import { customerReachableScope } from '@/lib/event-listing'
 import { onlineUnitPrice } from '@/lib/checkout-total'
@@ -112,7 +113,8 @@ async function _getGroupedMenuItemsByEvent(eventSlug: string): Promise<GroupedMe
         // Same readiness gate every other customer surface applies — when
         // enforcement is on, only ready vendors' items (and therefore vendor
         // tabs, which are derived from these items) appear on browse/menu.
-        where: { status: 'ACTIVE', isOffline: false, ...readinessWhereIfEnforced() },
+        // …and demo booths are left out with live Stripe keys (lib/demo-vendor.ts).
+        where: { status: 'ACTIVE', isOffline: false, ...readinessWhereIfEnforced(), ...demoHiddenWhere() },
         select: { id: true },
       },
     },

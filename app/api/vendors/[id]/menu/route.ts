@@ -3,6 +3,7 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { getGroupedMenuItemsByVendor } from '@/lib/menu/getGroupedMenuItems'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
+import { demoVendorHidden } from '@/lib/demo-vendor'
 import { getOptionalUserId } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
@@ -25,7 +26,7 @@ export async function GET(
     const vendor = await db.vendor.findFirst({
       where: await resolveVendorWhere(id, fairSlug),
       select: {
-        id: true, isOffline: true, status: true, stripeVerified: true,
+        id: true, isOffline: true, status: true, stripeVerified: true, isDemo: true,
         _count: { select: { menuItems: { where: SELLABLE } } },
       },
     })
@@ -49,6 +50,8 @@ export async function GET(
           !vendorReady({ status: vendor.status, stripeVerified: vendor.stripeVerified, availableMenuCount: vendor._count.menuItems })) {
         return apiError('Vendor not found', 404, 'NOT_FOUND')
       }
+      // Demo booths hidden from customers with live Stripe keys (lib/demo-vendor.ts).
+      if (demoVendorHidden(vendor)) return apiError('Vendor not found', 404, 'NOT_FOUND')
     }
 
     const grouped = await getGroupedMenuItemsByVendor(vendor.id)

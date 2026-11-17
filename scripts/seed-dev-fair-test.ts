@@ -3,10 +3,10 @@
  * test DB with a fake Clerk (no network).
  *
  *   [0] the date window is "live" by the app's own rule (lib/event-date.ts deriveEventLiveState)
- *   [1] first run: one ACTIVE public fair open today, 3 ACTIVE vendors (booths A1–A3, no Stripe
+ *   [1] first run: one ACTIVE public fair open today, 3 ACTIVE demo vendors (booths A1–A3, no Stripe
  *       data), 9 sellable items priced $1.00–$20.00 that pass the app's price rule
  *   [2] re-run: dates move, nothing duplicated, existing vendors and items untouched (price,
- *       removal, status), a missing vendor is recreated with its items
+ *       removal, status) except the demo mark, a missing vendor is recreated with its items
  *   [3] a wrong email refuses before anything is written
  *   [4] --vendor-email: APPROVED owner of Dev Grill through lib/payee-membership, "vendor" added
  *       to the Clerk roles, a second run adds no second row
@@ -126,6 +126,7 @@ async function main() {
   assert(vendors.every(v => v.status === VendorStatus.ACTIVE && !v.isOffline && !v.isBusy), 'every vendor ACTIVE, online, not busy')
   assert(JSON.stringify(vendors.map(v => v.boothNumber)) === '["A1","A2","A3"]', 'booths A1, A2, A3')
   assert(vendors.every(v => v.stripeAccountId === null && v.stripeVerified === false), 'no Stripe data on any vendor')
+  assert(vendors.every(v => v.isDemo === true) && r1.demoMarked.length === 0, 'every seed vendor is a demo booth from the start (Nov 16)')
   const items = vendors.flatMap(v => v.menuItems)
   assert(items.length === 9, '9 items')
   assert(items.every(i => i.price >= 1 && i.price <= 20), 'every price between $1.00 and $20.00')
@@ -143,6 +144,8 @@ async function main() {
   await prisma.menuItem.update({ where: { id: fries.id }, data: { price: 5 } })
   await prisma.menuItem.update({ where: { id: burger.id }, data: { removedAt: new Date() } })
   await prisma.vendor.update({ where: { id: tacos.id }, data: { status: VendorStatus.PAUSED } })
+  // Stands in for a vendor seeded before the demo flag existed (Nov 16): not yet demo.
+  await prisma.vendor.update({ where: { id: tacos.id }, data: { isDemo: false } })
   await prisma.menuItem.deleteMany({ where: { vendorId: sweets.id } })
   await prisma.vendor.delete({ where: { id: sweets.id } })
   await prisma.event.update({ where: { id: ev.id }, data: {
@@ -163,6 +166,8 @@ async function main() {
   assert(JSON.stringify(r2.keptVendors.map(k => k.name)) === '["Dev Grill","Dev Tacos"]', 'the other two are reported as kept')
   assert(r2.keptVendors.find(k => k.name === 'Dev Tacos')!.status === VendorStatus.PAUSED, 'a kept vendor\'s real status is reported')
   assert(v2.find(v => v.slug === 'dev-tacos')!.status === VendorStatus.PAUSED, 'a PAUSED vendor stays PAUSED (no move into ACTIVE)')
+  assert(JSON.stringify(r2.demoMarked) === '["Dev Tacos"]' && v2.every(v => v.isDemo === true),
+    'the re-run marks the kept non-demo vendor as demo (and reports it); all three are demo')
   const grill2 = v2.find(v => v.slug === 'dev-grill')!
   assert(grill2.menuItems.find(i => i.name === 'Fries')!.price === 5, 'a changed price is not reset')
   assert(grill2.menuItems.find(i => i.name === 'Burger')!.removedAt !== null, 'a removed item stays removed')
@@ -232,6 +237,8 @@ async function main() {
   const cliSrc = strip(readFileSync(new URL('./seed-dev-fair.ts', import.meta.url), 'utf8'))
   assert(!/new\s+PrismaClient/.test(seedSrc), 'the seed module builds no database client')
   assert(!/stripeAccountId|stripeVerified/.test(seedSrc), 'the seed module writes no Stripe field')
+  assert((seedSrc.match(/\.vendor\.update\(/g) ?? []).length === 1 && /\.vendor\.update\(\{ where: \{ id: existing\.id \}, data: \{ isDemo: true \} \}\)/.test(seedSrc),
+    'the only change to an EXISTING vendor is the demo mark, that column only')
   assert(/addVendorMember\(/.test(seedSrc) && !/vendorMember\.create|orgMember\.create/.test(seedSrc),
     'memberships only through lib/payee-membership')
   const guardAt = cliSrc.indexOf('refuseUnlessLocalDevDatabase()', cliSrc.indexOf('async function main'))

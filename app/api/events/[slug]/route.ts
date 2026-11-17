@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { customerReachableScope } from '@/lib/event-listing'
 import { PUBLIC_EVENT_SELECT } from '@/lib/public-event-select'
 
@@ -26,7 +27,8 @@ export async function GET(
             vendors: {
               // Aligns with the marketplace gate: when enforcement is on the badge
               // counts only orderable (ready) vendors — never "17" while 2 show.
-              where: { status: 'ACTIVE', isOffline: false, ...readinessWhereIfEnforced() },
+              // Demo booths are not counted with live Stripe keys (lib/demo-vendor.ts).
+              where: { status: 'ACTIVE', isOffline: false, ...readinessWhereIfEnforced(), ...demoHiddenWhere() },
             },
           },
         },

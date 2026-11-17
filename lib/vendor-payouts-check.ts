@@ -5,6 +5,7 @@
 // Stripe FRESH at approval time; the stored Vendor.stripeVerified flag is not enough on its own,
 // because it means "can receive transfers" (stripe_transfers), not "payouts enabled".
 //
+//   demo booth (Vendor.isDemo)           → ok, Stripe not asked (lib/demo-vendor.ts)
 //   no stripeAccountId                   → refused, VENDOR_STRIPE_NOT_LINKED
 //   Stripe can't find that account       → refused, VENDOR_STRIPE_NOT_LINKED
 //   transfers or payouts not active      → refused, VENDOR_PAYOUTS_NOT_ENABLED
@@ -28,7 +29,7 @@ let _testGetStatus: GetStatus | null = null
 /** Test seam: route every Stripe status read here (null restores the real Stripe call). */
 export function __setStripePayoutsStatusForTest(fake: GetStatus | null) { _testGetStatus = fake }
 
-export interface PayoutsVendor { id: string; name: string; stripeAccountId: string | null }
+export interface PayoutsVendor { id: string; name: string; stripeAccountId: string | null; isDemo?: boolean }
 
 export type PayoutsRefusalCode = 'VENDOR_STRIPE_NOT_LINKED' | 'VENDOR_PAYOUTS_NOT_ENABLED'
 export type PayoutsCheck = { ok: true } | { ok: false; code: PayoutsRefusalCode; message: string }
@@ -49,6 +50,9 @@ function isMissingAccount(err: unknown): boolean {
  * or ok; THROWS 503 STRIPE_CHECK_FAILED when Stripe can't be asked.
  */
 export async function checkVendorPayouts(vendor: PayoutsVendor): Promise<PayoutsCheck> {
+  // A demo booth skips this check (Jordan, Nov 16; lib/demo-vendor.ts): it can never take real
+  // money (checkout refuses it with live keys), so there are no payouts to check. Stripe is not asked.
+  if (vendor.isDemo) return { ok: true }
   const accountId = vendor.stripeAccountId?.trim()
   if (!accountId) return { ok: false, code: 'VENDOR_STRIPE_NOT_LINKED', message: notLinkedMessage(vendor.name) }
 

@@ -95,6 +95,7 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'vendor-approval-payouts',   file: 'scripts/vendor-approval-payouts-test.ts' },
   { group: 'boundary',    name: 'vendor-approver',           file: 'scripts/vendor-approver-test.ts' },
   { group: 'boundary',    name: 'booth-operators-approve',   file: 'scripts/booth-operators-approve-test.ts' },
+  { group: 'boundary',    name: 'demo-vendor',               file: 'scripts/demo-vendor-test.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },

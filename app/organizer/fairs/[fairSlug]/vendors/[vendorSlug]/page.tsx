@@ -53,6 +53,8 @@ interface VendorDetail {
   cuisineType: string; boothNumber: string | null; vendorType: string
   status: string; isOffline: boolean; isBusy: boolean
   stripeVerified: boolean; stripeConnectedAt: string | null
+  /** Demo booth (set by FairSynq only): hidden from customers and refused at checkout with live keys. */
+  isDemo: boolean
   /** Latest approve/reject as an organizer may see it: own team by name, FairSynq staff as "FairSynq". */
   review: { decision: 'APPROVE' | 'REJECT'; by: string; at: string } | null
   createdAt: string; lastHeartbeatAt: string | null
@@ -301,6 +303,12 @@ export default function VendorDetailPage({
               <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotColor}`} />
               {statusCfg.label}
             </span>
+            {vendor.isDemo && (
+              <span title="Demo booth: set by FairSynq; not shown to customers and takes no real orders"
+                className="px-2 py-1 rounded-full bg-sky-500/15 text-sky-300 text-xs font-bold uppercase tracking-wide">
+                Demo
+              </span>
+            )}
           </div>
           <p className="text-[#555] text-xs font-inter mt-0.5">{vendor.fairName} · {vendor.cuisineType}</p>
           {vendor.review && (

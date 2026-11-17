@@ -4,6 +4,7 @@ import { currentUser } from '@clerk/nextjs/server'
 import Stripe from 'stripe'
 import { FulfillmentType, EventStatus, EventListing, VendorStatus, OrderStatus } from '@prisma/client'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
+import { demoVendorHidden, demoRefusalMessage, VENDOR_DEMO_CODE } from '@/lib/demo-vendor'
 import { db } from '@/lib/db'
 import { SELLABLE } from '@/lib/menu/on-menu'
 import { stripe } from '@/lib/stripe'
@@ -286,6 +287,12 @@ export async function POST(req: NextRequest) {
           409,
           'VENDOR_INACTIVE'
         )
+      }
+      // DEMO BOOTH (Jordan, Nov 16; lib/demo-vendor.ts): never a real order. With live Stripe keys
+      // (anything not sk_test_/rk_test_, lib/stripe-mode.ts) it is refused here — before the price
+      // check, any write and any Stripe call. In test mode it takes test orders normally.
+      if (demoVendorHidden(vendor)) {
+        throw new ApiError(demoRefusalMessage(vendor.name), 409, VENDOR_DEMO_CODE)
       }
       if (vendor.isOffline) {
         throw new ApiError(`${vendor.name} is currently offline`, 409, 'VENDOR_OFFLINE')
