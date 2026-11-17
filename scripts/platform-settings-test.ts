@@ -141,6 +141,16 @@ async function main() {
   // platform_manager's second agreed grant (item 9): the approvals page's routes, and nothing else.
   const APPROVALS = join('approvals') + sep
   let approvalsProbed = 0, approvalsAdmitted = 0
+  // REFUSED WITH 404 BY DESIGN (Jordan, Nov 16; decision of Nov 12, H5 2g `ed24d3a`):
+  // requireAdminMenuApprover (lib/menu-requests/admin-approver.ts) answers every non-strict-admin
+  // with 404 "Event not found", so a refusal looks exactly like a fair that does not exist. These
+  // two handlers must answer platform_manager with EXACTLY 404; every other handler with EXACTLY 403.
+  // This list is pinned at two entries below: a new 404 elsewhere is still a LEAK.
+  const NOT_FOUND_BY_DESIGN = new Set([
+    `GET ${join('events', '[id]', 'menu-requests', 'route.ts')}`,
+    `PATCH ${join('events', '[id]', 'menu-requests', '[requestId]', 'route.ts')}`,
+  ])
+  let notFoundProbed = 0, notFoundRefused = 0
   const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
   let probed = 0, refused = 0, controlPassed = 0
   const leaks: string[] = [], controlFails: string[] = []
@@ -172,10 +182,15 @@ async function main() {
     const mod: Record<string, any> = await import(file)
     for (const method of METHODS) {
       if (typeof mod[method] !== 'function') continue
-      probed++
+      const byDesign404 = NOT_FOUND_BY_DESIGN.has(`${method} ${rel}`)
+      if (byDesign404) notFoundProbed++
+      else probed++
       as('platform_manager')
       const r: Response = await mod[method](req(url, method), { params: Promise.resolve(params) })
-      if (r.status === 403) refused++
+      if (byDesign404) {
+        if (r.status === 404) notFoundRefused++
+        else leaks.push(`${method} ${url} → ${r.status} (expected exactly 404, by design)`)
+      } else if (r.status === 403) refused++
       else leaks.push(`${method} ${url} → ${r.status}`)
       // Control: the same call as super_admin gets PAST the gate (any status but 401/403).
       as('super_admin')
@@ -186,9 +201,12 @@ async function main() {
   }
   for (const l of leaks) console.log(`     ↳ LEAK ${l}`)
   for (const l of controlFails) console.log(`     ↳ control refused ${l}`)
-  assert(probed >= 40, `[0] the scan found the admin API (${probed} handler methods across ${routeFiles.length} route files)`)
-  assert(controlPassed === probed, `[0] positive control: super_admin gets past the gate on all ${probed} (${controlPassed})`)
+  assert(probed >= 40, `[0] the scan found the admin API (${probed} + ${notFoundProbed} handler methods across ${routeFiles.length} route files)`)
+  assert(controlPassed === probed + notFoundProbed, `[0] positive control: super_admin gets past the gate on all ${probed + notFoundProbed} (${controlPassed})`)
   assert(refused === probed, `platform_manager → 403 on all ${probed} other admin handlers (${refused})`)
+  assert(notFoundProbed === NOT_FOUND_BY_DESIGN.size && NOT_FOUND_BY_DESIGN.size === 2,
+    `[0] both 404-by-design handlers exist and were probed, and the list is exactly 2 (${notFoundProbed})`)
+  assert(notFoundRefused === notFoundProbed, `platform_manager → exactly 404 on the ${notFoundProbed} menu-request handlers (refusal looks like a missing fair) (${notFoundRefused})`)
   assert(approvalsProbed === 3 && approvalsAdmitted === 3, `platform_manager gets past the gate on exactly the 3 approvals handlers (${approvalsAdmitted}/${approvalsProbed})`)
 
   // ── [3] page gates ─────────────────────────────────────────────────────────────────────
