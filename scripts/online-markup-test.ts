@@ -20,6 +20,8 @@
  *   [11] client-sent prices refused: menu create, menu edit, menu request, checkout line and body
  *   [12] never charge more than the customer saw: 409 PRICE_CHANGED, confirm, missing total 400
  *   [13] page total == server total exactly: two vendors, curbside, 15% tip, odd prices; a grid
+ *   [21] organizer settings on an ACTIVE fair save again (a status equal to the current one is a
+ *        no-op); an organizer still can't set ACTIVE; the markup stays locked
  *
  * Stripe is never called: the key is replaced with an obvious fake and paymentIntents.create /
  * update are replaced with recorders before the first order.
@@ -1099,6 +1101,121 @@ async function main() {
     assert(/\.\.\.\(markupChanged && \{ onlineMarkupBps: markupParse\.bps \}\)/.test(page) && /const markupChanged = markupParse\.bps !== savedMarkupBps/.test(page), 'only a changed markup is sent')
     assert(!/markupLocked|MARKUP_LOCKED|disabled=\{[^}]*[Mm]arkup/.test(page), 'no lock on the admin screen')
     assert(/Every change is logged/.test(page) && /onlineUnitPrice\(MARKUP_EXAMPLE_PRICE, markupParse\.bps\)/.test(page), 'it says changes are logged and shows the example price')
+  }
+
+  // ── [21] organizer settings on an ACTIVE fair (found Nov 17 in the toast step) ──────────────
+  // Before this fix an ACTIVE fair's organizer could save nothing: the page re-sent status ACTIVE on
+  // every save and the route allows only UPCOMING/INACTIVE. Now a status equal to the fair's current
+  // one is dropped (no refusal, no status write), and the page sends status only when it changed and
+  // shows an ACTIVE fair's status read-only. What an organizer may SET is unchanged: never ACTIVE.
+  console.log('\n[21] organizer settings on an ACTIVE fair: saves work, status rules unchanged, markup still locked')
+  {
+    const { parseStatementNameInput } = await import('../lib/statement-descriptor')
+    const parsedName = parseStatementNameInput('OMK LIVE FAIR')
+    const expectedName = parsedName.ok ? parsedName.value : '(refused)'
+    const rowOf = (id: string) => prisma.event.findUniqueOrThrow({ where: { id } })
+    // The exact body the page sent before this fix: every field, the status re-sent, no markup.
+    const oldPageBody = (status: unknown, tag: string, isPaused = true) => ({
+      primaryColor: '#123456', welcomeMessage: `${PFX}${tag}`, statementName: 'OMK LIVE FAIR', status,
+      orderAcceptanceWindowSec: 120, vendorOfflineHideSec: 300, maxVendorsPerOrder: 4, isPaused,
+    })
+    const mkStatusFair = async (tag: string, status: 'UPCOMING' | 'ACTIVE' | 'INACTIVE') => {
+      const f = await mkFair(A.org.id, tag)
+      if (status !== 'UPCOMING') await prisma.event.update({ where: { id: f.id }, data: { status } })
+      return f
+    }
+    login(A.user.clerkId)
+
+    // 1–3: an ACTIVE fair saves.
+    const live = await mkStatusFair('live', 'ACTIVE')
+    const r1 = await orgPatch(live.urlSlug, oldPageBody('ACTIVE', 'r1'))
+    const e1 = await rowOf(live.id)
+    assert(r1.status === 200 && e1.status === 'ACTIVE' && e1.welcomeMessage === `${PFX}r1` && e1.statementName === expectedName
+      && e1.isPaused === true && e1.maxVendorsPerOrder === 4 && e1.orderAcceptanceWindowSec === 120,
+      `ACTIVE fair, the old page's body (status ACTIVE re-sent, Platform Paused on) → 200, every setting saved, still ACTIVE (${r1.status})`)
+    const noStatusBody: Record<string, unknown> = { ...oldPageBody(null, 'r2', false) }
+    delete noStatusBody.status
+    const r2 = await orgPatch(live.urlSlug, noStatusBody)
+    const e2 = await rowOf(live.id)
+    assert(r2.status === 200 && e2.status === 'ACTIVE' && e2.welcomeMessage === `${PFX}r2` && e2.isPaused === false,
+      `ACTIVE fair, the same body WITHOUT status (the new page) → 200, saved, still ACTIVE (${r2.status})`)
+    const r3 = await orgPatch(live.urlSlug, { status: 'ACTIVE' })
+    const e3 = await rowOf(live.id)
+    assert(r3.status === 200 && e3.status === 'ACTIVE' && e3.welcomeMessage === `${PFX}r2` && e3.isPaused === false,
+      `ACTIVE fair, body { status: 'ACTIVE' } only → 200, nothing changed (${r3.status})`)
+
+    // 4: the markup stays locked on an ACTIVE fair, with or without the status in the body.
+    const bpsBefore = await bpsOf(live.id)
+    const logsBefore = (await logsOf(live.id)).length
+    for (const [label, body] of [
+      ['with status ACTIVE', { ...oldPageBody('ACTIVE', 'r4a'), onlineMarkupBps: bpsBefore === 100 ? 200 : 100 }],
+      ['without status', { welcomeMessage: `${PFX}r4b`, onlineMarkupBps: bpsBefore === 100 ? 200 : 100 }],
+    ] as const) {
+      const r4 = await orgPatch(live.urlSlug, body)
+      const b4 = await bodyOf(r4)
+      const e4 = await rowOf(live.id)
+      assert(r4.status === 409 && b4.error?.code === 'MARKUP_LOCKED' && e4.welcomeMessage === `${PFX}r2`,
+        `ACTIVE fair, a markup change ${label} → 409 MARKUP_LOCKED, the other setting not saved (${r4.status} ${b4.error?.code})`)
+    }
+    assert(await bpsOf(live.id) === bpsBefore && (await logsOf(live.id)).length === logsBefore, 'ACTIVE fair: markup unchanged, no log row')
+
+    // 5: an organizer still can't set ACTIVE.
+    for (const from of ['UPCOMING', 'INACTIVE'] as const) {
+      const f = await mkStatusFair(`to-active-${from.toLowerCase()}`, from)
+      const r5 = await orgPatch(f.urlSlug, oldPageBody('ACTIVE', 'r5'))
+      const b5 = await bodyOf(r5)
+      const e5 = await rowOf(f.id)
+      assert(r5.status === 400 && b5.error?.code === 'VALIDATION_ERROR' && e5.status === from && e5.welcomeMessage !== `${PFX}r5`,
+        `${from} fair sending ACTIVE → 400 VALIDATION_ERROR, still ${from}, nothing saved (${r5.status} ${b5.error?.code})`)
+    }
+
+    // 6: anything that is not UPCOMING/INACTIVE (and not the current status) is refused.
+    const up = await mkStatusFair('garbage', 'UPCOMING')
+    for (const bad of ['DRAFT', 'LIVE', null, 1, 'upcoming'] as const) {
+      const r6 = await orgPatch(up.urlSlug, oldPageBody(bad, 'r6'))
+      const e6 = await rowOf(up.id)
+      assert(r6.status === 400 && e6.status === 'UPCOMING' && e6.welcomeMessage !== `${PFX}r6`,
+        `UPCOMING fair, status ${JSON.stringify(bad)} → 400, nothing saved (${r6.status})`)
+    }
+
+    // 7: the changes an organizer may make today behave exactly as before (S7 noted, not changed).
+    const moves: Array<['UPCOMING' | 'ACTIVE' | 'INACTIVE', 'UPCOMING' | 'INACTIVE']> = [
+      ['UPCOMING', 'INACTIVE'], ['INACTIVE', 'UPCOMING'], ['ACTIVE', 'INACTIVE'], ['ACTIVE', 'UPCOMING'],
+    ]
+    for (const [from, to] of moves) {
+      const f = await mkStatusFair(`move-${from.toLowerCase()}-${to.toLowerCase()}`, from)
+      const r7 = await orgPatch(f.urlSlug, { status: to, welcomeMessage: `${PFX}r7` })
+      const e7 = await rowOf(f.id)
+      assert(r7.status === 200 && e7.status === to && e7.welcomeMessage === `${PFX}r7`,
+        `${from} → ${to} → 200, saved as today (${r7.status} ${e7.status})`)
+    }
+
+    // 8: re-sending UPCOMING on an UPCOMING fair still saves (no-op status, as today's result).
+    const r8 = await orgPatch(up.urlSlug, oldPageBody('UPCOMING', 'r8'))
+    const e8 = await rowOf(up.id)
+    assert(r8.status === 200 && e8.status === 'UPCOMING' && e8.welcomeMessage === `${PFX}r8`, `UPCOMING fair re-sending UPCOMING → 200, saved (${r8.status})`)
+
+    // 9–10: source checks on the route and the page.
+    const strip = (s: string) => s.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '')
+    const route = strip(readFileSync('app/api/organizer/fairs/[fairSlug]/settings/route.ts', 'utf8'))
+    const allowedMatch = route.match(/const ALLOWED_STATUSES: EventStatus\[\] = \[([^\]]*)\]/)
+    const allowed = (allowedMatch?.[1].match(/'([A-Z_]+)'/g) ?? []).map(s => s.slice(1, -1)).sort()
+    assert(allowed.join(',') === 'INACTIVE,UPCOMING', `route: an organizer may set exactly UPCOMING and INACTIVE (${allowed.join(', ')})`)
+    assert(/if \(data\.status === event\.status\) \{\s*delete data\.status\s*\} else if \(!ALLOWED_STATUSES\.includes\(data\.status as EventStatus\)\) \{\s*return apiError\('Invalid status', 400, 'VALIDATION_ERROR'\)/.test(route),
+      'route: a status equal to the current one is dropped (not written); any other status still goes through the allow-list')
+
+    const page = strip(readFileSync('app/organizer/fairs/[fairSlug]/settings/page.tsx', 'utf8'))
+    assert(/\.\.\.\(statusChanged && \{ status: settings\.status \}\)/.test(page) && /const statusChanged = savedStatus !== null && settings\.status !== savedStatus/.test(page)
+      && !/^\s*status:\s+settings\.status,/m.test(page),
+      'page: status is sent only when the organizer changed it (no unconditional status: settings.status)')
+    const choicesAt = page.indexOf('const ORGANIZER_STATUS_CHOICES')
+    const choicesBlock = choicesAt >= 0 ? page.slice(choicesAt, page.indexOf(']\n', choicesAt)) : ''
+    const choices = (choicesBlock.match(/value: '([A-Z_]+)'/g) ?? []).map(s => s.slice(8, -1)).sort()
+    assert(choices.length > 0 && choices.join(',') === allowed.join(','), `page: the dropdown choices equal the route's list (${choices.join(', ')})`)
+    assert(!/value:\s*'ACTIVE'/.test(page), 'page: Active is never offered as a choice')
+    assert(/ORGANIZER_STATUS_CHOICES\.some\(c => c\.value === savedStatus\) \? \(\s*<SelectField\s+label="Fair Status"/.test(page)
+      && /options=\{ORGANIZER_STATUS_CHOICES\}/.test(page) && /Active — live/.test(page) && /use Platform Paused/.test(page),
+      'page: the status dropdown shows only for a status the organizer may set; an ACTIVE fair shows "Active — live" read-only with the Platform Paused pointer')
   }
 }
 

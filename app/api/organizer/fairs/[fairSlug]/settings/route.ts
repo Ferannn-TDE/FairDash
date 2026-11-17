@@ -115,9 +115,15 @@ export async function PATCH(
       return apiError('No valid fields to update', 400, 'VALIDATION_ERROR')
     }
 
-    // Validate status transitions
+    // Validate status transitions. Sending the fair's CURRENT status is not a change: it is dropped
+    // from the write (no refusal, and no status write that could undo a change FairSynq just made),
+    // so an ACTIVE fair's settings still save from a page or an old tab that re-sends every field.
+    // Any other status keeps the rule exactly: an organizer may set only UPCOMING or INACTIVE, never
+    // ACTIVE (that is FairSynq's Go Live).
     if ('status' in data) {
-      if (!ALLOWED_STATUSES.includes(data.status as EventStatus)) {
+      if (data.status === event.status) {
+        delete data.status
+      } else if (!ALLOWED_STATUSES.includes(data.status as EventStatus)) {
         return apiError('Invalid status', 400, 'VALIDATION_ERROR')
       }
     }

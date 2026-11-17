@@ -14,6 +14,17 @@ import { onlineUnitPrice } from '@/lib/checkout-total'
 /** The example item the markup preview prices: "On a $10.00 item, customers pay …". */
 const MARKUP_EXAMPLE_PRICE = 10
 
+/**
+ * The statuses an organizer may set on this screen: exactly the settings route's ALLOWED_STATUSES
+ * (app/api/organizer/fairs/[fairSlug]/settings/route.ts; pinned by online-markup-test [21]).
+ * ACTIVE is FairSynq's Go Live, so it is never offered. A fair whose saved status is not in this
+ * list (ACTIVE) shows its status read-only, and the page never sends a status for it.
+ */
+const ORGANIZER_STATUS_CHOICES: { value: FairSettings['status']; label: string }[] = [
+  { value: 'UPCOMING', label: 'Upcoming' },
+  { value: 'INACTIVE', label: 'Inactive' },
+]
+
 // ── What a failed save says ───────────────────────────────────────────────────
 // Every sentence a failed save shows is written HERE, chosen by the response's error CODE. The
 // server's message is never shown (scripts/toast-leak-guard.ts [5]); it goes to the browser
@@ -169,6 +180,8 @@ export default function FairSettingsPage() {
   // The markup as typed, in percent. Checked by parseMarkupPercentInput: never clamped.
   const [markupInput, setMarkupInput] = useState('')
   const [markupError, setMarkupError] = useState<string | null>(null)
+  // The status as last loaded or saved. The page sends `status` only when the organizer changed it.
+  const [savedStatus, setSavedStatus] = useState<FairSettings['status'] | null>(null)
 
   useEffect(() => {
     fetch(`/api/organizer/fairs/${fairSlug}/settings`)
@@ -176,6 +189,7 @@ export default function FairSettingsPage() {
       .then(json => {
         if (json.data) {
           setSettings(json.data)
+          setSavedStatus(json.data.status)
           setMarkupInput(String(bpsToPercent(json.data.onlineMarkupBps ?? 0)))
         }
       })
@@ -204,6 +218,9 @@ export default function FairSettingsPage() {
     const markupBps = !settings.markupLocked && markupParse.ok && markupParse.bps !== settings.onlineMarkupBps
       ? markupParse.bps
       : undefined
+    // Sent only when the organizer picked a different status. An ACTIVE fair offers no choice, so
+    // its status is never sent and its other settings save (the route allows only UPCOMING/INACTIVE).
+    const statusChanged = savedStatus !== null && settings.status !== savedStatus
     setSaving(true)
     try {
       const res = await fetch(`/api/organizer/fairs/${fairSlug}/settings`, {
@@ -213,12 +230,12 @@ export default function FairSettingsPage() {
           primaryColor:             settings.primaryColor,
           welcomeMessage:           settings.welcomeMessage,
           statementName:            settings.statementName,
-          status:                   settings.status,
           orderAcceptanceWindowSec: settings.orderAcceptanceWindowSec,
           vendorOfflineHideSec:     settings.vendorOfflineHideSec,
           maxVendorsPerOrder:       settings.maxVendorsPerOrder,
           isPaused:                 settings.isPaused,
           ...(markupBps !== undefined && { onlineMarkupBps: markupBps }),
+          ...(statusChanged && { status: settings.status }),
         }),
       })
       const json = await res.json()
@@ -226,7 +243,8 @@ export default function FairSettingsPage() {
         toast.success('Settings saved')
         setDirty(false)
         setMarkupError(null)
-        setSettings(prev => prev ? { ...prev, onlineMarkupBps: json.data.onlineMarkupBps, markupLocked: json.data.markupLocked } : prev)
+        setSettings(prev => prev ? { ...prev, status: json.data.status, onlineMarkupBps: json.data.onlineMarkupBps, markupLocked: json.data.markupLocked } : prev)
+        setSavedStatus(json.data.status)
         setMarkupInput(String(bpsToPercent(json.data.onlineMarkupBps)))
       } else {
         const code: string | undefined = typeof json.error?.code === 'string' ? json.error.code : undefined
@@ -290,17 +308,25 @@ export default function FairSettingsPage() {
           value={settings.isPaused}
           onChange={v => update('isPaused', v)}
         />
-        <SelectField
-          label="Fair Status"
-          desc="UPCOMING = visible but not accepting orders · ACTIVE = fully live · INACTIVE = closed"
-          value={settings.status}
-          options={[
-            { value: 'UPCOMING', label: 'Upcoming' },
-            { value: 'ACTIVE',   label: 'Active' },
-            { value: 'INACTIVE', label: 'Inactive' },
-          ]}
-          onChange={v => update('status', v as FairSettings['status'])}
-        />
+        {ORGANIZER_STATUS_CHOICES.some(c => c.value === savedStatus) ? (
+          <SelectField
+            label="Fair Status"
+            desc="Upcoming = visible but not accepting orders · Inactive = closed. FairSynq puts a fair live."
+            value={settings.status}
+            options={ORGANIZER_STATUS_CHOICES}
+            onChange={v => update('status', v as FairSettings['status'])}
+          />
+        ) : (
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-white text-sm font-medium font-inter">Fair Status</p>
+              <p className="text-white/35 text-xs font-inter mt-0.5">
+                FairSynq controls a live fair&apos;s status. To stop orders now, use Platform Paused.
+              </p>
+            </div>
+            <span role="status" className="shrink-0 text-emerald-400 text-sm font-semibold font-inter">Active — live</span>
+          </div>
+        )}
       </Section>
 
       {/* Fair Branding */}
