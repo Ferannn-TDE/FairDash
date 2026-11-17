@@ -40,10 +40,37 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+# THE TEST REDIS AND RATE LIMITER, pinned the same way (found Nov 16: gate suites load .env.local,
+# and this wrapper used to pin only the database, so the rate limiter and the vendor auth cache
+# used whatever Upstash .env.local named, and the order routes failed closed with 429 whenever it
+# was not reachable). dotenv never overrides a variable that is already set, so these win.
+#   • Upstash: the test stand-in (docker-compose.test.yml, fairsynq-test-upstash on 58080), with
+#     the token read from that file (SRH_TOKEN) so there is one copy of it. Local hosts only.
+#   • REDIS_URL: pinned EMPTY. The test Redis has no published port, and no gate suite needs the
+#     job queue or the sweep heartbeat (both skip cleanly when it is empty).
+TEST_UPSTASH="${TEST_UPSTASH_URL:-http://localhost:58080}"
+upstash_host="$(printf '%s' "$TEST_UPSTASH" | sed -E 's#^[^:]+://([^@]*@)?([^:/]+).*#\2#')"
+case "$upstash_host" in
+  localhost|127.0.0.1) ;;
+  *)
+    echo "🛑 REFUSING: test Upstash host resolved to '$upstash_host', which is not local." >&2
+    exit 1
+    ;;
+esac
+COMPOSE_TEST_FILE="$(cd "$(dirname "$0")/.." && pwd)/docker-compose.test.yml"
+TEST_UPSTASH_TOKEN="$(sed -nE 's/^[[:space:]]*SRH_TOKEN:[[:space:]]*//p' "$COMPOSE_TEST_FILE" 2>/dev/null | head -n 1 | tr -d "\"'\r" || true)"
+if [ -z "$TEST_UPSTASH_TOKEN" ]; then
+  echo "🛑 REFUSING: no SRH_TOKEN found in docker-compose.test.yml; cannot pin the test rate limiter." >&2
+  exit 1
+fi
+
 # ALL THREE, from one value. DIRECT_URL is the one that bites — omit it and Prisma silently
 # uses .env.local's production value for every migrate/db command.
 exec env \
   DATABASE_URL="$TEST_DB" \
   DIRECT_URL="$TEST_DB" \
   TEST_DATABASE_URL="$TEST_DB" \
+  UPSTASH_REDIS_REST_URL="$TEST_UPSTASH" \
+  UPSTASH_REDIS_REST_TOKEN="$TEST_UPSTASH_TOKEN" \
+  REDIS_URL= \
   "$@"
