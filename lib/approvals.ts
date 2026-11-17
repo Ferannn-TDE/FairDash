@@ -74,6 +74,30 @@ function optionalReason(reason: unknown): string | null {
 
 const alreadyDecided = () => new ApiError('Already decided', 409, 'ALREADY_DECIDED')
 
+/**
+ * THE BOOTH'S DECISION NUMBER (review F5, Jordan Nov 17). Stored on every vendor APPROVE / REJECT
+ * record as detail.seq; lib/vendor-go-live.ts orders a booth's decisions by it, never by time.
+ *
+ * MUST run inside the decision's transaction, right AFTER its status-conditional booth update
+ * succeeded and BEFORE the ApprovalAction is created. That update locks the booth row until
+ * commit, so no other decision on this booth can land between this count and the record it
+ * numbers: a concurrent one waits, finds the status changed and gets ALREADY_DECIDED. The count
+ * includes older records written before numbers existed, so a booth's first numbered decision
+ * still comes after all of them.
+ *
+ * Only APPROVE and REJECT are decisions. DEMO_ON / DEMO_OFF (the demo switch) and VIEW_DOCUMENT
+ * are not counted and carry no number.
+ *
+ * `seq` is the LAST key of each record's detail, after every spread (Jordan, Nov 17), so nothing
+ * spread into detail can overwrite it.
+ */
+async function nextDecisionSeq(tx: Prisma.TransactionClient, vendorId: string): Promise<number> {
+  const decided = await tx.approvalAction.count({
+    where: { applicationType: 'vendor', applicationId: vendorId, action: { in: ['APPROVE', 'REJECT'] } },
+  })
+  return decided + 1
+}
+
 // ── Vendor ──────────────────────────────────────────────────────────────────────────────────
 // Approving puts the booth ACTIVE (live), so it runs the same go-live checklist as every other
 // move into ACTIVE (lib/vendor-go-live.ts, audit M1, decided Nov 12): documents, a sellable menu
@@ -199,6 +223,7 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
       },
     })
     if (flip.count === 0) throw alreadyDecided()
+    const seq = await nextDecisionSeq(tx, vendorId)
     if (owner && ownerChanges) {
       await tx.vendorMember.updateMany({
         where: { id: owner.id, approvalStatus: owner.approvalStatus },
@@ -214,6 +239,7 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
         detail: {
           ownerMemberId: owner?.id ?? null, ownerBefore: owner?.approvalStatus ?? null, ownerChanged: ownerChanges,
           ...(opts.via && { via: opts.via }), ...ctx.detail,
+          seq, // LAST: nothing spread above can overwrite the decision number
         },
       },
       select: { id: true },
@@ -248,6 +274,7 @@ export async function reconsiderVendor(vendorId: string, reasonIn: unknown, acto
       data: { status: VendorStatus.ACTIVE, ...(boothNumber !== undefined && { boothNumber }) },
     })
     if (flip.count === 0) throw alreadyDecided()
+    const seq = await nextDecisionSeq(tx, vendorId)
     if (owner && ownerChanges) {
       await tx.vendorMember.updateMany({
         where: { id: owner.id, approvalStatus: owner.approvalStatus },
@@ -258,7 +285,7 @@ export async function reconsiderVendor(vendorId: string, reasonIn: unknown, acto
       data: {
         action: 'APPROVE', applicationType: 'vendor', applicationId: vendorId,
         actorId: actor.clerkId, actorType: actor.actorType, actorName, reason,
-        detail: { reconsidered: true, fromStatus: 'REJECTED', ownerMemberId: owner?.id ?? null, ownerBefore: owner?.approvalStatus ?? null, ownerChanged: ownerChanges, ...ctx.detail },
+        detail: { reconsidered: true, fromStatus: 'REJECTED', ownerMemberId: owner?.id ?? null, ownerBefore: owner?.approvalStatus ?? null, ownerChanged: ownerChanges, ...ctx.detail, seq },
       },
       select: { id: true },
     })
@@ -283,11 +310,12 @@ export async function rejectLiveVendor(vendorId: string, reasonIn: unknown, acto
   await db.$transaction(async tx => {
     const flip = await tx.vendor.updateMany({ where: { id: vendorId, status: from }, data: { status: VendorStatus.REJECTED } })
     if (flip.count === 0) throw alreadyDecided()
+    const seq = await nextDecisionSeq(tx, vendorId)
     const action = await tx.approvalAction.create({
       data: {
         action: 'REJECT', applicationType: 'vendor', applicationId: vendorId,
         actorId: actor.clerkId, actorType: actor.actorType, actorName, reason,
-        detail: { fromStatus: from, ownerChanged: false, ...ctx.detail },
+        detail: { fromStatus: from, ownerChanged: false, ...ctx.detail, seq },
       },
       select: { id: true },
     })

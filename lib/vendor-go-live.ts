@@ -51,17 +51,35 @@ export interface GoLiveRefusal {
 }
 
 /**
- * Has this booth been approved for its event?
+ * Is this booth approved for its event RIGHT NOW? Answered from its NEWEST decision, never from
+ * "was it ever approved" (review F5, Jordan Nov 17: an old APPROVE must not outlive a later
+ * rejection).
  *
- * Read from the records that exist today: an ApprovalAction APPROVE (every FairSynq approval
- * through decideVendor, lib/approvals.ts, writes one), or an organizer-logged status change from
- * PENDING to ACTIVE (VendorAuditLog VENDOR_STATUS_CHANGED). The vendor owner's
- * VendorMember.approvalStatus is NOT used: the Aug 4 grandfather backfill approved operators of
- * booths that were still PENDING. A booth with neither record must be approved again before it
- * can be moved into ACTIVE (decided Nov 12).
+ * NUMBERED DECISIONS FIRST (Jordan, Nov 17; no clock is ever compared). Every vendor APPROVE /
+ * REJECT written by lib/approvals.ts carries detail.seq, the booth's decision number, taken inside
+ * the decision's transaction after the booth row is locked. If the booth has any numbered record,
+ * the highest number decides: times and the status log are not read at all. Status-log rows
+ * written since numbers exist are twins of numbered records, so nothing is lost by ignoring them.
+ *
+ * OLDER HISTORY ONLY (a booth with no numbered record), from the records that existed before:
+ *   approvals  — an ApprovalAction APPROVE (every decision through lib/approvals.ts writes one,
+ *                re-approvals included), or an organizer-logged status change PENDING → ACTIVE
+ *                (VendorAuditLog VENDOR_STATUS_CHANGED; older organizer approvals);
+ *   rejections — an ApprovalAction REJECT, or an organizer-logged status change into REJECTED.
+ * The newest by time wins; on an exact tie a rejection wins (fails closed). This compares times
+ * only for history written before decision numbers existed, and only until the booth's next
+ * decision. No decision at all → not approved: the booth must be approved before it can be moved
+ * into ACTIVE (decided Nov 12). A logged REJECTED → ACTIVE plain write (the F5 hole itself) is NOT
+ * an approval.
+ *
+ * The vendor owner's VendorMember.approvalStatus is NOT used: the Aug 4 grandfather backfill
+ * approved operators of booths that were still PENDING.
+ *
+ * With the two-approvals switch on (older history), the newest decision must be an approval AND
+ * the newest FairSynq record (ApprovalAction) must be an APPROVE.
  *
  * Later: the organizer portal build adds a per-event approval date, Vendor.eventApprovedAt; this
- * then reads that column instead of reconstructing approval from these two records.
+ * then reads that column instead of reconstructing approval from these records.
  */
 export async function vendorApprovedForEvent(
   client: Client,
@@ -69,19 +87,41 @@ export async function vendorApprovedForEvent(
   opts: { requirePlatformAccountApproval?: boolean } = {},
 ): Promise<boolean> {
   const requirePlatform = opts.requirePlatformAccountApproval ?? REQUIRE_PLATFORM_ACCOUNT_APPROVAL
-  const platformApprovals = await client.approvalAction.count({
-    where: { applicationType: 'vendor', applicationId: vendorId, action: 'APPROVE' },
+  type Decision = { approve: boolean; at: number }
+  const actions = await client.approvalAction.findMany({
+    where: { applicationType: 'vendor', applicationId: vendorId, action: { in: ['APPROVE', 'REJECT'] } },
+    select: { action: true, createdAt: true, detail: true },
   })
-  if (platformApprovals > 0) return true
-  if (requirePlatform) return false
+
+  // Numbered decisions: the highest number decides. Every numbered record is a FairSynq-side
+  // ApprovalAction, so the two-approvals switch is satisfied by the same answer.
+  let top: { seq: number; approve: boolean } | null = null
+  for (const a of actions) {
+    const seq = (a.detail as { seq?: unknown } | null)?.seq
+    if (typeof seq !== 'number' || !Number.isInteger(seq)) continue
+    if (!top || seq > top.seq) top = { seq, approve: a.action === 'APPROVE' }
+  }
+  if (top) return top.approve
+
+  // Older history only.
+  const recorded: Decision[] = actions.map(a => ({ approve: a.action === 'APPROVE', at: a.createdAt.getTime() }))
   const changes = await client.vendorAuditLog.findMany({
     where: { vendorId, action: 'VENDOR_STATUS_CHANGED' },
-    select: { metadata: true },
+    select: { metadata: true, createdAt: true },
   })
-  return changes.some(c => {
+  const logged: Decision[] = changes.flatMap((c): Decision[] => {
     const m = c.metadata as { previousStatus?: unknown; newStatus?: unknown } | null
-    return m?.previousStatus === 'PENDING' && m?.newStatus === 'ACTIVE'
+    if (m?.previousStatus === 'PENDING' && m?.newStatus === 'ACTIVE') return [{ approve: true, at: c.createdAt.getTime() }]
+    if (m?.newStatus === 'REJECTED') return [{ approve: false, at: c.createdAt.getTime() }]
+    return []
   })
+  /** The newest decision; on an exact tie, a rejection. */
+  const newest = (ds: Decision[]): Decision | null => ds.reduce<Decision | null>((best, d) =>
+    !best || d.at > best.at || (d.at === best.at && !d.approve) ? d : best, null)
+  const latest = newest([...recorded, ...logged])
+  if (!latest?.approve) return false
+  if (requirePlatform) return newest(recorded)?.approve === true
+  return true
 }
 
 export interface GoLiveVendor extends VendorDocPaths {

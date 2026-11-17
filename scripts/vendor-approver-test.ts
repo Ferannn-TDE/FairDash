@@ -343,7 +343,7 @@ async function main() {
   assert(/const ORGANIZER_MAY_APPROVE_VENDORS: boolean = true/.test(route), 'organizer approval is switched on (the switch is kept)')
   assert(/await decideVendor\(vendorId,/.test(route) && /await reconsiderVendor\(vendorId,/.test(route) && /await rejectLiveVendor\(vendorId,/.test(route),
     'the organizer route sends every decision to the shared decisions')
-  const iDecision = route.indexOf('if (decision) {'), iGoLive = route.indexOf('vendorGoLiveRefusal(db,'), iWrite = route.indexOf('db.vendor.update(')
+  const iDecision = route.indexOf('if (decision) {'), iGoLive = route.indexOf('vendorGoLiveRefusal(db,'), iWrite = route.indexOf('db.vendor.updateMany(')
   assert(iDecision !== -1 && iGoLive !== -1 && iWrite !== -1 && iDecision < iGoLive && iGoLive < iWrite,
     'decisions return before the plain status write; the go-live check still sits before that write')
   const lib = readFileSync('lib/approvals.ts', 'utf8').replace(/\r\n/g, '\n')

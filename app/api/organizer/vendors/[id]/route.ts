@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
-import { handleApiError } from '@/lib/api-error'
+import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { notifyVendorStatusChange } from '@/lib/notify'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
@@ -261,6 +261,8 @@ export async function PATCH(
     //   REJECTED → ACTIVE (re-approve)        reconsiderVendor (the full approval path)
     //   ACTIVE / PAUSED / SUSPENDED → REJECTED rejectLiveVendor (reason required)
     // Pausing, suspending and lifting a pause or suspension stay on the go-live path below.
+    // A REJECTED booth leaves REJECTED ONLY by re-approval (reconsiderVendor); any other status
+    // change of a rejected booth is refused with 409 and nothing changes (review F5, Jordan Nov 17).
     // The switch stays (set false to send PENDING decisions back to FairSynq only).
     const ORGANIZER_MAY_APPROVE_VENDORS: boolean = true
     if (!ORGANIZER_MAY_APPROVE_VENDORS && statusChanging && vendor.status === VendorStatus.PENDING
@@ -272,6 +274,15 @@ export async function PATCH(
       : vendor.status === VendorStatus.REJECTED && body.status === VendorStatus.ACTIVE ? 'reconsider'
       : body.status === VendorStatus.REJECTED && vendor.status !== VendorStatus.PENDING ? 'reject-live'
       : null
+
+    // ── OUT OF REJECTED: ONLY BY RE-APPROVAL (review F5; Jordan, Nov 17) ─────────────────────
+    // REJECTED → PAUSED / SUSPENDED used to be a plain write, and lifting that pause then put a
+    // rejected booth live with no re-approval, no fresh Stripe check, no record and no email. The
+    // only way out of REJECTED is the re-approval decision above (REJECTED → ACTIVE). Refused
+    // before any write, so nothing changes (a booth number sent with it is refused too).
+    if (statusChanging && vendor.status === VendorStatus.REJECTED && decision !== 'reconsider') {
+      throw new ApiError(`${vendor.name} was rejected. It can only come back by being re-approved, which runs the full approval check.`, 409, 'VENDOR_REJECTED')
+    }
 
     // After every write below (a decision, or the plain status/booth write): caches, the audit log
     // and the Slack note, then the response. One place, so both paths behave the same.
@@ -349,7 +360,12 @@ export async function PATCH(
       if (refusal) return apiError(refusal.message, 409, refusal.code, { missing: refusal.missingLabels })
     }
 
-    return finish(await db.vendor.update({ where: { id: vendorId }, data }))
+    // Conditional on the status read above (review F5): if the booth was decided meanwhile (for
+    // example rejected between that read and this write), nothing is written and the caller is
+    // told, instead of a pause overwriting the rejection.
+    const written = await db.vendor.updateMany({ where: { id: vendorId, status: vendor.status }, data })
+    if (written.count === 0) throw new ApiError('Changed by someone else just now; reload and try again', 409, 'ALREADY_CHANGED')
+    return finish(await db.vendor.findUniqueOrThrow({ where: { id: vendorId }, select: { id: true, status: true, boothNumber: true } }))
   } catch (err) {
     return handleApiError(err)
   }
