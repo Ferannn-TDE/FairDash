@@ -147,10 +147,14 @@ async function main() {
   assert(isProtected('/vendor/springfield/dashboard') && isProtected('/vendor'), '[0] control: the vendor portal (/vendor, /vendor/…) is still protected')
   assert(!isProtected('/vendor-agreement'), '/vendor-agreement is public (not caught by the vendor portal gate)')
   assert(toRe('/vendor(.*)').test('/vendor-agreement'), '[0] positive control: the old pattern /vendor(.*) WOULD have caught it')
+  // Updated 2026-11-17 (sign-in redesign): the shared shell renders the vendor pitch from
+  // lib/signin-copy.ts, which takes VENDOR_PITCH verbatim (locked in scripts/signin-copy-test.ts).
   const signIn = readFileSync('app/sign-in/vendor/page.tsx', 'utf8')
-  const signInClient = readFileSync('app/sign-in/vendor/VendorSignIn.tsx', 'utf8')
-  assert(/<VendorSignIn\b/.test(signIn), 'the vendor sign-in page renders VendorSignIn')
-  assert(/pitch=\{<VendorPitch\b/.test(signInClient) && /VENDOR_PITCH/.test(signInClient), 'the pitch is rendered on vendor sign-in')
+  const signinCopy = readFileSync('lib/signin-copy.ts', 'utf8')
+  const shell = readFileSync('app/_components/RoleAuthCard.tsx', 'utf8')
+  assert(/<RoleAuthCard role="vendor"/.test(signIn), 'the vendor sign-in page renders the shared sign-in shell as vendor')
+  assert(/heading: VENDOR_PITCH\.heading/.test(signinCopy) && /points: VENDOR_PITCH\.points\.map/.test(signinCopy)
+    && /\{copy\.heading\}/.test(shell) && /points\.map\(\(p\) =>/.test(shell), 'the pitch is rendered on vendor sign-in')
 }
 
 main()

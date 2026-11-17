@@ -46,6 +46,3 @@ export const ORGANIZERS_PAGE = {
   },
 } as const
 
-// The /organizer/login blurb. "approve vendors" was false (C-9: only FairSynq approves vendors).
-export const ORGANIZER_LOGIN_BLURB =
-  'Create fairs, see and manage the vendors at your fair, monitor orders live, and run your event end to end.'

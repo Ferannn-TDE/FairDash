@@ -1,16 +1,7 @@
 "use client";
-import { Truck } from "lucide-react";
 import RoleAuthCard from "@/app/_components/RoleAuthCard";
 
+// Runner sign-in: sign-in only (BATCH-1 §21 Q5; individual runner sign-up is retired, C-12).
 export default function RunnerSignInPage() {
-  return (
-    <RoleAuthCard
-      role="runner"
-      Icon={Truck}
-      eyebrow="Runner sign-in"
-      heading="Deliver & earn"
-      blurb="Claim deliveries, run orders across the fairgrounds, and get paid per drop."
-      redirectTo="/runner"
-    />
-  );
+  return <RoleAuthCard role="runner" redirectTo="/runner" />;
 }

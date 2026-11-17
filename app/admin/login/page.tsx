@@ -1,19 +1,7 @@
 "use client";
-import { ShieldCheck } from "lucide-react";
 import RoleAuthCard from "@/app/_components/RoleAuthCard";
 
-// Internal, invite-only. No sign-up, no marketing — just a quiet gate.
+// Internal, invite-only. No sign-up, no pitch, no video — a quiet gate (BATCH-1 §21 Q10).
 export default function AdminLoginPage() {
-  return (
-    <RoleAuthCard
-      role="admin"
-      Icon={ShieldCheck}
-      eyebrow="Admin · internal"
-      heading="Admin sign-in"
-      blurb="Restricted access. Sign in with your FairSynq admin account."
-      redirectTo="/admin"
-      allowSignUp={false}
-      quiet
-    />
-  );
+  return <RoleAuthCard role="admin" redirectTo="/admin" quiet />;
 }

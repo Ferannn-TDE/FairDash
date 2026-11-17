@@ -6,7 +6,7 @@
  *       before it is near the viewport (preload="none", src only when near), plays inline,
  *       sets muted on the element, and never autoplays for reduced-motion visitors
  *   [2] the placements: /sign-in/vendor and /become-vendor read vendorPitch, /partners reads partnerPitch,
- *       /organizers reads organizerPitch (under the intro and buttons), all
+ *       /organizers and /organizer/login read organizerPitch, all
  *       through lib/videos (cached under the tag the settings API revalidates)
  *   [1b] the phone cut (BATCH-1 §21 Q6): lib/video-pick chooses the phone file and poster under
  *        640px only when a phone cut is saved; PitchVideo measures the screen once, before any src
@@ -67,9 +67,14 @@ const vids = readFileSync('lib/videos.ts', 'utf8')
 assert(has(vids, "tags: [VIDEOS_CACHE_TAG]"), 'lib/videos caches under the videos tag')
 const route = readFileSync('app/api/admin/settings/route.ts', 'utf8')
 assert(has(route, /startsWith\('video\.'\)[\s\S]{0,80}revalidateTag\(VIDEOS_CACHE_TAG/), 'saving a video.* key revalidates that tag')
+// Updated 2026-11-17 (sign-in redesign): the vendor and organizer sign-in pages hand their slot to the
+// shared shell, which renders it in the video stage (after the card on phones).
 const signin = readFileSync('app/sign-in/vendor/page.tsx', 'utf8')
-const signinClient = readFileSync('app/sign-in/vendor/VendorSignIn.tsx', 'utf8')
-assert(has(signin, "getVideoSlot('vendorPitch')") && has(signinClient, '<PitchVideo source={video}'), '/sign-in/vendor shows the vendor pitch under the pitch points')
+const orgLogin = readFileSync('app/organizer/login/page.tsx', 'utf8')
+const shell = readFileSync('app/_components/RoleAuthCard.tsx', 'utf8')
+assert(has(shell, '<PitchVideo source={video}'), 'the sign-in shell renders the video it is given')
+assert(has(signin, "getVideoSlot('vendorPitch')") && has(signin, 'video={video}'), '/sign-in/vendor shows the vendor pitch in the video stage')
+assert(has(orgLogin, "getVideoSlot('organizerPitch')") && has(orgLogin, 'video={video}'), '/organizer/login reuses the organizer slot (Q7)')
 const become = readFileSync('app/become-vendor/page.tsx', 'utf8')
 const becomeClient = readFileSync('app/become-vendor/VendorOnboarding.tsx', 'utf8')
 assert(has(become, "getVideoSlot('vendorPitch')") && has(becomeClient, "{step === 1 && <PitchVideo source={video}"), '/become-vendor shows the vendor pitch at the top of step 1')
@@ -101,7 +106,7 @@ function walk(dir: string, out: string[] = []) {
   for (const n of readdirSync(dir)) { const q = join(dir, n); statSync(q).isDirectory() ? walk(q, out) : /\.tsx?$/.test(n) && out.push(q) }
   return out
 }
-const videoFiles = ['app/_components/PitchVideo.tsx', 'lib/videos.ts', 'app/partners/PartnerVideoSlot.tsx', 'app/organizers/OrganizerVideoSlot.tsx', 'app/sign-in/vendor/page.tsx', 'app/sign-in/vendor/VendorSignIn.tsx', 'app/become-vendor/page.tsx', 'app/become-vendor/VendorOnboarding.tsx']
+const videoFiles = ['app/_components/PitchVideo.tsx', 'lib/videos.ts', 'lib/video-pick.ts', 'app/partners/PartnerVideoSlot.tsx', 'app/organizers/OrganizerVideoSlot.tsx', 'app/sign-in/vendor/page.tsx', 'app/organizer/login/page.tsx', 'app/_components/RoleAuthCard.tsx', 'app/become-vendor/page.tsx', 'app/become-vendor/VendorOnboarding.tsx']
 assert(walk('app').length > 50, 'scanned the app tree')
 assert(videoFiles.every(f => !/supabase/i.test(readFileSync(f, 'utf8'))), 'no video file mentions Supabase')
 

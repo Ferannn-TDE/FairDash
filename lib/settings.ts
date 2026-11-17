@@ -169,14 +169,14 @@ export const SETTINGS = {
   } satisfies SettingDef<string>,
   // Item 12 (B1.15). Only slots with a page are listed; the others (vendor getting started,
   // customer video A) are added with their placement.
-  'video.vendorPitch.url': videoUrl('Vendor pitch', 'on the vendor sign-in page (/sign-in/vendor) under the pitch, and at the top of /become-vendor'),
+  'video.vendorPitch.url': videoUrl('Vendor pitch', 'on the vendor sign-in page (/sign-in/vendor) next to the sign-in form, and at the top of /become-vendor'),
   'video.vendorPitch.posterUrl': posterUrl('Vendor pitch'),
   'video.vendorPitch.phoneUrl': phoneVideoUrl('Vendor pitch'),
   'video.vendorPitch.phonePosterUrl': phonePosterUrl('Vendor pitch'),
   'video.partnerPitch.url': videoUrl('Partner pitch', 'on /partners, between the pitch and the application form'),
   'video.partnerPitch.posterUrl': posterUrl('Partner pitch'),
   // Organizer pitch on /organizers. Unheld 2026-11-17 (Feran): v3 goes live as is (BATCH-1 §21).
-  'video.organizerPitch.url': videoUrl('Organizer pitch', 'on /organizers, under the intro and buttons'),
+  'video.organizerPitch.url': videoUrl('Organizer pitch', 'on /organizers, under the intro and buttons, and on the organizer sign-in page (/organizer/login)'),
   'video.organizerPitch.posterUrl': posterUrl('Organizer pitch'),
   'video.organizerPitch.phoneUrl': phoneVideoUrl('Organizer pitch'),
   'video.organizerPitch.phonePosterUrl': phonePosterUrl('Organizer pitch'),

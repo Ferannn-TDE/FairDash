@@ -4,18 +4,20 @@
  *   [0] scanner controls: the proxy-pattern reader catches a planted path and the old pattern
  *   [1] proxy: /organizers is public; the organizer portal (/organizer, /organizer/…) is still gated
  *   [2] ?mode=apply (Q2): opens sign-up; no param = sign-in; admin ignores it; other values ignored;
- *       the toggle works both ways. Plus RoleAuthCard's wiring of the same function.
+ *       the tabs switch both ways (2026-11-17: tabs replaced the toggle links, sign-in redesign).
+ *       Plus RoleAuthCard's wiring of the same function.
  *   [3] page copy (Q5): the approved text word for word, every field rendered, in order
  *   [4] homepage (Q3): Host an Event card → /organizers "Learn more", rest unchanged; footer
  *       "Organizer sign-in" still → /organizer/login; no footer link to /organizers
- *   [5] /organizer/login blurb: "see and manage the vendors at your fair", no "approve vendors"
+ *   [5] /organizer/login: the old blurb is removed (sign-in redesign Q7b); no "approve vendors"
  *   [6] title, noindex, not in the sitemap (even with indexing on)
  *
  * Run:  npx tsx scripts/organizers-page-test.ts
  */
 import { readFileSync } from 'node:fs'
-import { initialAuthMode, toggleAuthMode } from '../lib/auth-mode'
-import { ORGANIZERS_PAGE, ORGANIZERS_PATH, ORGANIZER_LOGIN_BLURB } from '../lib/organizer-copy'
+import { initialAuthMode } from '../lib/auth-mode'
+import { SIGNIN_COPY } from '../lib/signin-copy'
+import { ORGANIZERS_PAGE, ORGANIZERS_PATH } from '../lib/organizer-copy'
 import { robotsFor, sitemapEntries, SITE_URL } from '../lib/seo'
 
 let pass = 0, fail = 0
@@ -49,16 +51,15 @@ assert(initialAuthMode('apply', true) === 'sign-up', '?mode=apply opens on sign-
 assert(initialAuthMode(null, true) === 'sign-in', 'no parameter opens on sign-in')
 assert(initialAuthMode('apply', false) === 'sign-in', 'admin (allowSignUp=false) ignores it')
 assert(['', 'Apply', 'signup', 'sign-up', 'apply ', 'login'].every(v => initialAuthMode(v, true) === 'sign-in'), 'any other value opens on sign-in')
-assert(toggleAuthMode('sign-in') === 'sign-up' && toggleAuthMode('sign-up') === 'sign-in'
-  && toggleAuthMode(toggleAuthMode(initialAuthMode('apply', true))) === 'sign-up', 'the toggle switches both ways')
 const card = readFileSync('app/_components/RoleAuthCard.tsx', 'utf8')
 assert(card.includes('useState<AuthMode>(() => initialAuthMode(searchParams.get(AUTH_MODE_PARAM), allowSignUp))'),
   'RoleAuthCard opens on initialAuthMode(?mode, allowSignUp)')
-assert((card.match(/onClick=\{\(\) => setMode\(toggleAuthMode\)\}/g) ?? []).length === 2 && !/setMode\("sign-(in|up)"\)/.test(card),
-  'both toggle links use toggleAuthMode')
-assert(/\{allowSignUp && \(/.test(card), 'the toggle only shows where sign-up is allowed')
-const admin = readFileSync('app/admin/login/page.tsx', 'utf8')
-assert(/allowSignUp=\{false\}/.test(admin), 'admin login passes allowSignUp={false}')
+// Updated 2026-11-17 (sign-in redesign Q5): two tabs replace the two toggle links. Each tab sets its
+// own mode, so the tabs switch both ways; the old toggle function is gone.
+assert(/\(\["sign-in", "sign-up"\] as const\)\.map\(\(m\) =>/.test(card) && /onClick=\{\(\) => setMode\(m\)\}/.test(card)
+  && !/toggleAuthMode/.test(card), 'two tabs, each setting its own mode (switches both ways)')
+assert(/\{allowSignUp && \(\s*<div role="tablist"/.test(card), 'the tabs only show where sign-up is allowed')
+assert(!SIGNIN_COPY.admin.signUpTab && card.includes('const allowSignUp = Boolean(copy.signUpTab)'), 'admin has no sign-up (no sign-up tab in its copy)')
 
 // ── [3] copy ──────────────────────────────────────────────────────────────────────────────
 console.log('\n[3] page copy (approved 2026-11-14)')
@@ -118,12 +119,13 @@ assert(!/\/organizers|ORGANIZERS_PATH/.test(footer), 'no footer link to /organiz
 assert((landing.match(/ORGANIZERS_PATH/g) ?? []).length === 2, 'ORGANIZERS_PATH is used once on the page (import + the card)')
 
 // ── [5] login blurb ───────────────────────────────────────────────────────────────────────
-console.log('\n[5] /organizer/login blurb')
-assert(ORGANIZER_LOGIN_BLURB === 'Create fairs, see and manage the vendors at your fair, monitor orders live, and run your event end to end.',
-  'the blurb is the corrected text')
+console.log('\n[5] /organizer/login')
+// Updated 2026-11-17 (sign-in redesign Q7b): ORGANIZER_LOGIN_BLURB is removed; the page renders the
+// shared shell with the organizer copy (locked in scripts/signin-copy-test.ts).
 const login = readFileSync('app/organizer/login/page.tsx', 'utf8')
-assert(/blurb=\{ORGANIZER_LOGIN_BLURB\}/.test(login), '/organizer/login renders it')
-assert(/approve vendors/i.test('Create fairs, approve vendors, monitor') && !/approve vendors/i.test(login + ORGANIZER_LOGIN_BLURB),
+const orgCopy = readFileSync('lib/organizer-copy.ts', 'utf8')
+assert(/<RoleAuthCard role="organizer"/.test(login) && !/blurb/.test(login) && !/ORGANIZER_LOGIN_BLURB/.test(orgCopy), 'the old blurb is gone; the page renders the organizer sign-in copy')
+assert(/approve vendors/i.test('Create fairs, approve vendors, monitor') && !/approve vendors/i.test(login + JSON.stringify(SIGNIN_COPY.organizer)),
   'no "approve vendors" (scanner positive control included)')
 
 // ── [6] SEO ───────────────────────────────────────────────────────────────────────────────

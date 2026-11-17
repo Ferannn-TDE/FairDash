@@ -350,12 +350,12 @@ async function main() {
   assert(!('video.partnerPitch.phoneUrl' in settingsLib.SETTINGS), 'the partner slot has no phone cut card')
   // Control: the vendor card's usual help line, the shape the organizer card must match.
   assert(settingsLib.SETTINGS['video.vendorPitch.url'].help ===
-    'Shown on the vendor sign-in page (/sign-in/vendor) under the pitch, and at the top of /become-vendor. '
+    'Shown on the vendor sign-in page (/sign-in/vendor) next to the sign-in form, and at the top of /become-vendor. '
     + 'Paste an https link ending in .mp4 or .webm. Upload a changed video under a new file name: the old link stays cached for up to a month.',
     'control: the vendor video card shows the usual help line')
   // Unheld 2026-11-17 (BATCH-1 §21): the organizer card shows only the usual help line, no held warning.
   assert(settingsLib.SETTINGS['video.organizerPitch.url'].help ===
-    'Shown on /organizers, under the intro and buttons. Paste an https link ending in .mp4 or .webm. '
+    'Shown on /organizers, under the intro and buttons, and on the organizer sign-in page (/organizer/login). Paste an https link ending in .mp4 or .webm. '
     + 'Upload a changed video under a new file name: the old link stays cached for up to a month.',
     'the organizer video card shows only the usual help line (unheld)')
   assert(settingsLib.SETTING_KEYS.filter(k => k.startsWith('video.')).every(k => !/held/i.test(settingsLib.SETTINGS[k].help)),

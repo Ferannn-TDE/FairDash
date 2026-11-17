@@ -258,7 +258,6 @@ async function main() {
   // Every remaining hit, file by file, with the exact count and why it stays. A NEW mention, even
   // in a listed file, changes the count and fails.
   const ALLOW: Record<string, { count: number; why: string }> = {
-    'app/sign-in/runner/page.tsx': { count: 2, why: 'runner sign-in copy — runner/partner rework, item 7' },
     'app/become-driver/layout.tsx': { count: 1, why: 'runner application metadata — runner/partner rework, item 7' },
     'app/become-driver/page.tsx': { count: 9, why: 'runner wizard + Driver Terms — runner rework (item 7) and legal pages (item 11)' },
     'app/_components/faq-content.ts': { count: 4, why: 'runner + organizer FAQ answers — rewritten with the runner/partner rework (item 7)' },
@@ -271,8 +270,8 @@ async function main() {
     'app/_components/AddressAutocomplete.tsx': { count: 2, why: 'import path + placeholder of the address field used only by delivery checkout' },
     'app/_components/usePlatformDelivery.ts': { count: 1, why: 'code: the /api/platform/delivery fetch URL' },
   }
-  // app/ plus lib/legal/: legal text lives in lib/legal/ but is shown to customers and vendors.
-  const files = [...walk(join(process.cwd(), 'app')), ...walk(join(process.cwd(), 'lib', 'legal'))].filter(f => /\.(ts|tsx)$/.test(f))
+  // app/ plus lib/legal/ and the sign-in copy: text that lives in lib/ but is shown on pages.
+  const files = [...walk(join(process.cwd(), 'app')), ...walk(join(process.cwd(), 'lib', 'legal')), join(process.cwd(), 'lib', 'signin-copy.ts')].filter(f => /\.(ts|tsx)$/.test(f))
     .map(f => ({ path: relative(process.cwd(), f).split(sep).join('/'), text: readFileSync(f, 'utf8') }))
     .filter(f => !OPERATOR.test(f.path))
   assert(countWords("label: 'Delivery Fee'") === 1 && countWords('title: "We deliver to your door"') === 1, '[0] positive control: the counter sees "Delivery" and "deliver" in strings')

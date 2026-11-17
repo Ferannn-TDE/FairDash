@@ -172,11 +172,13 @@ export const clerkAppearance = {
     formFieldRow: '!mb-3',
     formFieldLabel: '!text-[#A1A1A1] !text-[0.6875rem] !font-semibold !uppercase !tracking-[0.12em] !mb-1.5',
     formFieldHintText: '!hidden',
+    // THE ONE INPUT STYLE (BATCH-1 §21): 48px tall, rounded-xl, placeholder #8A8A8A. 16px text so
+    // iPhone Safari doesn't zoom into the field. Dark fill so it reads on the #1A1A1A card.
     formFieldInput: [
-      '!h-10 !px-3 !w-full',
-      '!bg-[#1A1A1A] !border !border-white/[0.10] !text-white !text-sm',
-      '!rounded-lg',
-      'placeholder:!text-[#6a6a6a]',
+      '!h-12 !px-3.5 !w-full',
+      '!bg-[#0F0F0F] !border !border-white/[0.10] !text-white !text-base',
+      '!rounded-xl',
+      'placeholder:!text-[#8A8A8A]',
       'focus:!border-[#FF0077]/50 focus:!ring-2 focus:!ring-[#FF0077]/20 focus:!shadow-none',
       'hover:!border-white/[0.18]',
       'transition-all !duration-200',
@@ -185,17 +187,18 @@ export const clerkAppearance = {
     formFieldErrorText: '!text-[#f15e6c] !text-xs !mt-1',
     formFieldAction: '!text-[#FF0077] hover:!text-white !text-xs !font-medium transition-colors',
 
-    // ── Primary action: auth-06's top-lit gradient fill in our accent. ─────────────────────────
+    // ── Primary action. ─────────────────────────────────────────────────────────────────────────
     // NO ::after arrow. auth-06 renders an arrow icon inside the button, but Clerk swaps the
     // button's contents for a spinner while submitting and a pseudo-element would survive that,
     // leaving "⟳ →" mid-request. Approximating it was optional; a clean button beats a hacked one.
+    // THE ONE BUTTON STYLE (BATCH-1 §21): the homepage's flat pink primary, label 19px bold for
+    // contrast. Replaces the gradient.
     formButtonPrimary: [
-      '!h-10 !w-full',
-      '!bg-gradient-to-b !from-[#FF0077] !to-[#FF0077]/70',
-      'hover:!from-[#ff2a8d] hover:!to-[#FF0077]/80',
-      '!text-white !text-sm !font-semibold !normal-case !tracking-normal',
-      '!rounded-lg !border-0',
-      '!shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18),0_4px_16px_-4px_rgba(255,0,119,0.45)]',
+      '!h-[52px] !w-full',
+      '!bg-[#FF0077] !bg-none hover:!bg-[#e0006b]',
+      '!text-white !text-[19px] !font-bold !normal-case !tracking-normal',
+      '!rounded-xl !border-0',
+      '!shadow-[0_4px_12px_rgba(255,0,119,0.3)]',
       'active:!scale-[0.98]',
       'transition-all !duration-200',
       '!mt-1',

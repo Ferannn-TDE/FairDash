@@ -4,52 +4,54 @@ import React, { Suspense, useState, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SignIn, SignUp, useUser, useClerk } from "@clerk/clerk-react";
-import { ArrowLeft, LogOut, type LucideIcon } from "lucide-react";
-import { safeRedirect } from "@/lib/safe-redirect";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { clerkAppearance } from "@/lib/clerk-appearance";
-import { initialAuthMode, toggleAuthMode, AUTH_MODE_PARAM, type AuthMode } from "@/lib/auth-mode";
+import { initialAuthMode, AUTH_MODE_PARAM, type AuthMode } from "@/lib/auth-mode";
+import { authDestinations } from "@/lib/auth-destinations";
+import { SIGNIN_COPY, SIGN_IN_TAB, type SigninRole } from "@/lib/signin-copy";
+import PitchVideo from "@/app/_components/PitchVideo";
+import type { VideoSource } from "@/lib/videos";
 
-// Shared mono-pink auth shell for every role login (vendor / runner / organizer /
-// admin). One reusable component so all operator logins are consistent with the
-// landing's design language. Preserves the real Clerk flow — only presentation +
-// the role-tailored heading/copy/redirect differ per role.
+// THE sign-in page for every role (vendor / organizer / runner / customer / admin), the "video
+// stage" redesign (BATCH-1 §21, 2026-11-17). One component, one copy of the auth logic: the Clerk
+// flow, the access gate and the destinations are unchanged from the old card; only the layout and
+// the per-role copy (lib/signin-copy.ts) are new.
+//
+// Layout, one grid for every role:
+//   desktop  — left: eyebrow, the page's only H1, line / video subline, then the video;
+//              right: the card. With a video the card and video overlap the band's bottom edge.
+//              Without one the video area disappears and the band closes up (Q3).
+//   phones   — headline, card, then the video (Q6), then the points.
+//   below    — the role's points as cards (vendor 4, organizer 6), none for the other roles.
+// Admin is `quiet`: no pink glow (Q10).
 
 export interface RoleAuthProps {
-  role: string;
-  Icon: LucideIcon;
-  eyebrow: string;        // e.g. "Vendor sign-in"
-  heading: string;        // e.g. "Manage your booth"
-  blurb: string;          // role-tailored one-liner
-  redirectTo: string;     // where Clerk lands after auth
-  allowSignUp?: boolean;  // operators can create accounts; admin cannot
-  quiet?: boolean;        // admin = unbranded, no marketing atmosphere
-  pitch?: React.ReactNode; // optional block above the card (vendor sign-in, item 8); same width
+  role: SigninRole;
+  redirectTo: string;          // where Clerk lands after auth
+  quiet?: boolean;             // admin: plainer look, no glow
+  video?: VideoSource | null;  // vendor and organizer only; null/absent = no video area
+  videoLabel?: string;
 }
-
-
-const REVEAL =
-  "motion-safe:opacity-0 motion-safe:animate-fadeIn motion-safe:[animation-fill-mode:forwards]";
-const reveal = (ms: number): React.CSSProperties => ({ animationDelay: `${ms}ms` });
 
 // useSearchParams requires a Suspense boundary at prerender — wrap the inner card.
 export default function RoleAuthCard(props: RoleAuthProps) {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#0a0a0a]" />}>
+    <Suspense fallback={<div className="min-h-screen bg-[#0F0F0F]" />}>
       <RoleAuthInner {...props} />
     </Suspense>
   );
 }
 
-function RoleAuthInner({
-  role, Icon, eyebrow, heading, blurb, redirectTo, allowSignUp = true, quiet = false, pitch,
-}: RoleAuthProps) {
+function RoleAuthInner({ role, redirectTo, quiet = false, video = null, videoLabel = "FairSynq video" }: RoleAuthProps) {
+  const copy = SIGNIN_COPY[role];
+  const allowSignUp = Boolean(copy.signUpTab); // no sign-up tab = sign-in only (runner, admin)
   const searchParams = useSearchParams();
   const router = useRouter();
   const { isSignedIn, isLoaded, user } = useUser();
   const { signOut } = useClerk();
-  const dest = safeRedirect(searchParams.get("redirect"), redirectTo);
-  // ?mode=apply opens on sign-up where sign-up is allowed (lib/auth-mode.ts); the toggle below still
-  // switches both ways.
+  // Destinations depend on ?redirect= only, never on the tab, so switching tabs keeps the return URL.
+  const { dest, afterSignIn, afterSignUp } = authDestinations(role, searchParams.get("redirect"), redirectTo);
+  // ?mode=apply opens on sign-up where sign-up is allowed (lib/auth-mode.ts); the tabs switch both ways.
   const [mode, setMode] = useState<AuthMode>(() => initialAuthMode(searchParams.get(AUTH_MODE_PARAM), allowSignUp));
 
   // Access gate: when signed in, ask the server whether this account actually has
@@ -83,167 +85,155 @@ function RoleAuthInner({
   // Signed in and definitively lacks the role → terminal state.
   const denied = isSignedIn === true && hasAccess === false;
 
-  // Preserve the return URL through sign-up too — onboarding honors ?redirect=,
-  // so a customer who creates an account at checkout still lands back at checkout.
-  // Only forward it if it's a safe in-app path (dest already validated above).
-  const redirectParam = dest !== redirectTo ? dest : null;
   // Role intent rides on the Clerk user (unsafeMetadata), NOT the query param.
   // Clerk's post-verify redirect can drop/normalize ?role= through the CAPTCHA +
   // email-verification hops, which silently defaulted organizer signups to
   // customer (they then never provisioned). unsafeMetadata is written atomically
   // as part of user creation and is readable server-side regardless of redirects
-  // or cookie timing — onboarding reads it as the authority. We still pass ?role=
-  // on the redirect as a belt-and-suspenders hint, but correctness no longer
-  // depends on it. (Precedent: this tree already used unsafeMetadata.isVendor for
-  // the same signup-time role signal.)
+  // or cookie timing — onboarding reads it as the authority.
   const signUpUnsafeMetadata = { intendedRole: role };
-  const afterSignUp = `/onboarding?role=${role}${
-    redirectParam ? `&redirect=${encodeURIComponent(redirectParam)}` : ""
-  }`;
 
-  // SIGN-IN GOES THROUGH ONBOARDING TOO — for the OPERATOR roles only.
-  //
-  // Sign-in used to land straight on `dest` (the portal), which meant /onboarding — the ONLY
-  // code that unions a role into publicMetadata.roles[] — ran on sign-UP and never again. So
-  // an existing account could never acquire a second role: signing up again is refused by
-  // Clerk ("that email address is taken", correctly — one account per email), and signing in
-  // skipped the only granting path. There was no route at all. Onboarding is idempotent and
-  // additive (it unions into the existing roles[]), so the hop is safe for the ordinary
-  // single-role case and is the whole fix for the multi-role one. `dest` rides along as
-  // ?redirect= so the user still lands where they were going.
-  //
-  // SCOPED TO vendor | organizer | runner, deliberately:
-  //   • customer — this card fronts CHECKOUT (?redirect=/fair/…/checkout). Customer access is
-  //     ungated (/api/auth/access returns hasAccess:true unconditionally), so the hop would
-  //     grant nothing while adding a Clerk write + redirect to the money path. Not worth it.
-  //   • admin    — not one of onboarding's VALID_ROLES, so it would silently degrade to
-  //     'customer', append that to the admin's roles[], and land them on /fairs instead of
-  //     /admin. The admin family is granted in Clerk metadata by invite; onboarding has no
-  //     part in it.
-  const ONBOARDING_ROLES = ["vendor", "organizer", "runner"];
-  const afterSignIn = ONBOARDING_ROLES.includes(role)
-    ? `/onboarding?role=${role}&redirect=${encodeURIComponent(dest)}`
-    : dest;
+  const hasVideo = Boolean(video);
+  const points = copy.points ?? [];
+
+  // ── The card ────────────────────────────────────────────────────────────────────────────
+  // Phones: edge to edge inside the 16px gutter (no border or padding), so Clerk's row of three
+  // short-label social buttons keeps its width. From sm up it is a surface.
+  const cardSurface =
+    "sm:rounded-2xl sm:bg-[#1A1A1A] sm:border sm:border-white/10 sm:p-7 " +
+    (quiet ? "sm:shadow-[0_24px_60px_rgba(0,0,0,0.6)]" : "sm:shadow-[0_24px_60px_rgba(0,0,0,0.6),0_0_20px_rgba(255,0,119,0.15)]");
+
+  const card = (
+    <div className={`w-full ${cardSurface}`}>
+      {denied ? (
+        // ── Terminal state: signed in, but this account lacks the role. ──────
+        // No redirect, no link back to a login — this is a dead end on purpose.
+        <>
+          <h2 className="font-bebas text-4xl text-white uppercase tracking-wide leading-none">No {roleLabel} Access</h2>
+          <p className="mt-2 text-xs text-gray-400 font-inter leading-relaxed">
+            You&apos;re signed in
+            {user?.primaryEmailAddress?.emailAddress ? (
+              <> as <span className="text-gray-200">{user.primaryEmailAddress.emailAddress}</span></>
+            ) : null}
+            , but this account doesn&apos;t have {role} access. Switch accounts or head back home.
+          </p>
+          <div className="mt-5 flex flex-col gap-3">
+            <button
+              onClick={() => signOut({ redirectUrl: "/" })}
+              className="inline-flex items-center justify-center gap-2 h-[52px] bg-[#FF0077] hover:bg-[#e0006b] active:scale-[0.98] text-white font-inter font-bold text-[19px] rounded-xl transition-all duration-200 shadow-[0_4px_12px_rgba(255,0,119,0.3)]"
+            >
+              <LogOut className="w-5 h-5" />
+              Sign out &amp; switch account
+            </button>
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center h-11 bg-white/5 border border-white/10 text-white hover:bg-white/10 font-inter text-sm rounded-xl transition-all duration-200"
+            >
+              Go home
+            </Link>
+          </div>
+        </>
+      ) : checking ? (
+        // ── Signed in, resolving access (or access granted, navigating). ─────
+        <div className="flex flex-col items-center justify-center py-16">
+          <div className="w-6 h-6 border-2 border-white/20 border-t-[#FF0077] rounded-full animate-spin" />
+          <p className="mt-4 text-xs text-gray-500 font-inter">Checking access…</p>
+        </div>
+      ) : (
+        // ── Signed out: tabs, the card heading, the Clerk form. ─────────────
+        <>
+          {allowSignUp && (
+            <div role="tablist" aria-label={copy.heading} className="grid grid-cols-2 p-1 mb-5 rounded-xl bg-[#0F0F0F] border border-white/[0.06]">
+              {(["sign-in", "sign-up"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === m}
+                  onClick={() => setMode(m)}
+                  className={`h-11 rounded-[9px] text-sm font-inter transition-colors ${
+                    mode === m ? "bg-[#FF0077]/[0.14] text-white font-semibold" : "text-[#A1A1A1] hover:text-white font-medium"
+                  }`}
+                >
+                  {m === "sign-in" ? SIGN_IN_TAB : copy.signUpTab}
+                </button>
+              ))}
+            </div>
+          )}
+          {copy.cardHeading && (
+            <h2 className="font-bebas text-4xl text-white tracking-wide leading-none mb-5">{copy.cardHeading}</h2>
+          )}
+          {mode === "sign-in" ? (
+            <SignIn routing="hash" forceRedirectUrl={afterSignIn} appearance={clerkAppearance} />
+          ) : (
+            <SignUp routing="hash" forceRedirectUrl={afterSignUp} unsafeMetadata={signUpUnsafeMetadata} appearance={clerkAppearance} />
+          )}
+        </>
+      )}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#0a0a0a] relative overflow-hidden px-5 py-10">
-      {/* Atmosphere — static; quieter for admin */}
-      {!quiet && (
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[140%] h-[55%] bg-gradient-to-b from-[#FF0077]/8 to-transparent" />
-          <div className="absolute -top-[10%] left-1/2 -translate-x-1/2 w-[420px] h-[420px] rounded-full bg-[#FF0077]/8 blur-[130px]" />
+    <div className="min-h-screen bg-[#0F0F0F] text-white font-inter">
+      {/* Top: logo and the back link, nothing else (Q2). The back link is at least 44px tall. */}
+      <header className="border-b border-white/[0.06]">
+        <div className="mx-auto max-w-[1280px] px-4 sm:px-8 h-16 flex items-center justify-between gap-4">
+          <Link href="/" aria-label="FairSynq home" className="font-bebas text-[28px] tracking-[0.04em] leading-none">
+            <span className="text-white">FAIR</span><span className="text-[#FF0077]">SYNQ</span>
+          </Link>
+          <Link href="/" className="group inline-flex items-center gap-1.5 min-h-[44px] px-1 text-sm text-[#A1A1A1] hover:text-white transition-colors">
+            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
+            Back to FairSynq
+          </Link>
         </div>
-      )}
-      <div className="h-px w-full max-w-md absolute top-0 left-1/2 -translate-x-1/2 bg-gradient-to-r from-transparent via-[#FF0077]/40 to-transparent" />
+      </header>
 
-      {/* max-w-md, widened from max-w-sm for HEADROOM, not necessity: three short-label pills
-          (Google / Apple / Facebook) measure ~338px and would technically fit 24rem's 384px, but
-          with only ~46px of slack — enough that a font fallback (Inter not yet loaded, so a wider
-          system face) pushes the row over and it wraps. 28rem leaves ~110px.
-          The card width and the SHORT LABELS together produce the side-by-side row; revert either
-          — the width here, or clerkLocalization — and it wraps back to one button per line. */}
-      <div className="relative z-10 w-full max-w-md">
-        <Link href="/" className={`group inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition-colors mb-8 ${REVEAL}`} style={reveal(0)}>
-          <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
-          <span className="font-bebas tracking-[0.2em] text-base">
-            <span className="text-white group-hover:text-[#FF0077] transition-colors">FAIR</span>
-            <span className="text-[#FF0077] group-hover:text-white transition-colors">SYNQ</span>
-          </span>
-        </Link>
-
-        {pitch && <div className={`mb-8 ${REVEAL}`} style={reveal(40)}>{pitch}</div>}
-
-        {/* auth-06's brand mark: a solid accent square, centered and standalone above the copy
-            (it was a small tinted chip inline with the eyebrow). RoleAuthCard's own JSX — there is
-            no Clerk slot involved, and nothing here touches the form. */}
-        <div className={`flex flex-col items-center gap-3 mb-6 ${REVEAL}`} style={reveal(80)}>
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 bg-[#FF0077] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2),0_6px_20px_-6px_rgba(255,0,119,0.6)]">
-            <Icon className="w-7 h-7 text-white" />
+      {/* The stage band. With a video, the video and the card hang over its bottom edge (lg). */}
+      <section className={`relative bg-[#151515] border-b border-white/[0.06] ${hasVideo ? "pb-10 lg:pb-0" : "pb-10 lg:pb-14"}`}>
+        {!quiet && (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="absolute -top-40 left-1/4 w-[520px] h-[520px] rounded-full bg-[#FF0077]/[0.07] blur-[130px]" />
           </div>
-          <p className="text-[10px] text-gray-500 font-inter uppercase tracking-[0.15em]">{eyebrow}</p>
-        </div>
-
-        {denied ? (
-          // ── Terminal state: signed in, but this account lacks the role. ──────
-          // No redirect, no link back to a login — this is a dead end on purpose.
-          <>
-            <h1 className={`font-bebas text-4xl text-white uppercase tracking-wide leading-none ${REVEAL}`} style={reveal(140)}>
-              No {roleLabel} Access
-            </h1>
-            <p className={`mt-2 text-xs text-gray-400 font-inter leading-relaxed ${REVEAL}`} style={reveal(180)}>
-              You&apos;re signed in
-              {user?.primaryEmailAddress?.emailAddress ? (
-                <> as <span className="text-gray-200">{user.primaryEmailAddress.emailAddress}</span></>
-              ) : null}
-              , but this account doesn&apos;t have {role} access. Switch accounts or head back home.
-            </p>
-
-            <div className="mt-4 mb-4 h-px bg-white/[0.06]" />
-
-            <div className={`flex flex-col gap-3 ${REVEAL}`} style={reveal(240)}>
-              <button
-                onClick={() => signOut({ redirectUrl: "/" })}
-                className="inline-flex items-center justify-center gap-2 h-10 bg-[#FF0077] hover:bg-[#FF0077]/90 active:scale-[0.98] text-white font-inter font-semibold text-sm rounded-xl transition-all duration-200"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign out &amp; switch account
-              </button>
-              <Link
-                href="/"
-                className="inline-flex items-center justify-center h-10 bg-white/[0.04] border border-white/[0.08] text-gray-200 hover:bg-white/[0.08] font-inter text-sm rounded-xl transition-all duration-200"
-              >
-                Go home
-              </Link>
-            </div>
-          </>
-        ) : checking ? (
-          // ── Signed in, resolving access (or access granted, navigating). ─────
-          <div className="flex flex-col items-center justify-center py-10">
-            <div className="w-6 h-6 border-2 border-white/20 border-t-[#FF0077] rounded-full animate-spin" />
-            <p className="mt-4 text-xs text-gray-500 font-inter">Checking access…</p>
-          </div>
-        ) : (
-          // ── Signed out: the actual sign-in / sign-up form. ──────────────────
-          <>
-            <h1 className={`font-bebas text-4xl text-white uppercase tracking-wide leading-none text-center ${REVEAL}`} style={reveal(140)}>
-              {heading}
-            </h1>
-            <p className={`mt-2 text-xs text-gray-400 font-inter leading-relaxed text-center ${REVEAL}`} style={reveal(180)}>
-              {blurb}
-            </p>
-
-            <div className="mt-5 mb-5 h-px bg-white/[0.06]" />
-
-            <div className={REVEAL} style={reveal(240)}>
-              {mode === "sign-in" ? (
-                <SignIn routing="hash" forceRedirectUrl={afterSignIn} appearance={clerkAppearance} />
-              ) : (
-                <SignUp routing="hash" forceRedirectUrl={afterSignUp} unsafeMetadata={signUpUnsafeMetadata} appearance={clerkAppearance} />
-              )}
-            </div>
-
-            {allowSignUp && (
-              <div className={`mt-5 pt-4 border-t border-white/[0.06] text-center ${REVEAL}`} style={reveal(300)}>
-                {mode === "sign-in" ? (
-                  <p className="text-xs text-gray-500 font-inter">
-                    New here?{" "}
-                    <button onClick={() => setMode(toggleAuthMode)} className="text-[#FF0077] hover:text-white font-medium transition-colors cursor-pointer bg-transparent border-0 p-0">
-                      Create an account
-                    </button>
-                  </p>
-                ) : (
-                  <p className="text-xs text-gray-500 font-inter">
-                    Already registered?{" "}
-                    <button onClick={() => setMode(toggleAuthMode)} className="text-[#FF0077] hover:text-white font-medium transition-colors cursor-pointer bg-transparent border-0 p-0">
-                      Sign in
-                    </button>
-                  </p>
-                )}
-              </div>
-            )}
-          </>
         )}
-      </div>
+        <div className="relative mx-auto max-w-[1280px] px-4 sm:px-8 pt-8 lg:pt-14 grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start">
+          {/* Headline: first on phones, top-left on desktop. */}
+          <div className="lg:col-start-1 lg:row-start-1 flex flex-col gap-3">
+            {copy.eyebrow && (
+              <p className="text-xs font-semibold tracking-[0.16em] text-[#FF0077]">{copy.eyebrow}</p>
+            )}
+            <h1 className="font-bebas font-normal text-[44px] sm:text-6xl lg:text-[88px] leading-[0.92] tracking-[0.01em] max-w-[680px]">
+              {copy.heading}
+            </h1>
+            {copy.line && <p className="text-base lg:text-[17px] leading-relaxed text-[#A1A1A1] max-w-[560px]">{copy.line}</p>}
+            {hasVideo && copy.videoSubline && (
+              <p className="text-base lg:text-[17px] leading-relaxed text-[#A1A1A1] max-w-[560px]">{copy.videoSubline}</p>
+            )}
+          </div>
+
+          {/* Card: second on phones, right column (both rows) on desktop. */}
+          <div className={`lg:col-start-2 lg:row-start-1 lg:row-span-2 ${hasVideo ? "lg:-mb-24" : ""}`}>{card}</div>
+
+          {/* Video: after the card on phones, under the headline on desktop. Absent = no area. */}
+          {hasVideo && (
+            <div className="lg:col-start-1 lg:row-start-2 lg:-mb-24">
+              <PitchVideo source={video} label={videoLabel} className="shadow-[0_24px_60px_rgba(0,0,0,0.6)]" />
+            </div>
+          )}
+        </div>
+      </section>
+
+      {points.length > 0 && (
+        <section className={`mx-auto max-w-[1280px] px-4 sm:px-8 pb-16 ${hasVideo ? "pt-10 lg:pt-[152px]" : "pt-10 lg:pt-14"}`}>
+          <ul className={`grid gap-4 lg:gap-5 sm:grid-cols-2 ${points.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+            {points.map((p) => (
+              <li key={p.title} className="flex flex-col gap-2.5 rounded-2xl bg-[#1A1A1A] border border-white/[0.06] p-5 lg:p-6">
+                <strong className="font-bebas font-normal text-2xl tracking-[0.03em] leading-tight text-[#FF0077]">{p.title}</strong>
+                {p.text && <span className="text-[15px] leading-relaxed text-[#A1A1A1]">{p.text}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }
