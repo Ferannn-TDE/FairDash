@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { getVendorStatusConfig } from '@/lib/order-status-config'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import { formatAuditTimestamp } from '@/lib/audit-time'
 import {
   docsCompleteFromPresence,
   VENDOR_DOC_LABELS,
@@ -46,6 +47,8 @@ interface Vendor {
   revenue: number
   ready: boolean
   availableMenuCount: number
+  /** Latest approve/reject as an organizer may see it: own team by name, FairSynq staff as "FairSynq". */
+  review: { decision: 'APPROVE' | 'REJECT'; by: string; at: string } | null
 }
 
 type TabKey = 'ALL' | 'ACTIVE' | 'PENDING' | 'REJECTED_INACTIVE'
@@ -129,6 +132,11 @@ function VendorCard({
             {vendor.cuisineType}
             {vendor.boothNumber && ` · Booth ${vendor.boothNumber}`}
           </p>
+          {vendor.review && (
+            <p className="text-[10px] text-[#666] font-inter mt-0.5 truncate">
+              {vendor.review.decision === 'APPROVE' ? 'Approved' : 'Rejected'} by {vendor.review.by} · {formatAuditTimestamp(vendor.review.at)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -172,11 +180,15 @@ function VendorCard({
 
       {/* Action buttons */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* New vendors are approved by FairSynq (item 9, pending C-9): no approve/reject here. */}
+        {/* The organizer approves or rejects new vendors (Jordan, Nov 16) on the vendor's page,
+            where the documents, the Stripe status and the reject reason box are. */}
         {vendor.status === 'PENDING' && (
-          <p className="flex-1 py-2 px-3 rounded-xl border border-white/10 text-[#888] text-xs font-semibold font-inter text-center">
-            Awaiting FairSynq approval
-          </p>
+          <Link
+            href={`/organizer/fairs/${fairSlug}/vendors/${vendor.slug}`}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-[#FF0077]/30 text-[#FF0077] hover:bg-[#FF0077]/10 text-xs font-semibold font-inter transition-colors"
+          >
+            Review application
+          </Link>
         )}
         {vendor.status === 'ACTIVE' && (
           <>
@@ -292,9 +304,12 @@ export default function VendorManagementPage() {
       })
       const json = await res.json()
       if (!json.data) {
-        // Revert on failure
+        // Revert on failure; say what is missing when the server lists it (Stripe, checklist).
         void load()
-        toast.error(json.error?.message ?? 'Action failed')
+        const missing = json.error?.details?.missing as string[] | undefined
+        toast.error(missing?.length && !String(json.error?.message ?? '').includes(missing[0])
+          ? `${json.error.message} Missing: ${missing.join(', ')}.`
+          : json.error?.message ?? 'Action failed')
       } else {
         setVendors(prev => prev.map(v => v.id === vendorId ? { ...v, status: json.data.status } : v))
         const label = status === 'ACTIVE' ? 'approved' : status === 'REJECTED' ? 'rejected' : 'updated'

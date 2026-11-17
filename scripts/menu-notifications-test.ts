@@ -640,9 +640,12 @@ async function main() {
     const marks = notif.split(mark).length - 1
     const del = notif.indexOf('if (template === MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED)')
     const pri = notif.indexOf('if (template === MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING)')
-    assert(marks === 2 && notif.lastIndexOf(mark, del) > 0 && del - notif.lastIndexOf(mark, del) < mark.length + 5
-      && pri - notif.lastIndexOf(mark, pri) < mark.length + 5,
-    `both menu templates are marked DRAFT on the line above them (${marks} mark(s))`)
+    // Third draft (Nov 16): the organizer's vendor-override notice (lib/approvals.ts), same rule.
+    const ovr = notif.indexOf('if (template === VENDOR_OVERRIDE_TEMPLATE)')
+    assert(marks === 3 && notif.lastIndexOf(mark, del) > 0 && del - notif.lastIndexOf(mark, del) < mark.length + 5
+      && pri - notif.lastIndexOf(mark, pri) < mark.length + 5
+      && ovr > 0 && ovr - notif.lastIndexOf(mark, ovr) < mark.length + 5,
+    `both menu templates and the vendor-override notice are marked DRAFT on the line above them (${marks} mark(s))`)
 
     const worker = readFileSync('workers/order-worker.ts', 'utf8')
     const dg = worker.indexOf('await runMenuNotificationDigests()')

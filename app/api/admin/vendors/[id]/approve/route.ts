@@ -24,14 +24,18 @@ export async function PATCH(
     const { id } = await params
 
     let boothNumber: string | undefined
+    // `reason`: required only for an override, approving a booth on an event that has an organizer
+    // (lib/vendor-approver.ts; recorded, and the organizer is emailed).
+    let reason: unknown
     try {
       const body = await req.json()
       boothNumber = typeof body.boothNumber === 'string' && body.boothNumber.trim() ? body.boothNumber.trim() : undefined
+      reason = body.reason
     } catch { /* body is optional */ }
 
     // The booth number is written inside the decision's own transaction and counts toward the
     // go-live checklist the approval runs (lib/vendor-go-live.ts).
-    await decideVendor(id, 'approve', null, {
+    await decideVendor(id, 'approve', reason, {
       clerkId, actorType: settingsActorRole(user?.publicMetadata) ?? 'admin',
       name: reviewerNameFrom({ fullName: user?.fullName, firstName: user?.firstName, lastName: user?.lastName }),
     }, { boothNumber })

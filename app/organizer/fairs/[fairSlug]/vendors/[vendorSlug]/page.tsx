@@ -21,6 +21,7 @@ import {
 import { getVendorStatusConfig } from '@/lib/order-status-config'
 import { OrganizerBreadcrumb } from '@/app/organizer/_components/Breadcrumb'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import { formatAuditTimestamp } from '@/lib/audit-time'
 import {
   REQUIRED_VENDOR_DOCS,
   VENDOR_DOC_LABELS,
@@ -52,6 +53,8 @@ interface VendorDetail {
   cuisineType: string; boothNumber: string | null; vendorType: string
   status: string; isOffline: boolean; isBusy: boolean
   stripeVerified: boolean; stripeConnectedAt: string | null
+  /** Latest approve/reject as an organizer may see it: own team by name, FairSynq staff as "FairSynq". */
+  review: { decision: 'APPROVE' | 'REJECT'; by: string; at: string } | null
   createdAt: string; lastHeartbeatAt: string | null
   // Presence only — the documents live in a PRIVATE bucket and are fetched as
   // short-lived signed URLs on demand (see viewDoc), never embedded in this payload.
@@ -154,6 +157,9 @@ export default function VendorDetailPage({
   const [acting, setActing] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [confirmStatus, setConfirmStatus] = useState<'PAUSED' | 'SUSPENDED' | null>(null)
+  // Rejecting needs a reason; it is emailed to the vendor (Jordan, Nov 16).
+  const [rejecting, setRejecting] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
   const [menuFilter, setMenuFilter] = useState<string>('ALL')
   const [viewingDoc, setViewingDoc] = useState<string | null>(null)
 
@@ -217,22 +223,29 @@ export default function VendorDetailPage({
     }
   }
 
-  async function setStatus(status: string) {
+  async function setStatus(status: string, reason?: string) {
     if (!vendor) return
     setActing(true)
     try {
       const res  = await fetch(`/api/organizer/vendors/${vendorSlug}?fair=${encodeURIComponent(fairSlug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(reason !== undefined ? { status, reason } : { status }),
       })
       const json = await res.json()
       if (json.data) {
-        setVendor(prev => prev ? { ...prev, status: json.data.status } : prev)
+        // Re-read so the reviewer line ("Approved by …") and status come from the server.
+        const fresh = await fetchVendor().catch(() => null)
+        setVendor(prev => fresh ?? (prev ? { ...prev, status: json.data.status } : prev))
+        setRejecting(false); setRejectReason('')
         const label = status === 'ACTIVE' ? 'approved' : status === 'REJECTED' ? 'rejected' : 'updated'
         toast.success(`Vendor ${label}`)
       } else {
-        toast.error(json.error?.message ?? 'Action failed')
+        // Say what is missing when the server lists it (Stripe payouts, documents, menu, booth).
+        const missing = json.error?.details?.missing as string[] | undefined
+        toast.error(missing?.length && !String(json.error?.message ?? '').includes(missing[0])
+          ? `${json.error.message} Missing: ${missing.join(', ')}.`
+          : json.error?.message ?? 'Action failed')
       }
     } catch {
       toast.error('Action failed')
@@ -290,6 +303,11 @@ export default function VendorDetailPage({
             </span>
           </div>
           <p className="text-[#555] text-xs font-inter mt-0.5">{vendor.fairName} · {vendor.cuisineType}</p>
+          {vendor.review && (
+            <p className="text-[#666] text-[11px] font-inter mt-0.5">
+              {vendor.review.decision === 'APPROVE' ? 'Approved' : 'Rejected'} by {vendor.review.by} · {formatAuditTimestamp(vendor.review.at)}
+            </p>
+          )}
         </div>
       </div>
 
@@ -499,11 +517,32 @@ export default function VendorDetailPage({
           <div className="bg-[#111111] rounded-2xl border border-white/5 p-5">
             <h2 className="font-bebas text-lg text-white tracking-wide mb-4">Actions</h2>
             <div className="space-y-2">
-              {vendor.status === 'PENDING' && (
+              {vendor.status === 'PENDING' && !rejecting && (
                 <>
                   <ActionButton label="Approve Vendor"    icon={CheckCircleIcon}       variant="success" loading={acting} onClick={() => setStatus('ACTIVE')}    />
-                  <ActionButton label="Reject Application" icon={XCircleIcon}           variant="danger"  loading={acting} onClick={() => setStatus('REJECTED')}  />
+                  <ActionButton label="Reject Application" icon={XCircleIcon}           variant="danger"  loading={acting} onClick={() => setRejecting(true)}  />
                 </>
+              )}
+              {vendor.status === 'PENDING' && rejecting && (
+                <div className="space-y-2">
+                  <label htmlFor="reject-reason" className="block text-[0.6875rem] uppercase tracking-wide text-[#888] font-semibold font-inter">
+                    Reason <span className="normal-case tracking-normal font-normal">(emailed to the vendor)</span>
+                  </label>
+                  <textarea
+                    id="reject-reason" rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)} disabled={acting}
+                    className="w-full bg-[#0F0F0F] border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-inter outline-none focus:border-[#FF0077]"
+                  />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => void setStatus('REJECTED', rejectReason.trim())} disabled={acting || !rejectReason.trim()}
+                      className="flex-1 px-3 py-2 rounded-xl bg-red-500/80 text-white text-xs font-semibold font-inter disabled:opacity-40 cursor-pointer">
+                      {acting ? 'Rejecting…' : 'Reject application'}
+                    </button>
+                    <button type="button" onClick={() => { setRejecting(false); setRejectReason('') }} disabled={acting}
+                      className="px-3 py-2 rounded-xl border border-white/10 text-[#888] text-xs font-semibold font-inter cursor-pointer">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               )}
               {vendor.status === 'ACTIVE' && (
                 <>

@@ -35,7 +35,14 @@ const SENDING_RECLAIM_MS = 10 * 60e3
 
 // ── Templates ───────────────────────────────────────────────────────────────────────────────
 export interface SignupAlertPayload { kind: ApplicationKind; name: string; contactName: string | null; email: string | null; phone: string | null }
-export interface DecisionPayload { kind: ApplicationKind; name: string; contactName: string | null; reason?: string }
+/** `decidedBy` (vendor decisions): who decided, as the VENDOR may see it — "FairSynq" or the
+ *  organizer's organization name, never a person (lib/reviewer-label.ts; Jordan, Nov 16). Absent on
+ *  rows queued before Nov 16, which read as FairSynq. */
+export interface DecisionPayload { kind: ApplicationKind; name: string; contactName: string | null; reason?: string; decidedBy?: string }
+/** The organizer's notice that FairSynq decided a vendor on their event (strict-admin override). */
+export interface OverridePayload { vendorName: string; fairName: string; decision: 'approved' | 'rejected'; reason: string; link: string }
+export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
+const byFairSynq = (p: DecisionPayload) => !p.decidedBy || p.decidedBy === 'FairSynq'
 
 export function renderEmail(template: string, payload: unknown): { subject: string; text: string } {
   if (template === 'signup_admin_alert') {
@@ -51,7 +58,7 @@ export function renderEmail(template: string, payload: unknown): { subject: stri
     const p = payload as DecisionPayload
     const hi = `Hi ${p.contactName || p.name}`
     const text =
-      p.kind === 'vendor' ? `${hi}, ${p.name} is approved. Sign in to finish your setup (payouts and menu): ${SITE_URL}/sign-in/vendor`
+      p.kind === 'vendor' ? `${hi}, ${p.name} is approved${byFairSynq(p) ? '' : ` by ${p.decidedBy}`}. Sign in to finish your setup (payouts and menu): ${SITE_URL}/sign-in/vendor`
       : p.kind === 'organizer' ? `${hi}, your organizer account is approved. Sign in to create your first fair: ${SITE_URL}/organizer/login`
       : `${hi}, ${p.name} is approved as a FairSynq partner organization. We'll be in touch about upcoming events.`
     return { subject: "You're approved on FairSynq", text }
@@ -60,7 +67,15 @@ export function renderEmail(template: string, payload: unknown): { subject: stri
     const p = payload as DecisionPayload
     return {
       subject: 'Your FairSynq application',
-      text: `Hi ${p.contactName || p.name}, we're not able to approve ${p.name} right now. Reason: ${p.reason ?? ''}. If you have questions, contact ${CONTACT_EMAIL}.`,
+      text: `Hi ${p.contactName || p.name}, ${byFairSynq(p) ? "we're" : `${p.decidedBy} is`} not able to approve ${p.name} right now. Reason: ${p.reason ?? ''}. If you have questions, contact ${CONTACT_EMAIL}.`,
+    }
+  }
+  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
+  if (template === VENDOR_OVERRIDE_TEMPLATE) {
+    const p = payload as OverridePayload
+    return {
+      subject: `FairSynq ${p.decision} ${p.vendorName} at ${p.fairName}`,
+      text: `FairSynq ${p.decision} ${p.vendorName}, a vendor at your event ${p.fairName}, instead of waiting for your decision. Reason: ${p.reason}\n\nSee the vendor: ${p.link}`,
     }
   }
   // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
@@ -96,12 +111,28 @@ export async function enqueueSignupAlert(tx: Tx, applicationId: string, payload:
   })
 }
 
-export async function enqueueDecisionEmail(tx: Tx, applicationId: string, decision: 'approved' | 'rejected', to: string | null, payload: DecisionPayload) {
+/** `decisionId`: set for a LATER decision on the same application (a rejected booth re-approved, a
+ *  live booth rejected), so its email isn't swallowed by the first decision's dedupe key. */
+export async function enqueueDecisionEmail(tx: Tx, applicationId: string, decision: 'approved' | 'rejected', to: string | null, payload: DecisionPayload, decisionId?: string) {
   if (!to) return // no address on file: nothing to send to (the decision itself still stands)
   await tx.notification.createMany({
     data: [{
       audience: 'applicant', to, template: decision === 'approved' ? 'decision_approved' : 'decision_rejected',
-      payload: payload as unknown as Prisma.InputJsonValue, dedupeKey: `decision:${payload.kind}:${applicationId}:${decision}`,
+      payload: payload as unknown as Prisma.InputJsonValue,
+      dedupeKey: `decision:${payload.kind}:${applicationId}:${decision}${decisionId ? `:${decisionId}` : ''}`,
+    }],
+    skipDuplicates: true,
+  })
+}
+
+/** Tells the event's organizer that FairSynq decided one of their vendors (strict-admin override).
+ *  Same transaction as the decision; one email per decision (keyed by its ApprovalAction id). */
+export async function enqueueOverrideNotice(tx: Tx, vendorId: string, decisionId: string, to: string | null, payload: OverridePayload) {
+  if (!to) return // no organizer address on file: the decision and its audit row still stand
+  await tx.notification.createMany({
+    data: [{
+      audience: 'user', to, template: VENDOR_OVERRIDE_TEMPLATE,
+      payload: payload as unknown as Prisma.InputJsonValue, dedupeKey: `vendor-override:${vendorId}:${decisionId}`,
     }],
     skipDuplicates: true,
   })

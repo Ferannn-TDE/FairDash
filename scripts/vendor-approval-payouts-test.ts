@@ -139,13 +139,16 @@ async function main() {
   const orgUser = await prisma.user.create({ data: { clerkId: `${PFX}orgu`, email: `orgu${MAIL}`, name: 'Org Person' } })
   const ownerOrg = await prisma.fairOrganizer.create({ data: { name: `${PFX}Board`, contactEmail: `board${MAIL}`, approvalStatus: 'APPROVED' } })
   await prisma.orgMember.create({ data: { organizerId: ownerOrg.id, userId: orgUser.id, role: 'owner' } })
-  const ev = await prisma.event.create({ data: { name: `${PFX}fair`, urlSlug: `${PFX}${rand()}`, status: EventStatus.UPCOMING, organizerId: ownerOrg.id, startDate: new Date(), endDate: new Date(Date.now() + 864e5) } })
+  // Since sub-step B (lib/vendor-approver.ts) FairSynq approves only on a fair with NO organizer, so
+  // [2]–[4] use such a fair. [5] uses the organizer's fair, decided by a strict-admin override.
+  const ev = await prisma.event.create({ data: { name: `${PFX}fair`, urlSlug: `${PFX}${rand()}`, status: EventStatus.UPCOMING, startDate: new Date(), endDate: new Date(Date.now() + 864e5) } })
+  const orgEv = await prisma.event.create({ data: { name: `${PFX}org-fair`, urlSlug: `${PFX}org-${rand()}`, status: EventStatus.UPCOMING, organizerId: ownerOrg.id, startDate: new Date(), endDate: new Date(Date.now() + 864e5) } })
 
-  const mkVendor = async (opts: { account?: string | null; stored?: boolean } = {}) => {
+  const mkVendor = async (opts: { account?: string | null; stored?: boolean; eventId?: string } = {}) => {
     const u = await prisma.user.create({ data: { clerkId: `${PFX}vu-${rand()}`, email: `vu-${rand()}${MAIL}`, name: 'Owner' } })
     const v = await prisma.vendor.create({
       data: {
-        eventId: ev.id, name: `${PFX}Booth ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Tacos', status: VendorStatus.PENDING,
+        eventId: opts.eventId ?? ev.id, name: `${PFX}Booth ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Tacos', status: VendorStatus.PENDING,
         contactName: 'Ana', contactEmail: `ana-${rand()}${MAIL}`,
         foodHandlerPermitPath: 'x/fh.pdf', insurancePath: 'x/ins.pdf', businessLicensePath: 'x/bl.pdf', boothNumber: 'A1',
         stripeVerified: opts.stored ?? true,
@@ -287,22 +290,29 @@ async function main() {
 
   // ── [5] visibility end to end ───────────────────────────────────────────────────────────
   console.log('\n[5] Who can see the name')
-  const seen = await mkVendor()
-  await DOORS[1].approve(seen.vendor.id) // decided by "Avery Admin"
+  // On the ORGANIZER's fair, decided by FairSynq staff (a strict-admin override, with a reason):
+  // the organizer must see only "FairSynq".
+  const seen = await mkVendor({ eventId: orgEv.id })
+  login(ADMIN)
+  const ov = await call(decideRoute(req(`/api/admin/approvals/vendor/${seen.vendor.id}`, 'POST', { decision: 'approve', reason: 'Organizer unreachable before opening day' }), { params: Promise.resolve({ kind: 'vendor', id: seen.vendor.id }) }))
+  assert(ov.status === 200, `[0] setup: a strict admin approves on the organizer's fair by override, with a reason (got ${ov.status} ${ov.code ?? ''})`)
   login(SUPER)
   const adminList = (await import('../app/api/admin/events/[id]/vendors/route')).GET
-  const al = await call(adminList(req(`/api/admin/events/${ev.urlSlug}/vendors?take=200`), { params: Promise.resolve({ id: ev.urlSlug }) }))
+  const al = await call(adminList(req(`/api/admin/events/${orgEv.urlSlug}/vendors?take=200`), { params: Promise.resolve({ id: orgEv.urlSlug }) }))
   const row = al.data?.vendors?.find(v => v.id === seen.vendor.id)
   assert(al.status === 200 && row?.review?.decision === 'APPROVE' && row.review.by === 'Avery Admin' && !!row.review.at,
     `admin fair roster: "Approved by Avery Admin" with the time (got ${JSON.stringify(row?.review)})`)
 
   login({ id: orgUser.clerkId, roles: ['organizer'] })
   const orgList = (await import('../app/api/organizer/fairs/[fairSlug]/vendors/route')).GET
-  const ol = await call(orgList(req(`/api/organizer/fairs/${ev.urlSlug}/vendors`), { params: Promise.resolve({ fairSlug: ev.urlSlug }) }))
-  assert(ol.status === 200 && !ol.raw.includes('Avery') && !ol.raw.includes('actorName'), `organizer fair vendor list: no FairSynq reviewer name anywhere (status ${ol.status})`)
+  const ol = await call(orgList(req(`/api/organizer/fairs/${orgEv.urlSlug}/vendors`), { params: Promise.resolve({ fairSlug: orgEv.urlSlug }) }))
+  const olRow = ol.data?.vendors?.find(v => v.id === seen.vendor.id)
+  assert(ol.status === 200 && !ol.raw.includes('Avery') && !ol.raw.includes('actorName') && olRow?.review?.by === 'FairSynq',
+    `organizer fair vendor list: "Approved by FairSynq", no FairSynq reviewer name anywhere (status ${ol.status}, by ${olRow?.review?.by})`)
   const orgDetail = (await import('../app/api/organizer/vendors/[id]/route')).GET
   const od = await call(orgDetail(req(`/api/organizer/vendors/${seen.vendor.id}`), { params: Promise.resolve({ id: seen.vendor.id }) }))
-  assert(od.status === 200 && !od.raw.includes('Avery') && !od.raw.includes('actorName'), `organizer vendor detail: no FairSynq reviewer name anywhere (status ${od.status})`)
+  assert(od.status === 200 && !od.raw.includes('Avery') && !od.raw.includes('actorName') && od.raw.includes('"by":"FairSynq"'),
+    `organizer vendor detail: "FairSynq", no FairSynq reviewer name anywhere (status ${od.status})`)
 
   const { computeVendorReadiness } = await import('../lib/vendor-readiness')
   const readiness = JSON.stringify(await computeVendorReadiness(seen.vendor.id))
@@ -316,12 +326,21 @@ async function main() {
   // ── [6] source checks ───────────────────────────────────────────────────────────────────
   console.log('\n[6] Source checks')
   const src = readFileSync('lib/approvals.ts', 'utf8').replace(/\r\n/g, '\n')
-  const decideBody = src.slice(src.indexOf('export async function decideVendor'), src.indexOf('// ── Organizer (platform-wide account)'))
-  const iCheck = decideBody.indexOf('await checkVendorPayouts(vendor)')
+  // Since sub-step B the Stripe check lives in ONE helper, assertReadyToApprove, which every
+  // approval (decideVendor's approve, reconsiderVendor) calls before its transaction.
+  const helper = src.slice(src.indexOf('async function assertReadyToApprove('), src.indexOf('interface DecisionContext'))
+  assert(helper.length > 0 && (helper.match(/checkVendorPayouts\(/g) ?? []).length === 1 && helper.indexOf('await checkVendorPayouts(vendor)') < helper.indexOf('vendorGoLiveRefusal('),
+    'assertReadyToApprove: exactly one Stripe check, asked before the checklist')
+  assert((src.match(/checkVendorPayouts\(/g) ?? []).length === 1, 'lib/approvals.ts: no other Stripe check anywhere (one place)')
+  const decideBody = src.slice(src.indexOf('export async function decideVendor'), src.indexOf('export async function reconsiderVendor'))
+  const iCheck = decideBody.indexOf('await assertReadyToApprove(vendor, boothNumber)')
   const iApproveBranch = decideBody.indexOf("if (decision === 'approve') {")
   const iTx = decideBody.indexOf('db.$transaction(')
   assert(iCheck > iApproveBranch && iApproveBranch >= 0 && iCheck < iTx, 'decideVendor: the Stripe check runs inside the approve branch, BEFORE the transaction (no network call inside it)')
-  assert((decideBody.match(/checkVendorPayouts\(/g) ?? []).length === 1, 'decideVendor: exactly one Stripe check')
+  assert((decideBody.match(/assertReadyToApprove\(/g) ?? []).length === 1, 'decideVendor: exactly one Stripe check')
+  const reBody = src.slice(src.indexOf('export async function reconsiderVendor'), src.indexOf('export async function rejectLiveVendor'))
+  assert(reBody.indexOf('await assertReadyToApprove(') > 0 && reBody.indexOf('await assertReadyToApprove(') < reBody.indexOf('db.$transaction('),
+    'reconsiderVendor (re-approve): the same Stripe check, before its transaction')
   for (const f of ['app/api/admin/vendors/[id]/approve/route.ts', 'app/api/admin/vendors/[id]/reject/route.ts']) {
     assert(/name: reviewerNameFrom\(/.test(readFileSync(f, 'utf8')), `${f} passes the reviewer's sign-in name`)
   }

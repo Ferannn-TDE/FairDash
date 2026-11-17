@@ -8,7 +8,10 @@
  *   [3] Documents gate, required reject reason, double decision → 409, staff never touched
  *   [4] Organizer and partner decisions; applicant emails queued; audit rows
  *   [5] The per-fair admin vendor routes run the same single decision
- *   [6] Organizers can't decide pending vendors (C-9 switched off); pausing still works
+ *   [6] Organizers decide pending vendors on their own fair (Jordan, Nov 16; was "can't decide"
+ *       while C-9 was switched off); FairSynq gets 409 there; pausing still works
+ *
+ * Sections [1]–[5] use a fair with NO organizer: there FairSynq is the approver (lib/vendor-approver.ts).
  *   [7] Document viewing: pending only, audited (actor, role, document)
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/approvals-test.ts
@@ -84,16 +87,18 @@ async function main() {
   const ownerOrg = await prisma.fairOrganizer.create({ data: { name: `${PFX}owner-org`, contactEmail: `owner-org${MAIL}`, approvalStatus: 'APPROVED' } })
   await prisma.orgMember.create({ data: { organizerId: ownerOrg.id, userId: orgUser.id, role: 'owner' } })
   const ev = await prisma.event.create({ data: { name: `${PFX}fair`, urlSlug: `${PFX}${rand()}`, status: EventStatus.UPCOMING, organizerId: ownerOrg.id, startDate: new Date(), endDate: new Date(Date.now() + 864e5) } })
+  // A fair with NO organizer: FairSynq is its approver (Jordan, Nov 16), so [1]–[5] decide here.
+  const fsEv = await prisma.event.create({ data: { name: `${PFX}fs-fair`, urlSlug: `${PFX}fs-${rand()}`, status: EventStatus.UPCOMING, startDate: new Date(), endDate: new Date(Date.now() + 864e5) } })
 
   // Approving puts a booth live, so since M1 (Fix B) it needs the whole go-live checklist:
   // documents, payouts, a booth number and a sellable menu item. Fixtures are complete unless a
   // case turns one item off.
-  const mkVendor = async (opts: { docs?: boolean; withStaff?: boolean; payouts?: boolean; booth?: boolean; menu?: boolean } = {}) => {
+  const mkVendor = async (opts: { docs?: boolean; withStaff?: boolean; payouts?: boolean; booth?: boolean; menu?: boolean; eventId?: string } = {}) => {
     const u = await prisma.user.create({ data: { clerkId: `${PFX}vu-${rand()}`, email: `vu-${rand()}${MAIL}`, name: 'Owner' } })
     const docs = opts.docs === false ? {} : { foodHandlerPermitPath: 'x/fh.pdf', insurancePath: 'x/ins.pdf', businessLicensePath: 'x/bl.pdf' }
     const v = await prisma.vendor.create({
       data: {
-        eventId: ev.id, name: `${PFX}Booth ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Tacos', status: VendorStatus.PENDING,
+        eventId: opts.eventId ?? fsEv.id, name: `${PFX}Booth ${rand()}`, slug: `${PFX}v-${rand()}`, cuisineType: 'Tacos', status: VendorStatus.PENDING,
         contactName: 'Ana', contactEmail: `ana-${rand()}${MAIL}`, ...docs,
         stripeVerified: opts.payouts !== false,
         // Approval asks Stripe fresh (lib/vendor-payouts-check.ts, Nov 16): a complete fixture has a
@@ -249,16 +254,29 @@ async function main() {
   assert(noBooth.status === 409 && withBooth.status === 200 && withBooth.data?.vendor?.boothNumber === 'C7' && (await state(kb.vendor.id, kb.ownerId)).booth === 'ACTIVE',
     `no booth number → 409; the same approval sending boothNumber "C7" counts it and goes ACTIVE (got ${noBooth.status}/${withBooth.status})`)
 
-  // ── [6] organizers can't decide pending vendors ────────────────────────────────────────
-  console.log('\n[6] Organizer approval of vendors is off (C-9)')
+  // ── [6] organizers decide pending vendors on their own fair ────────────────────────────
+  // Jordan, Nov 16 (locked decision 2): replaces "Organizer approval of vendors is off (C-9)".
+  console.log('\n[6] Organizers decide pending vendors on their own fair; FairSynq gets 409 there')
   const orgPATCH = (await import('../app/api/organizer/vendors/[id]/route')).PATCH
-  const m = await mkVendor()
-  const orgSet = (id: string, status: string) => { login(orgUser.clerkId, ['organizer']); return call(orgPATCH(req(`/api/organizer/vendors/${id}`, 'PATCH', { status }) as any, { params: Promise.resolve({ id }) })) }
-  const oa = await orgSet(m.vendor.id, 'ACTIVE'), orj = await orgSet(m.vendor.id, 'REJECTED')
-  assert(oa.status === 403 && oa.code === 'APPROVAL_BY_PLATFORM' && orj.status === 403, 'organizer PENDING → ACTIVE or REJECTED → 403 APPROVAL_BY_PLATFORM')
-  assert((await state(m.vendor.id, m.ownerId)).booth === 'PENDING', 'and the vendor is still pending')
-  const op = await orgSet(k.vendor.id, 'PAUSED')
-  assert(op.status === 200 && (await prisma.vendor.findUnique({ where: { id: k.vendor.id } }))?.status === 'PAUSED', '[0] control: the organizer can still pause an active vendor')
+  const orgSet = (id: string, status: string, extra: object = {}) => { login(orgUser.clerkId, ['organizer']); return call(orgPATCH(req(`/api/organizer/vendors/${id}`, 'PATCH', { status, ...extra }) as any, { params: Promise.resolve({ id }) })) }
+  const m = await mkVendor({ eventId: ev.id })
+  const oa = await orgSet(m.vendor.id, 'ACTIVE')
+  const sm = await state(m.vendor.id, m.ownerId)
+  assert(oa.status === 200 && sm.booth === 'ACTIVE' && sm.owner === 'APPROVED', `organizer PENDING → ACTIVE → the shared decision: booth ACTIVE and owner APPROVED together (got ${oa.status} ${oa.code ?? ''})`)
+  const mAudit = await prisma.approvalAction.findFirst({ where: { applicationId: m.vendor.id, action: 'APPROVE' } })
+  assert(mAudit?.actorType === 'organizer' && mAudit.actorId === orgUser.clerkId, '…with an audit row recording the organizer')
+  const m2 = await mkVendor({ eventId: ev.id })
+  const orjNoReason = await orgSet(m2.vendor.id, 'REJECTED')
+  assert(orjNoReason.status === 400 && (await state(m2.vendor.id, m2.ownerId)).booth === 'PENDING', `organizer reject with no reason → 400, still pending (got ${orjNoReason.status})`)
+  const orj = await orgSet(m2.vendor.id, 'REJECTED', { reason: 'No space this year' })
+  const sm2 = await state(m2.vendor.id, m2.ownerId)
+  assert(orj.status === 200 && sm2.booth === 'REJECTED' && sm2.owner === 'REJECTED' && sm2.ownerReason === 'No space this year', 'organizer reject with a reason → booth and owner REJECTED, reason stored')
+  const m3 = await mkVendor({ eventId: ev.id })
+  const fsOnOrgFair = await decideAs(PM, 'vendor', m3.vendor.id, { decision: 'approve' })
+  assert(fsOnOrgFair.status === 409 && fsOnOrgFair.code === 'APPROVAL_BY_ORGANIZER' && (await state(m3.vendor.id, m3.ownerId)).booth === 'PENDING',
+    `FairSynq (platform_manager) approving on the organizer's fair → 409 APPROVAL_BY_ORGANIZER, still pending (got ${fsOnOrgFair.status} ${fsOnOrgFair.code})`)
+  const op = await orgSet(m.vendor.id, 'PAUSED')
+  assert(op.status === 200 && (await prisma.vendor.findUnique({ where: { id: m.vendor.id } }))?.status === 'PAUSED', '[0] control: the organizer can still pause an active vendor')
 
   // ── [7] document viewing ───────────────────────────────────────────────────────────────
   console.log('\n[7] Viewing documents')

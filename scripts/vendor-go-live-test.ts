@@ -12,8 +12,8 @@
  *   [2] an approved PAUSED booth missing ONE checklist item at a time → 409 naming exactly that
  *       item; with everything done → 200 ACTIVE
  *   [3] approval recognised from either record: a FairSynq ApprovalAction, or an organizer-logged
- *       PENDING → ACTIVE change; REJECTED → ACTIVE with neither → 409; SUSPENDED → ACTIVE when
- *       approved and complete → 200
+ *       PENDING → ACTIVE change; SUSPENDED → ACTIVE when approved and complete → 200.
+ *       REJECTED → ACTIVE is a re-approval since Nov 16 (full approval path, Stripe asked fresh)
  *   [4] a booth number sent in the same PATCH counts toward the checklist
  *   [5] REQUIRE_PLATFORM_ACCOUNT_APPROVAL: false today; with it on, an organizer-logged approval
  *       alone is not enough and a FairSynq record is
@@ -183,10 +183,15 @@ async function main() {
       `an organizer-logged PENDING → ACTIVE counts: lifting a suspension → 200 (got ${r.status})`)
   }
   {
+    // Since Jordan's Nov 16 decision REJECTED → ACTIVE is a re-approval: the full approval path
+    // (lib/approvals.ts reconsiderVendor), so it does not ask for an earlier approval record; it asks
+    // Stripe fresh. This booth has no Stripe account linked → refused, still REJECTED, no record.
+    // scripts/vendor-approver-test.ts covers the re-approval itself.
     const { vendor } = await mkVendor('REJECTED')
     const r = await setStatus(vendor.id, { status: 'ACTIVE' })
-    assert(r.status === 409 && (r.body.error?.details?.missing ?? []).includes('Application approved') && await statusOf(vendor.id) === 'REJECTED',
-      `REJECTED → ACTIVE with no approval record → 409, still REJECTED (got ${r.status})`)
+    const records = await prisma.approvalAction.count({ where: { applicationId: vendor.id } })
+    assert(r.status === 409 && r.body.error?.code === 'VENDOR_STRIPE_NOT_LINKED' && await statusOf(vendor.id) === 'REJECTED' && records === 0,
+      `REJECTED → ACTIVE (re-approve) with no Stripe account → 409 VENDOR_STRIPE_NOT_LINKED, still REJECTED, no record (got ${r.status} ${r.body.error?.code})`)
   }
   {
     // An unrelated status change in the log (PAUSED → ACTIVE) is not an approval.

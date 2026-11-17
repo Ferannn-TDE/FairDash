@@ -9,6 +9,8 @@ import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
 import { vendorDocsPresence } from '@/lib/vendor-documents'
 import { GO_LIVE_VENDOR_SELECT, vendorGoLiveRefusal } from '@/lib/vendor-go-live'
+import { decideVendor, reconsiderVendor, rejectLiveVendor } from '@/lib/approvals'
+import { latestVendorReviews } from '@/lib/vendor-review'
 import { VendorStatus } from '@prisma/client'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 
@@ -111,6 +113,10 @@ export async function GET(
       ? orderHistory[orderHistory.length - 1].id
       : null
 
+    // Who last approved or rejected this booth, as an ORGANIZER may see it: their own team by
+    // name, FairSynq staff only as "FairSynq" (lib/reviewer-label.ts; Jordan, Nov 16).
+    const review = (await latestVendorReviews([vendorId], { kind: 'organizer', organizerId })).get(vendorId) ?? null
+
     return success({
       id: vendor.id,
       name: vendor.name,
@@ -124,6 +130,7 @@ export async function GET(
       isBusy: vendor.isBusy,
       stripeVerified: vendor.stripeVerified,
       stripeConnectedAt: vendor.stripeConnectedAt,
+      review,
       createdAt: vendor.createdAt,
       lastHeartbeatAt: vendor.lastHeartbeatAt,
       operatingHours: vendor.operatingHours,
@@ -243,75 +250,104 @@ export async function PATCH(
       })
     }
 
-    // ── ORGANIZER APPROVAL OF VENDORS IS SWITCHED OFF (item 9, pending C-9) ─────────────────
-    // Conflicts with the locked Nov 12 decision (the event's organizer approves vendors for their
-    // own event); it is turned on with the reviewer-name work, not in this fix.
-    // "Only the client approves": a new vendor (PENDING) is approved or rejected on /admin/approvals
-    // or the admin fair Vendors page, never here (a reject here would split the booth from its owner
-    // and skip the applicant's email). Pausing, suspending and reactivating active vendors stay.
-    // To switch organizer approval back on (if the client answers C-9 that way): set
-    // ORGANIZER_MAY_APPROVE_VENDORS below to true; the documents gate under it still applies.
-    const ORGANIZER_MAY_APPROVE_VENDORS = false
+    // ── ORGANIZER APPROVAL OF VENDORS IS ON (Jordan, Nov 16; locked decision 2) ─────────────
+    // The event's organizer approves vendors for their own event. Every DECISION goes through the
+    // shared decisions in lib/approvals.ts, never a plain status write here, so each one runs the
+    // approver rule, the Stripe payouts check (asked fresh) and the checklist, and writes its
+    // ApprovalAction (reviewer name) and the vendor's email in one transaction:
+    //   PENDING → ACTIVE / REJECTED          decideVendor (booth + owner together; reject needs a reason)
+    //   REJECTED → ACTIVE (re-approve)        reconsiderVendor (the full approval path)
+    //   ACTIVE / PAUSED / SUSPENDED → REJECTED rejectLiveVendor (reason required)
+    // Pausing, suspending and lifting a pause or suspension stay on the go-live path below.
+    // The switch stays (set false to send PENDING decisions back to FairSynq only).
+    const ORGANIZER_MAY_APPROVE_VENDORS: boolean = true
     if (!ORGANIZER_MAY_APPROVE_VENDORS && statusChanging && vendor.status === VendorStatus.PENDING
         && (body.status === VendorStatus.ACTIVE || body.status === VendorStatus.REJECTED)) {
       return apiError('New vendors are approved by FairSynq. You can pause or suspend vendors once they are active.', 403, 'APPROVAL_BY_PLATFORM')
     }
+    const decision: 'decide' | 'reconsider' | 'reject-live' | null = !statusChanging ? null
+      : vendor.status === VendorStatus.PENDING && (body.status === VendorStatus.ACTIVE || body.status === VendorStatus.REJECTED) ? 'decide'
+      : vendor.status === VendorStatus.REJECTED && body.status === VendorStatus.ACTIVE ? 'reconsider'
+      : body.status === VendorStatus.REJECTED && vendor.status !== VendorStatus.PENDING ? 'reject-live'
+      : null
+
+    // After every write below (a decision, or the plain status/booth write): caches, the audit log
+    // and the Slack note, then the response. One place, so both paths behave the same.
+    const finish = async (updated: { id: string; status: VendorStatus; boothNumber: string | null }) => {
+      // Revalidate vendor analytics cache
+      revalidateTag(`analytics-${vendorId}`, 'default')
+      revalidateTag(`vendor-${vendorId}`, 'default')
+
+      // Status change invalidates organizer headline counts (active vendor count)
+      if (body.status && body.status !== vendor.status) {
+        revalidateTag(`organizer-stats-${organizerId}`, 'default')
+        revalidateTag(`organizer-fairs-${organizerId}`, 'default')
+        // …and the CUSTOMER discovery list. status decides whether a vendor is ACTIVE and so
+        // orderable; getVendorsBySlugCached (lib/fairs.ts) caches that list 120s under
+        // 'vendors'. Without this, a SUSPENDED vendor lingers as orderable — and a newly
+        // ACTIVE one stays invisible — for up to two minutes. Same bust the toggle uses.
+        revalidateTag('vendors', 'default')
+      }
+
+      // Audit log + Slack notification on status change
+      if (statusChanging && body.status) {
+        const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
+        if (dbUser) {
+          logVendorAction(vendorId, dbUser.id, AUDIT_ACTIONS.VENDOR_STATUS_CHANGED, {
+            previousStatus: vendor.status,
+            newStatus: body.status,
+            reason: body.reason ?? null,
+          })
+        }
+        void notifyVendorStatusChange(
+          vendor.name,
+          vendorId,
+          body.status,
+          vendor.event.name,
+          body.reason,
+        )
+      }
+
+      return success({
+        id: updated.id,
+        status: updated.status,
+        boothNumber: updated.boothNumber,
+      })
+    }
+
+    if (decision) {
+      // The decisions write a booth number only when approving; a reject never changes it.
+      if (body.status === VendorStatus.REJECTED && data.boothNumber !== undefined) {
+        return apiError('Save the booth number separately from a rejection.', 400, 'VALIDATION_ERROR')
+      }
+      const actor = { clerkId, actorType: 'organizer' as const, organizerId }
+      const booth = typeof data.boothNumber === 'string' ? data.boothNumber : undefined
+      if (decision === 'decide') {
+        await decideVendor(vendorId, body.status === VendorStatus.ACTIVE ? 'approve' : 'reject', body.reason, actor, { boothNumber: booth })
+      } else if (decision === 'reconsider') {
+        await reconsiderVendor(vendorId, body.reason, actor, { boothNumber: booth })
+      } else {
+        await rejectLiveVendor(vendorId, body.reason, actor)
+      }
+      return finish(await db.vendor.findUniqueOrThrow({ where: { id: vendorId }, select: { id: true, status: true, boothNumber: true } }))
+    }
+
     // ── GO-LIVE CHECK (audit M1, decided Nov 12) ──────────────────────────────────────────
-    // EVERY move into ACTIVE, not only PENDING → ACTIVE: lifting a pause, lifting a suspension
-    // and re-activating a rejected booth all need the booth approved for this event AND the
-    // go-live checklist complete (documents, a sellable menu item, payouts, booth number). The
-    // old PENDING-only gate is what let PENDING → PAUSED → ACTIVE put a never-approved booth live.
-    // One shared check (lib/vendor-go-live.ts), also used by FairSynq's approve (decideVendor).
+    // EVERY remaining move into ACTIVE: lifting a pause or a suspension needs the booth approved
+    // for this event AND the go-live checklist complete (documents, a sellable menu item, payouts,
+    // booth number). The old PENDING-only gate is what let PENDING → PAUSED → ACTIVE put a
+    // never-approved booth live. Approving a PENDING booth and re-approving a REJECTED one are
+    // decisions, handled above (lib/approvals.ts). One shared check (lib/vendor-go-live.ts).
     // A booth number sent in this same PATCH counts toward the checklist.
     if (statusChanging && body.status === VendorStatus.ACTIVE) {
       const refusal = await vendorGoLiveRefusal(db, {
         ...vendor,
         boothNumber: data.boothNumber !== undefined ? (data.boothNumber as string | null) : vendor.boothNumber,
-      }, { approving: vendor.status === VendorStatus.PENDING })
+      })
       if (refusal) return apiError(refusal.message, 409, refusal.code, { missing: refusal.missingLabels })
     }
 
-    const updated = await db.vendor.update({ where: { id: vendorId }, data })
-
-    // Revalidate vendor analytics cache
-    revalidateTag(`analytics-${vendorId}`, 'default')
-    revalidateTag(`vendor-${vendorId}`, 'default')
-
-    // Status change invalidates organizer headline counts (active vendor count)
-    if (body.status && body.status !== vendor.status) {
-      revalidateTag(`organizer-stats-${organizerId}`, 'default')
-      revalidateTag(`organizer-fairs-${organizerId}`, 'default')
-      // …and the CUSTOMER discovery list. status decides whether a vendor is ACTIVE and so
-      // orderable; getVendorsBySlugCached (lib/fairs.ts) caches that list 120s under
-      // 'vendors'. Without this, a SUSPENDED vendor lingers as orderable — and a newly
-      // ACTIVE one stays invisible — for up to two minutes. Same bust the toggle uses.
-      revalidateTag('vendors', 'default')
-    }
-
-    // Audit log + Slack notification on status change
-    if (statusChanging && body.status) {
-      const dbUser = await db.user.findUnique({ where: { clerkId }, select: { id: true } })
-      if (dbUser) {
-        logVendorAction(vendorId, dbUser.id, AUDIT_ACTIONS.VENDOR_STATUS_CHANGED, {
-          previousStatus: vendor.status,
-          newStatus: body.status,
-          reason: body.reason ?? null,
-        })
-      }
-      void notifyVendorStatusChange(
-        vendor.name,
-        vendorId,
-        body.status,
-        vendor.event.name,
-        body.reason,
-      )
-    }
-
-    return success({
-      id: updated.id,
-      status: updated.status,
-      boothNumber: updated.boothNumber,
-    })
+    return finish(await db.vendor.update({ where: { id: vendorId }, data }))
   } catch (err) {
     return handleApiError(err)
   }
