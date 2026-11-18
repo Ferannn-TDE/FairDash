@@ -31,6 +31,8 @@
  *   [13] source: DRAFT marks on both templates; worker runs the digest before delivery; every
  *        recorder call passes the caller's tx; every "next tick" call uses dueAt()
  *   [5b] (after [5]) control: the database-vs-computer clock race (see dueAt), reproduced and removed
+ *   [14] review F15: a suspended, PENDING or REJECTED organizer's members are not told (the alert
+ *        is taken off the queue, nobody told); reinstated → told again; other fairs unaffected
  *
  * Clerk identity, next/cache and server-only are mocked (scripts/_route-loader.mjs); the strict
  * admin list goes through a fake Clerk client (the real paging and role filter run).
@@ -706,6 +708,111 @@ async function main() {
     }
     const planted = [...'await recordMenuDeleted(db, {'.matchAll(/record(?:MenuDeleted|PriceChangePending)\((\w+),/g)][0]?.[1]
     assert(planted === 'db', '[0] control: the scan reads the client argument')
+  }
+
+  // ── [14] a blocked organizer's members are not told (review F15) ────────────────────────────
+  // Jordan, Nov 17: menu alerts go only to members of an organizer that may operate, by the same
+  // two functions requireOrganizerAuth uses (approved, not suspended). Blocked → the group is taken
+  // off the queue with nobody told (decision A). Each alert is RECORDED while the organizer is
+  // approved, and the organizer is blocked only before the digest runs, so these rows test who is
+  // told, not whether the vendor may file. digest(minutes(11)) as in [8]: a delete is due after 10
+  // minutes, a price increase at once.
+  console.log('\n[14] a blocked organizer\'s members are not told (review F15)')
+  {
+    const orgC = await mkOrg('orgc', ['one', 'two'])
+    const [c1, c2] = orgC.members
+    const fairC = await mkFair(orgC.org.id, `${PFX}Blocked Fair`)
+    const C = await mkVendor(fairC.id, 'Booth C')
+    const setOrgC = (data: { approvalStatus?: string; suspendedAt?: Date | null }) =>
+      prisma.fairOrganizer.update({ where: { id: orgC.org.id }, data: data as never })
+    let seq = 0
+    const deleteOn = async (v: { vendor: { id: string }; user: { clerkId: string } }) => {
+      login(v.user.clerkId)
+      const item = await mkItem(v.vendor.id, `${PFX}Blk ${++seq}`, 5)
+      await file(v.vendor.id, { type: 'DELETE', menuItemId: item.id })
+    }
+    /** How many bell rows and email rows organizer C's two members got for Booth C. */
+    const toldC = async () => {
+      const bells = (await Promise.all([c1, c2].map(m => bellFor(m.id)))).flat().filter(n => n.title.startsWith('Booth C'))
+      const mails = (await Promise.all([c1, c2].map(m => mailFor(m.email)))).flat()
+      return { bells: bells.length, mails: mails.length }
+    }
+    const claimedC = async () => (await events(C.vendor.id)).every(e => e.digestId !== null)
+
+    // Control: approved and not suspended → both members told (unsaved choice = bell + email).
+    await resetAlerts()
+    await deleteOn(C)
+    const ok = await digest(minutes(11))
+    const t0 = await toldC()
+    assert(t0.bells === 2 && t0.mails === 2 && ok.notified === 1,
+      `[0] control: an approved organizer's 2 members are told, bell and email (bells ${t0.bells}, emails ${t0.mails}, notified ${ok.notified})`)
+
+    // Suspended: recorded while approved, suspended before the digest.
+    await resetAlerts()
+    await deleteOn(C)
+    await deleteOn(BB) // another approved organizer's fair, same run
+    await deleteOn(O)  // a fair with no organizer, same run
+    await setOrgC({ suspendedAt: new Date() })
+    const sus = await digest(minutes(11))
+    const t1 = await toldC()
+    assert(t1.bells === 0 && t1.mails === 0,
+      `suspended organizer: its members get NO bell and NO email (bells ${t1.bells}, emails ${t1.mails})`)
+    assert(await claimedC() && sus.nothingToSend === 1,
+      `suspended organizer: the alert is taken off the queue with nobody told (claimed ${await claimedC()}, nothingToSend ${sus.nothingToSend})`)
+    const sameRun = await prisma.inAppNotification.findMany({ where: { user: { email: { endsWith: MAIL } } }, select: { userId: true, title: true } })
+    const gotBB = new Set(sameRun.filter(n => n.title.startsWith('Booth BB')).map(n => n.userId))
+    const gotO = new Set(sameRun.filter(n => n.title.startsWith('Booth O')).map(n => n.userId))
+    assert(gotBB.size === 1 && gotBB.has(orgB.members[0].id) && gotO.has(adminUser.id) && gotO.has(superUser.id),
+      `[0] control, same run: another approved organizer's member and the strict admins are still told (BB ${gotBB.size}, admins ${gotO.size})`)
+
+    // A pending price increase while suspended: not told either.
+    await resetAlerts()
+    await setOrgC({ suspendedAt: null })
+    login(C.user.clerkId)
+    const gone = await mkItem(C.vendor.id, `${PFX}Blk Cannoli`, 8, new Date(now - 365 * 864e5))
+    await file(C.vendor.id, { type: 'RESTORE', menuItemId: gone.id, price: 9.5 })
+    const recorded = (await events(C.vendor.id, 'PRICE_PENDING')).length
+    await setOrgC({ suspendedAt: new Date() })
+    await digest(minutes(11))
+    const priceBells = (await Promise.all([c1, c2].map(m => bellFor(m.id, 'MENU_PRICE_CHANGE_PENDING')))).flat().length
+    assert(recorded === 1 && priceBells === 0 && await claimedC(),
+      `suspended organizer: a pending price increase is recorded but nobody is told (recorded ${recorded}, bells ${priceBells})`)
+
+    // Not approved: PENDING and REJECTED.
+    for (const status of ['PENDING', 'REJECTED'] as const) {
+      await resetAlerts()
+      await setOrgC({ approvalStatus: 'APPROVED', suspendedAt: null })
+      await deleteOn(C)
+      await setOrgC({ approvalStatus: status })
+      const run = await digest(minutes(11))
+      const t = await toldC()
+      assert(t.bells === 0 && t.mails === 0 && run.nothingToSend === 1 && await claimedC(),
+        `${status} organizer: its members are not told; the alert is taken off the queue (bells ${t.bells}, emails ${t.mails})`)
+    }
+
+    // Reinstated: approved and not suspended again → told again.
+    await resetAlerts()
+    await setOrgC({ approvalStatus: 'APPROVED', suspendedAt: null })
+    await deleteOn(C)
+    const back = await digest(minutes(11))
+    const t2 = await toldC()
+    assert(t2.bells === 2 && t2.mails === 2 && back.notified === 1,
+      `reinstated organizer: both members are told again (bells ${t2.bells}, emails ${t2.mails})`)
+
+    // Source: the same two functions as requireOrganizerAuth, checked before the members are read.
+    const dg = readFileSync('lib/menu-notify/digest.ts', 'utf8').replace(/\r\n/g, '\n')
+    const authSrc = readFileSync('lib/auth.ts', 'utf8').replace(/\r\n/g, '\n')
+    assert(dg.includes("import { organizerApprovalError } from '../organizer-approval'")
+        && dg.includes("import { organizerSuspensionError } from '../organizer-suspension'")
+        && authSrc.includes("import { organizerApprovalError } from './organizer-approval'")
+        && authSrc.includes("import { organizerSuspensionError } from './organizer-suspension'"),
+      'digest.ts imports organizerApprovalError and organizerSuspensionError from the same modules lib/auth.ts uses')
+    const rr = dg.slice(dg.indexOf('async function resolveRecipients('), dg.indexOf('async function processGroup('))
+    const gateAt = rr.indexOf('if (!org || organizerApprovalError(org) || organizerSuspensionError(org))')
+    assert(gateAt > 0 && gateAt < rr.indexOf('db.orgMember.findMany(') && rr.indexOf('db.fairOrganizer.findUnique(') < gateAt,
+      'resolveRecipients reads the organizer and applies both checks before reading its members')
+    assert(/logger\.warn\('\[menu-alerts\] organizer not approved or suspended: no recipients'/.test(rr) && !/logger\.info\(/.test(rr),
+      'a skipped organizer leaves a warn line (info prints only in development)')
   }
 }
 

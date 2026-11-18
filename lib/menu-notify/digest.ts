@@ -33,6 +33,8 @@ import { logger } from '../logger'
 import { SITE_URL } from '../seo'
 import { priceChangeSummary, formatPriceChange } from '../menu/price-gate'
 import { listStrictAdminClerkIds } from './admin-recipients'
+import { organizerApprovalError } from '../organizer-approval'
+import { organizerSuspensionError } from '../organizer-suspension'
 import {
   ALERT_TYPE_FOR_KIND,
   CHANGE_KIND,
@@ -121,6 +123,20 @@ async function resolveRecipients(
   admins: () => Promise<string[]>,
 ): Promise<{ audience: Audience; recipients: Recipient[] }> {
   if (organizerId) {
+    // WHO MAY BE TOLD (review F15; Jordan, Nov 17): only members of an organizer that may operate,
+    // decided by the SAME two functions requireOrganizerAuth uses (lib/auth.ts): approved, and not
+    // suspended. A blocked organizer's fairs get no menu alerts at all (decision A): the group is
+    // taken off the queue with nobody told (counted nothingToSend), as with no members. Its pending
+    // requests still wait on the menu-requests page for when it is reinstated.
+    const org = await db.fairOrganizer.findUnique({
+      where: { id: organizerId },
+      select: { approvalStatus: true, rejectionReason: true, suspendedAt: true, suspendedReason: true },
+    })
+    if (!org || organizerApprovalError(org) || organizerSuspensionError(org)) {
+      // warn, not info: info prints only in development (lib/logger.ts), and this must leave a trace in production.
+      logger.warn('[menu-alerts] organizer not approved or suspended: no recipients', { organizerId })
+      return { audience: 'organizer', recipients: [] }
+    }
     const members = await db.orgMember.findMany({
       where: { organizerId },
       select: { user: { select: { id: true, email: true } } },
