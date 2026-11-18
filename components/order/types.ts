@@ -12,7 +12,17 @@ export interface OrderItem {
   inPersonUnitPrice?: number | null
   subtotal: number
   specialInstructions?: string | null
-  menuItem: { name: string; imageUrl?: string | null; prepTime?: number | null }
+  menuItem: {
+    name: string
+    imageUrl?: string | null
+    prepTime?: number | null
+    /**
+     * The dish this item is a size of (MenuItem.variantGroup), for "order again": with vendorId it
+     * gives the cart's dishKey (lib/order-limits.ts dishKeyFor), so all sizes count toward one limit.
+     * Null for a dish with one size.
+     */
+    variantGroup?: string | null
+  }
   vendor: { id: string; name: string; boothNumber?: string | null }
 }
 

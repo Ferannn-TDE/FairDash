@@ -26,7 +26,9 @@ export async function GET(
         event: { select: { eventLat: true, eventLng: true } },
         orderItems: {
           include: {
-            menuItem: { select: { name: true, imageUrl: true, category: true, prepTime: true } },
+            // variantGroup: "order again" counts every size of one dish toward the 5-per-dish limit on
+            // screen (lib/order-limits.ts dishKeyFor). It is the dish's base name, public on the menu.
+            menuItem: { select: { name: true, imageUrl: true, category: true, prepTime: true, variantGroup: true } },
             vendor: { select: { id: true, name: true, boothNumber: true } },
           },
         },

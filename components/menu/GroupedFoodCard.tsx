@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 import { useAuth } from '@clerk/clerk-react'
 import { useFairCart } from '@/app/_contexts/FairCartContext'
 import type { GroupedMenuItem, MenuVariant } from '@/lib/menu/getGroupedMenuItems'
+import { dishKeyFromGroup, ORDER_ITEM_LIMIT_MESSAGE, QUANTITY_LIMIT_MESSAGE } from '@/lib/order-limits'
 
 interface Props {
   group: GroupedMenuItem
@@ -16,7 +17,7 @@ interface Props {
 }
 
 export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFavoriteToggle }: Props) {
-  const { addItem, updateQty, items } = useFairCart()
+  const { addItem, updateQty, items, addBlockReason } = useFairCart()
   const { isSignedIn } = useAuth()
 
   const availableVariants = group.variants.filter((v) => v.available)
@@ -61,7 +62,20 @@ export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFav
     .filter((i) => group.variants.some((v) => v.id === i.menuItemId))
     .reduce((sum, i) => sum + i.quantity, 0)
 
+  // ORDER LIMITS (Jordan, Nov 17; lib/order-limits.ts): every size of this dish counts together
+  // toward 5, and the whole cart toward 15. At either limit the + and Add buttons are disabled, and
+  // the matching fixed sentence shows as visible text under them (phones have no hover) and as
+  // their hover text.
+  const dishKey = dishKeyFromGroup(group.groupKey, group.vendorId, selected.id)
+  const blocked = addBlockReason(dishKey)
+  const blockedTitle =
+    blocked === 'ORDER_ITEM_LIMIT' ? ORDER_ITEM_LIMIT_MESSAGE
+    : blocked === 'QUANTITY_LIMIT' ? QUANTITY_LIMIT_MESSAGE
+    : undefined
+
   const handleAdd = () => {
+    // A blocked add does nothing and says nothing: "added" only for a real add.
+    if (blocked !== null) return
     const variantSuffix = group.variants.length > 1 ? ` (${selected.label})` : ''
     addItem(
       {
@@ -72,6 +86,7 @@ export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFav
         inPersonPrice: selected.inPersonPrice,
         prepTime: group.prepTime ?? undefined,
         imageUrl: group.imageUrl,
+        dishKey,
       },
       { id: group.vendorId, name: group.vendorName }
     )
@@ -200,7 +215,9 @@ export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFav
               </span>
               <button
                 onClick={handleAdd}
-                className="w-6 h-6 flex items-center justify-center hover:opacity-80 transition-opacity"
+                disabled={blocked !== null}
+                title={blockedTitle}
+                className="w-6 h-6 flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: accentColor }}
               >
                 <PlusIcon className="w-3 h-3 text-white" />
@@ -209,14 +226,22 @@ export function GroupedFoodCard({ group, accentColor, isFavorited = false, onFav
           ) : (
             <button
               onClick={handleAdd}
-              disabled={!selected.available}
-              className={`flex items-center gap-0.5 px-2 py-1 rounded-lg text-[0.65rem] font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0 ${!selected.available ? 'bg-white/10 text-white/30 cursor-not-allowed' : ''}`}
+              disabled={!selected.available || blocked !== null}
+              title={selected.available ? blockedTitle : undefined}
+              className={`flex items-center gap-0.5 px-2 py-1 rounded-lg text-[0.65rem] font-semibold text-white transition-opacity hover:opacity-80 whitespace-nowrap shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${!selected.available ? 'bg-white/10 text-white/30 cursor-not-allowed' : ''}`}
               style={selected.available ? { background: accentColor } : {}}
             >
               {selected.available ? <><PlusIcon className="w-3 h-3" />Add</> : 'Sold Out'}
             </button>
           )}
         </div>
+
+        {/* At a limit: the fixed sentence as visible text too (phones have no hover). */}
+        {blockedTitle && !allUnavailable && selected.available && (
+          <p className="mt-1 text-xs leading-snug text-amber-300" role="status">
+            {blockedTitle}
+          </p>
+        )}
       </div>
     </div>
   )

@@ -6,12 +6,28 @@ import { MinusIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 import Breadcrumb from '../_components/Breadcrumb'
+import {
+  dishKeyOf,
+  ORDER_ITEM_LIMIT_MESSAGE,
+  QUANTITY_LIMIT_MESSAGE,
+  type OrderLimitCode,
+} from '@/lib/order-limits'
+
+/** The fixed sentence for a limit, as the + button's hover text. */
+function limitTitle(reason: OrderLimitCode | null): string | undefined {
+  if (reason === 'ORDER_ITEM_LIMIT') return ORDER_ITEM_LIMIT_MESSAGE
+  if (reason === 'QUANTITY_LIMIT') return QUANTITY_LIMIT_MESSAGE
+  return undefined
+}
 
 export default function FairCartPage() {
   const router = useRouter()
   const { fair } = useFair()
   // Prices come from the cart's lib/checkout-total.ts pricing (the calculator checkout charges with).
-  const { items, itemCount, subtotal, pricing, updateQty, removeItem } = useFairCart()
+  // Order limits (Jordan, Nov 17; lib/order-limits.ts): a line's + stops when all sizes of its dish
+  // add up to 5, or at 15 in the whole cart. The 15-item sentence shows once, above the summary; a
+  // full dish shows its sentence under that line only.
+  const { items, itemCount, subtotal, pricing, updateQty, removeItem, addBlockReason, atOrderLimit } = useFairCart()
   const money = (cents: number | undefined) => `$${((cents ?? 0) / 100).toFixed(2)}`
   const accentColor = fair.branding?.accentColor ?? '#FF0077'
 
@@ -61,6 +77,11 @@ export default function FairCartPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-medium text-sm sm:text-base truncate">{item.name}</p>
                       <p className="text-text-gray text-xs sm:text-sm tabular-nums">{money(pricing.unitCents[item.menuItemId])} each</p>
+                      {addBlockReason(dishKeyOf(item)) === 'QUANTITY_LIMIT' && (
+                        <p className="mt-1 text-xs leading-snug text-amber-300" role="status">
+                          {QUANTITY_LIMIT_MESSAGE}
+                        </p>
+                      )}
                     </div>
 
                     {/* Qty controls */}
@@ -74,7 +95,9 @@ export default function FairCartPage() {
                       <span className="text-white font-semibold w-5 text-center text-sm tabular-nums">{item.quantity}</span>
                       <button
                         onClick={() => updateQty(item.menuItemId, item.quantity + 1)}
-                        className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity"
+                        disabled={addBlockReason(dishKeyOf(item)) !== null}
+                        title={limitTitle(addBlockReason(dishKeyOf(item)))}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                         style={{ background: accentColor }}
                       >
                         <PlusIcon className="w-3.5 h-3.5 text-white" />
@@ -102,6 +125,11 @@ export default function FairCartPage() {
 
         {/* Summary */}
         <div className="lg:w-72 shrink-0">
+          {atOrderLimit && (
+            <p className="mb-3 text-xs leading-snug text-amber-300" role="status">
+              {ORDER_ITEM_LIMIT_MESSAGE}
+            </p>
+          )}
           <div className="bg-bg-card border border-white/10 rounded-2xl p-5 lg:sticky lg:top-20">
             <h2 className="font-bebas text-xl text-white tracking-wide mb-4">Order Summary</h2>
             <div className="flex justify-between text-sm mb-2">

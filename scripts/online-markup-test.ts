@@ -1326,6 +1326,225 @@ async function main() {
       await refuse(`checkout line with ${k}`, [L(A, 1)], 'CLIENT_PRICE_NOT_ACCEPTED', null, {}, { [k]: 1 })
     }
   }
+
+  // ── [23] order limits on screen (batch 1b) ──────────────────────────────────────────────────────
+  // lib/order-limits.ts helpers drive the cart (app/_contexts/FairCartContext.tsx), the menu card,
+  // the cart and checkout pages and "order again". The dish key is the server's rule (vendor +
+  // variantGroup, else the item), stored in the browser's cart only and never sent. Trims are SAID
+  // (the fixed sentences, once), never silent. UI wiring is checked as source (no browser test
+  // framework in this repo), the helpers and the order API are called for real.
+  console.log('\n[23] order limits on screen: one dish key, + stops at 5 per dish / 15 in all, trims are said, never sent')
+  {
+    const lim = await import('../lib/order-limits')
+    const { dishKeyFor, dishKeyFromGroup, dishKeyOf, dishQuantity, totalQuantity, limitBreach, addBlockReason, capQuantity, mergeLines, trimToLimits } = lim
+    type CL = { menuItemId: string; quantity: number; dishKey?: string }
+    const ln = (menuItemId: string, quantity: number, dishKey?: string): CL =>
+      (dishKey === undefined ? { menuItemId, quantity } : { menuItemId, quantity, dishKey })
+    const shape = (lines: CL[]) => lines.map(l => `${l.menuItemId}×${l.quantity}`).join(',')
+
+    // ── dish keys: the server's rule, the same strings ──
+    assert(dishKeyFor('v1', 'Soup', 'm1') === 'group|v1|Soup' && dishKeyFor('v1', null, 'm1') === 'item|m1'
+        && dishKeyFor('v1', undefined, 'm1') === 'item|m1' && dishKeyFor('v1', '', 'm1') === 'item|m1',
+      'dishKeyFor: vendor + variantGroup → group|v|g; no (or empty) variantGroup → item|id')
+    assert(dishKeyFromGroup('v1::Soup', 'v1', 'm1') === 'group|v1|Soup' && dishKeyFromGroup('m1', 'v1', 'm1') === 'item|m1',
+      'dishKeyFromGroup: menu groupKey v1::Soup → group|v1|Soup; a one-size groupKey (the item id) → item|m1')
+    assert(dishKeyFromGroup('v1::A::B', 'v1', 'm1') === 'group|v1|A::B', 'dishKeyFromGroup: a variantGroup containing "::" is kept whole')
+    assert(dishKeyOf(ln('m9', 1)) === 'item|m9' && dishKeyOf(ln('m9', 1, '')) === 'item|m9' && dishKeyOf(ln('m9', 1, 'group|v1|Soup')) === 'group|v1|Soup',
+      'dishKeyOf: a line saved before 1b (no dishKey) counts as its own size; a stored dishKey is used')
+    const raw = (f: string) => readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
+    assert(raw('app/api/orders/route.ts').includes('mi.variantGroup ? `group|${mi.vendorId}|${mi.variantGroup}` : `item|${mi.id}`')
+        && raw('lib/order-limits.ts').includes('variantGroup ? `group|${vendorId}|${variantGroup}` : `item|${menuItemId}`'),
+      'source: the route and dishKeyFor build exactly the same two forms')
+    const groupedSrc = raw('lib/menu/getGroupedMenuItems.ts')
+    assert(groupedSrc.includes('? `${vendorId}::${item.variantGroup}`') && groupedSrc.includes('? `${item.vendorId}::${item.variantGroup}`')
+        && (groupedSrc.match(/:\s*item\.id\n/g) ?? []).length === 2,
+      'source: getGroupedMenuItems builds groupKey as vendorId::variantGroup, else the item id (both loaders)')
+
+    // ── the REAL menu code: a two-size dish's groupKey gives the server's dish key for both sizes ──
+    login(admin.clerkId, ['admin'])
+    const f23 = await mkLiveFair('screen-limits')
+    const v23 = await mkVendor(f23.id, 'scr')
+    const VG = `${PFX}Big Soup`
+    const size23 = (label: string, p: number) => prisma.menuItem.create({ data: {
+      vendorId: v23.id, name: `${PFX}bigsoup-${label}`, price: p, category: 'Mains', isAvailable: true,
+      variantGroup: VG, variantLabel: label,
+    } })
+    const s23 = await size23('Small', 3)
+    const l23 = await size23('Large', 5)
+    const solo23 = await mkItem(v23.id, 'solo23', 4)
+    const grouped = await import('../lib/menu/getGroupedMenuItems')
+    const loaders = [
+      { how: 'by vendor', groups: await grouped.getGroupedMenuItemsByVendor(v23.id) },
+      { how: 'by event', groups: await grouped.getGroupedMenuItemsByEvent(f23.urlSlug) },
+    ]
+    for (const { how, groups } of loaders) {
+      const g = groups.find(x => x.variants.some(v => v.id === s23.id))
+      const keys = [s23, l23].map(it => (g ? dishKeyFromGroup(g.groupKey, g.vendorId, it.id) : ''))
+      assert(!!g && g.variants.length === 2 && keys[0] === dishKeyFor(v23.id, VG, s23.id) && keys[1] === dishKeyFor(v23.id, VG, l23.id) && keys[0] === keys[1],
+        `real getGroupedMenuItems (${how}): both sizes of "${VG}" → dishKeyFromGroup(groupKey) === dishKeyFor(vendor, variantGroup), one key (${keys.join(' / ')})`)
+      const gs = groups.find(x => x.variants.some(v => v.id === solo23.id))
+      assert(!!gs && dishKeyFromGroup(gs.groupKey, gs.vendorId, solo23.id) === dishKeyFor(v23.id, null, solo23.id),
+        `real getGroupedMenuItems (${how}): a one-size dish → item|<id>`)
+    }
+
+    // ── "order again": the order API carries variantGroup, and two sizes share one key and stop at 5 together ──
+    const lines23 = [{ item: s23, qty: 1 }, { item: l23, qty: 1 }]
+    const placed23 = await place(f23.id, lines23, { expectedTotalCents: pageTotals(lines23, 0).totalCents })
+    assert(placed23.status === 201, `an order of Small + Large is placed (got ${placed23.status} ${placed23.code ?? ''})`)
+    const orderGET23 = (await import('../app/api/orders/[id]/route')).GET as unknown as (r: NextRequest, c: unknown) => Promise<Response>
+    login(customer2)
+    const oid23 = String(placed23.data?.orderId)
+    const got23 = await bodyOf(await orderGET23(new NextRequest(`http://localhost/api/orders/${oid23}`), { params: Promise.resolve({ id: oid23 }) }))
+    const ois = (got23.data?.orderItems ?? []) as Array<{ menuItemId: string; vendorId: string; menuItem: { variantGroup?: string | null } }>
+    assert(ois.length === 2 && ois.every(i => i.menuItem.variantGroup === VG && i.vendorId === v23.id),
+      `the order API gives "order again" each line's vendorId and menuItem.variantGroup (${ois.map(i => i.menuItem.variantGroup).join(', ')})`)
+    // What handleOrderAgain → replaceCart does: one line per order line (quantity 1, parked), its
+    // dishKey from dishKeyFor(item.vendorId, item.menuItem.variantGroup, item.menuItemId), then
+    // mergeLines and trimToLimits.
+    const again = trimToLimits(mergeLines(ois.map(i => ln(i.menuItemId, 1, dishKeyFor(i.vendorId, i.menuItem.variantGroup, i.menuItemId)))))
+    assert(again.lines.length === 2 && again.lines[0].dishKey === again.lines[1].dishKey && again.lines[0].dishKey === dishKeyFor(v23.id, VG, s23.id)
+        && !again.dishTrimmed && !again.totalTrimmed,
+      'order again: the two sizes of one dish get ONE dishKey (the menu card\'s key for that dish), nothing trimmed')
+    const k23 = dishKeyFor(v23.id, VG, s23.id)
+    const atFive = [ln(s23.id, 3, k23), ln(l23.id, 2, k23)]
+    assert(addBlockReason(atFive, k23) === 'QUANTITY_LIMIT' && capQuantity(atFive, s23.id, 4) === 3 && capQuantity(atFive, l23.id, 3) === 2
+        && limitBreach([ln(s23.id, 3, k23), ln(l23.id, 3, k23)]) === 'QUANTITY_LIMIT',
+      'order again: 3 Small + 2 Large of that dish stop at 5 together (+ blocked on both sizes; 3 + 3 is a breach)')
+
+    // ── 5 per dish, all sizes ──
+    const SOUP = 'group|v1|Soup'
+    assert(addBlockReason([ln('s', 3, SOUP), ln('l', 2, SOUP)], SOUP) === 'QUANTITY_LIMIT', '3 Small + 2 Large (one dish) → QUANTITY_LIMIT')
+    assert(addBlockReason([ln('s', 3, SOUP), ln('l', 1, SOUP)], SOUP) === null, '3 Small + 1 Large → may add')
+    assert(addBlockReason([ln('s', 3, SOUP), ln('l', 2, SOUP), ln('x', 1, 'item|x')], 'item|x') === null, 'a different dish in the same cart → may add')
+    assert(dishQuantity([ln('s', 3, SOUP), ln('l', 2, SOUP), ln('x', 1)], SOUP) === 5 && totalQuantity([ln('s', 3, SOUP), ln('l', 2, SOUP), ln('x', 1)]) === 6,
+      'dishQuantity counts all sizes of one dish; totalQuantity counts everything')
+
+    // ── 15 in all ──
+    const fifteen = [ln('a', 5, 'item|a'), ln('b', 5, 'item|b'), ln('c', 5, 'item|c')]
+    const fourteen = [ln('a', 5, 'item|a'), ln('b', 5, 'item|b'), ln('c', 4, 'item|c')]
+    assert(addBlockReason(fifteen, 'item|d') === 'ORDER_ITEM_LIMIT', '15 in the cart (two booths) → ORDER_ITEM_LIMIT for any dish')
+    assert(addBlockReason(fourteen, 'item|d') === null && addBlockReason(fourteen, 'item|a') === 'QUANTITY_LIMIT', '14 → may add, unless that dish is full')
+    assert(addBlockReason(fifteen, 'item|a') === 'ORDER_ITEM_LIMIT', 'both limits apply → ORDER_ITEM_LIMIT named first (as the server)')
+    assert(limitBreach(fourteen) === null && limitBreach([ln('a', 6)]) === 'QUANTITY_LIMIT'
+        && limitBreach([...fifteen, ln('d', 1, 'item|d')]) === 'ORDER_ITEM_LIMIT',
+      'limitBreach: none within the limits; 6 of a dish → QUANTITY_LIMIT; 16 in all → ORDER_ITEM_LIMIT')
+
+    // ── capQuantity ──
+    assert(capQuantity([ln('s', 4, SOUP), ln('l', 1, SOUP)], 's', 6) === 4, 'capQuantity: Small at 4 with Large at 1, asking for 6 → 4')
+    assert(capQuantity(fifteen, 'a', 6) === 5 && capQuantity(fifteen, 'c', 7) === 5, 'capQuantity: at 15 in all, asking for more → unchanged')
+    assert(capQuantity(fifteen, 'b', 2) === 2, 'capQuantity: asking for less is granted')
+
+    // ── trimToLimits ──
+    const t1 = trimToLimits([ln('a', 7)])
+    assert(shape(t1.lines) === 'a×5' && t1.dishTrimmed && !t1.totalTrimmed, 'trim: a saved line of 7 → 5, dishTrimmed only')
+    const t2 = trimToLimits([ln('a', 5), ln('b', 5), ln('c', 5), ln('d', 5)])
+    assert(shape(t2.lines) === 'a×5,b×5,c×5' && !t2.dishTrimmed && t2.totalTrimmed, 'trim: 20 across booths → 15, totalTrimmed only; a line cut to 0 is removed')
+    const t3 = trimToLimits([ln('a', 7), ln('b', 5), ln('c', 5), ln('d', 5)])
+    assert(shape(t3.lines) === 'a×5,b×5,c×5' && t3.dishTrimmed && t3.totalTrimmed, 'trim: both at once → both flags')
+    const within = [ln('a', 2), ln('b', 3, SOUP)]
+    const t4 = trimToLimits(within)
+    assert(JSON.stringify(t4.lines) === JSON.stringify(within) && !t4.dishTrimmed && !t4.totalTrimmed, 'trim: a cart within the limits is unchanged, no flags')
+    const t5 = trimToLimits([ln('s', 3), ln('l', 3)])
+    const t6 = trimToLimits([ln('s', 3, SOUP), ln('l', 3, SOUP)])
+    assert(shape(t5.lines) === 's×3,l×3' && !t5.dishTrimmed && shape(t6.lines) === 's×3,l×2' && t6.dishTrimmed,
+      'trim: old lines without dishKey count per size; with one dishKey the sizes are cut to 5 together')
+
+    // ── mergeLines + order again ──
+    const m1 = mergeLines([ln('a', 1), ln('a', 1), ln('b', 1)])
+    assert(shape(m1) === 'a×2,b×1', 'mergeLines: the same item on two lines → one line, quantities added, first-seen order')
+    assert(mergeLines([ln('a', 1), ln('a', 1, SOUP)])[0].dishKey === SOUP, 'mergeLines: a missing dishKey is filled from a later line of the same item')
+    const again20 = trimToLimits(mergeLines(Array.from({ length: 20 }, (_, i) => ln(`o${i}`, 1))))
+    assert(again20.lines.length === 15 && totalQuantity(again20.lines) === 15 && again20.totalTrimmed && !again20.dishTrimmed,
+      'order again: 20 one-each lines → 15 kept, totalTrimmed only (the 15-item sentence is shown)')
+    const again3 = trimToLimits(mergeLines([ln('a', 1), ln('b', 1), ln('c', 1)]))
+    assert(shape(again3.lines) === 'a×1,b×1,c×1' && !again3.totalTrimmed && !again3.dishTrimmed, 'order again: 3 lines within the limits → unchanged, nothing shown')
+
+    // ── source rows (comments stripped, as [16] does) ──
+    const strip = (f: string) => raw(f)
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '')
+    const ctx = strip('app/_contexts/FairCartContext.tsx')
+    assert(/case 'ADD_ITEM'[\s\S]*?if \(limitBreach\(next\) !== null\) return state/.test(ctx), 'context: ADD_ITEM does nothing when limitBreach(next) is not null')
+    assert(/case 'UPDATE_QTY'[\s\S]*?capQuantity\(state\.items, action\.menuItemId, action\.quantity\)/.test(ctx), 'context: UPDATE_QTY uses capQuantity')
+    assert(/case 'HYDRATE'[\s\S]*?trimToLimits\(savedCartLines\(action\.state\.items\)\)\.lines/.test(ctx)
+        && /Number\.isInteger\(i\.quantity\) && i\.quantity >= 1/.test(ctx),
+      'context: HYDRATE keeps the [16] filter (savedCartLines) and then trimToLimits')
+    const replaceAt = ctx.indexOf('const replaceCart = useCallback(')
+    const replaceBlock = ctx.slice(replaceAt, ctx.indexOf('const addBlockReason = useCallback(', replaceAt))
+    assert(replaceAt > 0 && replaceBlock.includes('trimToLimits(mergeLines(lines.map(l => toCartItem(l.item, l.vendor))))')
+        && replaceBlock.includes("dispatch({ type: 'REPLACE', items: trim.lines })") && replaceBlock.includes('announceCartTrim(trim)'),
+      'context: replaceCart = toCartItem → mergeLines → trimToLimits → REPLACE → announceCartTrim')
+    assert(ctx.includes("toast.error(ORDER_ITEM_LIMIT_MESSAGE, { id: 'cart-limit-total' })") && ctx.includes("toast.error(QUANTITY_LIMIT_MESSAGE, { id: 'cart-limit-dish' })"),
+      'context: announceCartTrim shows the two fixed constants with fixed toast ids (each once)')
+    assert(/const trim = trimToLimits\(savedCartLines\(parsed\.items\)\)\s*dispatch\(\{ type: 'HYDRATE', state: parsed \}\)\s*announceCartTrim\(trim\)/.test(ctx),
+      'context: the hydrate effect says what the saved-cart trim cut')
+    assert((ctx.match(/dishKey\?: string/g) ?? []).length === 2 && /dishKey: menuItem\.dishKey/.test(ctx), 'context: dishKey is optional on CartItem and AddableMenuItem and stored by toCartItem')
+    assert(/const atOrderLimit = itemCount >= MAX_ITEMS_PER_ORDER/.test(ctx), 'context: atOrderLimit = itemCount >= MAX_ITEMS_PER_ORDER')
+
+    const card = strip('components/menu/GroupedFoodCard.tsx')
+    assert(/const dishKey = dishKeyFromGroup\(group\.groupKey, group\.vendorId, selected\.id\)/.test(card) && /const blocked = addBlockReason\(dishKey\)/.test(card)
+        && /imageUrl: group\.imageUrl,\s*dishKey,/.test(card),
+      'card: dishKey from dishKeyFromGroup(group.groupKey, group.vendorId, selected.id), passed to addItem')
+    assert(card.includes('disabled={blocked !== null}') && card.includes('disabled={!selected.available || blocked !== null}')
+        && card.includes('title={blockedTitle}') && card.includes('title={selected.available ? blockedTitle : undefined}'),
+      'card: + and Add are disabled through addBlockReason, with the sentence as hover text')
+    assert(/const blockedTitle =\s*blocked === 'ORDER_ITEM_LIMIT' \? ORDER_ITEM_LIMIT_MESSAGE\s*: blocked === 'QUANTITY_LIMIT' \? QUANTITY_LIMIT_MESSAGE\s*: undefined/.test(card),
+      'card: blockedTitle is only the two imported constants')
+    assert(/\{blockedTitle && !allUnavailable && selected\.available && \(\s*<p className="mt-1 text-xs [^"]*"[^>]*>\s*\{blockedTitle\}\s*<\/p>/.test(card),
+      'card: when blocked, the sentence is rendered as visible text-xs text under the buttons (phones have no hover)')
+    const addAt = card.indexOf('const handleAdd = () => {')
+    const addBody = card.slice(addAt, card.indexOf('toast.success(', addAt))
+    assert(addAt > 0 && addBody.includes('if (blocked !== null) return') && addBody.includes('addItem('), 'card: handleAdd returns before addItem and "added" when blocked')
+
+    const cartPage = strip('app/fair/[fairSlug]/cart/page.tsx')
+    assert(cartPage.includes('disabled={addBlockReason(dishKeyOf(item)) !== null}') && cartPage.includes('title={limitTitle(addBlockReason(dishKeyOf(item)))}'),
+      'cart page: each + is disabled through addBlockReason(dishKeyOf(item)) and keeps its hover text')
+    assert(/function limitTitle\(reason: OrderLimitCode \| null\): string \| undefined \{\s*if \(reason === 'ORDER_ITEM_LIMIT'\) return ORDER_ITEM_LIMIT_MESSAGE\s*if \(reason === 'QUANTITY_LIMIT'\) return QUANTITY_LIMIT_MESSAGE\s*return undefined\s*\}/.test(cartPage),
+      'cart page: limitTitle returns only the two imported constants')
+    const totalMsgAt = cartPage.indexOf('{ORDER_ITEM_LIMIT_MESSAGE}')
+    assert((cartPage.match(/\{ORDER_ITEM_LIMIT_MESSAGE\}/g) ?? []).length === 1
+        && /\{atOrderLimit && \(\s*<p className="mb-3 text-xs [^"]*"[^>]*>\s*\{ORDER_ITEM_LIMIT_MESSAGE\}/.test(cartPage)
+        && totalMsgAt > 0 && totalMsgAt < cartPage.indexOf('Order Summary'),
+      'cart page: the 15-item sentence is rendered exactly once, under atOrderLimit, above the Order Summary')
+    assert((cartPage.match(/\{QUANTITY_LIMIT_MESSAGE\}/g) ?? []).length === 1
+        && /\{addBlockReason\(dishKeyOf\(item\)\) === 'QUANTITY_LIMIT' && \(\s*<p className="mt-1 text-xs [^"]*"[^>]*>\s*\{QUANTITY_LIMIT_MESSAGE\}/.test(cartPage),
+      'cart page: the 5-per-dish sentence is visible text-xs text under a line only when that line is at QUANTITY_LIMIT')
+
+    const checkout = strip('app/fair/[fairSlug]/checkout/page.tsx')
+    assert(/\{atOrderLimit && \(\s*<p className="[^"]*text-xs[^"]*"[^>]*>\s*\{ORDER_ITEM_LIMIT_MESSAGE\}/.test(checkout), 'checkout: the 15-item sentence is shown under atOrderLimit')
+    const hAt = checkout.indexOf('const handlePlaceOrder = async (expectedTotalCents: number) => {')
+    const handler = checkout.slice(hAt, checkout.indexOf('const handleSuccess', hAt))
+    const totalBranch = handler.search(/if \(code === 'ORDER_ITEM_LIMIT'\) \{\s*toast\.error\(ORDER_ITEM_LIMIT_MESSAGE, \{ id: 'cart-limit-total' \}\)\s*return\s*\}/)
+    const dishBranch = handler.search(/if \(code === 'QUANTITY_LIMIT'\) \{\s*toast\.error\(QUANTITY_LIMIT_MESSAGE, \{ id: 'cart-limit-dish' \}\)\s*return\s*\}/)
+    // The GENERIC toast (the handler's last one). The address-fields branch earlier has its own
+    // `toast.error(message ?? 'Please check the delivery address')`, which a limit refusal never reaches.
+    const generic = handler.indexOf("toast.error(message ?? 'Failed to create order")
+    assert(hAt > 0 && totalBranch > 0 && dishBranch > 0 && generic > totalBranch && generic > dishBranch,
+      'checkout: a server 400 ORDER_ITEM_LIMIT / QUANTITY_LIMIT shows the page\'s constant (fixed toast ids), before the generic server-text toast')
+    const tryAt = handler.indexOf('try {')
+    const finAt = handler.indexOf('} finally {')
+    assert(tryAt > 0 && tryAt < totalBranch && dishBranch < finAt
+        && /\} finally \{\s*inFlight\.current = false\s*setSubmitting\(false\)/.test(handler.slice(finAt)),
+      'checkout: the limit branches return inside the try, so the finally resets inFlight and submitting (the button is never stuck)')
+    assert(!handler.includes('dishKey'), 'checkout: the order request never sends dishKey')
+
+    assert(/variantGroup\?: string \| null/.test(strip('components/order/types.ts')), 'order type: menuItem.variantGroup is optional')
+    assert(strip('app/api/orders/[id]/route.ts').includes('menuItem: { select: { name: true, imageUrl: true, category: true, prepTime: true, variantGroup: true } }'),
+      'order API: the menuItem select adds variantGroup, and only that')
+    const orderPage = strip('app/fair/[fairSlug]/order/[orderId]/page.tsx')
+    const againAt = orderPage.indexOf('const handleOrderAgain = useCallback(')
+    const againBody = orderPage.slice(againAt, orderPage.indexOf('if (loading)', againAt))
+    assert(againAt > 0 && againBody.includes('replaceCart(order.orderItems.map(')
+        && againBody.includes('dishKey: dishKeyFor(item.vendorId, item.menuItem.variantGroup, item.menuItemId)')
+        && !/clearCart\(|addItem\(/.test(orderPage),
+      'order page: "order again" uses replaceCart with dishKeyFor(vendorId, variantGroup, id); no clearCart/addItem loop')
+    assert(/inPersonPrice: item\.inPersonUnitPrice \?\? item\.unitPrice/.test(orderPage), 'order page: the [16] in-person line is still there')
+
+    const screens = ['app/_contexts/FairCartContext.tsx', 'components/menu/GroupedFoodCard.tsx', 'app/fair/[fairSlug]/cart/page.tsx',
+      'app/fair/[fairSlug]/checkout/page.tsx', 'app/fair/[fairSlug]/order/[orderId]/page.tsx']
+    const typed = screens.filter(f => /Orders are limited to|at most 5 of each|order at most \d/.test(strip(f)))
+    assert(typed.length === 0 && screens.slice(0, 4).every(f => /from '@\/lib\/order-limits'/.test(raw(f))),
+      `no limit sentence typed out by hand; the screens import lib/order-limits (${typed.join(', ') || 'none typed'})`)
+  }
 }
 
 main()

@@ -18,6 +18,7 @@ import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
 import { checkoutRefusal } from '@/lib/checkout-floor'
 import { checkoutTotals, fromCents, toCents } from '@/lib/checkout-total'
+import { ORDER_ITEM_LIMIT_MESSAGE, QUANTITY_LIMIT_MESSAGE } from '@/lib/order-limits'
 import { validateDeliveryAddress, streetLineFromPlace, type DeliveryAddressError } from '@/lib/delivery-address'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
@@ -273,7 +274,8 @@ export default function CheckoutPage() {
   const { fair, fairLoading } = useFair()
   // calculatorLines + markupBps feed checkoutTotals (lib/checkout-total.ts), the same calculator the
   // server charges with (audit H5, 2h). No amount on this page is worked out any other way.
-  const { items, itemCount, calculatorLines, markupBps, clearCart } = useFairCart()
+  // atOrderLimit: the cart holds 15 items (lib/order-limits.ts); the fixed sentence shows in the summary.
+  const { items, itemCount, calculatorLines, markupBps, clearCart, atOrderLimit } = useFairCart()
   const { user } = useUser()
 
   // Redirect unauthenticated users to sign-in with a return URL
@@ -570,6 +572,16 @@ export default function CheckoutPage() {
           return
         }
         const code: string | undefined = json.error?.code
+        // ORDER LIMITS (Jordan, Nov 17): the page's own fixed sentences (lib/order-limits.ts), not
+        // the server's text, with the cart's toast ids so a sentence already showing isn't repeated.
+        if (code === 'ORDER_ITEM_LIMIT') {
+          toast.error(ORDER_ITEM_LIMIT_MESSAGE, { id: 'cart-limit-total' })
+          return
+        }
+        if (code === 'QUANTITY_LIMIT') {
+          toast.error(QUANTITY_LIMIT_MESSAGE, { id: 'cart-limit-dish' })
+          return
+        }
         if (code === 'OUT_OF_DELIVERY_RANGE' || code === 'ADDRESS_NOT_FOUND') {
           setAreaCheck({ state: 'out', text: message })
         }
@@ -959,6 +971,12 @@ export default function CheckoutPage() {
           <div className="lg:col-span-1">
             <div className="bg-[#1A1A1A] border border-white/10 rounded-2xl p-6 lg:sticky lg:top-36">
               <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Order Summary</h2>
+
+              {atOrderLimit && (
+                <p className="-mt-3 mb-4 text-xs leading-snug text-amber-300" role="status">
+                  {ORDER_ITEM_LIMIT_MESSAGE}
+                </p>
+              )}
 
               <div className="space-y-3 mb-5 max-h-64 overflow-y-auto -mx-1 px-1">
                 {items.map((item, idx) => (
