@@ -676,15 +676,18 @@ async function main() {
   }
 
   // ── [14] the largest order the route accepts ────────────────────────────────────────────────
-  // Limits in app/api/orders/route.ts: at most 20 cart lines (`items.length > 20` → 400), quantity
-  // 1–99 per line. There is NO vendor cap (MAX_VENDORS_PER_ORDER is dead; Event.maxVendorsPerOrder
-  // is a stored setting the route never reads), so the maximum is 20 lines from 20 vendors.
-  console.log('\n[14] the largest order: 20 lines from 20 vendors, 10%, curbside, tip')
+  // Limits (Jordan, Nov 17; lib/order-limits.ts): at most MAX_ITEMS_PER_ORDER (15) items in all and
+  // MAX_QTY_PER_ITEM (5) of one dish. The older line cap (`items.length > 20` → 400) still answers
+  // first for 21+ lines. There is NO vendor cap (MAX_VENDORS_PER_ORDER is dead; Event.maxVendorsPerOrder
+  // is a stored setting the route never reads), so the largest order is 15 lines from 15 vendors.
+  const { MAX_ITEMS_PER_ORDER } = await import('../lib/order-limits')
+  console.log(`\n[14] the largest order: ${MAX_ITEMS_PER_ORDER} lines from ${MAX_ITEMS_PER_ORDER} vendors, 10%, curbside, tip`)
   {
-    const MAX_LINES = 20
+    const MAX_LINES = MAX_ITEMS_PER_ORDER
+    const LINE_CAP = 20
     const fmax = await mkLiveFair('max', { onlineMarkupBps: 1000 })
     const maxItems: Item[] = []
-    for (let i = 0; i < MAX_LINES + 1; i++) {
+    for (let i = 0; i < LINE_CAP + 1; i++) {
       const v = await mkVendor(fmax.id, `mv${i}`)
       // Varied, awkward prices: $1.05, $2.42, $3.79, …, so rounding is exercised on every line.
       const p = Math.round((1.05 + i * 1.37) * 100) / 100
@@ -697,9 +700,9 @@ async function main() {
     const piBefore = piCalls.length
 
     const r = await place(fmax.id, lines, { ...curb, tip, expectedTotalCents: page.totalCents })
-    assert(r.status === 201, `20 lines from 20 vendors at 10%, curbside, $12.345 tip → 201 (${r.status} ${r.code ?? ''} ${r.message ?? ''})`)
+    assert(r.status === 201, `${MAX_LINES} lines from ${MAX_LINES} vendors at 10%, curbside, $12.345 tip → 201 (${r.status} ${r.code ?? ''} ${r.message ?? ''})`)
     const o = await orderOf(r.data?.orderId)
-    assert(new Set(o.orderItems.map(x => x.vendorId)).size === MAX_LINES, '20 distinct vendors on the order')
+    assert(new Set(o.orderItems.map(x => x.vendorId)).size === MAX_LINES, `${MAX_LINES} distinct vendors on the order`)
 
     const ownMarkup = lines.every(l => {
       const row = o.orderItems.find(x => x.vendorId === l.item.vendorId)
@@ -723,24 +726,36 @@ async function main() {
     const slices: Record<string, number> = {}
     for (const x of o.orderItems) slices[x.vendorId] = (slices[x.vendorId] ?? 0) + cents(x.subtotal)
     const sliceSum = Object.values(slices).reduce((s, c) => s + c, 0)
-    assert(Object.keys(slices).length === MAX_LINES && sliceSum === cents(o.subtotal), `20 refund slices add up to the food total (${sliceSum}¢ = ${cents(o.subtotal)}¢)`)
+    assert(Object.keys(slices).length === MAX_LINES && sliceSum === cents(o.subtotal), `${MAX_LINES} refund slices add up to the food total (${sliceSum}¢ = ${cents(o.subtotal)}¢)`)
     assert(sliceSum + cents(o.fairSynqFee) + cents(o.deliveryFee) + cents(o.serviceCharge) + cents(o.tip) === cents(o.total), 'slices + fee + curbside + tip = the charge')
 
-    // FINDING, not a pass/fail check (unchanged by 2h): Stripe limits each metadata value to 500
-    // characters, and the route's own comment (app/api/orders/route.ts, "N IS BOUNDED BY THE
-    // 20-ITEM CAP") says vendorSubtotalCents passes it at 15 vendors and vendorIds at 20. The
-    // recorder above accepts anything, so real Stripe would refuse this PaymentIntent (no charge,
-    // no Order row: it fails closed). Measured here so it is visible:
+    // FINDING, printed and NOT a pass/fail check (Jordan, Nov 17): Stripe limits each metadata value
+    // to 500 characters and the recorder above accepts anything. vendorSubtotalCents is
+    // 436 + 15 × (digits of each vendor's cents) at 15 vendors with 25-char cuids: 541 chars at
+    // $10,000 per booth, over 500 once ~5 of 15 booths exceed $100 (real Stripe would refuse the
+    // PaymentIntent: no charge, no Order row, it fails closed). This order's small test prices stay
+    // under, so a pass here would prove nothing. Pre-existing (the old 20-line cap was worse). Fix:
+    // drop vendorSubtotalCents from the PaymentIntent metadata, its own step (progress note, "Stripe
+    // metadata at 15 booths").
     const vscLen = (pi?.metadata?.vendorSubtotalCents ?? '').length
     const vidLen = (pi?.metadata?.vendorIds ?? '').length
-    console.log(`  ⚠️  FINDING (pre-existing, not counted): at 20 vendors the PaymentIntent metadata is vendorSubtotalCents ${vscLen} chars, vendorIds ${vidLen} chars; Stripe's limit is 500 per value${vscLen > 500 || vidLen > 500 ? ' → real Stripe would refuse this payment (fails closed)' : ''}.`)
+    console.log(`  ⚠️  FINDING (not counted): at ${MAX_LINES} vendors this order's PaymentIntent metadata is vendorSubtotalCents ${vscLen} chars, vendorIds ${vidLen} chars (Stripe's limit: 500 per value; 541 at $10,000 per booth)`)
 
-    // One over the limit: refused at validation, before anything is read, written or charged.
+    // One over the item limit: refused at validation, before anything is read, written or charged.
+    const over16: Line[] = maxItems.slice(0, MAX_LINES + 1).map(item => ({ item, qty: 1 }))
+    const before16 = await ordersIn(fmax.id), pi16 = piCalls.length
+    const page16 = pageTotals(over16, 1000, { deliveryFeeCents: 399, tip })
+    const r16 = await place(fmax.id, over16, { ...curb, tip, expectedTotalCents: page16.totalCents })
+    assert(over16.length === MAX_LINES + 1 && r16.status === 400 && r16.code === 'ORDER_ITEM_LIMIT',
+      `${MAX_LINES + 1} lines → 400 ORDER_ITEM_LIMIT (got ${r16.status} ${r16.code} "${r16.message}")`)
+    assert(await ordersIn(fmax.id) === before16 && piCalls.length === pi16, `${MAX_LINES + 1} lines: nothing written, nothing sent to Stripe`)
+
+    // One over the older line cap: refused at validation, before anything is read, written or charged.
     const over: Line[] = maxItems.map(item => ({ item, qty: 1 }))
     const ordersBefore = await ordersIn(fmax.id), piNow = piCalls.length
     const overPage = pageTotals(over, 1000, { deliveryFeeCents: 399, tip })
     const r21 = await place(fmax.id, over, { ...curb, tip, expectedTotalCents: overPage.totalCents })
-    assert(over.length === MAX_LINES + 1 && r21.status === 400 && r21.code === 'VALIDATION_ERROR' && r21.message === 'Cart cannot exceed 20 items',
+    assert(over.length === LINE_CAP + 1 && r21.status === 400 && r21.code === 'VALIDATION_ERROR' && r21.message === 'Cart cannot exceed 20 items',
       `21 lines → 400 "Cart cannot exceed 20 items" (got ${r21.status} ${r21.code} "${r21.message}")`)
     assert(await ordersIn(fmax.id) === ordersBefore && piCalls.length === piNow, 'nothing written, nothing sent to Stripe')
   }
@@ -1216,6 +1231,100 @@ async function main() {
     assert(/ORGANIZER_STATUS_CHOICES\.some\(c => c\.value === savedStatus\) \? \(\s*<SelectField\s+label="Fair Status"/.test(page)
       && /options=\{ORGANIZER_STATUS_CHOICES\}/.test(page) && /Active — live/.test(page) && /use Platform Paused/.test(page),
       'page: the status dropdown shows only for a status the organizer may set; an ACTIVE fair shows "Active — live" read-only with the Platform Paused pointer')
+  }
+
+  // ── [22] order quantity limits (Jordan, Nov 17) + review F8 / F9 ─────────────────────────────
+  // lib/order-limits.ts: at most MAX_QTY_PER_ITEM of one dish (every size of it counted together)
+  // and at most MAX_ITEMS_PER_ORDER in all. Over either: a clean 400 with a code, never a 500, before
+  // anything is written or sent to Stripe. Also: quantities that are not whole numbers (F9), cart
+  // lines that are not objects, and price-like fields the route used to ignore (F8).
+  console.log('\n[22] order limits: 5 per dish (all sizes together), 15 per order; whole numbers; price fields refused')
+  {
+    const limits = await import('../lib/order-limits')
+    assert(limits.MAX_QTY_PER_ITEM === 5 && limits.MAX_ITEMS_PER_ORDER === 15, 'the limits are 5 per dish and 15 per order, in one constant file')
+    assert(limits.ORDER_ITEM_LIMIT_MESSAGE === 'Orders are limited to 15 items. Place a second order for more.'
+        && limits.QUANTITY_LIMIT_MESSAGE === 'You can order at most 5 of each item.',
+      'both fixed sentences read as agreed (built from the constants)')
+
+    const fl = await mkLiveFair('limits')
+    const VA = await mkVendor(fl.id, 'limA')
+    const VB = await mkVendor(fl.id, 'limB')
+    const A = await mkItem(VA.id, 'lim-a', 4)
+    const B = await mkItem(VA.id, 'lim-b', 3)
+    const C = await mkItem(VB.id, 'lim-c', 2.5)
+    // One dish in two sizes: separate menu items sharing a variantGroup within booth B.
+    const sizeOf = (label: string, p: number) => prisma.menuItem.create({ data: {
+      vendorId: VB.id, name: `${PFX}soup-${label}`, price: p, category: 'Mains', isAvailable: true,
+      variantGroup: `${PFX}Soup`, variantLabel: label,
+    } })
+    const small = await sizeOf('Small', 3)
+    const large = await sizeOf('Large', 5)
+    const L = (item: Item, qty: number): Line => ({ item, qty })
+
+    const accept = async (label: string, lines: Line[], extra: Record<string, unknown> = {}, o: { deliveryFeeCents?: number; tip?: number } = {}) => {
+      const r = await place(fl.id, lines, { expectedTotalCents: pageTotals(lines, 0, o).totalCents, ...extra })
+      assert(r.status === 201, `${label} → 201 (got ${r.status} ${r.code ?? ''} ${r.message ?? ''})`)
+    }
+    const refuse = async (label: string, lines: Line[], code: string, message: string | null,
+      extra: Record<string, unknown> = {}, itemExtra: Record<string, unknown> = {}) => {
+      const before = await ordersIn(fl.id), piBefore = piCalls.length
+      const r = await place(fl.id, lines, { expectedTotalCents: 1000, ...extra }, itemExtra)
+      const nothing = await ordersIn(fl.id) === before && piCalls.length === piBefore
+      assert(r.status === 400 && r.code === code && (message === null || r.message === message) && nothing,
+        `${label} → 400 ${code}, nothing written or sent to Stripe (got ${r.status} ${r.code ?? ''} "${r.message ?? ''}")`)
+    }
+    const postRaw = async (items: unknown[]) => {
+      login(customer2)
+      const res = await orderPOST(new NextRequest('http://localhost/api/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: fl.id, fulfillmentType: 'BOOTH_PICKUP', customerName: 'C', customerPhone: '6185550100', expectedTotalCents: 1000, items }),
+      }))
+      const j = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } }
+      return { status: res.status, code: j.error?.code, message: j.error?.message }
+    }
+
+    // The exact body the real checkout sends (app/fair/[fairSlug]/checkout/page.tsx:509–541):
+    // eventId, fulfillmentType, customerName, customerPhone, tip, expectedTotalCents, items of
+    // { menuItemId, vendorId, quantity }, plus the vehicle fields for curbside. A tip is sent only for
+    // runner orders (page :357, tipAmount = isRunnerFulfilled ? tip : 0; route :436 counts it only
+    // then), so booth pickup sends none; the curbside row proves `tip` stays allowed.
+    await accept('the exact checkout body, booth pickup (the page sends no tip for booth pickup)', [L(A, 2), L(C, 1)])
+    await accept('the exact checkout body, curbside with vehicle fields and a $2.50 tip', [L(A, 1), L(small, 1)],
+      { fulfillmentType: 'CURBSIDE', vehicleMake: 'Honda', vehicleColor: 'Blue', vehiclePlate: 'ABC123', tip: 2.5 }, { deliveryFeeCents: 399, tip: 2.5 })
+
+    // 5 per dish.
+    await accept('5 of one item', [L(A, 5)])
+    await refuse('6 of one item', [L(A, 6)], 'QUANTITY_LIMIT', limits.QUANTITY_LIMIT_MESSAGE)
+    await refuse('the same item as 3 + 3 on two lines', [L(A, 3), L(A, 3)], 'QUANTITY_LIMIT', limits.QUANTITY_LIMIT_MESSAGE)
+    await accept('3 Small + 2 Large of one dish (5)', [L(small, 3), L(large, 2)])
+    await refuse('3 Small + 3 Large of one dish (6), a clean 400 and not a 500', [L(small, 3), L(large, 3)], 'QUANTITY_LIMIT', limits.QUANTITY_LIMIT_MESSAGE)
+
+    // 15 per order, across booths.
+    await accept('5 of A + 5 of B (booth A) + 5 of C (booth B): 15 across two booths', [L(A, 5), L(B, 5), L(C, 5)])
+    await refuse('15 across two booths + 1 Small: 16', [L(A, 5), L(B, 5), L(C, 5), L(small, 1)], 'ORDER_ITEM_LIMIT', limits.ORDER_ITEM_LIMIT_MESSAGE)
+    await refuse('15 across two booths + 1 more of A: 16', [L(A, 6), L(B, 5), L(C, 5)], 'ORDER_ITEM_LIMIT', limits.ORDER_ITEM_LIMIT_MESSAGE)
+
+    // Whole numbers only (F9: 1.5 used to give a 500; "2" used to be accepted).
+    for (const bad of [1.5, '2', 0, true, 'abc'] as const) {
+      await refuse(`quantity ${JSON.stringify(bad)}`, [L(A, bad as unknown as number)], 'VALIDATION_ERROR', 'Invalid quantity')
+    }
+
+    // A cart line must be an object.
+    for (const bad of [null, 'x', 5, []] as const) {
+      const before = await ordersIn(fl.id), piBefore = piCalls.length
+      const r = await postRaw([bad])
+      assert(r.status === 400 && r.code === 'VALIDATION_ERROR' && r.message === 'Invalid item in cart'
+          && await ordersIn(fl.id) === before && piCalls.length === piBefore,
+        `cart line ${JSON.stringify(bad)} → 400 VALIDATION_ERROR "Invalid item in cart", nothing written (got ${r.status} ${r.code ?? ''} "${r.message ?? ''}")`)
+    }
+
+    // Price-like fields are refused, not ignored (F8).
+    for (const k of ['total', 'subtotal', 'serviceFee', 'deliveryFee']) {
+      await refuse(`checkout body with ${k}`, [L(A, 1)], 'CLIENT_PRICE_NOT_ACCEPTED', null, { [k]: 1 })
+    }
+    for (const k of ['totalPrice', 'subtotal', 'inPersonPrice']) {
+      await refuse(`checkout line with ${k}`, [L(A, 1)], 'CLIENT_PRICE_NOT_ACCEPTED', null, {}, { [k]: 1 })
+    }
   }
 }
 

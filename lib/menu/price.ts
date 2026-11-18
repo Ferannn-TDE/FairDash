@@ -162,7 +162,13 @@ export function parseMarkupPercentInput(input: string): MarkupPercentParse {
 /** Keys refused on a menu item (create, edit, menu request) and at checkout. */
 export const CLIENT_MARKUP_KEYS = ['onlinePrice', 'onlineMarkupBps', 'markup'] as const
 /** Keys refused on a checkout cart line: the line names an item and a quantity, never a price. */
-export const CLIENT_LINE_PRICE_KEYS = ['price', 'unitPrice', ...CLIENT_MARKUP_KEYS] as const
+export const CLIENT_LINE_PRICE_KEYS = ['price', 'unitPrice', 'totalPrice', 'subtotal', 'inPersonPrice', ...CLIENT_MARKUP_KEYS] as const
+/**
+ * Keys refused on a checkout BODY (review F8): the server works out every total itself. Before
+ * Nov 17 these were silently ignored. `tip` is NOT here: it is real customer input. The real
+ * checkout body (app/fair/[fairSlug]/checkout/page.tsx) sends none of these.
+ */
+export const CLIENT_ORDER_TOTAL_KEYS = ['total', 'subtotal', 'serviceFee', 'deliveryFee', ...CLIENT_MARKUP_KEYS] as const
 
 export const CLIENT_PRICE_MESSAGE = 'Prices are worked out by FairSynq. Remove the online price or markup from this request.'
 

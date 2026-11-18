@@ -20,7 +20,8 @@ import { ensureDbUser } from '@/lib/ensure-db-user'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { checkoutRefusal } from '@/lib/checkout-floor'
 import { checkoutTotals, fromCents, toCents } from '@/lib/checkout-total'
-import { CLIENT_LINE_PRICE_KEYS, CLIENT_MARKUP_KEYS, CLIENT_PRICE_MESSAGE, clientPriceKey } from '@/lib/menu/price'
+import { CLIENT_LINE_PRICE_KEYS, CLIENT_ORDER_TOTAL_KEYS, CLIENT_PRICE_MESSAGE, clientPriceKey } from '@/lib/menu/price'
+import { MAX_QTY_PER_ITEM, MAX_ITEMS_PER_ORDER, QUANTITY_LIMIT_MESSAGE, ORDER_ITEM_LIMIT_MESSAGE } from '@/lib/order-limits'
 import { logger } from '@/lib/logger'
 import { effectiveFulfillment, isDeliveryEnabled } from '@/lib/delivery'
 
@@ -126,25 +127,41 @@ export async function POST(req: NextRequest) {
       return apiError('Cart cannot exceed 20 items', 400, 'VALIDATION_ERROR')
     }
     // Prices are worked out here from the database (audit H5, 2h). A body or cart line that
-    // carries a price or markup is refused, not silently ignored.
-    if (clientPriceKey(body, CLIENT_MARKUP_KEYS)) {
+    // carries a price, a total or a markup is refused, not silently ignored (review F8).
+    if (clientPriceKey(body, CLIENT_ORDER_TOTAL_KEYS)) {
       return apiError(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
     }
-    for (const item of items) {
+    for (const item of items as unknown[]) {
+      // Each cart line must be a plain object: null, a string, a number or an array used to reach
+      // item.menuItemId below and crash with a 500.
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        return apiError('Invalid item in cart', 400, 'VALIDATION_ERROR')
+      }
       if (clientPriceKey(item, CLIENT_LINE_PRICE_KEYS)) {
         return apiError(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
       }
     }
+    // QUANTITY (Jordan, Nov 17; lib/order-limits.ts): each line a whole number of at least 1 (review
+    // F9: 1.5 or "2" used to reach the calculator and give a 500), and at most MAX_ITEMS_PER_ORDER
+    // in all. The per-item limit counts every size of a dish together, so it needs each line's
+    // variantGroup: it is checked right after the menu items are read (step 2 below), still before
+    // anything is written or sent to Stripe.
+    let totalQty = 0
     for (const item of items) {
       if (!item.menuItemId || typeof item.menuItemId !== 'string') {
         return apiError('Invalid item in cart', 400, 'VALIDATION_ERROR')
       }
-      if (!item.quantity || item.quantity < 1 || item.quantity > 99) {
+      const quantity: unknown = item.quantity
+      if (!(typeof quantity === 'number' && Number.isInteger(quantity) && quantity >= 1)) {
         return apiError('Invalid quantity', 400, 'VALIDATION_ERROR')
       }
       if (!item.vendorId || typeof item.vendorId !== 'string') {
         return apiError('Invalid vendorId in cart item', 400, 'VALIDATION_ERROR')
       }
+      totalQty += quantity
+    }
+    if (totalQty > MAX_ITEMS_PER_ORDER) {
+      return apiError(ORDER_ITEM_LIMIT_MESSAGE, 400, 'ORDER_ITEM_LIMIT')
     }
 
     if (!Object.values(FulfillmentType).includes(fulfillmentType)) {
@@ -358,6 +375,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ONE DISH, ALL ITS SIZES (Jordan, Nov 17): sizes are separate menu items that share a
+    // variantGroup within a vendor (prisma/schema.prisma, MenuItem.variantGroup), so the
+    // MAX_QTY_PER_ITEM limit is counted per vendor + variantGroup; a standalone item counts alone,
+    // and the same item on two lines adds up. 3 Small + 2 Large = 5, allowed; 3 Small + 3 Large = 6,
+    // refused. Uses the rows read above: no extra query, and still before any write or Stripe call.
+    const qtyPerDish = new Map<string, number>()
+    for (const item of items) {
+      const mi = menuItemMap.get(item.menuItemId)
+      if (!mi) continue // unreachable: the loop above refused a missing item
+      const dish = mi.variantGroup ? `group|${mi.vendorId}|${mi.variantGroup}` : `item|${mi.id}`
+      const forDish = (qtyPerDish.get(dish) ?? 0) + item.quantity
+      if (forDish > MAX_QTY_PER_ITEM) {
+        throw new ApiError(QUANTITY_LIMIT_MESSAGE, 400, 'QUANTITY_LIMIT')
+      }
+      qtyPerDish.set(dish, forDish)
+    }
+
     // ── 3. Re-price from DB ────────────────────────────────────────────────
     const vendorMap = new Map(vendors.map(v => [v.id, v]))
 
@@ -546,7 +580,7 @@ export async function POST(req: NextRequest) {
     // dashboard see the split source without trusting the client. The worker is
     // authoritative from the DB; this is belt-and-suspenders.
     //
-    // ⚠️ N IS BOUNDED BY THE 20-ITEM CAP ABOVE (`items.length > 20`, :113), NOT by a vendor cap.
+    // ⚠️ N IS BOUNDED BY MAX_ITEMS_PER_ORDER (lib/order-limits.ts: 15 items, so at most 15 vendors) and the 20-line cap above, NOT by a vendor cap.
     // This comment used to claim "Max 5 vendors/order keeps this well under Stripe's 500-char
     // metadata value limit" — but MAX_VENDORS_PER_ORDER is DEAD (lib/constants.ts:157; its only
     // appearance in the repo is its own definition), so nothing enforces 5. Since each vendor
