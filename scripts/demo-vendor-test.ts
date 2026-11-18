@@ -19,6 +19,9 @@
  *       empty, missing key; a mixed cart too); test mode → a demo test order goes through; a
  *       normal booth is unaffected in live mode
  *   [6] every customer reader: demo hidden with live keys, shown in test mode
+ *  [6b] the last 2 customer reads (review F10, Nov 17): GET /api/menu/[id] → 404 for a demo item;
+ *       GET /api/favorites leaves it out but keeps the saved favorite; POST /api/favorites → 404;
+ *       all shown/accepted in test mode; source checks
  *   [7] badges: the admin roster and the organizer views carry isDemo; source checks per reader
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/demo-vendor-test.ts
@@ -458,6 +461,66 @@ async function main() {
     `test mode: counts include it: ${allActive} (got ${T.card}/${T.seo}/${T.apiCard}/${T.eventCount})`)
   const detailBody = await call(vendorDetail(req(`/api/vendors/${dId}`), { params: Promise.resolve({ id: dId }) }))
   assert(!detailBody.raw.includes('isDemo'), 'the public vendor detail never sends isDemo (gate-only, stripped)')
+
+  // ── [6b] the last 2 customer reads (review F10) ─────────────────────────────────────────
+  // Jordan, Nov 17: GET /api/menu/[id] answers a demo booth's item like a missing one (404);
+  // the favorites list leaves it out but keeps the saved favorite; saving one is refused (404).
+  // Same shared rule as [6] (lib/demo-vendor.ts). Test mode shows and accepts everything.
+  console.log('\n[6b] The last 2 customer reads: one menu item, and a customer\'s favorites (review F10)')
+  {
+    const menuItemGET = (await import('../app/api/menu/[id]/route')).GET
+    const favRoute = await import('../app/api/favorites/route')
+    const favUser = await prisma.user.create({ data: { clerkId: `${PFX}fav-${rand()}`, email: `fav-${rand()}${MAIL}`, name: 'Fav Customer' } })
+    const freshUser = await prisma.user.create({ data: { clerkId: `${PFX}fav2-${rand()}`, email: `fav2-${rand()}${MAIL}`, name: 'Fresh Customer' } })
+    await prisma.favoriteItem.createMany({ data: [{ userId: favUser.id, menuItemId: dItem.id }, { userId: favUser.id, menuItemId: rItem.id }] })
+
+    const itemRead = (id: string) => { login(null); return call(menuItemGET(req(`/api/menu/${id}`), { params: Promise.resolve({ id }) })) }
+    const favList = async () => {
+      login({ id: favUser.clerkId, roles: [] })
+      const r = await call(favRoute.GET())
+      return ((r.data as unknown as { favorites?: { menuItemId: string }[] } | undefined)?.favorites ?? []).map(f => f.menuItemId)
+    }
+    const favSave = (who: { clerkId: string }, menuItemId: string) => {
+      login({ id: who.clerkId, roles: [] })
+      return call(favRoute.POST(req('/api/favorites', 'POST', { menuItemId })))
+    }
+    const savedCount = (userId: string, menuItemId: string) => prisma.favoriteItem.count({ where: { userId, menuItemId } })
+
+    setKey(FAKE_LIVE)
+    const liveDemo = await itemRead(dItem.id)
+    const liveReal = await itemRead(rItem.id)
+    assert(liveDemo.status === 404 && liveDemo.code === 'NOT_FOUND' && liveDemo.message === 'Menu item not found' && liveReal.status === 200,
+      `live: GET /api/menu/[id] → 404 "Menu item not found" for the demo item, 200 for the real one (got ${liveDemo.status} ${liveDemo.code ?? ''} / ${liveReal.status})`)
+    assert(!liveDemo.raw.includes('isDemo') && !liveReal.raw.includes('isDemo'), 'live: neither menu item response contains isDemo')
+    const liveList = await favList()
+    assert(liveList.includes(rItem.id) && !liveList.includes(dItem.id),
+      `live: GET /api/favorites lists the real item only (got ${liveList.length} item(s))`)
+    assert(await savedCount(favUser.id, dItem.id) === 1, 'live: the saved favorite for the demo item still exists (hidden, not deleted)')
+    const liveSaveDemo = await favSave(freshUser, dItem.id)
+    const liveSaveReal = await favSave(freshUser, rItem.id)
+    assert(liveSaveDemo.status === 404 && liveSaveDemo.message === 'Menu item not found' && await savedCount(freshUser.id, dItem.id) === 0 && liveSaveReal.status === 201,
+      `live: POST /api/favorites → 404 for the demo item and nothing saved; 201 for the real one (got ${liveSaveDemo.status} / ${liveSaveReal.status})`)
+
+    setKey(FAKE_TEST)
+    const testDemo = await itemRead(dItem.id)
+    assert(testDemo.status === 200, `test mode: GET /api/menu/[id] shows the demo item (got ${testDemo.status})`)
+    const testList = await favList()
+    assert(testList.includes(rItem.id) && testList.includes(dItem.id), `test mode: the favorites list shows both items (got ${testList.length})`)
+    const testSaveDemo = await favSave(freshUser, dItem.id)
+    assert(testSaveDemo.status === 201 && await savedCount(freshUser.id, dItem.id) === 1, `test mode: POST /api/favorites saves the demo item (got ${testSaveDemo.status})`)
+
+    const srcOf = (f: string) => readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
+    const menuSrc = srcOf('app/api/menu/[id]/route.ts')
+    const getBody = menuSrc.slice(menuSrc.indexOf('export async function GET('), menuSrc.indexOf('export async function PATCH('))
+    const gate = getBody.indexOf("if (demoVendorHidden({ isDemo })) return apiError('Menu item not found', 404, 'NOT_FOUND')")
+    assert(gate > 0 && gate < getBody.indexOf('return success('), 'GET /api/menu/[id] uses demoVendorHidden() before it builds the response')
+    const favSrc = srcOf('app/api/favorites/route.ts')
+    assert(favSrc.includes('where: { userId: dbUser.id, menuItem: { vendor: { ...demoHiddenWhere() } } }'),
+      'GET /api/favorites filters with demoHiddenWhere() inside the query (saved rows untouched)')
+    const postBody = favSrc.slice(favSrc.indexOf('export async function POST('), favSrc.indexOf('export async function DELETE('))
+    const refusal = postBody.indexOf("if (!item || demoVendorHidden(item.vendor)) return apiError('Menu item not found', 404, 'NOT_FOUND')")
+    assert(refusal > 0 && refusal < postBody.indexOf('favoriteItem.upsert('), 'POST /api/favorites refuses a hidden demo item with demoVendorHidden() before saving')
+  }
 
   // ── [7] badges and source ───────────────────────────────────────────────────────────────
   console.log('\n[7] Badges, and every reader uses the shared demo rule')

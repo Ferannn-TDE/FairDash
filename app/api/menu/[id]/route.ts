@@ -8,6 +8,7 @@ import { parseInPersonPrice, clientPriceKey, CLIENT_PRICE_MESSAGE } from '@/lib/
 import { onlineUnitPrice } from '@/lib/checkout-total'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '@/lib/menu/price-audit'
 import { recordMenuDeleted } from '@/lib/menu-notify/record'
+import { demoVendorHidden } from '@/lib/demo-vendor'
 
 // GET /api/menu/:id
 export async function GET(
@@ -22,10 +23,14 @@ export async function GET(
     if (!item) return apiError('Menu item not found', 404, 'NOT_FOUND')
     // ONLINE PRICE (audit H5, 2h): this is a public read, so `price` is the online price customers
     // pay, from lib/checkout-total.ts. `inPersonPrice` is the stored price, for the calculator only.
-    const { event } = await db.vendor.findUniqueOrThrow({
+    const { event, isDemo } = await db.vendor.findUniqueOrThrow({
       where: { id: item.vendorId },
-      select: { event: { select: { onlineMarkupBps: true } } },
+      select: { isDemo: true, event: { select: { onlineMarkupBps: true } } },
     })
+    // DEMO BOOTHS (review F10; Jordan, Nov 17; lib/demo-vendor.ts): with live Stripe keys a demo
+    // booth's item is hidden like every other customer read, with the same answer as a missing
+    // item. isDemo is read here only for the check and is never sent.
+    if (demoVendorHidden({ isDemo })) return apiError('Menu item not found', 404, 'NOT_FOUND')
     return success({ ...item, price: onlineUnitPrice(item.price, event.onlineMarkupBps), inPersonPrice: item.price })
   } catch (err) {
     return handleApiError(err)

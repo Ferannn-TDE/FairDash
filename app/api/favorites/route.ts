@@ -3,6 +3,12 @@ import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { onlineUnitPrice } from '@/lib/checkout-total'
+import { demoHiddenWhere, demoVendorHidden } from '@/lib/demo-vendor'
+
+// DEMO BOOTHS (review F10; Jordan, Nov 17; lib/demo-vendor.ts): with live Stripe keys a demo
+// booth's items are hidden here like every other customer read. GET leaves them out of the list
+// but never deletes the saved favorite (it shows again if the booth leaves demo, and in test mode);
+// POST answers a demo item with the same 404 as a missing one, so nothing hidden can be saved.
 
 // GET /api/favorites
 // Returns the authenticated user's favorited menu items with vendor + event context.
@@ -14,7 +20,7 @@ export async function GET() {
     if (!dbUser) return success({ favorites: [] })
 
     const favorites = await db.favoriteItem.findMany({
-      where: { userId: dbUser.id },
+      where: { userId: dbUser.id, menuItem: { vendor: { ...demoHiddenWhere() } } },
       take: 100,
       orderBy: { createdAt: 'desc' },
       include: {
@@ -65,8 +71,11 @@ export async function POST(req: Request) {
     const dbUser = await db.user.findUnique({ where: { clerkId } })
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
-    const item = await db.menuItem.findUnique({ where: { id: menuItemId } })
-    if (!item) return apiError('Menu item not found', 404, 'NOT_FOUND')
+    const item = await db.menuItem.findUnique({
+      where: { id: menuItemId },
+      select: { id: true, vendor: { select: { isDemo: true } } },
+    })
+    if (!item || demoVendorHidden(item.vendor)) return apiError('Menu item not found', 404, 'NOT_FOUND')
 
     const favorite = await db.favoriteItem.upsert({
       where: { userId_menuItemId: { userId: dbUser.id, menuItemId } },
