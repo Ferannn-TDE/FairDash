@@ -44,7 +44,8 @@ export interface OverridePayload { vendorName: string; fairName: string; decisio
 export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
 const byFairSynq = (p: DecisionPayload) => !p.decidedBy || p.decidedBy === 'FairSynq'
 
-export function renderEmail(template: string, payload: unknown): { subject: string; text: string } {
+/** The templates themselves. Private: every caller goes through renderEmail, which makes the subject one safe line. */
+function renderEmailParts(template: string, payload: unknown): { subject: string; text: string } {
   if (template === 'signup_admin_alert') {
     const p = payload as SignupAlertPayload
     const label = KIND_LABEL[p.kind]
@@ -101,6 +102,38 @@ export function renderEmail(template: string, payload: unknown): { subject: stri
     }
   }
   throw new Error(`Unknown email template: ${template}`)
+}
+
+// ── Subject line (independent review F17; Jordan, Nov 17) ─────────────────────────────────────
+// Vendor, fair and applicant names go into subjects. A line break in a name could start a new
+// email header, so every subject is made ONE line here, at the single exit of renderEmail, for
+// every template now and later. Not live today (no email provider; lib/email/transport.ts), but
+// cheap and easy to forget. The email body keeps its line breaks: they are not headers.
+// When a real provider is connected, its transport must ALSO refuse CR/LF in subjects and
+// addresses (audit progress note, "Before any email provider is connected").
+
+/** At most this many characters in an email subject (whole characters, after flattening). */
+export const EMAIL_SUBJECT_MAX = 200
+
+/** Control characters (C0, DEL, C1 — CR, LF and tab among them) and the Unicode line/paragraph separators. */
+const SUBJECT_LINE_BREAKS_AND_CONTROLS = /[\p{Cc}\p{Zl}\p{Zp}]/gu
+
+/**
+ * One safe subject line: line breaks and other control characters become spaces, repeated spaces
+ * become one, the ends are trimmed. Over EMAIL_SUBJECT_MAX characters it keeps the first
+ * EMAIL_SUBJECT_MAX − 1 and adds "…". Counted and cut by WHOLE characters (Array.from, code points),
+ * so an emoji or other 2-unit character is never split in half.
+ */
+export function emailSubjectLine(subject: string): string {
+  const flat = subject.replace(SUBJECT_LINE_BREAKS_AND_CONTROLS, ' ').replace(/ {2,}/g, ' ').trim()
+  const chars = Array.from(flat)
+  return chars.length > EMAIL_SUBJECT_MAX ? `${chars.slice(0, EMAIL_SUBJECT_MAX - 1).join('')}…` : flat
+}
+
+/** Renders a template. The subject always leaves as one safe line (emailSubjectLine). */
+export function renderEmail(template: string, payload: unknown): { subject: string; text: string } {
+  const { subject, text } = renderEmailParts(template, payload)
+  return { subject: emailSubjectLine(subject), text }
 }
 
 // ── Enqueue (inside the caller's transaction) ───────────────────────────────────────────────

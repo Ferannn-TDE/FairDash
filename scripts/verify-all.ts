@@ -88,6 +88,7 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'menu-ownership',            file: 'scripts/menu-ownership-guard.ts' },
   { group: 'correctness', name: 'menu-immediate-delete',     file: 'scripts/menu-immediate-delete-test.ts' },
   { group: 'correctness', name: 'menu-notifications',        file: 'scripts/menu-notifications-test.ts' },
+  { group: 'correctness', name: 'free-text-limits',          file: 'scripts/free-text-limits-test.ts' },
   { group: 'boundary',    name: 'menu-alert-preferences',    file: 'scripts/menu-alert-preferences-test.ts' },
   { group: 'boundary',    name: 'notification-feed',         file: 'scripts/notification-feed-test.ts' },
   { group: 'money',       name: 'online-markup',             file: 'scripts/online-markup-test.ts' },

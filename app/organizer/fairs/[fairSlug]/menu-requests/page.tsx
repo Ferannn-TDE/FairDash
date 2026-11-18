@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { groupByVendor } from '@/lib/menu-requests/group-by-vendor'
 import type { BatchGroup } from '@/lib/menu-requests/group-by-batch'
 import { formatPriceChange, type PriceChangeSummary } from '@/lib/menu/price-gate'
+import { REVIEW_REASON_MAX } from '@/lib/menu-requests/review-reason'
 
 interface CurrentItem {
   id: string
@@ -290,6 +291,7 @@ function RequestCard({
             </label>
             <input
               autoFocus
+              maxLength={REVIEW_REASON_MAX}
               value={reason}
               onChange={e => setReason(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') submit('REJECT') }}

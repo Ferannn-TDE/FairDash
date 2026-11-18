@@ -24,6 +24,7 @@ import { menuRequestTargetsOwnItem } from './item-ownership'
 import { parseInPersonPrice } from '../menu/price'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '../menu/price-audit'
 import { recordMenuDeleted } from '../menu-notify/record'
+import { parseReviewReason } from './review-reason'
 
 export type MenuApprover =
   | { kind: 'organizer'; organizerId: string }
@@ -42,7 +43,8 @@ export interface MenuRequestDecisionInput {
   /** DB User.id of the approver: written as reviewedBy and on the audit rows (foreign key). */
   reviewerUserId: string
   action: 'APPROVE' | 'REJECT'
-  reason?: string | null
+  /** The approver's free text, as received: checked and cleaned by parseReviewReason. */
+  reason?: unknown
 }
 
 export interface MenuRequestDecisionResult {
@@ -64,8 +66,13 @@ const unprocessable = (message: string) => new ApiError(message, 422, 'UNPROCESS
  * both apply it: the second finds no PENDING row, throws 409, and its writes roll back.
  */
 export async function applyMenuRequestDecision(input: MenuRequestDecisionInput): Promise<MenuRequestDecisionResult> {
+  // THE REASON FIRST (review F16; Jordan, Nov 17; lib/menu-requests/review-reason.ts): bounded,
+  // single-line text, checked before any database read. A refusal is a clean 400 and changes nothing.
+  const parsedReason = parseReviewReason(input.reason)
+  if (!parsedReason.ok) throw new ApiError(parsedReason.message, 400, 'VALIDATION_ERROR')
+  const reason = parsedReason.reason
+
   const { requestId, event, approver, reviewerUserId, action } = input
-  const reason = input.reason ?? null
 
   const menuRequest = await db.menuRequest.findUnique({
     where: { id: requestId },
