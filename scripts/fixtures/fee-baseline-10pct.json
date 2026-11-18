@@ -1,0 +1,132 @@
+{
+  "note": "Today's 10% checkout, recorded through POST /api/orders with Stripe stubbed, BEFORE item 10 stage 2. Do not re-record to make a run pass.",
+  "recordedAt": "2026-11-18T06:49:15.831Z",
+  "results": {
+    "booth 0.29": {
+      "status": 201,
+      "stored": {
+        "subtotal": 0.29,
+        "fairSynqFee": 0.03,
+        "deliveryFee": null,
+        "tip": null,
+        "serviceCharge": null,
+        "total": 0.32,
+        "vendorPayout": 0
+      },
+      "piAmount": 32,
+      "piMetadata": {
+        "fairSynqFee": "0.03",
+        "serviceFee": "0.03",
+        "deliveryFee": "0.00",
+        "serviceCharge": "0.00",
+        "tip": "0.00",
+        "vendorSubtotalCents": "{\"cmwlrgj780003ofhlxhr5r9sq\":29}"
+      }
+    },
+    "booth 4.35": {
+      "status": 201,
+      "stored": {
+        "subtotal": 4.35,
+        "fairSynqFee": 0.44,
+        "deliveryFee": null,
+        "tip": null,
+        "serviceCharge": null,
+        "total": 4.79,
+        "vendorPayout": 0
+      },
+      "piAmount": 479,
+      "piMetadata": {
+        "fairSynqFee": "0.44",
+        "serviceFee": "0.44",
+        "deliveryFee": "0.00",
+        "serviceCharge": "0.00",
+        "tip": "0.00",
+        "vendorSubtotalCents": "{\"cmwlrgjat000fofhlug1kq6ue\":435}"
+      }
+    },
+    "booth 15.25": {
+      "status": 201,
+      "stored": {
+        "subtotal": 15.25,
+        "fairSynqFee": 1.53,
+        "deliveryFee": null,
+        "tip": null,
+        "serviceCharge": null,
+        "total": 16.78,
+        "vendorPayout": 0
+      },
+      "piAmount": 1678,
+      "piMetadata": {
+        "fairSynqFee": "1.53",
+        "serviceFee": "1.53",
+        "deliveryFee": "0.00",
+        "serviceCharge": "0.00",
+        "tip": "0.00",
+        "vendorSubtotalCents": "{\"cmwlrgjbe000rofhlo6yta7ue\":1525}"
+      }
+    },
+    "booth 50.00": {
+      "status": 201,
+      "stored": {
+        "subtotal": 50,
+        "fairSynqFee": 5,
+        "deliveryFee": null,
+        "tip": null,
+        "serviceCharge": null,
+        "total": 55,
+        "vendorPayout": 0
+      },
+      "piAmount": 5500,
+      "piMetadata": {
+        "fairSynqFee": "5.00",
+        "serviceFee": "5.00",
+        "deliveryFee": "0.00",
+        "serviceCharge": "0.00",
+        "tip": "0.00",
+        "vendorSubtotalCents": "{\"cmwlrgjbx0013ofhlgfijph1l\":5000}"
+      }
+    },
+    "booth two vendors 30.00 + 20.00": {
+      "status": 201,
+      "stored": {
+        "subtotal": 50,
+        "fairSynqFee": 5,
+        "deliveryFee": null,
+        "tip": null,
+        "serviceCharge": null,
+        "total": 55,
+        "vendorPayout": 0
+      },
+      "piAmount": 5500,
+      "piMetadata": {
+        "fairSynqFee": "5.00",
+        "serviceFee": "5.00",
+        "deliveryFee": "0.00",
+        "serviceCharge": "0.00",
+        "tip": "0.00",
+        "vendorSubtotalCents": "{\"cmwlrgjcj001fofhlv7txg05r\":3000,\"cmwlrgjcl001jofhl2mmkxdf4\":2000}"
+      }
+    },
+    "curbside 10.00, fee 3.00, tip 2.00": {
+      "status": 201,
+      "stored": {
+        "subtotal": 10,
+        "fairSynqFee": 1,
+        "deliveryFee": 3,
+        "tip": 2,
+        "serviceCharge": null,
+        "total": 16,
+        "vendorPayout": 0
+      },
+      "piAmount": 1600,
+      "piMetadata": {
+        "fairSynqFee": "1.00",
+        "serviceFee": "1.00",
+        "deliveryFee": "3.00",
+        "serviceCharge": "0.00",
+        "tip": "2.00",
+        "vendorSubtotalCents": "{\"cmwlrgjd6001wofhl1sabsa2p\":1000}"
+      }
+    }
+  }
+}

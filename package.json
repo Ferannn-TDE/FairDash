@@ -18,7 +18,7 @@
     "dev:db:reset": "docker compose -f docker-compose.dev.yml down -v",
     "test:db:up": "docker compose -f docker-compose.test.yml up -d --wait && npm run test:db:migrate",
     "test:db:down": "docker compose -f docker-compose.test.yml down -v",
-    "test:db:migrate": "./scripts/with-test-db.sh npx prisma db push --skip-generate --accept-data-loss",
+    "test:db:migrate": "./scripts/with-test-db.sh npx prisma db push --skip-generate --accept-data-loss && ./scripts/with-test-db.sh npx prisma db execute --file prisma/migrations/20261118120000_add_money_settings/migration.sql",
     "gate": "./scripts/gate.sh",
     "gate:fast": "./scripts/gate.sh --fast",
     "test:db:deploy": "./scripts/with-test-db.sh npx prisma migrate deploy",

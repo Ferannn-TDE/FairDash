@@ -4,6 +4,9 @@
  * Sends to Slack via incoming webhook when SLACK_WEBHOOK_URL is set.
  * All functions are fire-and-forget — a notification failure never propagates
  * to the caller. Configure SLACK_WEBHOOK_URL in .env.local to enable.
+ *
+ * BOUNDED (2026-11-18): a Slack call gives up after SLACK_TIMEOUT_MS. Before, a hung webhook
+ * hung its caller forever, and the catch never ran (unbounded-call class).
  */
 
 import { logger } from './logger'
@@ -14,6 +17,8 @@ interface SlackBlock {
   fields?: { type: string; text: string }[]
 }
 
+export const SLACK_TIMEOUT_MS = 5_000
+
 async function postToSlack(text: string, blocks?: SlackBlock[]): Promise<void> {
   const url = process.env.SLACK_WEBHOOK_URL
   if (!url) return
@@ -23,6 +28,7 @@ async function postToSlack(text: string, blocks?: SlackBlock[]): Promise<void> {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ text, blocks }),
+      signal:  AbortSignal.timeout(SLACK_TIMEOUT_MS),
     })
   } catch (err) {
     logger.warn('[Notify] Slack delivery failed', { error: String(err) })
@@ -112,6 +118,35 @@ export async function notifyRefundDropped(orderId: string, vendorId: string): Pr
         { type: 'mrkdwn', text: `*Vendor ID:*\n${vendorId}` },
         { type: 'mrkdwn', text: `*Time:*\n${new Date().toISOString()}` },
         { type: 'mrkdwn', text: `*Action:*\nManually issue refund via Stripe Dashboard` },
+      ],
+    },
+  ])
+}
+
+export interface MoneySettingChange {
+  key: string
+  label: string
+  from: string
+  to: string
+  actorId: string
+  actorType: string
+  reason: string
+}
+
+/**
+ * Notice: a money setting changed (item 10 / B1.13 stage 2). Sent after the save has committed,
+ * through runAfterResponse; it never blocks or fails the save.
+ */
+export async function notifyMoneySettingChanged(c: MoneySettingChange): Promise<void> {
+  logger.warn('[Settings] money setting changed', { key: c.key, from: c.from, to: c.to, actorId: c.actorId, actorType: c.actorType })
+  await postToSlack(`💲 *Fee setting changed* — ${c.label}: ${c.from} → ${c.to}`, [
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Setting:*\n${c.label} (\`${c.key}\`)` },
+        { type: 'mrkdwn', text: `*Change:*\n${c.from} → ${c.to}` },
+        { type: 'mrkdwn', text: `*By:*\n${c.actorId} (${c.actorType})` },
+        { type: 'mrkdwn', text: `*Reason:*\n${c.reason}` },
       ],
     },
   ])

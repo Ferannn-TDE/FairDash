@@ -87,9 +87,22 @@ function walk(dir: string, out: string[] = []) {
   return out
 }
 
+// THE PRODUCTION MONEY SEED (item 10 stage 2, BATCH-1 §19): this suite wipes every setting, so it
+// puts the four fee rows back exactly as production's migration seeds them, by running that very
+// migration file. Every later suite then starts from the production seed (Feran: restore, not skip).
+const MONEY_SEED_SQL = readFileSync('prisma/migrations/20261118120000_add_money_settings/migration.sql', 'utf8')
+const MONEY_SEED: Record<string, unknown> = {
+  'fees.serviceFee.percentBps': 1500, 'fees.serviceFee.flatCents': 0, 'fees.curbsideRunnerFeeCents': 399, 'fees.cardFeesPaidBy': 'VENDOR',
+}
+const nonMoneyRowCount = () => prisma.platformSetting.count({ where: { NOT: { key: { startsWith: 'fees.' } } } })
+async function restoreMoneySeed() {
+  await prisma.$executeRawUnsafe(MONEY_SEED_SQL)
+}
+
 async function cleanup() {
   await prisma.platformSettingChange.deleteMany({})
   await prisma.platformSetting.deleteMany({})
+  await restoreMoneySeed()
   const events = await prisma.event.findMany({ where: { urlSlug: { startsWith: PFX } }, select: { id: true } })
   if (events.length) {
     await prisma.runner.deleteMany({ where: { eventId: { in: events.map(e => e.id) } } })
@@ -127,7 +140,8 @@ async function main() {
   }
   login(null)
   assert((await GET()).status === 401, 'anonymous → 401')
-  assert((await prisma.platformSetting.count()) === 0, 'none of the refused PATCHes wrote anything')
+  // Updated 2026-11-18: the four seeded fee rows always exist now; count every OTHER row.
+  assert((await nonMoneyRowCount()) === 0, 'none of the refused PATCHes wrote anything')
   assert(!(roles.ADMIN_ROLES as readonly string[]).includes('platform_manager'),
     'platform_manager is NOT in ADMIN_ROLES (so no requireAdminAuth route admits it)')
 
@@ -294,7 +308,7 @@ async function main() {
     const j: any = await r.json()
     assert(r.status === 400 && typeof j.error?.details?.fieldErrors?.[key] === 'string', `${key} = ${JSON.stringify(value).slice(0, 40)} → 400 with a field error`)
   }
-  assert((await changeCount()) === countInvalid && (await prisma.platformSetting.count()) === 0, 'invalid values wrote nothing')
+  assert((await changeCount()) === countInvalid && (await nonMoneyRowCount()) === 0, 'invalid values wrote nothing')
   for (const v of ['(618) 555-0100', '618-555-0100', '+16185550100', '1 618 555 0100']) {
     assert(settingsLib.normalizeUsPhone(v) === '+16185550100', `[0] control: "${v}" → +16185550100`)
   }
@@ -325,20 +339,26 @@ async function main() {
 
   // ── [6] registry ───────────────────────────────────────────────────────────────────────
   console.log('\n[6] Only registry keys exist')
-  const unk = await PATCH({ key: 'fees.serviceFee.percentBps', value: 1500, expectedVersion: 'unset' })
-  assert(unk.status === 400 && ((await unk.json()) as any).error?.code === 'UNKNOWN_SETTING', 'a money key (not in the registry yet) → 400 UNKNOWN_SETTING')
-  assert(!(await prisma.platformSetting.findUnique({ where: { key: 'fees.serviceFee.percentBps' } })), 'and nothing was written for it')
+  // Updated 2026-11-18 (item 10 stage 2): the four fees.* keys are now in the registry, so the
+  // "not in the registry" probe uses a money-looking key that still isn't.
+  const unk = await PATCH({ key: 'fees.vendorCommissionBps', value: 1500, expectedVersion: 'unset' })
+  assert(unk.status === 400 && ((await unk.json()) as any).error?.code === 'UNKNOWN_SETTING', 'a key not in the registry (fees.vendorCommissionBps) → 400 UNKNOWN_SETTING')
+  assert(!(await prisma.platformSetting.findUnique({ where: { key: 'fees.vendorCommissionBps' } })), 'and nothing was written for it')
   let unknownThrew = false
   try {
     // @ts-expect-error — an unknown key is a type error (tsc fails this file if it ever isn't)
     await settingsLib.getSetting('sms.enabled')
   } catch { unknownThrew = true }
   assert(unknownThrew, 'getSetting on an unknown key throws at runtime too')
-  assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify(['delivery.enabled', 'alerts.email', 'alerts.phone',
+  assert(JSON.stringify(settingsLib.SETTING_KEYS) === JSON.stringify([
+    'fees.serviceFee.percentBps', 'fees.serviceFee.flatCents', 'fees.curbsideRunnerFeeCents', 'fees.cardFeesPaidBy',
+    'delivery.enabled', 'alerts.email', 'alerts.phone',
     'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.vendorPitch.phoneUrl', 'video.vendorPitch.phonePosterUrl',
     'video.partnerPitch.url', 'video.partnerPitch.posterUrl',
     'video.organizerPitch.url', 'video.organizerPitch.posterUrl', 'video.organizerPitch.phoneUrl', 'video.organizerPitch.phonePosterUrl']),
-    'the registry holds delivery.enabled (item 6), the two alert contacts and the three video slots, vendor and organizer with a phone cut (no SMS or money keys)')
+    'the registry holds the four fee keys (item 10), delivery.enabled (item 6), the two alert contacts and the three video slots, vendor and organizer with a phone cut (no SMS key)')
+  assert(settingsLib.SETTING_KEYS.filter(k => settingsLib.SETTINGS[k].class === 'money').join() === 'fees.serviceFee.percentBps,fees.serviceFee.flatCents,fees.curbsideRunnerFeeCents,fees.cardFeesPaidBy',
+    'exactly the four fees.* keys are money settings')
   // Phone cut cards (BATCH-1 §21 Q6): optional, same link rules as the main video and poster.
   for (const slot of ['vendorPitch', 'organizerPitch'] as const) {
     const v = settingsLib.SETTINGS[`video.${slot}.phoneUrl`], pp = settingsLib.SETTINGS[`video.${slot}.phonePosterUrl`]
@@ -462,6 +482,12 @@ main()
   .catch((e) => { fail++; console.error(e) })
   .finally(async () => {
     try { await cleanup() } catch (e) { console.error('cleanup failed', e) }
+    // Leaves the production seed behind: the four money rows, exactly (S2 test cleanup rule).
+    try {
+      const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: 'fees.' } } })
+      const seeded = rows.length === 4 && rows.every(r => JSON.stringify(r.value) === JSON.stringify(MONEY_SEED[r.key]) && r.updatedByType === 'system')
+      assert(seeded, 'after cleanup the four money rows are back at the production seed (1500 / 0 / 399 / VENDOR, system)')
+    } catch (e) { fail++; console.error('seed check failed', e) }
     await prisma.$disconnect()
     console.log(`\n${'─'.repeat(64)}`)
     console.log(fail === 0 ? `  ${pass} passed, 0 failed` : `  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

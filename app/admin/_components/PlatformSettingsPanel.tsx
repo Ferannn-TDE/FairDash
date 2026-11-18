@@ -3,15 +3,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { History } from 'lucide-react'
+import { bpsToText, centsToText } from '@/lib/money-input'
 
 // /admin/settings panel (Batch 1 item 5). One card per setting with its own Save and an optional
 // reason; the change log underneath. Loading renders skeletons, never placeholder values
 // (flicker-class rule). A 409 keeps what you typed and shows the value someone else saved.
+// MONEY cards (fees.*, item 10 stage 2): a required reason, never cleared, the stored cents/bps shown
+// as editable text; read-only for platform_manager ("Only an admin can change fees.").
 
 interface SettingView {
   key: string
   label: string
   help: string
+  class: 'ops' | 'content' | 'money'
   notInEffect: string | null
   value: unknown
   display: string
@@ -34,6 +38,13 @@ interface SettingChangeView {
 const toInput = (value: unknown) =>
   Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : ''
 
+// A money value as the admin edits it: bps as a percent, cents as dollars, the card choice as-is.
+function moneyToInput(key: string, value: unknown): string {
+  if (typeof value === 'number') return key === 'fees.serviceFee.percentBps' ? bpsToText(value) : centsToText(value)
+  return typeof value === 'string' ? value : ''
+}
+const CARD_FEE_CHOICES = [{ value: 'VENDOR', label: 'Vendor pays' }, { value: 'PLATFORM', label: 'FairSynq pays' }]
+
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
@@ -43,28 +54,35 @@ const labelCls = 'text-[0.6875rem] uppercase tracking-wide text-text-gray font-s
 
 interface DeliveryEvent { name: string; slug: string }
 
-function SettingCard({ setting, onSaved, deliveryEventsOn }: { setting: SettingView; onSaved: () => void; deliveryEventsOn: DeliveryEvent[] }) {
+function SettingCard({ setting, onSaved, deliveryEventsOn, viewerRole }: { setting: SettingView; onSaved: () => void; deliveryEventsOn: DeliveryEvent[]; viewerRole: string | null }) {
   const isSwitch = typeof setting.value === 'boolean'
+  const isMoney = setting.class === 'money'
+  const isChoice = setting.key === 'fees.cardFeesPaidBy'
+  // The server refuses platform_manager on money keys (403); the card says so up front.
+  const readOnly = isMoney && viewerRole !== 'admin' && viewerRole !== 'super_admin'
+  const asInput = (v: unknown) => (isMoney ? moneyToInput(setting.key, v) : toInput(v))
   // Turning delivery ON is a two-step action: show which events start offering it, then confirm.
   const [confirmingOn, setConfirmingOn] = useState(false)
-  const [draft, setDraft] = useState(toInput(setting.value))
+  const [draft, setDraft] = useState(asInput(setting.value))
   const [reason, setReason] = useState('')
   const [version, setVersion] = useState(setting.version)
   const [saving, setSaving] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
+  const [reasonError, setReasonError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<SettingView | null>(null)
 
   // A fresh load (after any save) re-seeds the card, except while a conflict is on screen:
   // then the typed value stays put so it can be re-applied.
   useEffect(() => {
     if (conflict) return
-    setDraft(toInput(setting.value))
+    setDraft(asInput(setting.value))
     setVersion(setting.version)
   }, [setting.value, setting.version]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async (valueOverride?: unknown) => {
     setSaving(true)
     setFieldError(null)
+    setReasonError(null)
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'PATCH',
@@ -79,7 +97,9 @@ function SettingCard({ setting, onSaved, deliveryEventsOn }: { setting: SettingV
         return
       }
       if (!json.success) {
-        setFieldError(json.error?.details?.fieldErrors?.[setting.key] ?? json.error?.message ?? 'Save failed')
+        const fe = json.error?.details?.fieldErrors
+        if (fe?.reason) setReasonError(fe.reason)
+        else setFieldError(fe?.[setting.key] ?? json.error?.message ?? 'Save failed')
         return
       }
       setConflict(null)
@@ -129,15 +149,32 @@ function SettingCard({ setting, onSaved, deliveryEventsOn }: { setting: SettingV
             <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${setting.value ? 'translate-x-5' : 'translate-x-0'}`} />
           </button>
         </div>
-      ) : (
+      ) : isChoice ? (
         <>
           <label className={labelCls} htmlFor={`setting-${setting.key}`}>Value</label>
+          <select
+            id={`setting-${setting.key}`}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={saving || readOnly}
+            aria-invalid={!!fieldError}
+            className={`${inputCls} ${fieldError ? 'border-red-500/70 focus:border-red-500' : ''}`}
+          >
+            {CARD_FEE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </>
+      ) : (
+        <>
+          <label className={labelCls} htmlFor={`setting-${setting.key}`}>
+            {isMoney ? (setting.key === 'fees.serviceFee.percentBps' ? 'Percent' : 'Dollars') : 'Value'}
+          </label>
           <input
             id={`setting-${setting.key}`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            disabled={saving}
-            placeholder="Not set"
+            disabled={saving || readOnly}
+            inputMode={isMoney ? 'decimal' : undefined}
+            placeholder={isMoney ? '' : 'Not set'}
             aria-invalid={!!fieldError}
             className={`${inputCls} ${fieldError ? 'border-red-500/70 focus:border-red-500' : ''}`}
           />
@@ -173,22 +210,31 @@ function SettingCard({ setting, onSaved, deliveryEventsOn }: { setting: SettingV
         </div>
       )}
 
-      <label className={`${labelCls} mt-4`} htmlFor={`reason-${setting.key}`}>Reason (optional)</label>
-      <input
-        id={`reason-${setting.key}`}
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        disabled={saving}
-        placeholder="Why the change, for the log"
-        className={inputCls}
-      />
+      {readOnly ? (
+        <p className="mt-4 text-xs text-text-gray">Only an admin can change fees.</p>
+      ) : (
+        <>
+          <label className={`${labelCls} mt-4`} htmlFor={`reason-${setting.key}`}>{isMoney ? 'Reason (required)' : 'Reason (optional)'}</label>
+          <input
+            id={`reason-${setting.key}`}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            disabled={saving}
+            placeholder="Why the change, for the log"
+            aria-invalid={!!reasonError}
+            className={`${inputCls} ${reasonError ? 'border-red-500/70 focus:border-red-500' : ''}`}
+          />
+          {reasonError && <p className="mt-1.5 text-xs text-red-400">{reasonError}</p>}
+        </>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-[0.6875rem] text-text-gray">
           {setting.isSet && setting.updatedAt ? `Last changed ${fmtTime(setting.updatedAt)}` : isSwitch ? 'Using the default' : 'Not set'}
-          {!isSwitch && <>{' · '}Clear the field and save to remove it.</>}
+          {!isSwitch && !isMoney && <>{' · '}Clear the field and save to remove it.</>}
+          {isMoney && <>{' · '}A change applies only to orders placed after it.</>}
         </p>
-        {!isSwitch && <button
+        {!isSwitch && !readOnly && <button
           type="button"
           onClick={() => save()}
           disabled={saving}
@@ -202,7 +248,7 @@ function SettingCard({ setting, onSaved, deliveryEventsOn }: { setting: SettingV
 }
 
 export default function PlatformSettingsPanel() {
-  const [data, setData] = useState<{ settings: SettingView[]; changes: SettingChangeView[]; deliveryEventsOn?: DeliveryEvent[] } | null>(null)
+  const [data, setData] = useState<{ settings: SettingView[]; changes: SettingChangeView[]; deliveryEventsOn?: DeliveryEvent[]; viewerRole?: string } | null>(null)
   const [error, setError] = useState(false)
 
   const load = useCallback(async () => {
@@ -242,7 +288,7 @@ export default function PlatformSettingsPanel() {
       {data && (
         <>
           <div className="space-y-4">
-            {data.settings.map((s) => <SettingCard key={s.key} setting={s} onSaved={load} deliveryEventsOn={data.deliveryEventsOn ?? []} />)}
+            {data.settings.map((s) => <SettingCard key={s.key} setting={s} onSaved={load} deliveryEventsOn={data.deliveryEventsOn ?? []} viewerRole={data.viewerRole ?? null} />)}
           </div>
 
           <section className="mt-10">
@@ -263,7 +309,7 @@ export default function PlatformSettingsPanel() {
                       <span className="text-white/80">{c.from}</span> → <span className="text-white">{c.to}</span>
                     </p>
                     <p className="mt-1 text-xs text-text-gray break-words">
-                      {c.actor} · {c.actorType}
+                      {c.actorType === 'system' ? c.actor : <>{c.actor} · {c.actorType}</>}
                       {c.reason ? <> · &ldquo;{c.reason}&rdquo;</> : null}
                     </p>
                   </li>

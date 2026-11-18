@@ -587,6 +587,12 @@ model Order {
   tip          Float? // Customer tip on runner-fulfilled orders only. 100% the runner's; NO service fee, NO split. Null/0 otherwise.
   total        Float // subtotal + serviceFee(10%×subtotal) + deliveryFee + serviceCharge + tip
   fairSynqFee  Float // FairSynq revenue = 10% service fee charged to the customer on top (on subtotal only)
+  // Fee snapshot (item 10 / B1.13 stage 2). NULL on every order until stage 3 writes them; null =
+  // today's 10% rules. A settings change can't move a placed order (BATCH-1 §5 "Snapshot").
+  feeModel            Int? // null = legacy 10% model, 2 = Exhibit A
+  serviceFeeBps       Int?
+  serviceFeeFlatCents Int?
+  cardFeesPaidBy      CardFeesPaidBy?
   vendorPayout Float // = subtotal in full — vendor keeps everything, no commission deducted
 
   // Customer info
@@ -763,6 +769,12 @@ enum OrderStatus {
   CANCELLED // Cancelled by vendor, customer, or system
   UNCOLLECTED // Customer never collected (10-min timeout after READY)
   UNDELIVERABLE // Home delivery address unreachable by runner
+}
+
+// Who absorbs card processing on an order's food (item 10 / B1.13). Mirrors fees.cardFeesPaidBy.
+enum CardFeesPaidBy {
+  VENDOR
+  PLATFORM
 }
 
 enum FulfillmentType {

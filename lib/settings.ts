@@ -6,13 +6,25 @@
 // refusal for anything that arrives as a plain string (the API body).
 //
 // Item 5 ships only the two alert contacts. delivery.enabled arrives with item 6 (when it is
-// first read, defaulting to off), money keys with item 10 (their own migration, fail-closed),
-// SMS once sending exists.
+// first read, defaulting to off), SMS once sending exists.
+//
+// MONEY KEYS (item 10 / B1.13 stage 2, BATCH-1 §19 S2-Q1..Q6). Four `fees.*` keys, class 'money':
+//   - seeded by migration 20261118120000_add_money_settings; NO code default (default: null)
+//   - read only through getMoneySettings(): all-or-nothing, uncached, MoneySettingsUnavailable
+//     naming every missing/invalid key. getSetting() refuses them, so no lenient path exists.
+//   - saved only by admin | super_admin (platform_manager → 'forbidden'), with a reason, never
+//     cleared, values converted from text exactly (lib/money-input.ts)
+//   - every successful change posts a Slack notice after the response (lib/after-response.ts)
+// Nothing outside this file reads them yet: checkout still charges the 10% in lib/constants.ts
+// until stage 3 wires getMoneySettings() in.
 
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { validateEmail } from '@/lib/runner-application-validation'
 import type { SettingsRole } from '@/lib/roles'
+import { dollarsToCents, percentToBps, formatBps, formatCents } from '@/lib/money-input'
+import { notifyMoneySettingChanged, type MoneySettingChange } from '@/lib/notify'
+import type { AfterTask } from '@/lib/after-response'
 
 export type SettingClass = 'ops' | 'content' | 'money'
 type Parsed<T> = { ok: true; value: T | null } | { ok: false; error: string }
@@ -136,8 +148,61 @@ const phonePosterUrl = (label: string) => ({
   format: (v: string) => v,
 }) satisfies SettingDef<string>
 
+// ── fees.* (money) ─────────────────────────────────────────────────────────────────────────
+// Ranges (S2-Q2): service fee 0–30%, flat $0–$5, curbside $0–$15, card fees VENDOR | PLATFORM.
+export const MONEY_LIMITS = { serviceFeeBps: 3000, serviceFeeFlatCents: 500, curbsideRunnerFeeCents: 1500 } as const
+export type CardFeesPaidBySetting = 'VENDOR' | 'PLATFORM'
+const CARD_FEES_LABEL: Record<CardFeesPaidBySetting, string> = { VENDOR: 'Vendor pays', PLATFORM: 'FairSynq pays' }
+
+const notInEffect = (today: string) => `Not in effect yet. ${today} This value takes effect when the new fees go live.`
+const fromExact = (r: { ok: true; value: number } | { ok: false; error: string }): Parsed<number> =>
+  r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error }
+function parseCardFeesPaidBy(raw: unknown): Parsed<CardFeesPaidBySetting> {
+  return raw === 'VENDOR' || raw === 'PLATFORM' ? { ok: true, value: raw } : { ok: false, error: 'Choose "Vendor pays" or "FairSynq pays"' }
+}
+// A money value as STORED (JSON), checked the same way the form checks it. Used by
+// getMoneySettings(): anything else in the row makes the read fail closed.
+const isIntIn = (v: unknown, max: number) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max
+
 // ── The registry ───────────────────────────────────────────────────────────────────────────
 export const SETTINGS = {
+  // Item 10 / B1.13 (money). Order matters only for the admin page: fees first.
+  'fees.serviceFee.percentBps': {
+    label: 'Service fee: percent of the food',
+    help: 'Charged to the customer once per order, on the food subtotal. Enter a percent, e.g. 15 or 12.5 (0 to 30).',
+    class: 'money',
+    default: null,
+    notInEffect: notInEffect('Checkout still charges the old 10% service fee.'),
+    parse: (raw: unknown) => fromExact(percentToBps(raw, MONEY_LIMITS.serviceFeeBps)),
+    format: (v: number) => formatBps(v),
+  } satisfies SettingDef<number>,
+  'fees.serviceFee.flatCents': {
+    label: 'Service fee: flat amount per order',
+    help: 'Added to the service fee once per order. Enter dollars, e.g. 0.50 ($0.00 to $5.00).',
+    class: 'money',
+    default: null,
+    notInEffect: notInEffect('Checkout adds no flat fee today.'),
+    parse: (raw: unknown) => fromExact(dollarsToCents(raw, MONEY_LIMITS.serviceFeeFlatCents)),
+    format: (v: number) => formatCents(v),
+  } satisfies SettingDef<number>,
+  'fees.curbsideRunnerFeeCents': {
+    label: 'Curbside fee',
+    help: 'Charged on curbside orders. Enter dollars, e.g. 3.99 ($0.00 to $15.00).',
+    class: 'money',
+    default: null,
+    notInEffect: notInEffect("Checkout still uses each event's own curbside fee."),
+    parse: (raw: unknown) => fromExact(dollarsToCents(raw, MONEY_LIMITS.curbsideRunnerFeeCents)),
+    format: (v: number) => formatCents(v),
+  } satisfies SettingDef<number>,
+  'fees.cardFeesPaidBy': {
+    label: 'Card processing fees',
+    help: 'Who pays Stripe\'s card processing on the food: the vendor, or FairSynq.',
+    class: 'money',
+    default: null,
+    notInEffect: notInEffect('Today vendors pay the full card processing fee on every order.'),
+    parse: parseCardFeesPaidBy,
+    format: (v: CardFeesPaidBySetting) => CARD_FEES_LABEL[v] ?? String(v),
+  } satisfies SettingDef<CardFeesPaidBySetting>,
   // Item 6 (B1.2). Home delivery is offered only when this AND the event's own flag are on
   // (lib/delivery.ts deliveryAvailable). Added when first read, defaulting to OFF, so nothing saved
   // before it existed can switch delivery back on.
@@ -212,6 +277,8 @@ export function formatSettingValue(key: SettingKey, value: unknown): string {
 /** The effective value: the saved value, else the code default. For future readers (item 9). */
 export async function getSetting<K extends SettingKey>(key: K): Promise<SettingValue<K> | null> {
   if (!isSettingKey(key)) throw new SettingError('unknown_key', `Unknown setting: ${String(key)}`)
+  // Money keys have no default to fall back to; they are read only through getMoneySettings().
+  if (SETTINGS[key].class === 'money') throw new SettingError('unknown_key', `${key} is a money setting: read it with getMoneySettings()`)
   const row = await db.platformSetting.findUnique({ where: { key } })
   return (row ? row.value : SETTINGS[key].default) as SettingValue<K> | null
 }
@@ -242,6 +309,9 @@ export interface SettingChangeView {
 }
 
 export const CHANGE_LOG_LIMIT = 50
+/** The seed migration writes actorType 'system'; the log shows it as this, never blank or a role. */
+export const SYSTEM_ACTOR_TYPE = 'system'
+export const SYSTEM_ACTOR_LABEL = 'System (migration)'
 
 export async function listSettings(): Promise<{ settings: SettingView[]; changes: SettingChangeView[] }> {
   const [rows, changes] = await Promise.all([
@@ -280,7 +350,7 @@ export async function listSettings(): Promise<{ settings: SettingView[]; changes
       label: isSettingKey(c.key) ? def(c.key).label : c.key,
       from: isSettingKey(c.key) ? formatSettingValue(c.key, c.oldValue) : JSON.stringify(c.oldValue),
       to: isSettingKey(c.key) ? formatSettingValue(c.key, c.newValue) : JSON.stringify(c.newValue),
-      actor: emailOf.get(c.actorId) || c.actorId,
+      actor: c.actorType === SYSTEM_ACTOR_TYPE ? SYSTEM_ACTOR_LABEL : (emailOf.get(c.actorId) || c.actorId),
       actorType: c.actorType,
       reason: c.reason,
       createdAt: c.createdAt.toISOString(),
@@ -291,7 +361,7 @@ export async function listSettings(): Promise<{ settings: SettingView[]; changes
 // ── Writes ─────────────────────────────────────────────────────────────────────────────────
 export class SettingError extends Error {
   constructor(
-    public kind: 'unknown_key' | 'invalid' | 'conflict',
+    public kind: 'unknown_key' | 'invalid' | 'conflict' | 'forbidden',
     message: string,
     public details?: unknown,
   ) {
@@ -310,6 +380,11 @@ export interface SaveSettingInput {
   reason?: unknown
   /** Test seam: runs after the setting write and before the log write, inside the transaction. */
   hooks?: { afterSettingWrite?: () => void | Promise<void> }
+  /** How a post-save side effect is scheduled. The route passes runAfterResponse (Next's after());
+   *  absent (a script), the task runs unawaited with its errors swallowed. */
+  afterResponse?: (task: AfterTask) => void
+  /** Test seam for the money-change notice; defaults to notifyMoneySettingChanged (Slack). */
+  notify?: (change: MoneySettingChange) => Promise<void>
 }
 
 export interface SaveSettingResult {
@@ -333,14 +408,27 @@ export async function saveSetting(input: SaveSettingInput): Promise<SaveSettingR
   if (!isSettingKey(key)) throw new SettingError('unknown_key', `Unknown setting: ${String(key)}`)
   const d = def(key)
 
+  const isMoney = d.class === 'money'
+  // S2-Q1: only admin | super_admin change fees. Checked before anything else, so a refused
+  // platform_manager learns nothing about the value it sent.
+  if (isMoney && input.actorType !== 'admin' && input.actorType !== 'super_admin') {
+    throw new SettingError('forbidden', 'Only an admin can change fees.')
+  }
+
   const parsed = d.parse(input.raw)
   if (!parsed.ok) throw new SettingError('invalid', parsed.error, { fieldErrors: { [key]: parsed.error } })
   const next = parsed.value
 
   const reason = typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim().slice(0, 500) : null
+  if (isMoney) {
+    // S2-Q2: never cleared (a missing money row fails checkout closed); S2 §3: a reason, always.
+    if (next === null) throw new SettingError('invalid', 'A fee setting can\'t be cleared.', { fieldErrors: { [key]: 'A fee setting can\'t be cleared.' } })
+    if (!reason) throw new SettingError('invalid', 'Enter a reason for this change.', { fieldErrors: { reason: 'Enter a reason for this change.' } })
+  }
   const expected = typeof input.expectedVersion === 'string' ? input.expectedVersion : ''
 
   let outcome: SaveSettingResult['outcome'] = 'unchanged'
+  let savedFrom: unknown = undefined // the old value, set only when a write commits
   try {
     await db.$transaction(async (tx) => {
       const row = await tx.platformSetting.findUnique({ where: { key } })
@@ -373,6 +461,7 @@ export async function saveSetting(input: SaveSettingInput): Promise<SaveSettingR
 
       await input.hooks?.afterSettingWrite?.()
 
+      savedFrom = old
       await tx.platformSettingChange.create({
         data: {
           key,
@@ -395,6 +484,76 @@ export async function saveSetting(input: SaveSettingInput): Promise<SaveSettingR
     throw err
   }
 
+  // Money notice (S2 addition): only after the save committed, scheduled to run after the response,
+  // never awaited here. A throwing or hanging notifier cannot fail or delay the save.
+  if (isMoney && (outcome as SaveSettingResult['outcome']) === 'saved' && savedFrom !== undefined) {
+    const change: MoneySettingChange = {
+      key, label: d.label, from: formatSettingValue(key, savedFrom), to: formatSettingValue(key, next),
+      actorId: input.actorId, actorType: input.actorType, reason: reason!,
+    }
+    const notify = input.notify ?? notifyMoneySettingChanged
+    const task: AfterTask = () => notify(change)
+    try {
+      if (input.afterResponse) input.afterResponse(task)
+      else void task().catch(() => {})
+    } catch { /* scheduling itself failed: the save stands */ }
+  }
+
   const { settings } = await listSettings()
   return { outcome, setting: settings.find((s) => s.key === key)! }
+}
+
+// ── Money reads (item 10 / B1.13 stage 2, S2-Q4) ───────────────────────────────────────────
+export const MONEY_KEYS = [
+  'fees.serviceFee.percentBps',
+  'fees.serviceFee.flatCents',
+  'fees.curbsideRunnerFeeCents',
+  'fees.cardFeesPaidBy',
+] as const satisfies readonly SettingKey[]
+export type MoneyKey = (typeof MONEY_KEYS)[number]
+
+export interface MoneySettings {
+  serviceFeeBps: number
+  serviceFeeFlatCents: number
+  curbsideRunnerFeeCents: number
+  cardFeesPaidBy: CardFeesPaidBySetting
+}
+
+/** The fee terms can't be read: one or more money rows are missing or hold a value the form
+ *  would refuse. Stage 3 maps this to 503 at checkout (with a Slack alert and a plain customer
+ *  message, never these key names). */
+export class MoneySettingsUnavailable extends Error {
+  constructor(public missing: MoneyKey[], public invalid: MoneyKey[]) {
+    super(`Money settings unavailable — missing: ${missing.join(', ') || 'none'}; invalid: ${invalid.join(', ') || 'none'}`)
+    this.name = 'MoneySettingsUnavailable'
+  }
+}
+
+const STORED_OK: Record<MoneyKey, (v: unknown) => boolean> = {
+  'fees.serviceFee.percentBps': (v) => isIntIn(v, MONEY_LIMITS.serviceFeeBps),
+  'fees.serviceFee.flatCents': (v) => isIntIn(v, MONEY_LIMITS.serviceFeeFlatCents),
+  'fees.curbsideRunnerFeeCents': (v) => isIntIn(v, MONEY_LIMITS.curbsideRunnerFeeCents),
+  'fees.cardFeesPaidBy': (v) => v === 'VENDOR' || v === 'PLATFORM',
+}
+
+/**
+ * The four fee terms, all or nothing. ONE uncached query; no default anywhere: a missing row or a
+ * stored value the form would refuse throws MoneySettingsUnavailable naming every bad key.
+ * Nothing outside this file calls it until stage 3 (proved by scripts/money-settings-test.ts [9]).
+ */
+export async function getMoneySettings(): Promise<MoneySettings> {
+  const rows = await db.platformSetting.findMany({ where: { key: { in: [...MONEY_KEYS] } } })
+  const byKey = new Map(rows.map((r) => [r.key, r.value as unknown]))
+  const missing: MoneyKey[] = [], invalid: MoneyKey[] = []
+  for (const k of MONEY_KEYS) {
+    if (!byKey.has(k)) missing.push(k)
+    else if (!STORED_OK[k](byKey.get(k))) invalid.push(k)
+  }
+  if (missing.length || invalid.length) throw new MoneySettingsUnavailable(missing, invalid)
+  return {
+    serviceFeeBps: byKey.get('fees.serviceFee.percentBps') as number,
+    serviceFeeFlatCents: byKey.get('fees.serviceFee.flatCents') as number,
+    curbsideRunnerFeeCents: byKey.get('fees.curbsideRunnerFeeCents') as number,
+    cardFeesPaidBy: byKey.get('fees.cardFeesPaidBy') as CardFeesPaidBySetting,
+  }
 }
