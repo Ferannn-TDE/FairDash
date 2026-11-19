@@ -155,6 +155,23 @@ for (const v of ['DATABASE_URL', 'DIRECT_URL', 'TEST_DATABASE_URL']) {
 assert(/REFUSING/.test(wrapper) && /localhost\|127\.0\.0\.1/.test(wrapper),
   'the wrapper REFUSES a non-local host rather than trusting the caller')
 
+// The wrapper's DEFAULT test-DB address is 127.0.0.1, never `localhost` (Nov 17–18, Windows):
+// Node and Prisma try ::1 first for "localhost", and on Windows ::1:55432 timed out while
+// 127.0.0.1:55432 answered, so every Windows test run stopped with P1001. Naming the IPv4
+// address removes the lookup. TEST_DATABASE_URL_OVERRIDE can still move it, locally only.
+const testDbDefaultHost = (src: string): string | null => {
+  const m = src.replace(/\r\n/g, '\n').match(/^TEST_DB="\$\{TEST_DATABASE_URL_OVERRIDE:-([^}]+)\}"$/m)
+  if (!m) return null
+  try { return new URL(m[1]).hostname } catch { return null }
+}
+const OLD_WRAPPER_LINE = 'TEST_DB="${TEST_DATABASE_URL_OVERRIDE:-postgresql://u:p@localhost:55432/fairsynq_test}"'
+assert(testDbDefaultHost(OLD_WRAPPER_LINE) === 'localhost',
+  '[0] POSITIVE CONTROL: the address reader finds `localhost` in the old wrapper line, so the check below can fail')
+const wrapperDbHost = testDbDefaultHost(wrapper)
+assert(wrapperDbHost !== null, 'the wrapper has a TEST_DB default line this check can read (not vacuous)')
+assert(wrapperDbHost === '127.0.0.1',
+  `the wrapper's default test DB host is 127.0.0.1, not localhost (found ${wrapperDbHost ?? 'none'})`)
+
 // The wrapper also pins the test rate limiter and blanks the queue Redis (found Nov 16: suites
 // loaded .env.local's Upstash, and the order routes failed closed with 429 when it was not
 // reachable). dotenv never overrides a variable that is already set, so these win.
