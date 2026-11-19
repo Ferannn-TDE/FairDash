@@ -382,9 +382,10 @@ async function main() {
   const realBooth = await mkVendor({ eventId: liveFair.id, isDemo: false, name: `${PFX}Real Grill` })
   const orderPOST = (await import('../app/api/orders/route')).POST
   const { checkoutTotals, toCents } = await import('../lib/checkout-total')
+  const feeTerms = await (await import('../lib/settings')).getMoneySettings()
   const place = (items: { id: string; vendorId: string; price: number }[]) => {
     login({ id: `${PFX}cust`, roles: [] })
-    const expectedTotalCents = checkoutTotals({ lines: items.map(i => ({ inPersonCents: toCents(i.price), quantity: 1 })), markupBps: 0, deliveryFeeCents: 0, serviceChargeCents: 0, tipCents: 0 }).totalCents
+    const expectedTotalCents = checkoutTotals({ lines: items.map(i => ({ inPersonCents: toCents(i.price), quantity: 1 })), markupBps: 0, feeTerms, deliveryFeeCents: 0, tipCents: 0 }).totalCents
     return call(orderPOST(new NextRequest('http://localhost/api/orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ eventId: liveFair.id, fulfillmentType: 'BOOTH_PICKUP', customerName: 'C', customerPhone: '6185550100', expectedTotalCents,

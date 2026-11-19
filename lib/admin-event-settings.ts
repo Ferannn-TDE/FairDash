@@ -21,8 +21,8 @@ export function hasSafeSettingsField(body: Record<string, unknown>): boolean {
  * builds the update by explicitly PICKING known-safe fields; the body is never spread, so an
  * extra field in the payload is silently ignored rather than written.
  *
- * ALLOWED (presentation / logistics): name, startDate, endDate, eventLat, eventLng,
- *   serviceChargeEnabled, serviceChargeAmount.
+ * ALLOWED (presentation / logistics): name, startDate, endDate, eventLat, eventLng.
+ *   (serviceChargeEnabled / serviceChargeAmount were allowed until item 10 stage 3; now ignored, C-7.)
  * FORBIDDEN by construction (never picked): status, isPaused, archivedAt, organizerId,
  *   urlSlug — identity/ownership, or with their own gated routes (pause, status).
  *
@@ -57,9 +57,8 @@ export function buildSafeSettingsUpdate(
   const lng = optNum(body.eventLng, 'Longitude', { min: -180, max: 180 })
   if (lng !== undefined) data.eventLng = lng
 
-  if (body.serviceChargeEnabled !== undefined) data.serviceChargeEnabled = Boolean(body.serviceChargeEnabled)
-  const amt = optNum(body.serviceChargeAmount, 'Service charge', { min: 0, max: 100 })
-  if (amt !== undefined) data.serviceChargeAmount = amt
+  // serviceChargeEnabled / serviceChargeAmount are IGNORED since item 10 stage 3 (C-7): new orders never
+  // charge the old per-event service charge. The columns and stored values stay.
 
   // Cross-field: end must not precede start, using the resulting values.
   const finalStart = (data.startDate as Date | undefined) ?? current.startDate

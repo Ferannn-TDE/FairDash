@@ -744,8 +744,9 @@ async function main() {
       const res = await orderPOST(jsonReq('/api/orders', 'POST', {
         eventId: fair.id, fulfillmentType: 'BOOTH_PICKUP', customerName: 'C', customerPhone: '6185550100',
         items: [{ menuItemId: pizza.id, vendorId: A.vendor.id, quantity: 1 }],
-        // The total shown to the customer (audit H5, 2h): $12 + 10% fee = 1320¢ at the 0% default.
-        expectedTotalCents: 1320,
+        // The total shown to the customer (audit H5, 2h): $12 + the money settings' 15% fee = 1380¢ at
+        // the 0% markup default (item 10 stage 3).
+        expectedTotalCents: 1380,
       }))
       const j = await bodyOf(res)
       return { status: res.status, code: j.error?.code, message: j.error?.message }

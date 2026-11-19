@@ -99,7 +99,7 @@ export default function AdminReportsPage({ params: paramsPromise }: { params: Pr
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatCard label="Gross Sales" value={money(r.grossSalesCents)} sub={`${r.totalOrders} orders · what customers paid`} icon={ShoppingBag} tone="gross" />
         <StatCard label="Net Sales" value={money(r.netSalesCents)} sub="after refunds" icon={TrendingDown} tone="net" />
-        <StatCard label="Platform Fee" value={money(r.platformFeeCents)} sub="FairSynq revenue (10%)" icon={DollarSign} tone="fee" />
+        <StatCard label="Platform Fee" value={money(r.platformFeeCents)} sub="FairSynq revenue (service fees)" icon={DollarSign} tone="fee" />
         <StatCard label="Refunds" value={money(r.refundsCents)} sub={`${r.refundedOrders} order${r.refundedOrders === 1 ? '' : 's'} refunded`} icon={TrendingDown} tone="refund" />
       </div>
 

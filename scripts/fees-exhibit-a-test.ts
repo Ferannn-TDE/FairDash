@@ -138,7 +138,10 @@ assert(eq(wholeOrderRefundParts('PARTIAL_CANCEL_OTHERS_FULFILLED'), { serviceFee
 assert(NON_RETURNED_FEE_ABSORBED_BY === 'FAIRSYNQ', 'C-4 (a): FairSynq absorbs Stripe\'s non-returned fee')
 
 // ── [6] not wired ────────────────────────────────────────────────────────────────────────
-console.log('\n[6] Stage 1 is not wired')
+// Updated 2026-11-18 (item 10 stage 3): the PRICE side is now wired (lib/checkout-total.ts since 2026-11-23, and the order
+// route imports FEE_MODEL_EXHIBIT_A for the snapshot). Payouts and refunds must still not use it until
+// stages 4 and 5.
+console.log('\n[6] Only the price side is wired (stage 3)')
 function walk(dir: string, out: string[] = []) {
   for (const n of readdirSync(dir)) { const q = join(dir, n); statSync(q).isDirectory() ? (n !== 'node_modules' && walk(q, out)) : out.push(q) }
   return out
@@ -150,9 +153,10 @@ const importers = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd()
   .filter(f => IMPORT.test(readFileSync(f, 'utf8')))
   .map(f => relative(process.cwd(), f).split(sep).join('/'))
 for (const i of importers) console.log(`     ↳ imports it: ${i}`)
-assert(importers.length === 0, 'nothing in app/, lib/ or workers/ uses the new model yet (checkout, payouts and refunds unchanged)')
+assert(JSON.stringify(importers.sort()) === JSON.stringify(['app/api/orders/route.ts', 'lib/checkout-total.ts']),
+  'only the price side imports it (lib/checkout-total.ts, app/api/orders/route.ts); payouts, refunds and the worker do not')
 const constants = readFileSync('lib/constants.ts', 'utf8')
-assert(/export const SERVICE_FEE_RATE = 0\.10/.test(constants), 'the live service fee is still the legacy 10%')
+assert(/export const SERVICE_FEE_RATE = 0\.10/.test(constants), 'the legacy 10% constant is still there (legacy orders keep their stored 10%)')
 
 console.log(`\n${'─'.repeat(64)}`)
 console.log(fail === 0 ? `  ${pass} passed, 0 failed` : `  ❌ SUITE FAILED — ${fail} of ${pass + fail} failed`)

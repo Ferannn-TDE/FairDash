@@ -262,13 +262,13 @@ function OrderModal({
     if (confirmTarget.type === 'vendor') {
       const v = confirmTarget.vendor
       return `This refunds ${v.vendorName}'s subtotal of ${fmt(v.sliceAmount)} to the customer. `
-        + `The 10% platform fee is NOT refunded.`
+        + `The service fee is NOT refunded.`
         + (refundError ? `  ⚠ ${refundError}` : '')
     }
     const list = confirmTarget.vendors.map(v => `${v.vendorName} (${fmt(v.sliceAmount)})`).join(', ')
     const sum = confirmTarget.vendors.reduce((s, v) => s + v.sliceAmount, 0)
     return `This refunds each refundable vendor's subtotal — ${list} — totalling ${fmt(sum)}. `
-      + `The 10% platform fee is NOT refunded.`
+      + `The service fee is NOT refunded.`
       + (refundError ? `  ⚠ ${refundError}` : '')
   })()
 

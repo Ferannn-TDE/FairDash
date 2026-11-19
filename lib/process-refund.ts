@@ -350,7 +350,7 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
     customerRefundedCents: refundAmountCents,
     sliceCents,
     waivedFeeCents,                                  // > 0 only when waiveFee — deliberate waived revenue
-    serviceFeeKept: waiveFee ? `WAIVED ${waivedFeeCents}¢ (deliberate)` : 'kept (10% not refunded)',
+    serviceFeeKept: waiveFee ? `WAIVED ${waivedFeeCents}¢ (deliberate)` : 'kept (service fee not refunded)',
     absorbedStripeFeeCents,
     // paidRow may be ABSENT on a CASE 2 reached via the earning alone (earning='paid' with no
     // Payout row — the crash-window shape Pattern X hunts). `paidRow!` would throw here, so it

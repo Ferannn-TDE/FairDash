@@ -117,6 +117,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'notifications',          file: 'scripts/notifications-test.ts' },
   { group: 'money',       name: 'fees-exhibit-a',         file: 'scripts/fees-exhibit-a-test.ts' },
   { group: 'money',       name: 'money-settings',         file: 'scripts/money-settings-test.ts' },
+  { group: 'money',       name: 'fees-stage3',            file: 'scripts/fees-stage3-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
   { group: 'money',       name: 'earnings-invariant',     file: 'scripts/earnings-invariant-guard.ts' },
   { group: 'correctness', name: 'incoming-divergence',    file: 'scripts/incoming-divergence-guard.ts' },

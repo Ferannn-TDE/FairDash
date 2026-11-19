@@ -1,8 +1,9 @@
-// Exhibit A fee model (Batch 1 item 10, B1.13) — STAGE 1: pure functions only.
+// Exhibit A fee model (Batch 1 item 10, B1.13) — pure functions.
 //
-// NOTHING calls this yet. Checkout, the order route, payouts and refunds still run the legacy
-// model (10% service fee, vendor pays the whole Stripe fee: lib/constants.ts, lib/payout-split.ts).
-// Wiring is stage 2+, after the client answers C-1 to C-4 and the production dry run (BATCH-1 §19).
+// STAGE 3: the PRICE side is wired — lib/checkout-total.ts calls serviceFeeCents() for the checkout
+// estimate and POST /api/orders. The SPLIT side (splitByLargestRemainder, payouts) is still unused:
+// payouts and refunds run the legacy model (vendor pays the whole Stripe fee, lib/payout-split.ts)
+// until stages 4 and 5 (BATCH-1 §19).
 //
 // Every amount is an integer number of cents; every function is pure and deterministic.
 //

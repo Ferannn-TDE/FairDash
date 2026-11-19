@@ -8,6 +8,7 @@ import {
   useMemo,
   type ReactNode,
 } from 'react'
+import type { CustomerFeeTerms } from '@/lib/checkout-total'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FulfillmentConfig {
@@ -40,6 +41,8 @@ export interface FairData {
   serviceChargeAmount: number | null
   /** Online price markup in basis points (audit H5, 2h); fed to lib/checkout-total.ts. */
   onlineMarkupBps: number
+  /** The fee terms checkout prices with (item 10 stage 3). null = ordering is paused. */
+  feeTerms: CustomerFeeTerms | null
   // Optional fields not present in DB — pages handle them with conditional rendering
   tagline?: string
   location: { address: string; city: string; state: string }
@@ -108,6 +111,7 @@ function placeholderFair(fairSlug: string): FairData {
     serviceChargeEnabled: false,
     serviceChargeAmount: null,
     onlineMarkupBps: 0,
+    feeTerms: null,
     location: { address: '', city: '', state: '' },
     operatingHours: { open: '', close: '' },
     admissionFree: false,
@@ -146,6 +150,7 @@ function normalizeEvent(raw: any): FairData {
     // Missing → 0: the page would then show a LOWER total than the server's, which the server
     // answers with 409 PRICE_CHANGED and the real total for the customer to confirm. Never more.
     onlineMarkupBps: typeof raw.onlineMarkupBps === 'number' ? raw.onlineMarkupBps : 0,
+    feeTerms: raw.feeTerms ?? null,
     location: {
       address: raw.address ?? raw.location ?? '',
       city: raw.city ?? '',

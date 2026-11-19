@@ -117,6 +117,7 @@ export async function runScenarios(): Promise<{ results: Record<string, Observed
   const ordersPOST = (await import('../app/api/orders/route')).POST
   const { checkoutTotals, toCents } = await import('../lib/checkout-total')
   const { checkoutRefusal } = await import('../lib/checkout-floor')
+  const feeTerms = await (await import('../lib/settings')).getMoneySettings()
   const results: Record<string, Observed> = {}
   try {
     for (const s of SCENARIOS) {
@@ -139,12 +140,13 @@ export async function runScenarios(): Promise<{ results: Record<string, Observed
       login(clerkId)
       const before = created.length
       // The total the checkout page shows for this cart (same calculator, no markup on these fairs,
-      // the curbside fee as the delivery fee, the tip): what a real customer's checkout sends.
+      // the money settings' fee terms, the PLATFORM curbside fee, the tip): what a real customer's
+      // checkout sends. The event's own curbsideFee is ignored since stage 3 (S3-Q2).
       const page = checkoutTotals({
         lines: s.prices.map(p => ({ inPersonCents: toCents(p), quantity: 1 })),
         markupBps: 0,
-        deliveryFeeCents: s.fulfillment === 'CURBSIDE' ? toCents(s.curbsideFee ?? 0) : 0,
-        serviceChargeCents: 0,
+        feeTerms,
+        deliveryFeeCents: s.fulfillment === 'CURBSIDE' ? feeTerms.curbsideRunnerFeeCents : 0,
         tipCents: toCents(s.tip ?? 0),
       })
       const floorCode = checkoutRefusal({ subtotalCents: page.onlineSubtotalCents, totalCents: page.totalCents })?.code ?? null

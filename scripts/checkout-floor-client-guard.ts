@@ -13,9 +13,10 @@
  *   [1] imports checkoutRefusal from the shared module (no second copy of the rule)
  *   [2] feeds it the page's food subtotal and its five-term total, in cents (since audit H5 2h both
  *       come from checkoutTotals in lib/checkout-total.ts, the calculator the server charges with)
- *   [3] the total still has all five terms the server charges: the page passes the cart lines, the
- *       markup, the delivery fee, the service charge and the tip to checkoutTotals, and
- *       checkoutTotals adds food + service fee + delivery fee + service charge + tip
+ *   [3] the total has every term the server charges: the page passes the cart lines, the markup,
+ *       the money settings' fee terms, the delivery fee and the tip to checkoutTotals, and
+ *       checkoutTotals adds food + service fee + delivery fee + tip (no event service charge since
+ *       item 10 stage 3, C-7; ported into this calculator 2026-11-23)
  *   [4] the button is disabled while there is a refusal, and the handler returns before its fetch
  *   [5] the text shown is the refusal's own message; none of the three messages is copied in
  *   [6] the page's default delivery fee equals the order route's, so the estimate matches the charge
@@ -48,28 +49,28 @@ const CALC = 'lib/checkout-total.ts'
 const imports = (s: string) => /import\s*\{[^}]*\bcheckoutRefusal\b[^}]*\}\s*from\s*'@\/lib\/checkout-floor'/.test(s)
 const fedFromEstimate = (s: string) =>
   /const floorRefusal = checkoutRefusal\(\{\s*subtotalCents:\s*totals\.onlineSubtotalCents,\s*totalCents:\s*totals\.totalCents,?\s*\}\)/.test(s)
-/** The five inputs the page passes to checkoutTotals: lines, markup, delivery fee, service charge, tip. */
+/** The five inputs the page passes to checkoutTotals: lines, markup, fee terms, delivery fee, tip. */
 const fiveTerms = (s: string) => {
   if (!/import\s*\{[^}]*\bcheckoutTotals\b[^}]*\}\s*from\s*'@\/lib\/checkout-total'/.test(s)) return false
   const m = s.match(/const totals = useMemo\(\(\) => checkoutTotals\(\{([\s\S]*?)\}\), \[/)
   if (!m) return false
   const args = m[1].split(',').map(t => t.trim()).filter(Boolean).sort()
   return JSON.stringify(args) === JSON.stringify([
-    'deliveryFeeCents: toCents(estimatedDeliveryFee)', 'lines: calculatorLines', 'markupBps',
-    'serviceChargeCents: toCents(serviceChargeAmount)', 'tipCents: toCents(tipAmount)',
+    'deliveryFeeCents: estimatedDeliveryFeeCents', 'feeTerms', 'lines: calculatorLines', 'markupBps',
+    'tipCents: toCents(tipAmount)',
   ])
 }
-/** checkoutTotals itself adds the five terms the server charges. */
+/** checkoutTotals itself adds the four terms the server charges. */
 const calcAddsFiveTerms = (s: string) => {
   const m = s.match(/const totalCents = ([^\n]+)/)
   if (!m) return false
   const terms = m[1].split('+').map(t => t.trim()).sort()
   return JSON.stringify(terms) === JSON.stringify(
-    ['input.deliveryFeeCents', 'input.serviceChargeCents', 'input.tipCents', 'onlineSubtotalCents', 'serviceFeeCents'])
+    ['input.deliveryFeeCents', 'input.tipCents', 'onlineSubtotalCents', 'serviceFee'])
 }
-const buttonDisabled = (s: string) => /onClick=\{\(\) => handlePlaceOrder\(totals\.totalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal\}/.test(s)
+const buttonDisabled = (s: string) => /onClick=\{\(\) => handlePlaceOrder\(totals\.totalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal \|\| orderingPaused\}/.test(s)
 /** The PRICE_CHANGED "Confirm" button is held to the same rule (added in audit H5 2h). */
-const confirmDisabled = (s: string) => /onClick=\{\(\) => handlePlaceOrder\(activePriceChange\.newTotalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal\}/.test(s)
+const confirmDisabled = (s: string) => /onClick=\{\(\) => handlePlaceOrder\(activePriceChange\.newTotalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal \|\| orderingPaused\}/.test(s)
 const handlerReturnsFirst = (s: string) => {
   const start = s.indexOf('const handlePlaceOrder = async (expectedTotalCents: number) => {')
   if (start < 0) return false
@@ -102,8 +103,8 @@ function main() {
   const checks: Array<[string, (s: string) => boolean]> = [
     ['[1] imports checkoutRefusal from @/lib/checkout-floor', imports],
     ['[2] computes floorRefusal from totals.onlineSubtotalCents and totals.totalCents', fedFromEstimate],
-    ['[4] "Continue to Payment" is disabled={submitting || !!floorRefusal}', buttonDisabled],
-    ['[4] the PRICE_CHANGED "Confirm" button is disabled={submitting || !!floorRefusal} too', confirmDisabled],
+    ['[4] "Continue to Payment" is disabled={submitting || !!floorRefusal || orderingPaused}', buttonDisabled],
+    ['[4] the PRICE_CHANGED "Confirm" button is disabled={submitting || !!floorRefusal || orderingPaused} too', confirmDisabled],
     ['[4] handlePlaceOrder returns on a refusal before its fetch to /api/orders', handlerReturnsFirst],
     ['[5] renders {floorRefusal.message} in a role="alert" paragraph', showsMessage],
   ]
@@ -112,10 +113,10 @@ function main() {
     assert(!check(planted), `${label.slice(0, 3)} [0] control: the same check FAILS on a page without the mirror`)
   }
 
-  assert(fiveTerms(page), '[3] the page passes exactly the cart lines, markup, delivery fee, service charge and tip to checkoutTotals')
+  assert(fiveTerms(page), '[3] the page passes exactly the cart lines, markup, fee terms, delivery fee and tip to checkoutTotals')
   assert(!fiveTerms(page.replace(/\s*tipCents: toCents\(tipAmount\),/, '')), '[3] [0] control: a total missing the tip fails the check')
   const calc = strip(readSource(CALC))
-  assert(calcAddsFiveTerms(calc), '[3] checkoutTotals adds exactly food + service fee + delivery fee + service charge + tip')
+  assert(calcAddsFiveTerms(calc), '[3] checkoutTotals adds exactly food + service fee + delivery fee + tip')
   assert(!calcAddsFiveTerms(calc.replace(' + input.tipCents', '')), '[3] [0] control: a calculator total missing the tip fails the check')
 
   const copies = copiedMessages(page)

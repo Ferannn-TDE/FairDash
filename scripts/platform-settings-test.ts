@@ -525,10 +525,20 @@ async function main() {
   const sources = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd(), d)))
     .filter(f => /\.(ts|tsx)$/.test(f))
     .map(f => ({ path: relative(process.cwd(), f).split(sep).join('/'), text: readFileSync(f, 'utf8') }))
+  // Updated 2026-11-18 (item 10 stage 3): money keys are never read by name. The three PRICE keys count
+  // as read when code outside the plumbing calls getMoneySettings() (checkout prices with them); the
+  // CARD-FEE key counts as read only once the payout uses cardFeesPaidBy (stage 4), so its note stays.
+  const PRICE_KEYS = new Set(['fees.serviceFee.percentBps', 'fees.serviceFee.flatCents', 'fees.curbsideRunnerFeeCents'])
+  const PAYOUT_FILES = new Set(['lib/process-payout.ts', 'lib/payout-split.ts'])
+  function readersOf(key: string, files: { path: string; text: string }[]) {
+    if (PRICE_KEYS.has(key)) return files.filter(f => !PLUMBING.has(f.path) && f.text.includes('getMoneySettings('))
+    if (key === 'fees.cardFeesPaidBy') return files.filter(f => PAYOUT_FILES.has(f.path) && f.text.includes('cardFeesPaidBy'))
+    return files.filter(f => !PLUMBING.has(f.path) && (f.text.includes(`'${key}'`) || f.text.includes(`"${key}"`)))
+  }
   function noteViolations(files: { path: string; text: string }[]) {
     const out: string[] = []
     for (const key of settingsLib.SETTING_KEYS) {
-      const readers = files.filter(f => !PLUMBING.has(f.path) && (f.text.includes(`'${key}'`) || f.text.includes(`"${key}"`)))
+      const readers = readersOf(key, files)
       const hasNote = !!(settingsLib.SETTINGS[key] as { notInEffect?: string }).notInEffect
       if (readers.length && hasNote) out.push(`${key}: read by ${readers.map(r => r.path).join(', ')}; remove its "not in effect yet" note`)
       if (!readers.length && !hasNote) out.push(`${key}: nothing reads it; it needs a "not in effect yet" note`)
@@ -541,7 +551,10 @@ async function main() {
     'alerts.email is read by the outbox (lib/notifications.ts) and its note is gone; alerts.phone keeps its note')
   const real = noteViolations(sources)
   for (const v of real) console.log(`     ↳ ${v}`)
-  assert(real.length === 0, 'notes match readers: alerts.phone keeps its note; delivery.enabled, alerts.email and the video keys (lib/videos.ts) are read, so they have none')
+  assert(real.length === 0, 'notes match readers: alerts.phone and card fees keep their note; delivery.enabled, alerts.email, the video keys and the three price keys (read via getMoneySettings) have none')
+  const fakePayout = noteViolations([...sources, { path: 'lib/process-payout.ts', text: 'if (order.cardFeesPaidBy === "PLATFORM") {}' }])
+  assert(fakePayout.some(v => v.startsWith('fees.cardFeesPaidBy: read by lib/process-payout.ts')),
+    '[0] control: once the payout reads cardFeesPaidBy, the check demands the card-fee note\'s removal (stage 4)')
 
   // ── [8] role sync keeps platform_manager; grant/revoke ─────────────────────────────────
   console.log('\n[8] Role sync, the hourly reconcile, grant and revoke')

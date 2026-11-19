@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import FairShell from '../../_components/FairShell'
 import { getFairBySlugCached, getFairSeoBySlugCached, getVendorsBySlugCached } from '@/lib/fairs'
+import { getCustomerFeeTerms } from '@/lib/fees/fee-terms'
 import { SITE_NAME, fairDescription, fairTitle, robotsFor } from '@/lib/seo'
 import type { FairData, VendorData } from '@/app/_contexts/FairContext'
 import type { Metadata } from 'next'
@@ -42,13 +43,15 @@ export default async function FairLayout({ params, children }: Props) {
   let initialVendors: VendorData[] = []
 
   try {
-    const [dbFair, dbVendors] = await Promise.all([
+    // The fair stays cached; the fee terms are read uncached and merged in (item 10 stage 3).
+    const [dbFair, dbVendors, feeTerms] = await Promise.all([
       getFairBySlugCached(fairSlug),
       getVendorsBySlugCached(fairSlug),
+      getCustomerFeeTerms(),
     ])
 
     if (dbFair) {
-      initialFair = dbFair
+      initialFair = { ...dbFair, feeTerms }
       initialVendors = dbVendors
     }
   } catch (err) {

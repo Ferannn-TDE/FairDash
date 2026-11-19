@@ -19,7 +19,6 @@ const DEFAULT_STATE: FulfillmentState = {
   homeDeliveryFee: '',
   homeDeliveryRadiusKm: '',
   runnerTransportDescription: '',
-  curbsideFee: '0',
   runnerFeePercent: '0',
 }
 
@@ -36,7 +35,6 @@ interface FulfillmentState {
   homeDeliveryFee: string
   homeDeliveryRadiusKm: string
   runnerTransportDescription: string
-  curbsideFee: string
   runnerFeePercent: string
 }
 
@@ -121,7 +119,6 @@ export default function FulfillmentConfigPage() {
             homeDeliveryFee: c.homeDeliveryFee != null ? String(c.homeDeliveryFee) : '',
             homeDeliveryRadiusKm: c.homeDeliveryRadiusKm != null ? String(c.homeDeliveryRadiusKm) : '',
             runnerTransportDescription: c.runnerTransportDescription ?? '',
-            curbsideFee: String(c.curbsideFee ?? 0),
             runnerFeePercent: String(c.runnerFeePercent ?? 0),
           })
         }
@@ -178,7 +175,6 @@ export default function FulfillmentConfigPage() {
           homeDeliveryFee: state.homeDeliveryFee ? parseFloat(state.homeDeliveryFee) : null,
           homeDeliveryRadiusKm: state.homeDeliveryRadiusKm ? parseFloat(state.homeDeliveryRadiusKm) : null,
           runnerTransportDescription: state.runnerTransportDescription.trim() || null,
-          curbsideFee: state.curbsideFee ? parseFloat(state.curbsideFee) : 0,
           runnerFeePercent: parseInt(state.runnerFeePercent || '0', 10) || 0,
         }),
       })
@@ -414,18 +410,8 @@ export default function FulfillmentConfigPage() {
               The leftover <span className="text-white font-semibold">{Math.max(0, Math.min(100, 100 - runnerPctNum))}%</span> is recorded as your organizer earning. Applies to both delivery and curbside fees. Tips are always 100% the runner's.
             </p>
 
-            <Field label="Curbside Fee ($)">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={state.curbsideFee}
-                onChange={e => set('curbsideFee', e.target.value)}
-                placeholder="0.00"
-                className={INPUT}
-              />
-            </Field>
-            <p className="text-xs text-[#666] font-inter">Default $0 — curbside is free unless you set a fee. Split by the same runner share above.</p>
+            {/* No per-event curbside fee (item 10 stage 3): new orders charge the platform curbside fee
+                set in /admin/settings; the old per-event value stays in the database, unused. */}
           </div>
         </SectionCard>
 

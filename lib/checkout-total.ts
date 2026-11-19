@@ -10,15 +10,32 @@
 //     half-up (onlinePriceCents in lib/menu/price.ts);
 //   - food subtotal = Σ online unit × quantity: what the customer pays for food and what vendors
 //     are paid on, so the markup reaches the vendor through the existing payout split;
-//   - the 10% service fee is on the IN-PERSON subtotal only (calculateServiceFee, unchanged);
-//   - total = food + service fee + delivery/curbside fee + service charge + tip (the 5-term identity).
+//   - the service fee is on the IN-PERSON subtotal only (Feran, 2026-11-23: the markup carries no fee);
+//   - total = food + service fee + delivery/curbside fee + tip.
+//
+// THE FEE TERMS (item 10 stage 3, ported into this calculator 2026-11-23): the service fee is
+// lib/fees/exhibit-a's serviceFeeCents(): round-half-up(fee base × percentBps / 10000) + the flat fee,
+// once per order (0 when there is no food). The terms come from getMoneySettings(), read uncached by
+// the order route and merged into the fair payload as `feeTerms` for the page. Curbside charges the
+// PLATFORM curbside fee (fees.curbsideRunnerFeeCents, S3-Q2); the caller passes it as deliveryFeeCents.
+// There is NO event service charge (C-7): the calculator has no input for one.
 //
 // Integer cents throughout. Dollar inputs (a fee from config, a tip) go through toCents() once.
 //
-// Import-free apart from two import-free modules, so the checkout page can use it in the browser.
+// Import-free apart from import-free modules, so the checkout page can use it in the browser.
 
 import { onlinePriceCents } from './menu/price'
-import { calculateServiceFee } from './constants'
+import { serviceFeeCents } from './fees/exhibit-a'
+
+/** The fee terms a customer can see (the card-fee setting never reaches the browser). */
+export interface CustomerFeeTerms {
+  serviceFeeBps: number
+  serviceFeeFlatCents: number
+  curbsideRunnerFeeCents: number
+}
+
+/** The two terms the calculator itself uses. */
+export type ServiceFeeTerms = Pick<CustomerFeeTerms, 'serviceFeeBps' | 'serviceFeeFlatCents'>
 
 export type CheckoutLine = {
   /** The item's in-person price in cents (MenuItem.price × 100). */
@@ -30,8 +47,10 @@ export type CheckoutTotalsInput = {
   lines: CheckoutLine[]
   /** Event.onlineMarkupBps: 0–1000. */
   markupBps: number
+  /** The money settings' service fee terms (percent + flat), the same on the page and the server. */
+  feeTerms: ServiceFeeTerms
+  /** The runner fee: the PLATFORM curbside fee for curbside, the event's fee for delivery, 0 for booth. */
   deliveryFeeCents: number
-  serviceChargeCents: number
   tipCents: number
 }
 
@@ -41,11 +60,10 @@ export type CheckoutTotals = {
   /** Online unit × quantity per line. */
   lineCents: number[]
   onlineSubtotalCents: number
-  /** Σ in-person unit × quantity: the base of the 10% service fee. */
+  /** Σ in-person unit × quantity: the base of the service fee. */
   feeBaseCents: number
   serviceFeeCents: number
   deliveryFeeCents: number
-  serviceChargeCents: number
   tipCents: number
   totalCents: number
 }
@@ -125,13 +143,16 @@ export type CartPricing = {
   onlineSubtotalCents: number
 }
 
+/** No fee: the cart prices food only. */
+export const NO_FEE_TERMS: ServiceFeeTerms = { serviceFeeBps: 0, serviceFeeFlatCents: 0 }
+
 /** The cart's online prices: checkoutTotals with no fees, so they match checkout to the cent. */
 export function cartPricing(items: CartPricingItem[], markupBps: unknown): CartPricing {
   const t = checkoutTotals({
     lines: cartCalculatorLines(items),
     markupBps: safeMarkupBps(markupBps),
+    feeTerms: NO_FEE_TERMS,
     deliveryFeeCents: 0,
-    serviceChargeCents: 0,
     tipCents: 0,
   })
   const unitCents: Record<string, number> = {}
@@ -146,7 +167,6 @@ function assertWholeCents(name: string, v: number) {
 
 export function checkoutTotals(input: CheckoutTotalsInput): CheckoutTotals {
   assertWholeCents('deliveryFeeCents', input.deliveryFeeCents)
-  assertWholeCents('serviceChargeCents', input.serviceChargeCents)
   assertWholeCents('tipCents', input.tipCents)
 
   const unitCents: number[] = []
@@ -163,20 +183,21 @@ export function checkoutTotals(input: CheckoutTotalsInput): CheckoutTotals {
     feeBaseCents += inPerson * line.quantity
   }
 
-  // The existing fee rule, unchanged (lib/constants.ts), applied to the in-person base. At 0%
-  // markup the base equals the food subtotal, so the fee is exactly what it was before 2h.
-  const serviceFeeCents = Math.round(calculateServiceFee(fromCents(feeBaseCents)) * 100)
+  // The money settings' fee (lib/fees/exhibit-a serviceFeeCents: integer half-up + flat, once per
+  // order), on the in-person base. At 0% markup the base equals the food subtotal. A base at or
+  // below zero (only a legacy row priced before the $1 rule) carries no fee and reaches the checkout
+  // floor, which refuses it.
+  const serviceFee = feeBaseCents > 0 ? serviceFeeCents(feeBaseCents, input.feeTerms) : 0
 
-  const totalCents = onlineSubtotalCents + serviceFeeCents + input.deliveryFeeCents + input.serviceChargeCents + input.tipCents
+  const totalCents = onlineSubtotalCents + serviceFee + input.deliveryFeeCents + input.tipCents
 
   return {
     unitCents,
     lineCents,
     onlineSubtotalCents,
     feeBaseCents,
-    serviceFeeCents,
+    serviceFeeCents: serviceFee,
     deliveryFeeCents: input.deliveryFeeCents,
-    serviceChargeCents: input.serviceChargeCents,
     tipCents: input.tipCents,
     totalCents,
   }

@@ -22,6 +22,10 @@ import { checkoutRefusal } from '@/lib/checkout-floor'
 import { checkoutTotals, fromCents, toCents } from '@/lib/checkout-total'
 import { CLIENT_LINE_PRICE_KEYS, CLIENT_ORDER_TOTAL_KEYS, CLIENT_PRICE_MESSAGE, clientPriceKey } from '@/lib/menu/price'
 import { MAX_QTY_PER_ITEM, MAX_ITEMS_PER_ORDER, QUANTITY_LIMIT_MESSAGE, ORDER_ITEM_LIMIT_MESSAGE } from '@/lib/order-limits'
+import { getMoneySettings, MoneySettingsUnavailable } from '@/lib/settings'
+import { FEE_MODEL_EXHIBIT_A } from '@/lib/fees/exhibit-a'
+import { alertOrderingPaused, ORDERING_PAUSED_MESSAGE, ORDERING_PAUSED_CODE } from '@/lib/ordering-paused'
+import { runAfterResponse } from '@/lib/after-response'
 import { logger } from '@/lib/logger'
 import { effectiveFulfillment, isDeliveryEnabled } from '@/lib/delivery'
 
@@ -70,7 +74,9 @@ interface CreateOrderBody {
 // Flow:
 //   1. Auth + body validation
 //   2. DB validation — event active, all vendors online, items available
-//   3. Re-price from DB (never trust frontend prices)
+//   3. Re-price from DB (never trust frontend prices) with the fee terms read NOW from the money
+//      settings (item 10 stage 3): feeModel 2, all in cents (lib/checkout-total.ts). Unreadable
+//      settings → 503 ORDERING_PAUSED before any PaymentIntent exists, plus a Slack alert.
 //   4. Resolve user record (upsert stub if Clerk webhook hasn't fired yet)
 //   5. Create single Stripe PaymentIntent for combined total
 //   6. Write Order + OrderItems atomically
@@ -393,6 +399,22 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 3. Re-price from DB ────────────────────────────────────────────────
+    // Fee terms are read NOW, uncached, all-or-nothing (item 10 stage 3). Unreadable → 503 before
+    // any PaymentIntent or order exists; the customer sees only the plain message, the key names go
+    // to the log and a rate-limited Slack alert (lib/ordering-paused.ts), sent after the response.
+    let money: Awaited<ReturnType<typeof getMoneySettings>>
+    try {
+      money = await getMoneySettings()
+    } catch (err) {
+      if (err instanceof MoneySettingsUnavailable) {
+        logger.error('[orders] ordering paused: money settings unavailable', { missing: err.missing, invalid: err.invalid })
+        const detail = { missing: [...err.missing], invalid: [...err.invalid] }
+        runAfterResponse(async () => { await alertOrderingPaused(detail) })
+        throw new ApiError(ORDERING_PAUSED_MESSAGE, 503, ORDERING_PAUSED_CODE)
+      }
+      throw err
+    }
+
     const vendorMap = new Map(vendors.map(v => [v.id, v]))
 
     // ONLINE PRICE (audit H5, 2h): each unit is charged the event's online price, worked out here
@@ -419,7 +441,7 @@ export async function POST(req: NextRequest) {
       fulfillmentType === FulfillmentType.HOME_DELIVERY
         ? toCents(config?.homeDeliveryFee ?? DEFAULT_DELIVERY_FEE)
         : fulfillmentType === FulfillmentType.CURBSIDE
-          ? toCents(config?.curbsideFee ?? 0)
+          ? money.curbsideRunnerFeeCents // the PLATFORM curbside fee (S3-Q2); the event's own curbsideFee is ignored
           : null
     const deliveryFee: number | null = deliveryFeeCents === null ? null : fromCents(deliveryFeeCents)
 
@@ -436,14 +458,11 @@ export async function POST(req: NextRequest) {
     const tipCents = isRunnerFulfilled && tipInput && tipInput > 0 ? toCents(tipInput) : 0
     const tip = fromCents(tipCents)
 
-    const serviceChargeCents =
-      event.serviceChargeEnabled && event.serviceChargeAmount
-        ? toCents(event.serviceChargeAmount)
-        : 0
-    const serviceCharge = fromCents(serviceChargeCents)
+    const serviceCharge = 0 // C-7: no event service charge on feeModel 2 orders (the calculator has no input for one)
 
     // ── Fee model ──────────────────────────────────────────────────────────
-    // FairSynq's sole revenue is the 10% service fee charged to the CUSTOMER on
+    // FairSynq's sole revenue is the service fee (item 10 / Exhibit A, feeModel 2: the money
+    // settings' percent + flat, once per order) charged to the CUSTOMER on
     // top of the food, computed on the IN-PERSON subtotal (serviceFeeBase), NOT on
     // the online subtotal: the online markup is vendor revenue and carries no fee
     // (audit H5, 2h). The fee is kept CLEAN (Stripe fees do NOT come out of it).
@@ -460,15 +479,15 @@ export async function POST(req: NextRequest) {
     // THE ONE CALCULATION (lib/checkout-total.ts), shared with the checkout page:
     //   subtotal       = Σ online unit × qty  (what the customer pays for food; vendors are paid on it,
     //                    so the markup is vendor revenue)
-    //   serviceFeeBase = Σ in-person unit × qty; serviceFee = 10% of serviceFeeBase (audit H5, 2h),
-    //                    never 10% of the online subtotal
-    //   total          = subtotal + serviceFee + deliveryFee + serviceCharge + tip (5-term money
-    //                    identity; the fee is never on the markup, delivery fee, service charge or tip)
+    //   serviceFeeBase = Σ in-person unit × qty; serviceFee = round-half-up(base × bps / 10000) + flat
+    //                    (lib/fees/exhibit-a), never on the online subtotal
+    //   total          = subtotal + serviceFee + deliveryFee + tip (serviceCharge is always 0, C-7;
+    //                    the fee is never on the markup, delivery fee or tip). Integer cents, dollars once.
     const totals = checkoutTotals({
       lines: pricedLines.map(({ cartItem, mi }) => ({ inPersonCents: toCents(mi.price), quantity: cartItem.quantity })),
       markupBps,
+      feeTerms: money,
       deliveryFeeCents: deliveryFeeCents ?? 0,
-      serviceChargeCents,
       tipCents,
     })
 
@@ -609,7 +628,7 @@ export async function POST(req: NextRequest) {
     const transferGroup = `order_grp_${globalThis.crypto.randomUUID()}`
 
     const piParams: Stripe.PaymentIntentCreateParams = {
-      amount: Math.round(total * 100),
+      amount: totals.totalCents, // exact: the same cents the summary and the stored total come from
       currency: 'usd',
       automatic_payment_methods: { enabled: true },
       transfer_group: transferGroup,
@@ -629,6 +648,12 @@ export async function POST(req: NextRequest) {
         tip: tip.toFixed(2),
         vendorIds: uniqueVendorIds.join(','),
         vendorSubtotalCents: JSON.stringify(vendorSubtotalCents),
+        // Item 10 stage 3: the fee snapshot, as a backup copy of the Order columns. Every key above
+        // keeps its name and meaning; these are additions only.
+        feeModel: String(FEE_MODEL_EXHIBIT_A),
+        serviceFeeBps: String(money.serviceFeeBps),
+        serviceFeeFlatCents: String(money.serviceFeeFlatCents),
+        cardFeesPaidBy: money.cardFeesPaidBy,
       },
     }
 
@@ -681,6 +706,11 @@ export async function POST(req: NextRequest) {
           // Snapshots (audit H5, 2h): the in-person base the fee used, and the markup in force.
           serviceFeeBase,
           onlineMarkupBps: markupBps,
+          // Fee snapshot (item 10 stage 3): a later settings change can't move this order.
+          feeModel: FEE_MODEL_EXHIBIT_A,
+          serviceFeeBps: money.serviceFeeBps,
+          serviceFeeFlatCents: money.serviceFeeFlatCents,
+          cardFeesPaidBy: money.cardFeesPaidBy,
           customerName,
           customerPhone,
           vehicleMake: vehicleMake ?? null,

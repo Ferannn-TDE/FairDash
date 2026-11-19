@@ -6,6 +6,7 @@ import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { customerReachableScope } from '@/lib/event-listing'
 import { PUBLIC_EVENT_SELECT } from '@/lib/public-event-select'
+import { getCustomerFeeTerms } from '@/lib/fees/fee-terms'
 
 // GET /api/events/:slug
 // Returns a single event by its URL slug, with active vendor count.
@@ -36,7 +37,8 @@ export async function GET(
     })
 
     if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
-    return success(event)
+    // Fee terms (item 10 stage 3): their own uncached read, null when the money settings can't be read.
+    return success({ ...event, feeTerms: await getCustomerFeeTerms() })
   } catch (err) {
     return handleApiError(err)
   }

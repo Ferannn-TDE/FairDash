@@ -151,3 +151,16 @@ export async function notifyMoneySettingChanged(c: MoneySettingChange): Promise<
     },
   ])
 }
+
+/**
+ * ALERT: checkout is refusing orders because the money settings can't be read (item 10 stage 3).
+ * Rate-limited by lib/ordering-paused.ts (one per 10 minutes); key names go here, never to customers.
+ */
+export async function notifyOrderingPaused(detail: { missing: string[]; invalid: string[] }): Promise<void> {
+  logger.error('[CRITICAL] Ordering paused — money settings unavailable', detail)
+  const what = [
+    detail.missing.length ? `missing: ${detail.missing.join(', ')}` : '',
+    detail.invalid.length ? `invalid: ${detail.invalid.join(', ')}` : '',
+  ].filter(Boolean).join('; ')
+  await postToSlack(`🚨 *Ordering is paused* — the fee settings can't be read (${what}). Checkout returns 503 until they're fixed in /admin/settings.`)
+}

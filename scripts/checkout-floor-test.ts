@@ -4,8 +4,7 @@
  * POST /api/orders now refuses, before any database write or Stripe call:
  *   1. ORDER_SUBTOTAL_ZERO        — no food (a $0 or negative food subtotal)
  *   2. ORDER_BELOW_PROCESSING_FEE — food smaller than the estimated card fee (2.9% + 30¢) on the
- *                                   FULL charge: food + service fee + delivery/curbside fee +
- *                                   service charge + tip
+ *                                   FULL charge: food + service fee + delivery/curbside fee + tip
  *   3. ORDER_BELOW_MINIMUM        — a charge under Stripe's $0.50 minimum
  *
  *   [1] the estimate and the refusal order, pure
@@ -15,8 +14,9 @@
  *   [3] accepted orders get past the floor and stop at 503 STRIPE_NOT_CONFIGURED (the key is
  *       unset here, so Stripe cannot be called at all). The first one creates the customer's user
  *       row: the positive control that [2]'s "no user row" is the floor, not a dead route
- *   [4] the exact boundary (food = estimate accepted, 1¢ over refused), via the service charge
- *       and, separately, via a curbside tip; and a two-vendor order judged on its whole subtotal
+ *   [4] the exact boundary (food = estimate accepted, 1¢ over refused) via a curbside tip, and a
+ *       two-vendor order judged on its whole subtotal. Rebuilt 2026-11-23 for item 10 stage 3: no
+ *       event service charge (C-7), the 15% fee on the food, the PLATFORM curbside fee 399¢
  *   [5] source: the floor runs before the user upsert, the Stripe key check, the geocode,
  *       paymentIntents.create and the order transaction
  *
@@ -182,16 +182,19 @@ async function main() {
   const zero = await mkFair([0])
   const negative = await mkFair([-1])
   const fortyCents = await mkFair([0.4])
-  const overFee = await mkFair([1], { serviceCharge: 23.22 })
+  const overFee = await mkFair([1], { curbside: true })
+  const curbExtra = (tip: number, expectedTotalCents?: number) =>
+    ({ fulfillmentType: 'CURBSIDE', vehicleMake: 'Honda', vehicleColor: 'Blue', tip, ...(expectedTotalCents !== undefined && { expectedTotalCents }) })
 
-  const refusals: Array<[string, Fair, string]> = [
+  // Curbside $1 item: food 100¢ + 15% fee 15¢ + platform curbside fee 399¢ = 514¢ before the tip.
+  const refusals: Array<[string, Fair, string, Record<string, unknown>?]> = [
     ['$0 item (seeded legacy row)', zero, 'ORDER_SUBTOTAL_ZERO'],
     ['-$1 item (seeded legacy row)', negative, 'ORDER_SUBTOTAL_ZERO'],
-    ['40¢ item: passes the fee rule (estimate 31¢), total 44¢', fortyCents, 'ORDER_BELOW_MINIMUM'],
-    ['$1 item + $23.22 service charge: total 2432¢, estimate 101¢', overFee, 'ORDER_BELOW_PROCESSING_FEE'],
+    ['40¢ item: passes the fee rule (estimate 31¢), total 46¢', fortyCents, 'ORDER_BELOW_MINIMUM'],
+    ['curbside $1 item + $19.18 tip: total 2432¢, estimate 101¢', overFee, 'ORDER_BELOW_PROCESSING_FEE', curbExtra(19.18)],
   ]
-  for (const [label, fair, code] of refusals) {
-    const r = await place(fair)
+  for (const [label, fair, code, extra] of refusals) {
+    const r = await place(fair, extra)
     assert(r.status === 400 && r.code === code, `${label} → 400 ${code} (got ${r.status} ${r.code})`)
     assert(await ordersFor(fair) === 0, `${label}: no Order row`)
   }
@@ -202,41 +205,32 @@ async function main() {
   const tenDollar = await mkFair([10])
   // Accepted orders send the total the customer was shown (audit H5, 2h: checked right after the
   // floor, before any write). The refusals in [2] never reach that check, so they send none.
-  const ten = await place(tenDollar, { expectedTotalCents: 1100 })
+  const ten = await place(tenDollar, { expectedTotalCents: 1150 })
   assert(ten.status === 503 && ten.code === 'STRIPE_NOT_CONFIGURED',
-    `$10 item at booth pickup (total 1100¢, estimate 62¢) → past the floor, 503 STRIPE_NOT_CONFIGURED (got ${ten.status} ${ten.code})`)
+    `$10 item at booth pickup (total 1150¢, estimate 63¢) → past the floor, 503 STRIPE_NOT_CONFIGURED (got ${ten.status} ${ten.code})`)
   assert(await userRows() === 1,
     '[0] positive control: the accepted order DID reach ensureDbUser and created the user row, so [2]\'s zero is the floor refusing early')
   assert(await ordersFor(tenDollar) === 0, 'no Order row (stopped before Stripe and the order transaction)')
 
   // ── [4] the boundary, the tip, and multi-vendor ─────────────────────────────────────────────
-  console.log('\n[4] boundary: food = estimate is accepted, 1¢ under is refused')
-  const atFee = await mkFair([1], { serviceCharge: 23.21 })
-  const atR = await place(atFee, { expectedTotalCents: 2431 })
-  assert(atR.status === 503 && atR.code === 'STRIPE_NOT_CONFIGURED',
-    `$1 item + $23.21 service charge (total 2431¢, estimate 100¢ = food) → accepted (got ${atR.status} ${atR.code})`)
-  // The $23.22 case is the refusal already asserted in [2].
-
-  console.log('\n[4b] the tip is part of the full charge (curbside)')
+  console.log('\n[4] boundary: food = estimate is accepted, 1¢ over the food is refused (curbside tip)')
   const curb = await mkFair([1], { curbside: true })
-  const curbExtra = (tip: number, expectedTotalCents?: number) =>
-    ({ fulfillmentType: 'CURBSIDE', vehicleMake: 'Honda', vehicleColor: 'Blue', tip, ...(expectedTotalCents !== undefined && { expectedTotalCents }) })
-  const tipOk = await place(curb, curbExtra(23.21, 2431))
+  const tipOk = await place(curb, curbExtra(19.17, 2431))
   assert(tipOk.status === 503 && tipOk.code === 'STRIPE_NOT_CONFIGURED',
-    `$1 item + $23.21 tip (total 2431¢) → accepted (got ${tipOk.status} ${tipOk.code})`)
-  const tipOver = await place(curb, curbExtra(23.22))
+    `$1 item + $19.17 tip (total 2431¢, estimate 100¢ = food) → accepted (got ${tipOk.status} ${tipOk.code})`)
+  const tipOver = await place(curb, curbExtra(19.18))
   assert(tipOver.status === 400 && tipOver.code === 'ORDER_BELOW_PROCESSING_FEE',
-    `$1 item + $23.22 tip (total 2432¢) → 400 ORDER_BELOW_PROCESSING_FEE (got ${tipOver.status} ${tipOver.code})`)
+    `$1 item + $19.18 tip (total 2432¢) → 400 ORDER_BELOW_PROCESSING_FEE (got ${tipOver.status} ${tipOver.code})`)
   assert(await ordersFor(curb) === 0, 'no Order row from either curbside call')
 
-  console.log('\n[4c] a two-vendor order is judged on its WHOLE food subtotal')
-  const two = await mkFair([1, 1], { serviceCharge: 23.21 })
-  // $2 food + $0.20 fee + $23.21 = 2541¢ → estimate floor((73689+500)/1000)+30 = 104¢ ≤ 200¢.
+  console.log('\n[4b] a two-vendor order is judged on its WHOLE food subtotal')
+  const two = await mkFair([1, 1], { curbside: true })
+  // $2 food + 30¢ fee + 399¢ curbside + $19.12 tip = 2541¢ → estimate floor((73689+500)/1000)+30 = 104¢ ≤ 200¢.
   // Each vendor's $1 alone would be under 104¢; the order passes because the rule is order-wide.
   assert(estimatedStripeFeeCents(2541) === 104, 'estimate for the two-vendor total is 104¢ (more than either vendor\'s 100¢)')
-  const twoR = await place(two, { expectedTotalCents: 2541 })
+  const twoR = await place(two, curbExtra(19.12, 2541))
   assert(twoR.status === 503 && twoR.code === 'STRIPE_NOT_CONFIGURED',
-    `two vendors, $1 each, $23.21 service charge → accepted on the order-wide subtotal (got ${twoR.status} ${twoR.code})`)
+    `two vendors, $1 each, curbside with a $19.12 tip → accepted on the order-wide subtotal (got ${twoR.status} ${twoR.code})`)
 
   // ── [5] source order ────────────────────────────────────────────────────────────────────────
   console.log('\n[5] source: the floor runs before every write and Stripe call')

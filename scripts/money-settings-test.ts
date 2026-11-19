@@ -14,7 +14,8 @@
  *   [7] the seed migration: idempotent, one log entry per row actually inserted, a present key kept,
  *       "System (migration)" in the log
  *   [8] the order snapshot columns: enum, nullable, no default, null on every order incl. new ones
- *   [9] today's 10% checkout is unchanged: the frozen baseline (scripts/fee-baseline.ts), the fee
+ *   [9] (updated for stage 3) new orders are feeModel 2 and differ from the frozen 10% baseline, which
+ *       stays as the legacy record; only the order route and fair payload read the settings; the fee
  *       function's golden values, and a scan proving nothing reads the new settings or columns yet
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/money-settings-test.ts
@@ -123,7 +124,11 @@ async function main() {
     'fees.curbsideRunnerFeeCents': "Not in effect yet. Checkout still uses each event's own curbside fee. This value takes effect when the new fees go live.",
     'fees.cardFeesPaidBy': 'Not in effect yet. Today vendors pay the full card processing fee on every order. This value takes effect when the new fees go live.',
   }
-  assert(MONEY.every(k => S[k].notInEffect === NOTES[k]), 'each card\'s amber note is the approved text, word for word')
+  // Updated 2026-11-18 (item 10 stage 3): checkout reads the three price keys, so their notes are gone;
+  // the card-fee note stays until the stage 4 payout reads it.
+  assert(S['fees.cardFeesPaidBy'].notInEffect === NOTES['fees.cardFeesPaidBy']
+    && ['fees.serviceFee.percentBps', 'fees.serviceFee.flatCents', 'fees.curbsideRunnerFeeCents'].every(k => !S[k].notInEffect),
+    'the card-fee card keeps its approved amber note word for word; the three price cards have none (stage 3)')
   assert(money.centsToText(399) === '3.99' && money.centsToText(0) === '0.00' && money.bpsToText(1250) === '12.5' && money.bpsToText(1500) === '15',
     'the form shows stored values as editable text (399 → 3.99, 1250 → 12.5)')
   let refusedAll = true
@@ -337,10 +342,9 @@ async function main() {
   await prisma.event.delete({ where: { id: ev.id } }); await prisma.user.delete({ where: { id: cu.id } })
 
   // ── [9] ───────────────────────────────────────────────────────────────────────────────────
-  console.log('\n[9] today\'s 10% checkout is unchanged')
-  // Since the Batch 1 merge (2026-11-21) checkout refuses an order below the card minimum (H5 2h,
-  // lib/checkout-floor.ts), so the $0.29 scenario is kept as a refusal; the other orders are
-  // compared with the frozen baseline, which is unchanged (scripts/fee-baseline.ts).
+  // Updated 2026-11-18 (item 10 stage 3): the 10% baseline is RETIRED for new orders (they are 15% by
+  // design now) and kept as the legacy record. Stage 3's own end-to-end checks: scripts/fees-stage3-test.ts.
+  console.log('\n[9] stage 3: new orders are feeModel 2; the 10% baseline is the legacy record')
   const { results, stubCalls } = await runScenarios()
   const accepted = acceptedScenarios()
   const refused = SCENARIOS.filter(s => s.refusedBy)
@@ -356,9 +360,11 @@ async function main() {
   const baseline = loadBaseline()
   const diffs = compareToBaseline(results, baseline)
   for (const d of diffs) console.log(`     ↳ ${d}`)
-  assert(diffs.length === 0, `all ${accepted.length} accepted orders identical to the 10% baseline recorded before stage 2 (stored fee, total, PaymentIntent amount and metadata)`)
-  assert(accepted.every(s => { const r = results[s.name]; return !!r?.snapshot && Object.values(r.snapshot).every(v => v === null) }),
-    'new orders through POST /api/orders store all four snapshot columns as null')
+  const b50now = results['booth 50.00']
+  assert(Object.keys(baseline).length === 6 && diffs.length > 0 && (b50now.stored as any).total === 57.5 && b50now.piAmount === 5750,
+    'accepted orders differ from the 10% baseline as intended ($50 booth: $57.50, PaymentIntent 5750); the baseline file stays as the legacy record')
+  assert(accepted.every(s => { const r = results[s.name]; return !!r?.snapshot && JSON.stringify(r.snapshot) === JSON.stringify({ feeModel: 2, serviceFeeBps: 1500, serviceFeeFlatCents: 0, cardFeesPaidBy: 'VENDOR' }) }),
+    `all ${accepted.length} accepted orders through POST /api/orders store the snapshot feeModel 2 / 1500 / 0 / VENDOR`)
   const at15: Record<string, Observed> = JSON.parse(JSON.stringify(baseline))
   const b50 = at15['booth 50.00']; (b50.stored as any).fairSynqFee = 7.5; (b50.stored as any).total = 57.5; b50.piAmount = 5750
   assert(compareToBaseline(at15, baseline).length >= 3, '[0] control: the comparison catches a 15% order (fee, total and PaymentIntent all flagged)')
@@ -368,12 +374,13 @@ async function main() {
   const READ = /getMoneySettings\(|(?<!fees\.)\b(feeModel|serviceFeeBps|serviceFeeFlatCents|cardFeesPaidBy)\b|lib\/fees\/exhibit-a/
   assert(READ.test('const t = await getMoneySettings()') && READ.test('if (order.feeModel === 2)') && !READ.test("key: 'fees.cardFeesPaidBy'"),
     '[0] control: the scanner finds a planted call and a planted column read, and ignores the settings key name')
-  const ALLOWED = new Set(['lib/settings.ts', 'lib/fees/exhibit-a.ts'])
+  // Stage 3 readers: the order route and the fair payload (via fee-terms), and the one calculator (lib/checkout-total.ts).
+  const ALLOWED = new Set(['lib/settings.ts', 'lib/fees/exhibit-a.ts', 'app/api/orders/route.ts', 'lib/fees/fee-terms.ts', 'lib/checkout-total.ts'])
   const readers = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd(), d)))
     .map(f => relative(process.cwd(), f).split(sep).join('/'))
     .filter(f => !ALLOWED.has(f))
     .filter(f => READ.test(readFileSync(f, 'utf8').split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')))
-  assert(readers.length === 0, `nothing in app/, lib/ or workers/ reads the money settings or snapshot columns yet (found: ${readers.join(', ') || 'none'})`)
+  assert(readers.length === 0, `only the order route and the fair payload read the money settings; payouts, refunds and the worker read neither them nor the snapshot columns (others found: ${readers.join(', ') || 'none'})`)
 }
 
 main()

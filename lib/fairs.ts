@@ -105,6 +105,8 @@ export const getFairBySlugCached = unstable_cache(
       serviceChargeAmount: raw.serviceChargeAmount ?? null,
       // Online price markup (audit H5, 2h): the cart and checkout feed it to lib/checkout-total.ts.
       onlineMarkupBps: raw.onlineMarkupBps,
+      // Never cached: the fair layout and /api/events/:slug merge the live terms in (item 10 stage 3).
+      feeTerms: null,
       featuredVendorIds: raw.featuredVendorIds ?? [],
       featuredLabel: raw.featuredLabel ?? null,
       featuredEnabled: raw.featuredEnabled ?? true,

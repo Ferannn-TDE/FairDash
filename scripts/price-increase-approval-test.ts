@@ -556,8 +556,9 @@ async function main() {
     assert(!!served && served.inPersonPrice === 10 && served.price === 10,
       `the public menu serves the old price: in person 10, online 10 at no markup (got ${served?.inPersonPrice} / ${served?.price})`)
 
+    const feeTerms = await (await import('../lib/settings')).getMoneySettings()
     const totalAt = (dollars: number) => checkoutTotals({
-      lines: [{ inPersonCents: toCents(dollars), quantity: 1 }], markupBps: 0, deliveryFeeCents: 0, serviceChargeCents: 0, tipCents: 0,
+      lines: [{ inPersonCents: toCents(dollars), quantity: 1 }], markupBps: 0, feeTerms, deliveryFeeCents: 0, tipCents: 0,
     }).totalCents
     const customer = await prisma.user.create({ data: { clerkId: `${PFX}cust-${rand()}`, email: `cust-${rand()}${MAIL}`, name: 'C' } })
     const place = async (expectedTotalCents: number) => {

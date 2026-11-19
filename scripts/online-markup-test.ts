@@ -401,6 +401,8 @@ async function main() {
 
   const orderPOST = (await import('../app/api/orders/route')).POST as unknown as (r: NextRequest) => Promise<Response>
   const { checkoutTotals, toCents } = await import('../lib/checkout-total')
+  // The money settings' terms (seeded 1500 / 0 / 399): the server reads the same ones (stage 3).
+  const feeTerms = await (await import('../lib/settings')).getMoneySettings()
   const { estimatedStripeFeeCents } = await import('../lib/checkout-floor')
   const { itemizeOrder } = await import('../lib/order-itemization')
   const { readFileSync } = await import('node:fs')
@@ -425,12 +427,12 @@ async function main() {
   type Line = { item: Item; qty: number }
   const customer2 = `${PFX}cust-${rand()}`
   /** What the checkout page shows: the SAME checkoutTotals, from the in-person prices and the markup. */
-  const pageTotals = (lines: Line[], bps: number, o: { deliveryFeeCents?: number; serviceChargeCents?: number; tip?: number } = {}) =>
+  const pageTotals = (lines: Line[], bps: number, o: { deliveryFeeCents?: number; tip?: number } = {}) =>
     checkoutTotals({
       lines: lines.map(l => ({ inPersonCents: toCents(l.item.price), quantity: l.qty })),
       markupBps: bps,
+      feeTerms,
       deliveryFeeCents: o.deliveryFeeCents ?? 0,
-      serviceChargeCents: o.serviceChargeCents ?? 0,
       tipCents: toCents(o.tip ?? 0),
     })
   type OrderRes = { status: number; code?: string; message?: string; details?: Record<string, unknown>; data?: Record<string, unknown> }
@@ -461,72 +463,81 @@ async function main() {
   console.log('\n[7] checkout at 0%: the same as before 2h')
   let twoVendorOrderId: unknown = null
   {
-    const r = await place(live.id, [{ item: i10, qty: 1 }], { expectedTotalCents: 1100 })
-    assert(r.status === 201, `$10.00 item, booth pickup, expected 1100 → 201 (${r.status} ${r.code ?? ''} ${r.message ?? ''})`)
+    // Updated 2026-11-23: the fee is the money settings' 15% (item 10 stage 3), on the booth price.
+    const r = await place(live.id, [{ item: i10, qty: 1 }], { expectedTotalCents: 1150 })
+    assert(r.status === 201, `$10.00 item, booth pickup, expected 1150 → 201 (${r.status} ${r.code ?? ''} ${r.message ?? ''})`)
     const o = await orderOf(r.data?.orderId)
     const it = o.orderItems[0]
-    assert(o.subtotal === 10 && o.fairSynqFee === 1 && o.total === 11, `subtotal 10.00, fee 1.00, total 11.00 (got ${o.subtotal}, ${o.fairSynqFee}, ${o.total})`)
+    assert(o.subtotal === 10 && o.fairSynqFee === 1.5 && o.total === 11.5, `subtotal 10.00, fee 1.50, total 11.50 (got ${o.subtotal}, ${o.fairSynqFee}, ${o.total})`)
     assert(o.serviceFeeBase === 10 && o.onlineMarkupBps === 0, 'snapshots: serviceFeeBase 10.00, onlineMarkupBps 0')
     assert(it.unitPrice === 10 && it.inPersonUnitPrice === 10 && it.subtotal === 10, 'item: unitPrice 10.00 = inPersonUnitPrice 10.00')
     const pi = piCalls.at(-1)
-    assert(pi?.amount === 1100 && pi.metadata?.serviceFeeBase === '10.00' && pi.metadata?.onlineMarkupBps === '0', 'PaymentIntent 1100¢, metadata serviceFeeBase 10.00, onlineMarkupBps 0')
+    assert(pi?.amount === 1150 && pi.metadata?.serviceFeeBase === '10.00' && pi.metadata?.onlineMarkupBps === '0', 'PaymentIntent 1150¢, metadata serviceFeeBase 10.00, onlineMarkupBps 0')
   }
 
   // ── [8] checkout at 10% ─────────────────────────────────────────────────────────────────────
   console.log('\n[8] checkout at 10%: online unit price, fee on the in-person price')
   {
     await setMarkup(live.id, 1000)
-    const r = await place(live.id, [{ item: i10, qty: 1 }], { expectedTotalCents: 1200 })
-    assert(r.status === 201, `$10.00 item at 10%, expected 1200 → 201 (${r.status} ${r.code ?? ''})`)
+    const r = await place(live.id, [{ item: i10, qty: 1 }], { expectedTotalCents: 1250 })
+    assert(r.status === 201, `$10.00 item at 10%, expected 1250 → 201 (${r.status} ${r.code ?? ''})`)
     const o = await orderOf(r.data?.orderId)
     const it = o.orderItems[0]
     assert(it.unitPrice === 11 && it.subtotal === 11 && it.inPersonUnitPrice === 10, `unit 11.00 online, in-person snapshot 10.00 (got ${it.unitPrice}, ${it.inPersonUnitPrice})`)
-    assert(o.subtotal === 11 && o.fairSynqFee === 1 && o.total === 12, `subtotal 11.00, fee 1.00 (NOT 1.10), total 12.00 (got ${o.subtotal}, ${o.fairSynqFee}, ${o.total})`)
+    assert(o.subtotal === 11 && o.fairSynqFee === 1.5 && o.total === 12.5, `subtotal 11.00, fee 1.50 (NOT 1.65), total 12.50 (got ${o.subtotal}, ${o.fairSynqFee}, ${o.total})`)
     assert(o.serviceFeeBase === 10 && o.onlineMarkupBps === 1000, 'snapshots: serviceFeeBase 10.00, onlineMarkupBps 1000')
     const pi = piCalls.at(-1)
-    assert(pi?.amount === 1200 && pi.metadata?.serviceFee === '1.00' && pi.metadata?.serviceFeeBase === '10.00' && pi.metadata?.onlineMarkupBps === '1000',
-      'PaymentIntent 1200¢; metadata serviceFee 1.00, serviceFeeBase 10.00, onlineMarkupBps 1000')
+    assert(pi?.amount === 1250 && pi.metadata?.serviceFee === '1.50' && pi.metadata?.serviceFeeBase === '10.00' && pi.metadata?.onlineMarkupBps === '1000',
+      'PaymentIntent 1250¢; metadata serviceFee 1.50, serviceFeeBase 10.00, onlineMarkupBps 1000')
     assert(JSON.stringify(JSON.parse(pi?.metadata?.vendorSubtotalCents ?? '{}')) === JSON.stringify({ [V1.id]: 1100 }), 'vendor subtotal 1100¢ (the markup goes to the vendor)')
-    assert((r.data?.summary as Record<string, unknown>)?.serviceFee === 1 && (r.data?.summary as Record<string, unknown>)?.total === 12, 'response summary: fee 1.00, total 12.00')
+    assert((r.data?.summary as Record<string, unknown>)?.serviceFee === 1.5 && (r.data?.summary as Record<string, unknown>)?.total === 12.5, 'response summary: fee 1.50, total 12.50')
 
     const lines = [{ item: i10, qty: 1 }, { item: i1299, qty: 1 }]
     const expected = pageTotals(lines, 1000).totalCents
-    assert(expected === 2759, `two vendors: page total 2759¢ = 1100 + 1429 food + 230 fee (got ${expected})`)
+    assert(expected === 2874, `two vendors: page total 2874¢ = 1100 + 1429 food + 345 fee (15% of the 2299¢ booth prices, half up) (got ${expected})`)
     const r2 = await place(live.id, lines, { expectedTotalCents: expected })
     assert(r2.status === 201, `two-vendor order → 201 (${r2.status} ${r2.code ?? ''})`)
     const o2 = await orderOf(r2.data?.orderId)
     twoVendorOrderId = o2.id
     const byVendor = (v: string) => o2.orderItems.filter(x => x.vendorId === v).reduce((s, x) => s + cents(x.subtotal), 0)
     assert(byVendor(V1.id) === 1100 && byVendor(V2.id) === 1429, `each vendor's line total includes its markup: V1 1100¢, V2 1429¢ ($12.99 → $14.29) (got ${byVendor(V1.id)}, ${byVendor(V2.id)})`)
-    assert(o2.serviceFeeBase === 22.99 && o2.fairSynqFee === 2.3 && o2.total === 27.59, `fee 2.30 on the in-person 22.99, total 27.59 (got ${o2.fairSynqFee} on ${o2.serviceFeeBase}, ${o2.total})`)
+    assert(o2.serviceFeeBase === 22.99 && o2.fairSynqFee === 3.45 && o2.total === 28.74, `fee 3.45 on the in-person 22.99, total 28.74 (got ${o2.fairSynqFee} on ${o2.serviceFeeBase}, ${o2.total})`)
     assert(cents(o2.subtotal) + cents(o2.fairSynqFee) + cents(o2.deliveryFee) + cents(o2.serviceCharge) + cents(o2.tip) === cents(o2.total), 'the 5-term identity holds')
-    assert(piCalls.at(-1)?.amount === 2759, 'PaymentIntent 2759¢')
+    assert(piCalls.at(-1)?.amount === 2874, 'PaymentIntent 2874¢')
   }
 
   // ── [9] checkout floor uses the online subtotal ─────────────────────────────────────────────
   console.log('\n[9] the checkout floor uses the online subtotal')
   {
-    // $1.00 item + $23.22 service charge. At 0%: food 100¢, total 2432¢, estimate 101¢ → refused.
+    // Rebuilt 2026-11-23 (no event service charge since stage 3, C-7): a curbside order with a tip
+    // makes the same totals. $1.00 item, 15% fee on the in-person $1.00 = 15¢, the platform curbside
+    // fee 399¢, tip $19.18. At 0%: food 100¢, total 2432¢, estimate 101¢ → refused.
     // At 10%: food 110¢, total 2442¢, estimate 101¢ → passes, only because of the markup.
     assert(estimatedStripeFeeCents(2432) === 101 && estimatedStripeFeeCents(2442) === 101, 'estimates: 2432¢ → 101¢, 2442¢ → 101¢')
-    const f2 = await mkLiveFair('floor', { serviceChargeEnabled: true, serviceChargeAmount: 23.22 })
+    assert(feeTerms.serviceFeeBps === 1500 && feeTerms.serviceFeeFlatCents === 0 && feeTerms.curbsideRunnerFeeCents === 399, '[0] fixture: the seeded money settings 1500 / 0 / 399')
+    const curb = (tip: number) => ({ fulfillmentType: 'CURBSIDE', vehicleMake: 'Honda', vehicleColor: 'Blue', tip })
+    const f2 = await mkLiveFair('floor')
     const v3 = await mkVendor(f2.id, 'v3')
     const one = await mkItem(v3.id, 'one', 1)
     const line = [{ item: one, qty: 1 }]
-    const at0 = await place(f2.id, line, { expectedTotalCents: pageTotals(line, 0, { serviceChargeCents: 2322 }).totalCents })
+    const exp0 = pageTotals(line, 0, { deliveryFeeCents: 399, tip: 19.18 }).totalCents
+    assert(exp0 === 2432, `[0] the page total at 0% is 2432¢ (got ${exp0})`)
+    const at0 = await place(f2.id, line, { ...curb(19.18), expectedTotalCents: exp0 })
     assert(at0.status === 400 && at0.code === 'ORDER_BELOW_PROCESSING_FEE', `at 0%: food 100¢ < estimate 101¢ → 400 ORDER_BELOW_PROCESSING_FEE (got ${at0.status} ${at0.code})`)
     await setMarkup(f2.id, 1000)
-    const exp10 = pageTotals(line, 1000, { serviceChargeCents: 2322 }).totalCents
-    const at10 = await place(f2.id, line, { expectedTotalCents: exp10 })
+    const exp10 = pageTotals(line, 1000, { deliveryFeeCents: 399, tip: 19.18 }).totalCents
+    const at10 = await place(f2.id, line, { ...curb(19.18), expectedTotalCents: exp10 })
     assert(exp10 === 2442 && at10.status === 201, `at 10%: online food 110¢ ≥ estimate 101¢ → passes and is placed (total ${exp10}¢, got ${at10.status} ${at10.code ?? ''})`)
 
-    // $1.00 + $26.56 at 10%: food 110¢, total 2776¢, estimate 111¢ → still refused.
+    // $1.00 at 10% with a $22.52 tip: food 110¢, total 2776¢, estimate 111¢ → still refused.
     assert(estimatedStripeFeeCents(2776) === 111, 'estimate: 2776¢ → 111¢')
-    const f3 = await mkLiveFair('floor2', { serviceChargeEnabled: true, serviceChargeAmount: 26.56, onlineMarkupBps: 1000 })
+    const f3 = await mkLiveFair('floor2', { onlineMarkupBps: 1000 })
     const v4 = await mkVendor(f3.id, 'v4')
     const one2 = await mkItem(v4.id, 'one', 1)
     const line2 = [{ item: one2, qty: 1 }]
-    const still = await place(f3.id, line2, { expectedTotalCents: pageTotals(line2, 1000, { serviceChargeCents: 2656 }).totalCents })
+    const exp3 = pageTotals(line2, 1000, { deliveryFeeCents: 399, tip: 22.52 }).totalCents
+    assert(exp3 === 2776, `[0] the page total at 10% is 2776¢ (got ${exp3})`)
+    const still = await place(f3.id, line2, { ...curb(22.52), expectedTotalCents: exp3 })
     assert(still.status === 400 && still.code === 'ORDER_BELOW_PROCESSING_FEE', `at 10%: online food 110¢ < estimate 111¢ → still 400 (got ${still.status} ${still.code})`)
     assert(await ordersIn(f3.id) === 0, 'no Order row for the refused order')
   }
@@ -593,7 +604,7 @@ async function main() {
     const ten = await mkItem(v5.id, 'ten', 10)
     const line = [{ item: ten, qty: 1 }]
     const shown = pageTotals(line, 0).totalCents
-    assert(shown === 1100, 'customer adds a $10.00 item at 0%: the page shows $11.00 (1100¢)')
+    assert(shown === 1150, 'customer adds a $10.00 item at 0%: the page shows $11.50 (1150¢)')
 
     login(admin.clerkId, ['admin'])
     const raise = await adminPatch(f4.id, { onlineMarkupBps: 1000 })
@@ -602,21 +613,21 @@ async function main() {
     const piBefore = piCalls.length
     const r = await place(f4.id, line, { expectedTotalCents: shown })
     assert(r.status === 409 && r.code === 'PRICE_CHANGED', `checkout with the old total → 409 PRICE_CHANGED (got ${r.status} ${r.code})`)
-    assert(r.details?.newTotalCents === 1200 && r.details?.newTotal === 12 && r.details?.expectedTotalCents === 1100, `returns the new total 1200¢ ($12.00) (got ${r.details?.newTotalCents})`)
+    assert(r.details?.newTotalCents === 1250 && r.details?.newTotal === 12.5 && r.details?.expectedTotalCents === 1150, `returns the new total 1250¢ ($12.50) (got ${r.details?.newTotalCents})`)
     const bd = r.details?.breakdown as Record<string, unknown> | undefined
-    assert(bd?.subtotal === 11 && bd?.serviceFee === 1 && bd?.total === 12 && bd?.onlineMarkupBps === 1000, 'with the new breakdown: food 11.00, fee 1.00, total 12.00')
-    assert(r.message === 'Prices updated — new total $12.00', `message: "${r.message}"`)
+    assert(bd?.subtotal === 11 && bd?.serviceFee === 1.5 && bd?.total === 12.5 && bd?.onlineMarkupBps === 1000, 'with the new breakdown: food 11.00, fee 1.50, total 12.50')
+    assert(r.message === 'Prices updated — new total $12.50', `message: "${r.message}"`)
     assert(await ordersIn(f4.id) === 0 && piCalls.length === piBefore, 'nothing written, nothing charged (no Order row, no PaymentIntent)')
 
-    const higher = await place(f4.id, line, { expectedTotalCents: 1250 })
-    const lower = await place(f4.id, line, { expectedTotalCents: 1150 })
+    const higher = await place(f4.id, line, { expectedTotalCents: 1300 })
+    const lower = await place(f4.id, line, { expectedTotalCents: 1200 })
     assert(higher.status === 409 && higher.code === 'PRICE_CHANGED' && lower.status === 409 && lower.code === 'PRICE_CHANGED',
-      'any difference is refused: a shown total of 1250¢ or 1150¢ (real 1200¢) → 409 both')
+      'any difference is refused: a shown total of 1300¢ or 1200¢ (real 1250¢) → 409 both')
     assert(await ordersIn(f4.id) === 0 && piCalls.length === piBefore, 'still nothing written or charged')
     const confirmed = await place(f4.id, line, { expectedTotalCents: r.details?.newTotalCents })
-    assert(confirmed.status === 201 && piCalls.at(-1)?.amount === 1200 && (await orderOf(confirmed.data?.orderId)).total === 12,
-      `the customer confirms the new total → 201, charged exactly 1200¢ (got ${confirmed.status})`)
-    const again = await place(f4.id, line, { expectedTotalCents: 1200 })
+    assert(confirmed.status === 201 && piCalls.at(-1)?.amount === 1250 && (await orderOf(confirmed.data?.orderId)).total === 12.5,
+      `the customer confirms the new total → 201, charged exactly 1250¢ (got ${confirmed.status})`)
+    const again = await place(f4.id, line, { expectedTotalCents: 1250 })
     assert(again.status === 201, '[0] control: a matching total checks out normally')
 
     const ordersNow = await ordersIn(f4.id), piNow = piCalls.length
@@ -712,9 +723,10 @@ async function main() {
 
     const inPersonTotal = lines.reduce((s, l) => s + toCents(l.item.price), 0)
     const onlineTotal = lines.reduce((s, l) => s + price.onlinePriceCents(toCents(l.item.price), 1000), 0)
-    assert(cents(o.serviceFeeBase) === inPersonTotal && cents(o.fairSynqFee) === Math.round(inPersonTotal * 0.1),
-      `fee ${cents(o.fairSynqFee)}¢ = 10% of the combined in-person total ${inPersonTotal}¢`)
-    assert(cents(o.fairSynqFee) !== Math.round(onlineTotal * 0.1), `[0] control: and not 10% of the online total ${onlineTotal}¢ (${Math.round(onlineTotal * 0.1)}¢)`)
+    const fee15 = (c: number) => Math.floor((c * 1500 + 5000) / 10000)
+    assert(cents(o.serviceFeeBase) === inPersonTotal && cents(o.fairSynqFee) === fee15(inPersonTotal),
+      `fee ${cents(o.fairSynqFee)}¢ = 15% (half up) of the combined in-person total ${inPersonTotal}¢`)
+    assert(cents(o.fairSynqFee) !== fee15(onlineTotal), `[0] control: and not 15% of the online total ${onlineTotal}¢ (${fee15(onlineTotal)}¢)`)
     assert(cents(o.subtotal) === onlineTotal && cents(o.deliveryFee) === 399 && cents(o.tip) === toCents(tip), 'food = Σ online lines; curbside 3.99; tip as shown')
     assert(cents(o.total) === page.totalCents, `server total ${cents(o.total)}¢ == page total ${page.totalCents}¢ exactly`)
     const pi = piCalls.at(-1)
@@ -772,7 +784,7 @@ async function main() {
 
     // One calculator: the display function and the checkout calculator give the same unit price.
     const sameAsCheckout = [100, 105, 333, 715, 1299, 99999].every(c =>
-      [0, 1, 715, 1000].every(b => onlineUnitCents(c, b) === ct({ lines: [{ inPersonCents: c, quantity: 1 }], markupBps: b, deliveryFeeCents: 0, serviceChargeCents: 0, tipCents: 0 }).unitCents[0]))
+      [0, 1, 715, 1000].every(b => onlineUnitCents(c, b) === ct({ lines: [{ inPersonCents: c, quantity: 1 }], markupBps: b, feeTerms, deliveryFeeCents: 0, tipCents: 0 }).unitCents[0]))
     assert(sameAsCheckout, 'onlineUnitCents (menus, cart) and checkoutTotals (checkout) give the same unit price for every case')
     assert(onlineUnitPrice(12.99, 1000) === 14.29 && onlineUnitPrice(10, 0) === 10, 'onlineUnitPrice: $12.99 at 10% → $14.29; $10 at 0% → $10')
 
@@ -842,15 +854,15 @@ async function main() {
     // The checkout page will total the cart exactly like this (screen 3): checkoutTotals on the
     // cart's calculator lines and the fair's markup.
     const pageTotal = (items: Array<{ menuItemId: string; price: number; inPersonPrice?: number; quantity: number }>) =>
-      ct({ lines: cartCalculatorLines(items), markupBps: 1000, deliveryFeeCents: 0, serviceChargeCents: 0, tipCents: 0 }).totalCents
+      ct({ lines: cartCalculatorLines(items), markupBps: 1000, feeTerms, deliveryFeeCents: 0, tipCents: 0 }).totalCents
     const asLines = (items: Array<{ quantity: number }>) => [{ item: i10, qty: items[0].quantity }]
 
     // Old cart A, saved BEFORE 2h (0% markup everywhere): no inPersonPrice, stored price = $10.
     const oldA = [{ menuItemId: i10.id, price: 10, quantity: 1 }]
     const totalA = pageTotal(oldA)
     const rA = await place(live.id, asLines(oldA), { expectedTotalCents: totalA })
-    assert(totalA === 1200 && rA.status === 201 && piCalls.at(-1)?.amount === 1200,
-      `old cart saved before 2h: shows $12.00, the server agrees, placed and charged 1200¢ (no 409) (${rA.status} ${rA.code ?? ''})`)
+    assert(totalA === 1250 && rA.status === 201 && piCalls.at(-1)?.amount === 1250,
+      `old cart saved before 2h: shows $12.50, the server agrees, placed and charged 1250¢ (no 409) (${rA.status} ${rA.code ?? ''})`)
 
     // Old cart B: no inPersonPrice but its stored price is an online $11 (a line that somehow lost
     // its in-person price). The page counts $11 as in-person and shows MORE than the real total.
@@ -858,13 +870,13 @@ async function main() {
     const totalB = pageTotal(oldB)
     const before = await ordersIn(live.id), piBefore = piCalls.length
     const rB = await place(live.id, asLines(oldB), { expectedTotalCents: totalB })
-    // $11 counted as in-person → $12.10 online + 10% fee on $11 ($1.10) = $13.20 shown.
-    assert(totalB === 1320 && rB.status === 409 && rB.code === 'PRICE_CHANGED' && rB.details?.newTotalCents === 1200,
-      `old cart with an online stored price: page shows $13.20, server refuses 409 with the real $12.00 (shown ${totalB}; ${rB.status} ${rB.code} ${rB.details?.newTotalCents})`)
+    // $11 counted as in-person → $12.10 online + 15% fee on $11 ($1.65) = $13.75 shown.
+    assert(totalB === 1375 && rB.status === 409 && rB.code === 'PRICE_CHANGED' && rB.details?.newTotalCents === 1250,
+      `old cart with an online stored price: page shows $13.75, server refuses 409 with the real $12.50 (shown ${totalB}; ${rB.status} ${rB.code} ${rB.details?.newTotalCents})`)
     assert(await ordersIn(live.id) === before && piCalls.length === piBefore, 'nothing written, nothing charged')
     const confirmB = await place(live.id, asLines(oldB), { expectedTotalCents: rB.details?.newTotalCents })
-    assert(confirmB.status === 201 && piCalls.at(-1)?.amount === 1200 && 1200 <= totalB,
-      'the customer confirms the server\'s total → charged 1200¢, never more than was shown')
+    assert(confirmB.status === 201 && piCalls.at(-1)?.amount === 1250 && 1250 <= totalB,
+      'the customer confirms the server\'s total → charged 1250¢, never more than was shown')
 
     // "Order again" works from the stored snapshot: the order API returns inPersonUnitPrice.
     const orderGET = (await import('../app/api/orders/[id]/route')).GET as unknown as (r: NextRequest, c: unknown) => Promise<Response>
@@ -900,12 +912,12 @@ async function main() {
     const line = [{ item: ten, qty: 1 }]
     // What the page does: checkoutTotals on the cart's calculator lines and the fair's markup.
     const cart = [{ menuItemId: ten.id, price: 10, inPersonPrice: 10, quantity: 1 }]
-    const pageShows = (bps: number) => ct({ lines: cartCalculatorLines(cart), markupBps: bps, deliveryFeeCents: 0, serviceChargeCents: 0, tipCents: 0 }).totalCents
+    const pageShows = (bps: number) => ct({ lines: cartCalculatorLines(cart), markupBps: bps, feeTerms, deliveryFeeCents: 0, tipCents: 0 }).totalCents
 
     const shown = pageShows(0)
     const raise1 = await adminPatch(f5.id, { onlineMarkupBps: 500 })
     const first = await place(f5.id, line, { expectedTotalCents: shown })
-    assert(raise1.status === 200 && shown === 1100 && first.status === 409 && first.details?.newTotalCents === 1150, `page showed $11.00; markup raised to 5% → 409, server's total $11.50 (${raise1.status}; ${first.status} ${first.details?.newTotalCents})`)
+    assert(raise1.status === 200 && shown === 1150 && first.status === 409 && first.details?.newTotalCents === 1200, `page showed $11.50; markup raised to 5% → 409, server's total $12.00 (${raise1.status}; ${first.status} ${first.details?.newTotalCents})`)
 
     // Prices change AGAIN before the customer presses Confirm: the confirmed total is now stale.
     // (place() signs in as the customer, so sign in as the admin again for the change.)
@@ -914,19 +926,19 @@ async function main() {
     assert(raise2.status === 200 && await bpsOf(f5.id) === 1000, `the admin raises it again to 10% (${raise2.status})`)
     const piBefore = piCalls.length
     const second = await place(f5.id, line, { expectedTotalCents: first.details?.newTotalCents })
-    assert(second.status === 409 && second.code === 'PRICE_CHANGED' && second.details?.newTotalCents === 1200,
-      `confirming the old server total after another change → 409 again with $12.00: the customer is asked again (${second.status} ${second.details?.newTotalCents})`)
+    assert(second.status === 409 && second.code === 'PRICE_CHANGED' && second.details?.newTotalCents === 1250,
+      `confirming the old server total after another change → 409 again with $12.50: the customer is asked again (${second.status} ${second.details?.newTotalCents})`)
     assert(await ordersIn(f5.id) === 0 && piCalls.length === piBefore, 'neither attempt wrote or charged anything')
     const third = await place(f5.id, line, { expectedTotalCents: second.details?.newTotalCents })
-    assert(third.status === 201 && piCalls.at(-1)?.amount === 1200, 'confirming the newest server total → placed, charged exactly 1200¢')
+    assert(third.status === 201 && piCalls.at(-1)?.amount === 1250, 'confirming the newest server total → placed, charged exactly 1250¢')
 
     // Source checks on the page.
     const strip = (s: string) => s.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '')
     const page = strip(readFileSync('app/fair/[fairSlug]/checkout/page.tsx', 'utf8'))
     assert(/const totals = useMemo\(\(\) => checkoutTotals\(\{\s*lines: calculatorLines,\s*markupBps,/.test(page), 'every amount comes from checkoutTotals with the cart\'s calculatorLines and markupBps')
     assert(!/calculateServiceFee|estimatedServiceFee|estimatedTotal|item\.price|i\.price|\bsubtotal \*/.test(page), 'no fee or total maths of its own, and no stored item price used')
-    const summaryAmounts = ['money(totals.unitCents[idx]', 'money(totals.onlineSubtotalCents)', 'money(totals.deliveryFeeCents)', 'money(totals.serviceChargeCents)', 'money(totals.serviceFeeCents)', 'money(totals.tipCents)', 'money(totals.totalCents)']
-    assert(summaryAmounts.every(a => page.includes(a)), 'the summary shows line prices, subtotal, delivery, service charge, fee, tip and total from totals')
+    const summaryAmounts = ['money(totals.unitCents[idx]', 'money(totals.onlineSubtotalCents)', 'money(totals.deliveryFeeCents)', 'money(totals.serviceFeeCents)', 'money(totals.tipCents)', 'money(totals.totalCents)']
+    assert(summaryAmounts.every(a => page.includes(a)), 'the summary shows line prices, subtotal, delivery, fee, tip and total from totals (no event service charge, C-7)')
 
     const handlerAt = page.indexOf('const handlePlaceOrder = async (expectedTotalCents: number) => {')
     const handlerEnd = page.indexOf('const handleSuccess', handlerAt)
@@ -943,9 +955,9 @@ async function main() {
       'on 409 PRICE_CHANGED it keeps the server\'s new total and breakdown, then stops')
     const guardAt = handler.indexOf('if (inFlight.current) return')
     assert(guardAt > 0 && guardAt < handler.indexOf("fetch('/api/orders'") && /finally \{\s*inFlight\.current = false/.test(handler), 'a second press while one is in flight is ignored (guard before the fetch, released after)')
-    assert(/onClick=\{\(\) => handlePlaceOrder\(activePriceChange\.newTotalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal\}/.test(page),
+    assert(/onClick=\{\(\) => handlePlaceOrder\(activePriceChange\.newTotalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal \|\| orderingPaused\}/.test(page),
       'Confirm resubmits with the SERVER\'S total (activePriceChange.newTotalCents), disabled while submitting')
-    assert(/onClick=\{\(\) => handlePlaceOrder\(totals\.totalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal\}/.test(page), '"Continue to Payment" sends the page\'s total, disabled while submitting')
+    assert(/onClick=\{\(\) => handlePlaceOrder\(totals\.totalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal \|\| orderingPaused\}/.test(page), '"Continue to Payment" sends the page\'s total, disabled while submitting')
     assert(/Prices updated — new total \{money\(activePriceChange\.newTotalCents\)\}/.test(page) && /activePriceChange\.breakdown\.serviceFee/.test(page), 'the panel shows "Prices updated — new total $X" and the server\'s breakdown')
     assert(/const activePriceChange = priceChange && priceChange\.inputsKey === inputsKey \? priceChange : null/.test(page), 'a confirmed total stops applying if the cart, pickup type or tip changes')
   }

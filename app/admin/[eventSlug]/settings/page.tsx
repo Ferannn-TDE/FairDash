@@ -20,8 +20,6 @@ interface Settings {
   endDate: string
   eventLat: number | null
   eventLng: number | null
-  serviceChargeEnabled: boolean
-  serviceChargeAmount: number | null
   /** Online price markup, basis points 0–1000 (audit H5, 2h). */
   onlineMarkupBps: number
 }
@@ -58,8 +56,6 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
   const [endDate, setEndDate] = useState('')
   const [eventLat, setEventLat] = useState('')
   const [eventLng, setEventLng] = useState('')
-  const [serviceChargeEnabled, setServiceChargeEnabled] = useState(false)
-  const [serviceChargeAmount, setServiceChargeAmount] = useState('')
   // Online price markup (audit H5, 2h): typed in percent, checked by parseMarkupPercentInput (never
   // clamped). savedMarkupBps is the server's value, so only a real change is sent (and logged).
   const [markupInput, setMarkupInput] = useState('')
@@ -78,8 +74,6 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
     setEndDate(s.endDate)
     setEventLat(s.eventLat != null ? String(s.eventLat) : '')
     setEventLng(s.eventLng != null ? String(s.eventLng) : '')
-    setServiceChargeEnabled(s.serviceChargeEnabled)
-    setServiceChargeAmount(s.serviceChargeAmount != null ? String(s.serviceChargeAmount) : '')
     setSavedMarkupBps(s.onlineMarkupBps ?? 0)
     setMarkupInput(String(bpsToPercent(s.onlineMarkupBps ?? 0)))
   }, [])
@@ -137,8 +131,6 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
           endDate,
           eventLat: eventLat.trim() === '' ? null : eventLat,
           eventLng: eventLng.trim() === '' ? null : eventLng,
-          serviceChargeEnabled,
-          serviceChargeAmount: serviceChargeEnabled ? serviceChargeAmount : null,
           // Only a real change is sent; the server logs it (EventMarkupChange) in the same
           // transaction. Strict admins are not locked after the event starts.
           ...(markupChanged && { onlineMarkupBps: markupParse.bps }),
@@ -238,28 +230,8 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
           </div>
         </SectionCard>
 
-        <SectionCard title="Service Charge">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-white font-inter">Enable per-order service charge</p>
-                <p className="text-xs text-[#666] font-inter mt-0.5">Applied to every order. Goes 100% to the operator payout.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setServiceChargeEnabled(e => !e)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${serviceChargeEnabled ? 'bg-[#FF0077]' : 'bg-white/10'}`}
-              >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${serviceChargeEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-              </button>
-            </div>
-            {serviceChargeEnabled && (
-              <Field label="Charge Amount ($)" hint="Flat dollar amount applied to each order subtotal">
-                <input type="number" step="0.01" min="0" max="100" value={serviceChargeAmount} onChange={e => setServiceChargeAmount(e.target.value)} placeholder="1.50" className={`${INPUT} max-w-xs`} />
-              </Field>
-            )}
-          </div>
-        </SectionCard>
+        {/* No "Service Charge" card (C-7, item 10 stage 3): the old per-event charge is never applied to
+            new orders. The columns and stored values stay; the API ignores them. */}
 
         <SectionCard title="Online Prices">
           <div className="space-y-3">

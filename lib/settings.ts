@@ -15,8 +15,9 @@
 //   - saved only by admin | super_admin (platform_manager → 'forbidden'), with a reason, never
 //     cleared, values converted from text exactly (lib/money-input.ts)
 //   - every successful change posts a Slack notice after the response (lib/after-response.ts)
-// Nothing outside this file reads them yet: checkout still charges the 10% in lib/constants.ts
-// until stage 3 wires getMoneySettings() in.
+// Readers (stage 3): POST /api/orders prices and snapshots every new order with them, and the fair
+// payload carries the customer-visible terms (lib/fees/fee-terms.ts). The card-fee key is stored on
+// orders from stage 3 and acted on by the stage 4 payout.
 
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
@@ -170,19 +171,19 @@ export const SETTINGS = {
   // Item 10 / B1.13 (money). Order matters only for the admin page: fees first.
   'fees.serviceFee.percentBps': {
     label: 'Service fee: percent of the food',
-    help: 'Charged to the customer once per order, on the food subtotal. Enter a percent, e.g. 15 or 12.5 (0 to 30).',
+    help: 'Charged to the customer once per order, on the food subtotal. Enter a percent, e.g. 15 or 12.5 (0 to 30). Changing this also requires a new Vendor Agreement version. Talk to your developer first.',
     class: 'money',
     default: null,
-    notInEffect: notInEffect('Checkout still charges the old 10% service fee.'),
+    // In effect since item 10 stage 3: POST /api/orders and the checkout read it via getMoneySettings().
     parse: (raw: unknown) => fromExact(percentToBps(raw, MONEY_LIMITS.serviceFeeBps)),
     format: (v: number) => formatBps(v),
   } satisfies SettingDef<number>,
   'fees.serviceFee.flatCents': {
     label: 'Service fee: flat amount per order',
-    help: 'Added to the service fee once per order. Enter dollars, e.g. 0.50 ($0.00 to $5.00).',
+    help: 'Added to the service fee once per order. Enter dollars, e.g. 0.50 ($0.00 to $5.00). Changing this also requires a new Vendor Agreement version. Talk to your developer first.',
     class: 'money',
     default: null,
-    notInEffect: notInEffect('Checkout adds no flat fee today.'),
+    // In effect since item 10 stage 3.
     parse: (raw: unknown) => fromExact(dollarsToCents(raw, MONEY_LIMITS.serviceFeeFlatCents)),
     format: (v: number) => formatCents(v),
   } satisfies SettingDef<number>,
@@ -191,14 +192,15 @@ export const SETTINGS = {
     help: 'Charged on curbside orders. Enter dollars, e.g. 3.99 ($0.00 to $15.00).',
     class: 'money',
     default: null,
-    notInEffect: notInEffect("Checkout still uses each event's own curbside fee."),
+    // In effect since item 10 stage 3: curbside orders charge this, not the event's own fee.
     parse: (raw: unknown) => fromExact(dollarsToCents(raw, MONEY_LIMITS.curbsideRunnerFeeCents)),
     format: (v: number) => formatCents(v),
   } satisfies SettingDef<number>,
   'fees.cardFeesPaidBy': {
     label: 'Card processing fees',
-    help: 'Who pays Stripe\'s card processing on the food: the vendor, or FairSynq.',
+    help: 'Who pays Stripe\'s card processing on the food: the vendor, or FairSynq. Changing this also requires a new Vendor Agreement version. Talk to your developer first.',
     class: 'money',
+    // The note stays until stage 4's payout reads this (the order stores it from stage 3 on).
     default: null,
     notInEffect: notInEffect('Today vendors pay the full card processing fee on every order.'),
     parse: parseCardFeesPaidBy,

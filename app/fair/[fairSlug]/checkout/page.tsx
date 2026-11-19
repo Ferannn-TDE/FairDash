@@ -17,8 +17,9 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
 import { checkoutRefusal } from '@/lib/checkout-floor'
-import { checkoutTotals, fromCents, toCents } from '@/lib/checkout-total'
+import { checkoutTotals, fromCents, toCents, NO_FEE_TERMS } from '@/lib/checkout-total'
 import { ORDER_ITEM_LIMIT_MESSAGE, QUANTITY_LIMIT_MESSAGE } from '@/lib/order-limits'
+import { ORDERING_PAUSED_MESSAGE, ORDERING_PAUSED_CODE } from '@/lib/ordering-paused-copy'
 import { validateDeliveryAddress, streetLineFromPlace, type DeliveryAddressError } from '@/lib/delivery-address'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
@@ -299,9 +300,7 @@ export default function CheckoutPage() {
   })
 
   const configDeliveryFee = fc?.homeDeliveryFee ?? 2.99
-  const serviceChargeAmount = fair.serviceChargeEnabled && fair.serviceChargeAmount
-    ? fair.serviceChargeAmount
-    : 0
+  // C-7 (item 10 stage 3): the old per-event service charge is never charged on new orders.
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>('BOOTH_PICKUP')
@@ -349,28 +348,33 @@ export default function CheckoutPage() {
 
   // Runner-fulfilled = delivery OR curbside; only these carry a fee + allow tips.
   const isRunnerFulfilled = fulfillmentType === 'HOME_DELIVERY' || fulfillmentType === 'CURBSIDE'
-  const configCurbsideFee = fc?.curbsideFee ?? 0
+  // FEE TERMS (item 10 stage 3): the money settings' terms from the fair payload, read uncached on
+  // the server. No terms → ordering is paused (the server refuses with 503 anyway).
+  const [pausedByServer, setPausedByServer] = useState(false)
+  const orderingPaused = !fairLoading && (fair.feeTerms === null || pausedByServer)
+  const feeTerms = fair.feeTerms ?? NO_FEE_TERMS
 
-  const estimatedDeliveryFee =
-    fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee
-    : fulfillmentType === 'CURBSIDE'    ? configCurbsideFee
+  // Curbside charges the PLATFORM curbside fee (S3-Q2); delivery keeps the event's fee.
+  const estimatedDeliveryFeeCents =
+    fulfillmentType === 'HOME_DELIVERY' ? toCents(configDeliveryFee)
+    : fulfillmentType === 'CURBSIDE'    ? (fair.feeTerms?.curbsideRunnerFeeCents ?? 0)
     : 0
   // Tip — runner-fulfilled only; 100% the runner's; NO service fee, NO split.
   const tipAmount = isRunnerFulfilled ? tip : 0
 
   // THE ONE CALCULATION (lib/checkout-total.ts), the same function POST /api/orders charges with:
-  // online food (per unit, half-up) + 10% service fee on the IN-PERSON food + delivery/curbside fee
-  // + service charge + tip, all in cents. Every amount this page shows comes from `totals`, and its
-  // total is sent as expectedTotalCents: the server refuses (409) rather than charge anything else.
+  // online food (per unit, half-up) + the service fee (percent + flat, once per order) on the
+  // IN-PERSON food + delivery/curbside fee + tip, all in cents. Every amount this page shows comes
+  // from `totals`, and its total is sent as expectedTotalCents: the server refuses (409) rather
+  // than charge anything else.
   const totals = useMemo(() => checkoutTotals({
     lines: calculatorLines,
     markupBps,
-    deliveryFeeCents: toCents(estimatedDeliveryFee),
-    serviceChargeCents: toCents(serviceChargeAmount),
+    feeTerms,
+    deliveryFeeCents: estimatedDeliveryFeeCents,
     tipCents: toCents(tipAmount),
-  }), [calculatorLines, markupBps, estimatedDeliveryFee, serviceChargeAmount, tipAmount])
+  }), [calculatorLines, markupBps, feeTerms, estimatedDeliveryFeeCents, tipAmount])
   const money = (cents: number) => `$${fromCents(cents).toFixed(2)}`
-
   // Checkout floor (audit H5, Step 2b): the SAME function POST /api/orders runs, on the same
   // totals, so the customer sees the refusal before submitting instead of after. The server is
   // still the gate: it re-prices from the database and refuses on its own numbers.
@@ -381,7 +385,7 @@ export default function CheckoutPage() {
 
   // A 409 answer applies only to the exact inputs it was given for. If the customer then changes
   // the cart, the pickup type or the tip, it no longer applies and the panel goes away.
-  const inputsKey = JSON.stringify([calculatorLines, markupBps, fulfillmentType, totals.deliveryFeeCents, totals.serviceChargeCents, totals.tipCents])
+  const inputsKey = JSON.stringify([calculatorLines, markupBps, fulfillmentType, totals.deliveryFeeCents, totals.serviceFeeCents, totals.tipCents])
   const activePriceChange = priceChange && priceChange.inputsKey === inputsKey ? priceChange : null
 
   const estimatedReadyMin = useMemo(() => {
@@ -580,6 +584,10 @@ export default function CheckoutPage() {
         }
         if (code === 'QUANTITY_LIMIT') {
           toast.error(QUANTITY_LIMIT_MESSAGE, { id: 'cart-limit-dish' })
+          return
+        }
+        if (code === ORDERING_PAUSED_CODE) {
+          setPausedByServer(true) // the plain message shows in the summary; no toast with details
           return
         }
         if (code === 'OUT_OF_DELIVERY_RANGE' || code === 'ADDRESS_NOT_FOUND') {
@@ -901,6 +909,11 @@ export default function CheckoutPage() {
                     {floorRefusal.message}
                   </p>
                 )}
+                {orderingPaused && (
+                  <p role="alert" className="mb-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                    {ORDERING_PAUSED_MESSAGE}
+                  </p>
+                )}
                 {activePriceChange ? (
                   // 409 PRICE_CHANGED: the server's new total and breakdown. Confirm resubmits with
                   // the SERVER'S total (activePriceChange.newTotalCents), never a recalculation.
@@ -916,9 +929,6 @@ export default function CheckoutPage() {
                       {(activePriceChange.breakdown.deliveryFee ?? 0) > 0 && (
                         <div className="flex justify-between"><span className="text-[#A1A1A1]">{fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}</span><span className="text-white">{money(toCents(activePriceChange.breakdown.deliveryFee))}</span></div>
                       )}
-                      {(activePriceChange.breakdown.serviceCharge ?? 0) > 0 && (
-                        <div className="flex justify-between"><span className="text-[#A1A1A1]">Event service charge</span><span className="text-white">{money(toCents(activePriceChange.breakdown.serviceCharge))}</span></div>
-                      )}
                       <div className="flex justify-between"><span className="text-[#A1A1A1]">Service Fee</span><span className="text-white">{money(toCents(activePriceChange.breakdown.serviceFee))}</span></div>
                       {(activePriceChange.breakdown.tip ?? 0) > 0 && (
                         <div className="flex justify-between"><span className="text-[#A1A1A1]">Tip (runner)</span><span className="text-white">{money(toCents(activePriceChange.breakdown.tip))}</span></div>
@@ -929,7 +939,7 @@ export default function CheckoutPage() {
                       <button
                         type="button"
                         onClick={() => handlePlaceOrder(activePriceChange.newTotalCents)}
-                        disabled={submitting || !!floorRefusal}
+                        disabled={submitting || !!floorRefusal || orderingPaused}
                         className="flex-1 py-3 bg-[#FF0077] text-black font-bold rounded-xl hover:bg-[#ff3399] transition-colors uppercase tracking-wide text-sm border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {submitting ? 'Loading…' : `Confirm ${money(activePriceChange.newTotalCents)}`}
@@ -947,7 +957,7 @@ export default function CheckoutPage() {
                 ) : (
                 <button
                   onClick={() => handlePlaceOrder(totals.totalCents)}
-                  disabled={submitting || !!floorRefusal}
+                  disabled={submitting || !!floorRefusal || orderingPaused}
                   className="w-full flex items-center justify-center gap-2 py-4 bg-[#FF0077] text-black font-bold rounded-xl hover:bg-[#ff3399] transition-colors duration-200 uppercase tracking-wide border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
@@ -1052,24 +1062,18 @@ export default function CheckoutPage() {
                   <span className="text-[#A1A1A1]">Subtotal</span>
                   <span className="text-white">{orderSummary ? money(toCents(orderSummary.subtotal)) : money(totals.onlineSubtotalCents)}</span>
                 </div>
-                {isRunnerFulfilled && (
+                {isRunnerFulfilled && (orderSummary || fair.feeTerms) && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">{fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}</span>
                     <span className="text-white">{orderSummary ? money(toCents(orderSummary.deliveryFee)) : money(totals.deliveryFeeCents)}</span>
                   </div>
                 )}
-                {(orderSummary ? (orderSummary.serviceCharge ?? 0) > 0 : totals.serviceChargeCents > 0) && (
-                  <div className="flex justify-between">
-                    <span className="text-[#A1A1A1]">Event service charge</span>
-                    <span className="text-white">{orderSummary ? money(toCents(orderSummary.serviceCharge)) : money(totals.serviceChargeCents)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
+                {(orderSummary || fair.feeTerms) && <div className="flex justify-between">
                   <span className="text-[#A1A1A1]">Service Fee</span>
                   <span className="text-white">
                     {orderSummary ? money(toCents(orderSummary.serviceFee)) : money(totals.serviceFeeCents)}
                   </span>
-                </div>
+                </div>}
                 {(orderSummary ? (orderSummary.tip ?? 0) > 0 : totals.tipCents > 0) && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">Tip (runner)</span>
@@ -1078,6 +1082,9 @@ export default function CheckoutPage() {
                 )}
               </div>
 
+              {orderingPaused && !orderSummary ? (
+                <p className="py-4 text-sm text-amber-100">{ORDERING_PAUSED_MESSAGE}</p>
+              ) : (
               <div className="flex justify-between py-4">
                 <span className="text-white font-bold">
                   {orderSummary ? 'Total' : 'Est. Total'}
@@ -1086,6 +1093,7 @@ export default function CheckoutPage() {
                   {orderSummary ? money(toCents(orderSummary.total)) : money(totals.totalCents)}
                 </span>
               </div>
+              )}
             </div>
           </div>
 

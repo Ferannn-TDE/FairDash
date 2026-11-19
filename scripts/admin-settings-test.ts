@@ -56,7 +56,8 @@ async function main() {
     const after = await prisma.event.findUnique({ where: { id: ev.id } })
     assert(after?.name === 'After Fair', 'name persisted')
     assert(after?.eventLat === 39.78 && after?.eventLng === -89.65, 'location persisted (parsed to numbers)')
-    assert(after?.serviceChargeEnabled === true && after?.serviceChargeAmount === 1.5, 'service charge persisted')
+    // Updated 2026-11-18 (item 10 stage 3, C-7): the service charge fields are now IGNORED, not saved.
+    assert(after?.serviceChargeEnabled === false && after?.serviceChargeAmount === null, 'service charge fields ignored (C-7): still off, no amount')
 
     // ── [2] ⛔ ALLOWLIST: a hostile body cannot write forbidden fields ─────────
     console.log('\n[2] ⛔ ALLOWLIST: status / isPaused / archivedAt / organizerId / urlSlug are NEVER written')

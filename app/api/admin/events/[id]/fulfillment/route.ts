@@ -41,6 +41,8 @@ interface FulfillmentBody {
   homeDeliveryFee?: number | null
   homeDeliveryRadiusKm?: number | null
   runnerTransportDescription?: string | null
+  /** IGNORED since item 10 stage 3: new orders charge the platform curbside fee. Accepted and
+   *  dropped so an old page or script can't set a fee nothing reads; the stored value stays. */
   curbsideFee?: number
   runnerFeePercent?: number
   runnerTipsOnlyAck?: boolean
@@ -60,16 +62,11 @@ export async function PATCH(
     // gate below, both of which reason about the MERGED resulting state (body ?? existing).
     const existing = await db.fulfillmentConfig.findUnique({ where: { eventId: event.id } })
 
-    // Validation: fee split + curbside fee (Part A)
+    // Validation: fee split (Part A). curbsideFee is ignored since item 10 stage 3.
     if (body.runnerFeePercent !== undefined) {
       const p = body.runnerFeePercent
       if (!Number.isInteger(p) || p < 0 || p > 100) {
         throw new ApiError('runnerFeePercent must be an integer 0–100', 400, 'VALIDATION_ERROR')
-      }
-    }
-    if (body.curbsideFee !== undefined) {
-      if (!Number.isFinite(body.curbsideFee) || body.curbsideFee < 0) {
-        throw new ApiError('curbsideFee must be a non-negative number', 400, 'VALIDATION_ERROR')
       }
     }
     if (body.homeDeliveryFee != null && (!Number.isFinite(body.homeDeliveryFee) || body.homeDeliveryFee < 0)) {
@@ -158,7 +155,6 @@ export async function PATCH(
         homeDeliveryFee: body.homeDeliveryFee ?? null,
         homeDeliveryRadiusKm: body.homeDeliveryRadiusKm ?? null,
         runnerTransportDescription: body.runnerTransportDescription ?? null,
-        curbsideFee: body.curbsideFee ?? 0,
         runnerFeePercent: body.runnerFeePercent ?? 0,
         runnerTipsOnlyAck: body.runnerTipsOnlyAck ?? false,
       },
@@ -173,7 +169,6 @@ export async function PATCH(
         ...(body.homeDeliveryFee !== undefined && { homeDeliveryFee: body.homeDeliveryFee }),
         ...(body.homeDeliveryRadiusKm !== undefined && { homeDeliveryRadiusKm: body.homeDeliveryRadiusKm }),
         ...(body.runnerTransportDescription !== undefined && { runnerTransportDescription: body.runnerTransportDescription }),
-        ...(body.curbsideFee !== undefined && { curbsideFee: body.curbsideFee }),
         ...(body.runnerFeePercent !== undefined && { runnerFeePercent: body.runnerFeePercent }),
         ...(body.runnerTipsOnlyAck !== undefined && { runnerTipsOnlyAck: body.runnerTipsOnlyAck }),
       },

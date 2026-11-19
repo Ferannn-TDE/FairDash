@@ -29,23 +29,19 @@ const ALLOWED_FIELDS = new Set([
   // Platform
   'isPaused',
   'status',
-  // Vendor rules
-  'serviceChargeEnabled',
-  'serviceChargeAmount',
+  // serviceChargeEnabled / serviceChargeAmount removed (C-7, item 10 stage 3): ignored if sent.
 ])
 
 const NUMERIC_RANGES: Record<string, [number, number]> = {
   orderAcceptanceWindowSec: [30, 600],
   vendorOfflineHideSec:     [60, 1800],
   maxVendorsPerOrder:       [1, 10],
-  serviceChargeAmount:      [0, 50],
 }
 
 const BOOLEAN_FIELDS = new Set([
   'showVendorWaitTimes',
   'allowGuestBrowse',
   'isPaused',
-  'serviceChargeEnabled',
 ])
 
 // Containment gate (until the admin approval workflow lands): an organizer may set

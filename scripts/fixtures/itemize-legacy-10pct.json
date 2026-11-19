@@ -1,0 +1,292 @@
+{
+  "note": "itemizeOrder output for the six 10% baseline orders (feeModel null), recorded 2026-11-18 on fees-3-4 BEFORE stage 3 code. Never re-record to make a run pass.",
+  "results": {
+    "booth 0.29": {
+      "input": {
+        "fulfillmentType": "BOOTH_PICKUP",
+        "subtotal": 0.29,
+        "fairSynqFee": 0.03,
+        "deliveryFee": null,
+        "serviceCharge": null,
+        "tip": null,
+        "total": 0.32,
+        "orderItems": [
+          {
+            "vendorId": "v0",
+            "subtotal": 0.29,
+            "vendor": {
+              "name": "Vendor 0"
+            }
+          }
+        ],
+        "refunds": []
+      },
+      "itemization": {
+        "charges": [
+          {
+            "key": "subtotal",
+            "label": "Subtotal",
+            "cents": 29
+          },
+          {
+            "key": "service_fee",
+            "label": "Service fee",
+            "cents": 3
+          }
+        ],
+        "totalCents": 32,
+        "linesSumCents": 32,
+        "reconciles": true,
+        "refunds": [],
+        "refundedCents": 0,
+        "processingCents": 0,
+        "fullCancel": false,
+        "serviceFeeKept": null,
+        "netPaidCents": 32,
+        "refundSummary": ""
+      }
+    },
+    "booth 4.35": {
+      "input": {
+        "fulfillmentType": "BOOTH_PICKUP",
+        "subtotal": 4.35,
+        "fairSynqFee": 0.44,
+        "deliveryFee": null,
+        "serviceCharge": null,
+        "tip": null,
+        "total": 4.79,
+        "orderItems": [
+          {
+            "vendorId": "v0",
+            "subtotal": 4.35,
+            "vendor": {
+              "name": "Vendor 0"
+            }
+          }
+        ],
+        "refunds": []
+      },
+      "itemization": {
+        "charges": [
+          {
+            "key": "subtotal",
+            "label": "Subtotal",
+            "cents": 435
+          },
+          {
+            "key": "service_fee",
+            "label": "Service fee",
+            "cents": 44
+          }
+        ],
+        "totalCents": 479,
+        "linesSumCents": 479,
+        "reconciles": true,
+        "refunds": [],
+        "refundedCents": 0,
+        "processingCents": 0,
+        "fullCancel": false,
+        "serviceFeeKept": null,
+        "netPaidCents": 479,
+        "refundSummary": ""
+      }
+    },
+    "booth 15.25": {
+      "input": {
+        "fulfillmentType": "BOOTH_PICKUP",
+        "subtotal": 15.25,
+        "fairSynqFee": 1.53,
+        "deliveryFee": null,
+        "serviceCharge": null,
+        "tip": null,
+        "total": 16.78,
+        "orderItems": [
+          {
+            "vendorId": "v0",
+            "subtotal": 15.25,
+            "vendor": {
+              "name": "Vendor 0"
+            }
+          }
+        ],
+        "refunds": []
+      },
+      "itemization": {
+        "charges": [
+          {
+            "key": "subtotal",
+            "label": "Subtotal",
+            "cents": 1525
+          },
+          {
+            "key": "service_fee",
+            "label": "Service fee",
+            "cents": 153
+          }
+        ],
+        "totalCents": 1678,
+        "linesSumCents": 1678,
+        "reconciles": true,
+        "refunds": [],
+        "refundedCents": 0,
+        "processingCents": 0,
+        "fullCancel": false,
+        "serviceFeeKept": null,
+        "netPaidCents": 1678,
+        "refundSummary": ""
+      }
+    },
+    "booth 50.00": {
+      "input": {
+        "fulfillmentType": "BOOTH_PICKUP",
+        "subtotal": 50,
+        "fairSynqFee": 5,
+        "deliveryFee": null,
+        "serviceCharge": null,
+        "tip": null,
+        "total": 55,
+        "orderItems": [
+          {
+            "vendorId": "v0",
+            "subtotal": 50,
+            "vendor": {
+              "name": "Vendor 0"
+            }
+          }
+        ],
+        "refunds": []
+      },
+      "itemization": {
+        "charges": [
+          {
+            "key": "subtotal",
+            "label": "Subtotal",
+            "cents": 5000
+          },
+          {
+            "key": "service_fee",
+            "label": "Service fee",
+            "cents": 500
+          }
+        ],
+        "totalCents": 5500,
+        "linesSumCents": 5500,
+        "reconciles": true,
+        "refunds": [],
+        "refundedCents": 0,
+        "processingCents": 0,
+        "fullCancel": false,
+        "serviceFeeKept": null,
+        "netPaidCents": 5500,
+        "refundSummary": ""
+      }
+    },
+    "booth two vendors 30.00 + 20.00": {
+      "input": {
+        "fulfillmentType": "BOOTH_PICKUP",
+        "subtotal": 50,
+        "fairSynqFee": 5,
+        "deliveryFee": null,
+        "serviceCharge": null,
+        "tip": null,
+        "total": 55,
+        "orderItems": [
+          {
+            "vendorId": "v0",
+            "subtotal": 30,
+            "vendor": {
+              "name": "Vendor 0"
+            }
+          },
+          {
+            "vendorId": "v1",
+            "subtotal": 20,
+            "vendor": {
+              "name": "Vendor 1"
+            }
+          }
+        ],
+        "refunds": []
+      },
+      "itemization": {
+        "charges": [
+          {
+            "key": "subtotal",
+            "label": "Subtotal",
+            "cents": 5000
+          },
+          {
+            "key": "service_fee",
+            "label": "Service fee",
+            "cents": 500
+          }
+        ],
+        "totalCents": 5500,
+        "linesSumCents": 5500,
+        "reconciles": true,
+        "refunds": [],
+        "refundedCents": 0,
+        "processingCents": 0,
+        "fullCancel": false,
+        "serviceFeeKept": null,
+        "netPaidCents": 5500,
+        "refundSummary": ""
+      }
+    },
+    "curbside 10.00, fee 3.00, tip 2.00": {
+      "input": {
+        "fulfillmentType": "CURBSIDE",
+        "subtotal": 10,
+        "fairSynqFee": 1,
+        "deliveryFee": 3,
+        "serviceCharge": null,
+        "tip": 2,
+        "total": 16,
+        "orderItems": [
+          {
+            "vendorId": "v0",
+            "subtotal": 10,
+            "vendor": {
+              "name": "Vendor 0"
+            }
+          }
+        ],
+        "refunds": []
+      },
+      "itemization": {
+        "charges": [
+          {
+            "key": "subtotal",
+            "label": "Subtotal",
+            "cents": 1000
+          },
+          {
+            "key": "delivery_fee",
+            "label": "Curbside fee",
+            "cents": 300
+          },
+          {
+            "key": "tip",
+            "label": "Tip",
+            "cents": 200
+          },
+          {
+            "key": "service_fee",
+            "label": "Service fee",
+            "cents": 100
+          }
+        ],
+        "totalCents": 1600,
+        "linesSumCents": 1600,
+        "reconciles": true,
+        "refunds": [],
+        "refundedCents": 0,
+        "processingCents": 0,
+        "fullCancel": false,
+        "serviceFeeKept": null,
+        "netPaidCents": 1600,
+        "refundSummary": ""
+      }
+    }
+  }
+}
