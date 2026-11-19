@@ -67,6 +67,7 @@ export function owedBackCandidateWhere(): Prisma.OrderWhereInput {
     status: 'CANCELLED',
     OR: [{ tip: { gt: 0 } }, { deliveryFee: { gt: 0 }, cancelledAt: { gte: OWED_BACK_FEE_FROM } }],
     runnerEarning: { is: null },
+    partnerEarning: { is: null }, // item 10 stage 4: a held PartnerEarning means the partner earned it
     tipRefundId: null,
     voidedAt: null,
     NOT: { owedBackHalt: { is: { resolvedAt: { not: null } } } },
@@ -101,6 +102,7 @@ export async function planTipRefund(orderId: string): Promise<TipRefundPlan> {
     select: {
       id: true, status: true, tip: true, deliveryFee: true, stripeChargeId: true, tipRefundId: true, cancelledAt: true,
       runnerEarning: { select: { id: true } },
+      partnerEarning: { select: { id: true } },
     },
   })
   if (!order) throw new Error(`planTipRefund: order ${orderId} not found`)
@@ -113,7 +115,8 @@ export async function planTipRefund(orderId: string): Promise<TipRefundPlan> {
     tipCents,
     deliveryFeeCents,
     chargeId: order.stripeChargeId ?? null,
-    hasRunnerEarning: !!order.runnerEarning,
+    // A held PartnerEarning (item 10 stage 4, feeModel 2) counts as earned, same as a RunnerEarning.
+    hasRunnerEarning: !!order.runnerEarning || !!order.partnerEarning,
     alreadyRefunded: !!order.tipRefundId,
   }
 
@@ -278,6 +281,11 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
   const earned = await db.runnerEarning.findUnique({ where: { orderId }, select: { id: true } })
   if (earned) {
     logger.warn('[OwedBack] runner earned it between plan and execute — NOT refunding', { orderId })
+    return { orderId, outcome: 'excluded_runner_earned' }
+  }
+  const partnerHeld = await db.partnerEarning.findUnique({ where: { orderId }, select: { id: true } })
+  if (partnerHeld) {
+    logger.warn('[OwedBack] a PartnerEarning is held for it — NOT refunding', { orderId })
     return { orderId, outcome: 'excluded_runner_earned' }
   }
 

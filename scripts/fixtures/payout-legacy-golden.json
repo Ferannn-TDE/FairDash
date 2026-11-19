@@ -1,0 +1,382 @@
+{
+  "note": "Today's payout for old (feeModel null) orders, recorded BEFORE item 10 stage 4 code. Never re-record to make a run pass.",
+  "recordedAt": "2026-11-19T06:23:57.110Z",
+  "results": {
+    "booth one vendor $50": {
+      "result": {
+        "orderId": "ORDER",
+        "stripeFeeCents": 197,
+        "transfers": [
+          {
+            "vendorId": "V0",
+            "amountCents": 4803,
+            "transferId": "TRANSFER"
+          }
+        ],
+        "held": [],
+        "skippedDeclined": [],
+        "blocked": []
+      },
+      "transfers": [
+        {
+          "params": {
+            "amount": 4803,
+            "currency": "usd",
+            "destination": "ACCT0",
+            "source_transaction": "CHARGE",
+            "transfer_group": "order_ORDER",
+            "metadata": {
+              "orderId": "ORDER",
+              "vendorId": "V0"
+            }
+          },
+          "idempotencyKey": "payout_ORDER_V0"
+        }
+      ],
+      "payouts": [
+        {
+          "vendorId": "V0",
+          "grossAmount": 50,
+          "fairSynqFee": 1.97,
+          "netAmount": 48.03,
+          "stripeStatus": "pending",
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "earnings": [
+        {
+          "vendorId": "V0",
+          "subtotalCents": 5000,
+          "status": "paid",
+          "feeShareCents": 197,
+          "netCents": 4803,
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "holds": [],
+      "runnerEarning": null,
+      "organizerEarning": null
+    },
+    "booth two vendors 30 + 20": {
+      "result": {
+        "orderId": "ORDER",
+        "stripeFeeCents": 167,
+        "transfers": [
+          {
+            "vendorId": "V0",
+            "amountCents": 2899,
+            "transferId": "TRANSFER"
+          },
+          {
+            "vendorId": "V1",
+            "amountCents": 1934,
+            "transferId": "TRANSFER"
+          }
+        ],
+        "held": [],
+        "skippedDeclined": [],
+        "blocked": []
+      },
+      "transfers": [
+        {
+          "params": {
+            "amount": 2899,
+            "currency": "usd",
+            "destination": "ACCT0",
+            "source_transaction": "CHARGE",
+            "transfer_group": "order_ORDER",
+            "metadata": {
+              "orderId": "ORDER",
+              "vendorId": "V0"
+            }
+          },
+          "idempotencyKey": "payout_ORDER_V0"
+        },
+        {
+          "params": {
+            "amount": 1934,
+            "currency": "usd",
+            "destination": "ACCT1",
+            "source_transaction": "CHARGE",
+            "transfer_group": "order_ORDER",
+            "metadata": {
+              "orderId": "ORDER",
+              "vendorId": "V1"
+            }
+          },
+          "idempotencyKey": "payout_ORDER_V1"
+        }
+      ],
+      "payouts": [
+        {
+          "vendorId": "V0",
+          "grossAmount": 30,
+          "fairSynqFee": 1.01,
+          "netAmount": 28.99,
+          "stripeStatus": "pending",
+          "stripeTransferId": "TRANSFER"
+        },
+        {
+          "vendorId": "V1",
+          "grossAmount": 20,
+          "fairSynqFee": 0.66,
+          "netAmount": 19.34,
+          "stripeStatus": "pending",
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "earnings": [
+        {
+          "vendorId": "V0",
+          "subtotalCents": 3000,
+          "status": "paid",
+          "feeShareCents": 101,
+          "netCents": 2899,
+          "stripeTransferId": "TRANSFER"
+        },
+        {
+          "vendorId": "V1",
+          "subtotalCents": 2000,
+          "status": "paid",
+          "feeShareCents": 66,
+          "netCents": 1934,
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "holds": [],
+      "runnerEarning": null,
+      "organizerEarning": null
+    },
+    "two vendors, second unconnected (held)": {
+      "result": {
+        "orderId": "ORDER",
+        "stripeFeeCents": 167,
+        "transfers": [
+          {
+            "vendorId": "V0",
+            "amountCents": 2899,
+            "transferId": "TRANSFER"
+          }
+        ],
+        "held": [
+          {
+            "vendorId": "V1",
+            "sliceCents": 1934,
+            "reason": "unconnected"
+          }
+        ],
+        "skippedDeclined": [],
+        "blocked": []
+      },
+      "transfers": [
+        {
+          "params": {
+            "amount": 2899,
+            "currency": "usd",
+            "destination": "ACCT0",
+            "source_transaction": "CHARGE",
+            "transfer_group": "order_ORDER",
+            "metadata": {
+              "orderId": "ORDER",
+              "vendorId": "V0"
+            }
+          },
+          "idempotencyKey": "payout_ORDER_V0"
+        }
+      ],
+      "payouts": [
+        {
+          "vendorId": "V0",
+          "grossAmount": 30,
+          "fairSynqFee": 1.01,
+          "netAmount": 28.99,
+          "stripeStatus": "pending",
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "earnings": [
+        {
+          "vendorId": "V0",
+          "subtotalCents": 3000,
+          "status": "paid",
+          "feeShareCents": 101,
+          "netCents": 2899,
+          "stripeTransferId": "TRANSFER"
+        },
+        {
+          "vendorId": "V1",
+          "subtotalCents": 2000,
+          "status": "accrued",
+          "feeShareCents": null,
+          "netCents": null,
+          "stripeTransferId": null
+        }
+      ],
+      "holds": [
+        {
+          "vendorId": "V1",
+          "amountCents": 1934,
+          "reason": "unconnected",
+          "resolved": false
+        }
+      ],
+      "runnerEarning": null,
+      "organizerEarning": null
+    },
+    "two vendors, second REFUNDED (skipped)": {
+      "result": {
+        "orderId": "ORDER",
+        "stripeFeeCents": 167,
+        "transfers": [
+          {
+            "vendorId": "V0",
+            "amountCents": 2899,
+            "transferId": "TRANSFER"
+          }
+        ],
+        "held": [],
+        "skippedDeclined": [
+          {
+            "vendorId": "V1",
+            "sliceCents": 1934
+          }
+        ],
+        "blocked": []
+      },
+      "transfers": [
+        {
+          "params": {
+            "amount": 2899,
+            "currency": "usd",
+            "destination": "ACCT0",
+            "source_transaction": "CHARGE",
+            "transfer_group": "order_ORDER",
+            "metadata": {
+              "orderId": "ORDER",
+              "vendorId": "V0"
+            }
+          },
+          "idempotencyKey": "payout_ORDER_V0"
+        }
+      ],
+      "payouts": [
+        {
+          "vendorId": "V0",
+          "grossAmount": 30,
+          "fairSynqFee": 1.01,
+          "netAmount": 28.99,
+          "stripeStatus": "pending",
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "earnings": [
+        {
+          "vendorId": "V0",
+          "subtotalCents": 3000,
+          "status": "paid",
+          "feeShareCents": 101,
+          "netCents": 2899,
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "holds": [],
+      "runnerEarning": null,
+      "organizerEarning": null
+    },
+    "one vendor under an admin hold (blocked)": {
+      "result": {
+        "orderId": "ORDER",
+        "stripeFeeCents": 197,
+        "transfers": [],
+        "held": [],
+        "skippedDeclined": [],
+        "blocked": [
+          {
+            "vendorId": "V0",
+            "sliceCents": 4803,
+            "reason": "admin_hold"
+          }
+        ]
+      },
+      "transfers": [],
+      "payouts": [],
+      "earnings": [
+        {
+          "vendorId": "V0",
+          "subtotalCents": 5000,
+          "status": "held",
+          "feeShareCents": null,
+          "netCents": null,
+          "stripeTransferId": null
+        }
+      ],
+      "holds": [],
+      "runnerEarning": null,
+      "organizerEarning": null
+    },
+    "curbside delivered, fee 3.99 + tip 2": {
+      "result": {
+        "orderId": "ORDER",
+        "stripeFeeCents": 210,
+        "transfers": [
+          {
+            "vendorId": "V0",
+            "amountCents": 4790,
+            "transferId": "TRANSFER"
+          }
+        ],
+        "held": [],
+        "skippedDeclined": [],
+        "blocked": []
+      },
+      "transfers": [
+        {
+          "params": {
+            "amount": 4790,
+            "currency": "usd",
+            "destination": "ACCT0",
+            "source_transaction": "CHARGE",
+            "transfer_group": "order_ORDER",
+            "metadata": {
+              "orderId": "ORDER",
+              "vendorId": "V0"
+            }
+          },
+          "idempotencyKey": "payout_ORDER_V0"
+        }
+      ],
+      "payouts": [
+        {
+          "vendorId": "V0",
+          "grossAmount": 50,
+          "fairSynqFee": 2.1,
+          "netAmount": 47.9,
+          "stripeStatus": "pending",
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "earnings": [
+        {
+          "vendorId": "V0",
+          "subtotalCents": 5000,
+          "status": "paid",
+          "feeShareCents": 210,
+          "netCents": 4790,
+          "stripeTransferId": "TRANSFER"
+        }
+      ],
+      "holds": [],
+      "runnerEarning": {
+        "runnerId": "RUNNER",
+        "amountCents": 400,
+        "status": "tracked"
+      },
+      "organizerEarning": {
+        "organizerId": "ORGANIZER",
+        "amountCents": 199,
+        "source": "curbside_fee_share",
+        "status": "accrued"
+      }
+    }
+  }
+}

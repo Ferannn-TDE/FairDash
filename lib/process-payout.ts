@@ -36,6 +36,8 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { splitStripeFee } from './payout-split'
+import { ensureOrderFeeSplit } from './fee-split'
+import { FEE_MODEL_EXHIBIT_A, type CardFeesPaidBy } from './fees/exhibit-a'
 import { logger } from './logger'
 import { classifyStripeError, type StripeFailureVerdict } from './stripe-error-class'
 
@@ -321,6 +323,9 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       stripeChargeId: true,
       stripePaymentIntentId: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
+      // Item 10 stage 4: the fee model decides the split (null = today's legacy split, unchanged).
+      feeModel: true,
+      cardFeesPaidBy: true,
     },
   })
   if (!order) throw new Error(`processOrderPayout: order ${orderId} not found`)
@@ -374,7 +379,17 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   }
 
   // ── Proportional fee split (Σ feeShare === stripeFee exactly) ─────────────
-  const lines = splitStripeFee(vendorSubtotalsCents, stripeFeeCents)
+  // feeModel null (legacy): today's split, unchanged — vendors carry the whole fee by food share.
+  // feeModel 2 (Exhibit A, item 10 stage 4): each party carries its own processing; the split is
+  // computed ONCE at the first run and stored (lib/fee-split.ts), and every run pays from it.
+  const exhibitA = order.feeModel === FEE_MODEL_EXHIBIT_A
+    ? await ensureOrderFeeSplit({
+        orderId, eventId: order.eventId, vendorFoodCents: vendorSubtotalsCents,
+        serviceFeeCents, runnerFeeCents: deliveryCents, tipCents,
+        cardFeesPaidBy: (order.cardFeesPaidBy ?? 'VENDOR') as CardFeesPaidBy, realStripeFeeCents: stripeFeeCents,
+      })
+    : null
+  const lines = exhibitA ? exhibitA.lines : splitStripeFee(vendorSubtotalsCents, stripeFeeCents)
 
   const vendorIds = lines.map(l => l.vendorId)
   const [vendors, statuses, earnings, existingPayouts] = await Promise.all([
@@ -466,7 +481,12 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   //   not transferred in this phase). Runner/organizer payouts are Part B.
   //   blocked is retained in the platform balance under admin control — it MUST be
   //   in the identity, or an admin hold would look like money that vanished.
-  const payoutSide = sentCents + alreadyPaidCents + heldCents + blockedCents + skippedCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + stripeFeeCents
+  // feeModel 2: FairSynq keeps its NET (service fee − its processing share), the partner's curbside
+  // fee + tip sit HELD net of its share (PartnerEarning), and the stored split's fee is the real fee.
+  const payoutSide = sentCents + alreadyPaidCents + heldCents + blockedCents + skippedCents + serviceChargeCents
+    + (exhibitA
+      ? exhibitA.fairsynqNetCents + exhibitA.partnerNetCents + exhibitA.realStripeFeeCents
+      : serviceFeeCents + deliveryCents + tipCents + stripeFeeCents)
   if (payoutSide !== totalCents) {
     throw new PayoutReconciliationError(
       `order ${orderId}: payout-side mismatch — ${payoutSide}¢ ≠ charge ${totalCents}¢ (sent ${sentCents}, alreadyPaid ${alreadyPaidCents}, held ${heldCents}, blocked ${blockedCents}, skipped ${skippedCents}, serviceFee ${serviceFeeCents}, delivery ${deliveryCents}, serviceCharge ${serviceChargeCents}, tip ${tipCents}, stripeFee ${stripeFeeCents})`,

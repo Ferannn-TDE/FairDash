@@ -19,6 +19,10 @@
  *       actually receive". The estimate must therefore be ≥ the real fee, so take-home is
  *       under-stated, never over-stated. Lowering a constant or dropping the ceil breaks it.
  *
+ * UPDATED 2026-11-19 (item 10 stage 4): feeModel 2 (Exhibit A) orders are estimated and paid with
+ * the Exhibit A weights instead of splitStripeFee. [5] holds the same three properties for them,
+ * with a planted break; [1]–[4] stay as the legacy (feeModel null) half.
+ *
  * Pure logic/file reader — no DB, no Stripe, no network. Scoped to the two modules it names.
  * Run:  npx tsx scripts/vendor-fee-coupling-guard.ts
  */
@@ -32,6 +36,8 @@ import {
   type OrderForEarnings,
 } from '../lib/vendor-earnings'
 import { splitStripeFee } from '../lib/payout-split'
+import { estimateExhibitAVendorShareCents } from '../lib/vendor-earnings'
+import { planExhibitAPayout, nominalWeights } from '../lib/fees/exhibit-a'
 import { stripComments } from './_strip-comments'
 
 let pass = 0, fail = 0
@@ -83,6 +89,7 @@ for (const total of [500, 1_000, 2_599, 5_000, 12_345, 100_000]) {
 const order = (payoutNet?: number): OrderForEarnings => ({
   total: 50,
   status: 'COMPLETED',
+  feeModel: null, cardFeesPaidBy: null,
   orderItems: [{ vendorId: 'v1', subtotal: 50 }],
   payouts: payoutNet == null ? [] : [{ vendorId: 'v1', netAmount: payoutNet, reversedAt: null, stripeTransferId: 'tr_realLookingId_000000001' }],
   refunds: [], vendorOrderStatuses: [{ vendorId: 'v1', status: 'COMPLETED' }],
@@ -102,6 +109,63 @@ assert(!/Math\.ceil\(orderTotalCents \* 0\.029\)/.test(earnings),
   'the inline literal form is gone (it was unfindable by anyone auditing the fee model)')
 assert(/scripts\/vendor-fee-coupling-guard/.test(readFileSync('lib/vendor-earnings.ts', 'utf8')),
   'and the constants point at this guard, so the reasoning is findable from the value')
+
+console.log('\n[5] feeModel 2 (Exhibit A): same weights both sides, vendor bears its share, estimate conservative')
+const feeSplit = stripComments(readFileSync('lib/fee-split.ts', 'utf8'))
+assert(/nominalWeights\(/.test(earnings), 'vendor-earnings estimates a feeModel 2 share with nominalWeights (the payout\'s weights)')
+assert(/planExhibitAPayout\(/.test(feeSplit) && /ensureOrderFeeSplit\(/.test(payout),
+  'the payout splits a feeModel 2 REAL fee with planExhibitAPayout (via ensureOrderFeeSplit), which weights with nominalWeights')
+assert(/order\.feeModel === FEE_MODEL_EXHIBIT_A/.test(earnings) && /order\.feeModel === FEE_MODEL_EXHIBIT_A/.test(payout),
+  'both sides branch on the order\'s stored feeModel (never today\'s setting)')
+const booth = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 197, cardFeesPaidBy: 'VENDOR' })
+assert(booth.vendorPayoutCents.v1 === 5000 - booth.feeShares.v1 && booth.feeShares.v1 > 0,
+  'VENDOR mode: the vendor is paid food MINUS its share (the estimate deducts a share for the same reason)')
+const plat = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 197, cardFeesPaidBy: 'PLATFORM' })
+assert(plat.vendorPayoutCents.v1 === 5000, 'PLATFORM mode: the vendor is paid the full food, so its estimate deducts nothing')
+const m2 = (cardFeesPaidBy: string, payoutNet?: number): OrderForEarnings => ({
+  total: 57.50, status: 'COMPLETED', feeModel: 2, cardFeesPaidBy,
+  orderItems: [{ vendorId: 'v1', subtotal: 50 }],
+  payouts: payoutNet == null ? [] : [{ vendorId: 'v1', netAmount: payoutNet, reversedAt: null, stripeTransferId: 'tr_realLookingId_000000002' }],
+  refunds: [], vendorOrderStatuses: [{ vendorId: 'v1', status: 'COMPLETED' }],
+})
+const est2 = computeVendorOrderEarnings(m2('VENDOR'), 'v1').cents
+console.log(`     $50 booth, feeModel 2: estimated ${est2}¢ ≤ real payout ${booth.vendorPayoutCents.v1}¢ (real fee 197¢)`)
+assert(est2 <= booth.vendorPayoutCents.v1 && est2 >= booth.vendorPayoutCents.v1 - 1, '$50 booth: estimate ≤ the real 4825¢ and within 1¢ of it')
+assert(computeVendorOrderEarnings(m2('PLATFORM'), 'v1').cents === 5000, 'PLATFORM: the estimate is exact (5000¢)')
+assert(computeVendorOrderEarnings(m2('VENDOR', 48.25), 'v1').cents === 4825, 'after payout the settled figure is the real one')
+// Conservative for EVERY real fee up to the prediction, on random multi-vendor orders.
+// The PROBE: an estimator rounding DOWN instead of up must be caught by the same loop (planted break).
+const floorEst = (food: Record<string, number>, total: number, id: string) => {
+  const parties = nominalWeights({ vendorFoodCents: food, serviceFeeCents: total - Object.values(food).reduce((a, b) => a + b, 0), curbsideFeeCents: 0, tipCents: 0 })
+  const W = parties.reduce((a, p) => a + p.weight, 0)
+  return Math.floor(estimateStripeFeeCents(total) * parties.find(p => p.key === id)!.weight / W)
+}
+let seed = 42
+const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n }
+let checked = 0, over = 0, plantedCaught = 0
+for (let t = 0; t < 600; t++) {
+  const nV = 1 + rnd(5)
+  const food: Record<string, number> = {}
+  for (let i = 0; i < nV; i++) food[`v${i}`] = 100 + rnd(8000)
+  const F = Object.values(food).reduce((a, b) => a + b, 0)
+  const service = Math.floor(F * 0.15 + 0.5), curb = rnd(2) ? 399 : 0, tip = curb ? rnd(800) : 0
+  const total = F + service + curb + tip
+  const P = estimateStripeFeeCents(total)
+  for (const realFee of [P, P - 1, Math.floor(P * 0.9), rnd(P + 1)]) {
+    const plan = planExhibitAPayout({ vendorFoodCents: food, serviceFeeCents: service, curbsideFeeCents: curb, tipCents: tip, realStripeFeeCents: realFee, cardFeesPaidBy: 'VENDOR' })
+    for (const id of Object.keys(food)) {
+      checked++
+      if (food[id] - estimateExhibitAVendorShareCents(food, total, id) > plan.vendorPayoutCents[id]) over++
+      if (food[id] - floorEst(food, total, id) > plan.vendorPayoutCents[id]) plantedCaught++
+    }
+  }
+}
+console.log(`     ${checked} vendor slices, real fee ≤ prediction: ${over} estimates above the real payout; planted floor-rounding: ${plantedCaught}`)
+assert(plantedCaught > 0, '[0] planted break: a ROUND-DOWN estimator is caught by this loop (the probe can fail)')
+assert(over === 0, '⛔ feeModel 2: estimated take-home ≤ real payout whenever the real fee ≤ the prediction')
+// Documented, not hidden: a fee ABOVE the prediction can pay below the estimate (the wording says so).
+const hi = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 260, cardFeesPaidBy: 'VENDOR' })
+assert(hi.vendorPayoutCents.v1 < est2, `a 260¢ fee (above the 197¢ prediction) pays ${hi.vendorPayoutCents.v1}¢ < estimate ${est2}¢ — the case the "some cards cost more" wording covers`)
 
 console.log(`\n${'─'.repeat(52)}`)
 console.log(fail === 0 ? `✅ vendor-fee-coupling-guard: ${pass} passed, 0 failed` : `❌ vendor-fee-coupling-guard: ${pass} passed, ${fail} failed`)

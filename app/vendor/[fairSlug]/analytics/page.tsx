@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline'
 import EarningsChart, { type ChartDataPoint, type ChartPeriod } from '@/app/_components/EarningsChart'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
+import { PENDING_ESTIMATE_NOTE } from '@/lib/vendor-estimate-copy'
 
 interface AnalyticsData {
   chartData: ChartDataPoint[]
@@ -151,7 +152,7 @@ export default function VendorAnalyticsPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
               { label: 'Earned (settled)', value: `$${(analytics.earned ?? 0).toFixed(2)}`, note: 'in your Stripe balance' },
-              { label: 'Pending (est.)',   value: `~$${(analytics.pending ?? 0).toFixed(2)}`, note: 'not yet transferred' },
+              { label: 'Pending (est.)',   value: `~$${(analytics.pending ?? 0).toFixed(2)}`, note: PENDING_ESTIMATE_NOTE },
               { label: 'Gross Sales',      value: `$${(analytics.totalRevenue ?? 0).toFixed(2)}`, note: 'customer-paid subtotals' },
               { label: 'Total Orders',     value: String(analytics.totalOrders ?? 0) },
             ].map(({ label, value, note }) => (

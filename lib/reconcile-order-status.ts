@@ -208,7 +208,7 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     select: {
       id: true, status: true, fulfillmentType: true, eventId: true,
       vendorId: true, customerId: true, runnerId: true,
-      deliveryProofPath: true, voidedAt: true, deliveryFee: true, tip: true,
+      deliveryProofPath: true, voidedAt: true, deliveryFee: true, tip: true, feeModel: true,
       vendorOrderStatuses: { select: { status: true, vendorId: true } },
     },
   })
@@ -429,7 +429,10 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
     }
   }
 
-  if (target === 'DELIVERED' && order.runnerId && ((order.deliveryFee ?? 0) > 0 || (order.tip ?? 0) > 0)) {
+  // Item 10 stage 4 (S4-Q3): a feeModel 2 (Exhibit A) order NEVER accrues the old runner/organizer
+  // split. Its curbside fee + tip (less their card-fee share) is held as ONE PartnerEarning, written
+  // with the order's fee split at payout (lib/fee-split.ts). Accruing here too would pay it twice.
+  if (target === 'DELIVERED' && order.feeModel !== 2 && order.runnerId && ((order.deliveryFee ?? 0) > 0 || (order.tip ?? 0) > 0)) {
     // CRITICAL money move (Phase 4) — RECORD runner + organizer earnings. The
     // runner-fulfilled fee (delivery OR curbside, in deliveryFee) splits
     // runner/organizer by runnerFeePercent (sums exactly via splitRunnerFee); the

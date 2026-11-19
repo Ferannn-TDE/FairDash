@@ -79,7 +79,7 @@ export async function computeFairReport(eventId: string): Promise<FairReport> {
     db.order.findMany({
       where: { eventId, voidedAt: null },
       select: {
-        id: true, total: true, fairSynqFee: true, status: true,
+        id: true, total: true, fairSynqFee: true, status: true, feeModel: true, cardFeesPaidBy: true,
         orderItems: { select: { vendorId: true, subtotal: true } },
         payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
         refunds: { select: { vendorId: true, status: true, amountCents: true } },
@@ -126,6 +126,7 @@ export async function computeFairReport(eventId: string): Promise<FairReport> {
     // being handed to the earnings helper, so the helper could not apply the unpaid invariant
     // and PENDING_PAYMENT orders were counted as estimated take-home.
     status: o.status,
+    feeModel: o.feeModel, cardFeesPaidBy: o.cardFeesPaidBy,
     orderItems: o.orderItems,
     payouts: o.payouts,
     refunds: o.refunds,

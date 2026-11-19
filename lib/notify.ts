@@ -164,3 +164,13 @@ export async function notifyOrderingPaused(detail: { missing: string[]; invalid:
   ].filter(Boolean).join('; ')
   await postToSlack(`🚨 *Ordering is paused* — the fee settings can't be read (${what}). Checkout returns 503 until they're fixed in /admin/settings.`)
 }
+
+/**
+ * ALERT: delivered feeModel 2 orders whose fee split exists but whose held PartnerEarning doesn't
+ * (item 10 stage 4, reconciler Pattern L check 3). Rate-limited by lib/partner-earning-alert.ts: once per
+ * order per 24 hours, and sent anyway when Redis is down.
+ */
+export async function notifyPartnerEarningMissing(orderIds: string[]): Promise<void> {
+  logger.error('[CRITICAL] PartnerEarning missing on delivered feeModel 2 orders', { count: orderIds.length, orderIds })
+  await postToSlack(`🔴 *Partner earning missing* — ${orderIds.length} delivered order(s) have a fee split but no held partner earning: ${orderIds.slice(0, 10).join(', ')}${orderIds.length > 10 ? ' …' : ''}`)
+}

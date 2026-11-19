@@ -22,6 +22,7 @@
  */
 
 import { splitStripeFee } from './payout-split'
+import { nominalWeights, FEE_MODEL_EXHIBIT_A } from './fees/exhibit-a'
 import { isPollutedTransfer } from './pollution-cohort'
 import { isPaidOrderStatus } from './order-status'
 
@@ -67,6 +68,12 @@ export interface OrderForEarnings {
   payouts: { vendorId: string; netAmount: number; reversedAt: Date | null; stripeTransferId: string }[]
   refunds: { vendorId: string; status: string; amountCents: number }[]
   vendorOrderStatuses: { vendorId: string; status: string }[]
+  /**
+   * Item 10 stage 4 — REQUIRED for the same reason `status` is: without them the helper would
+   * quietly estimate a feeModel 2 order with the legacy split. null = legacy (today's 10% model).
+   */
+  feeModel: number | null
+  cardFeesPaidBy: string | null
 }
 
 const c = (n: number) => Math.round(n * 100)
@@ -106,6 +113,33 @@ export const STRIPE_FEE_FIXED_CENTS = 30 // US card standard, per-charge compone
 export function estimateStripeFeeCents(orderTotalCents: number): number {
   if (orderTotalCents <= 0) return 0
   return Math.ceil(orderTotalCents * STRIPE_FEE_PCT) + STRIPE_FEE_FIXED_CENTS
+}
+
+/**
+ * Item 10 stage 4 (S4-Q3, option a): a feeModel 2 vendor's ESTIMATED processing share.
+ *
+ * Same prediction as legacy (estimateStripeFeeCents: 2.9% rounded up + 30¢ on the charge), split
+ * with the Exhibit A weights the real payout uses (nominalWeights), then ROUNDED UP per vendor:
+ * ceil(prediction × w_vendor / W). The real payout splits the REAL fee by largest remainder, which
+ * gives each party at most ceil(real × w / W). So whenever the real fee ≤ the prediction, the real
+ * share ≤ this one and the vendor is paid at least the estimate. A card that costs more than the
+ * prediction (some international cards) can pay below it — hence the wording on the surfaces.
+ *
+ * Only the vendor weights and their SUM matter here, and FairSynq's and the partner's weights share
+ * one rate, so everything that isn't food goes in as one non-food amount (total − food).
+ * In PLATFORM mode FairSynq pays the vendors' processing, so callers use 0 (exact).
+ */
+export function estimateExhibitAVendorShareCents(
+  vendorFoodCents: Record<string, number>, orderTotalCents: number, vendorId: string,
+): number {
+  if (!(vendorFoodCents[vendorId] > 0)) return 0
+  const food = Object.values(vendorFoodCents).reduce((a, b) => a + b, 0)
+  const nonFood = Math.max(0, orderTotalCents - food)
+  const parties = nominalWeights({ vendorFoodCents, serviceFeeCents: nonFood, curbsideFeeCents: 0, tipCents: 0 })
+  const W = parties.reduce((a, p) => a + BigInt(p.weight), BigInt(0))
+  const w = BigInt(parties.find(p => p.key === vendorId)!.weight)
+  const P = BigInt(estimateStripeFeeCents(orderTotalCents))
+  return Number((P * w + W - BigInt(1)) / W)
 }
 
 export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: string): VendorOrderEarnings {
@@ -155,7 +189,9 @@ export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: st
     // Estimate: slice − this vendor's share of the estimated Stripe fee, split
     // proportionally with the SAME function the real payout uses.
     const estFeeTotal = estimateStripeFeeCents(c(order.total))
-    const feeShare = splitStripeFee(vendorSubtotalsCents, estFeeTotal).find(l => l.vendorId === vendorId)?.feeShareCents ?? 0
+    const feeShare = order.feeModel === FEE_MODEL_EXHIBIT_A
+      ? (order.cardFeesPaidBy === 'PLATFORM' ? 0 : estimateExhibitAVendorShareCents(vendorSubtotalsCents, c(order.total), vendorId))
+      : splitStripeFee(vendorSubtotalsCents, estFeeTotal).find(l => l.vendorId === vendorId)?.feeShareCents ?? 0
     base = Math.max(0, sliceCents - feeShare)
     status = 'estimated'
   }

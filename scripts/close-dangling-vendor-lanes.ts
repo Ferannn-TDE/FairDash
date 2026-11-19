@@ -38,7 +38,7 @@ const money = (c: number) => `$${(c / 100).toFixed(2)}`
 const short = (id: string) => '#' + id.slice(-8).toUpperCase()
 
 const ORDER_SELECT = {
-  id: true, status: true, total: true,
+  id: true, status: true, total: true, feeModel: true, cardFeesPaidBy: true,
   orderItems: { select: { vendorId: true, subtotal: true } },
   payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
   refunds: { select: { vendorId: true, status: true, amountCents: true } },

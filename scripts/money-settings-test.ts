@@ -126,9 +126,10 @@ async function main() {
   }
   // Updated 2026-11-18 (item 10 stage 3): checkout reads the three price keys, so their notes are gone;
   // the card-fee note stays until the stage 4 payout reads it.
-  assert(S['fees.cardFeesPaidBy'].notInEffect === NOTES['fees.cardFeesPaidBy']
-    && ['fees.serviceFee.percentBps', 'fees.serviceFee.flatCents', 'fees.curbsideRunnerFeeCents'].every(k => !S[k].notInEffect),
-    'the card-fee card keeps its approved amber note word for word; the three price cards have none (stage 3)')
+  // Updated 2026-11-19 (item 10 stage 4): the payout splits by the card-fee snapshot, so that note is gone too.
+  void NOTES
+  assert(['fees.serviceFee.percentBps', 'fees.serviceFee.flatCents', 'fees.curbsideRunnerFeeCents', 'fees.cardFeesPaidBy'].every(k => !S[k].notInEffect),
+    'no money card has an amber note: the three price cards since stage 3, card fees since stage 4')
   assert(money.centsToText(399) === '3.99' && money.centsToText(0) === '0.00' && money.bpsToText(1250) === '12.5' && money.bpsToText(1500) === '15',
     'the form shows stored values as editable text (399 → 3.99, 1250 → 12.5)')
   let refusedAll = true
@@ -374,13 +375,20 @@ async function main() {
   const READ = /getMoneySettings\(|(?<!fees\.)\b(feeModel|serviceFeeBps|serviceFeeFlatCents|cardFeesPaidBy)\b|lib\/fees\/exhibit-a/
   assert(READ.test('const t = await getMoneySettings()') && READ.test('if (order.feeModel === 2)') && !READ.test("key: 'fees.cardFeesPaidBy'"),
     '[0] control: the scanner finds a planted call and a planted column read, and ignores the settings key name')
-  // Stage 3 readers: the order route and the fair payload (via fee-terms), and the one calculator (lib/checkout-total.ts).
-  const ALLOWED = new Set(['lib/settings.ts', 'lib/fees/exhibit-a.ts', 'app/api/orders/route.ts', 'lib/fees/fee-terms.ts', 'lib/checkout-total.ts'])
-  const readers = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd(), d)))
-    .map(f => relative(process.cwd(), f).split(sep).join('/'))
-    .filter(f => !ALLOWED.has(f))
-    .filter(f => READ.test(readFileSync(f, 'utf8').split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')))
-  assert(readers.length === 0, `only the order route and the fair payload read the money settings; payouts, refunds and the worker read neither them nor the snapshot columns (others found: ${readers.join(', ') || 'none'})`)
+  // Stage 3 readers: the order route and the fair payload (via fee-terms); the one calculator (lib/checkout-total.ts) takes the terms as input.
+  // Updated 2026-11-19 (item 10 stage 4): the PAYOUT side now reads the order's snapshot columns (fee split,
+  // payout, vendor estimate, accrual skip, reconciler). Two rules remain: (a) only the price side reads the LIVE
+  // money settings (getMoneySettings), so a payout can never use today's setting for an old order; (b) refunds,
+  // chargebacks and the worker entry points read neither (stage 5 isn't built).
+  const code = (f: string) => readFileSync(f, 'utf8').split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const all = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd(), d))).map(f => relative(process.cwd(), f).split(sep).join('/'))
+  const LIVE_ALLOWED = new Set(['lib/settings.ts', 'app/api/orders/route.ts', 'lib/fees/fee-terms.ts'])
+  const liveReaders = all.filter(f => !LIVE_ALLOWED.has(f) && /getMoneySettings\(/.test(code(f)))
+  assert(liveReaders.length === 0, `only the price side reads the live money settings (others found: ${liveReaders.join(', ') || 'none'})`)
+  const NOT_YET = all.filter(f => /^workers\//.test(f) || /(refund|chargeback)/i.test(f.split('/').pop()!))
+  const refundReaders = NOT_YET.filter(f => READ.test(code(f)))
+  assert(NOT_YET.length >= 5 && NOT_YET.includes('lib/process-refund.ts') && NOT_YET.includes('lib/tip-refund.ts'), `[0] control: the refund/worker set is found (${NOT_YET.length} files)`)
+  assert(refundReaders.length === 0, `refunds, chargebacks and the worker read neither the money settings nor the snapshot columns (found: ${refundReaders.join(', ') || 'none'})`)
 }
 
 main()

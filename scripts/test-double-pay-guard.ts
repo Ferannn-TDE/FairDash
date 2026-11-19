@@ -14,6 +14,9 @@
  * PROBE itself: a [0] baseline where a normal accrued slice still classifies 'pay', so the
  * 'already_paid' assertion is meaningfully distinguishing and never vacuous.
  *
+ * [4] (2026-11-19) reads the whole payout identity, so stage 4's feeModel 2 arm can't drop already-paid.
+ * Behavioural re-run (both fee models): scripts/fees-stage4-test.ts [4].
+ *
  * Run:  npx tsx scripts/test-double-pay-guard.ts
  */
 
@@ -77,6 +80,30 @@ function main() {
     'the skip logs at WARN (a prevented double-pay is prod-visible, not swallowed)')
   assert(src.includes('alreadyPaidCents') && /payoutSide = sentCents \+ alreadyPaidCents/.test(src),
     'already-paid cents are on the SENT side of the payout-side reconciliation (Σ === charge holds across re-runs)')
+
+  // ── [4] the identity counts already-paid ONCE, for BOTH fee models (updated 2026-11-19, item 10 stage 4) ──
+  // Stage 4 added a feeModel 2 arm to the identity. The [3] regex only reads the expression's first terms,
+  // so a planted `- (exhibitA ? alreadyPaidCents : 0)` passed it (proven by a plant). This reads the whole
+  // expression: alreadyPaidCents appears exactly once, added, in the part shared by both models.
+  console.log('\n[4] the payout identity counts already-paid cents once, in the shared part (both fee models)')
+  const identityOf = (code: string) => {
+    const m = /const payoutSide =([\s\S]*?)\n\s*if \(payoutSide !== totalCents\)/.exec(code)
+    return m ? m[1].replace(/\s+/g, ' ').trim() : null
+  }
+  const identityOk = (code: string) => {
+    const e = identityOf(code)
+    if (!e) return false
+    const shared = e.split(/\(\s*exhibitA/)[0]
+    return (e.match(/alreadyPaidCents/g) ?? []).length === 1 && /(^|\+ )alreadyPaidCents\b/.test(shared) && !/-\s*alreadyPaidCents/.test(e)
+  }
+  const plantedNeg = src.replace('+ serviceChargeCents\n', '+ serviceChargeCents - (exhibitA ? alreadyPaidCents : 0)\n')
+  const plantedArm = src.replace('const payoutSide = sentCents + alreadyPaidCents + ', 'const payoutSide = sentCents + ').replace(': serviceFeeCents + deliveryCents', ': alreadyPaidCents + serviceFeeCents + deliveryCents')
+  assert(identityOf(src) !== null && plantedNeg !== src && plantedArm !== src, '[0] control: the identity is found and both plants apply')
+  assert(!identityOk(plantedNeg), '[0] control: a feeModel 2 arm that subtracts already-paid is caught')
+  assert(!identityOk(plantedArm), '[0] control: already-paid moved into ONE model\'s arm is caught')
+  assert(identityOk(src), 'already-paid is counted exactly once, added, before the fee-model split (both models hold Σ === charge on re-runs)')
+  // A loop that keeps the text but never skips (e.g. `already_paid && false`) is invisible to a source
+  // read; the behavioural re-run check for that lives in scripts/fees-stage4-test.ts [4].
 
   console.log(`\n${'─'.repeat(52)}`)
   console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)

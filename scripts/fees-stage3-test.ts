@@ -16,7 +16,7 @@
  *   [6] legacy orders: itemizeOrder output identical to the golden recorded before stage 3; the
  *       payout's customer-side identity holds for new and legacy stored orders
  *   [7] copy: the seven approved strings; no "10%" left in them; no page promises a service-fee refund
- *   [8] settings cards: notes only on card fees; the Vendor Agreement line on the three cards
+ *   [8] settings cards: no amber notes on the money cards (card fees' went in stage 4); the Vendor Agreement line on the three cards
  *   END the four money rows are back at 1500 / 0 / 399 / VENDOR
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/fees-stage3-test.ts
@@ -337,9 +337,11 @@ async function main() {
   console.log('\n[8] settings cards')
   const S = settings.SETTINGS as any
   const VA = 'Changing this also requires a new Vendor Agreement version. Talk to your developer first.'
+  // Updated 2026-11-19 (item 10 stage 4): the payout now splits by card fees, so that note is gone too
+  // (scripts/fees-stage4-test.ts [8] and platform-settings-test [7] hold it).
   assert(!S['fees.serviceFee.percentBps'].notInEffect && !S['fees.serviceFee.flatCents'].notInEffect && !S['fees.curbsideRunnerFeeCents'].notInEffect
-    && S['fees.cardFeesPaidBy'].notInEffect === 'Not in effect yet. Today vendors pay the full card processing fee on every order. This value takes effect when the new fees go live.',
-    'amber notes gone from percent, flat and curbside (checkout reads them); the card-fee note stays until stage 4')
+    && !S['fees.cardFeesPaidBy'].notInEffect,
+    'amber notes gone from percent, flat and curbside (checkout reads them) and from card fees (the payout reads it, stage 4)')
   assert(['fees.serviceFee.percentBps', 'fees.serviceFee.flatCents', 'fees.cardFeesPaidBy'].every(k => S[k].help.endsWith(` ${VA}`)) && !S['fees.curbsideRunnerFeeCents'].help.includes(VA),
     'the Vendor Agreement line is on the percent, flat and card-fee cards (not curbside)')
 }

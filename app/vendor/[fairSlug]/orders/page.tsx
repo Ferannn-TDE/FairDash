@@ -12,6 +12,7 @@ import { EarningsBadge } from '@/app/_components/EarningsBadge'
 import { getStatusMeta, TAB_STATUS_MAP } from '@/lib/order-status'
 import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
 import AnimatedPagination from '@/app/_components/ui/AnimatedPagination'
+import { TAKE_HOME_ESTIMATE_NOTE } from '@/lib/vendor-estimate-copy'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,9 @@ function OrderCard({ order }: { order: Order }) {
                 <span className="text-xs text-text-gray">Your Take-Home</span>
                 <EarningsBadge amount={order.earnings} status={order.earningsStatus} />
               </div>
+              {order.earningsStatus === 'estimated' && (
+                <p className="text-[0.6875rem] text-white/40 text-right">{TAKE_HOME_ESTIMATE_NOTE}</p>
+              )}
             </div>
           </div>
 

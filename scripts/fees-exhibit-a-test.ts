@@ -62,8 +62,9 @@ assert(throws(() => splitByLargestRemainder(5, [])) && throws(() => splitByLarge
 
 // ── [3] Exhibit A payouts ────────────────────────────────────────────────────────────────
 console.log('\n[3] Exhibit A payouts')
-const conserved = (p: ReturnType<typeof planExhibitAPayout>, food: number, svc: number, curbFee: number, tip: number, fee: number) =>
-  sum(p.vendorPayoutCents) + p.fairsynqNetCents + p.partnerNetCents + fee === food + svc + curbFee + tip
+// Updated 2026-11-19 (item 10 stage 4, S4-Q2): `tax` joins the customer side (0 when absent).
+const conserved = (p: ReturnType<typeof planExhibitAPayout>, food: number, svc: number, curbFee: number, tip: number, fee: number, tax = 0) =>
+  sum(p.vendorPayoutCents) + p.fairsynqNetCents + p.partnerNetCents + fee === food + tax + svc + curbFee + tip
 
 assert(nominalStripeFee(5750) === 197, 'Stripe fee on a 5750¢ charge = 166.75 + 30 → 197¢')
 const b50 = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 197, cardFeesPaidBy: 'VENDOR' })
@@ -98,8 +99,28 @@ assert(throws(() => planExhibitAPayout({ vendorFoodCents: {}, serviceFeeCents: 0
   throws(() => planExhibitAPayout({ vendorFoodCents: { a: 0 }, serviceFeeCents: 0, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 30, cardFeesPaidBy: 'VENDOR' })),
   'an order with no vendors or no food is refused')
 
+// ── [3b] tax (stage 4, S4-Q2: VENDOR remitter, fed 0 until B1.19 adds tax columns) ──────────
+console.log('\n[3b] Tax rides with the vendor (S4-Q2)')
+assert(nominalStripeFee(6150) === 208, 'Stripe fee on $50 + $4 tax (8%) + $7.50 service = 6150¢ → 208¢')
+const t50 = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, vendorTaxCents: { v1: 400 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 208, cardFeesPaidBy: 'VENDOR' })
+assert(t50.feeShares.v1 === 186 && t50.feeShares[FAIRSYNQ] === 22, '$50 + 8% tax: vendor share 186¢ (2.9% of $54 + 30¢), FairSynq 22¢')
+assert(t50.vendorPayoutCents.v1 === 5214 && t50.fairsynqNetCents === 728, '$50 + 8% tax: vendor paid $52.14 (food + tax − share), FairSynq $7.28')
+assert(conserved(t50, 5000, 750, 0, 0, 208, 400), '$50 + 8% tax: every cent accounted for, tax included')
+const t0 = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, vendorTaxCents: { v1: 0 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 197, cardFeesPaidBy: 'VENDOR' })
+assert(t0.vendorPayoutCents.v1 === 4825 && t0.fairsynqNetCents === 728 && sum(t0.feeShares) === 197 && JSON.stringify(t0) === JSON.stringify(b50),
+  'zero tax is exactly the untaxed plan: 4825 / 728 / 197, byte-identical')
+const t2 = planExhibitAPayout({ vendorFoodCents: { a: 3000, b: 2000 }, vendorTaxCents: { a: 240, b: 0 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: nominalStripeFee(5990), cardFeesPaidBy: 'VENDOR' })
+assert(t2.feeShares.a > two.feeShares.a && t2.vendorPayoutCents.a === 3240 - t2.feeShares.a && t2.vendorPayoutCents.b === 2000 - t2.feeShares.b,
+  '2 vendors, different tax: only the taxed vendor carries the tax\'s processing; each is paid food + own tax − share')
+assert(conserved(t2, 5000, 750, 0, 0, nominalStripeFee(5990), 240), '2 vendors with tax: conserved')
+const tp = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, vendorTaxCents: { v1: 400 }, serviceFeeCents: 750, curbsideFeeCents: 399, tipCents: 0, realStripeFeeCents: nominalStripeFee(6549), cardFeesPaidBy: 'PLATFORM' })
+assert(tp.vendorPayoutCents.v1 === 5400 && conserved(tp, 5000, 750, 399, 0, nominalStripeFee(6549), 400), 'PLATFORM with tax: the vendor gets food + tax in full ($54), conserved')
+assert(throws(() => planExhibitAPayout({ vendorFoodCents: { a: 1000 }, vendorTaxCents: { b: 80 }, serviceFeeCents: 150, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 66, cardFeesPaidBy: 'VENDOR' })) &&
+  throws(() => planExhibitAPayout({ vendorFoodCents: { a: 1000 }, vendorTaxCents: { a: -1 }, serviceFeeCents: 150, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 66, cardFeesPaidBy: 'VENDOR' })),
+  'tax for a vendor with no food, or negative tax, is refused')
+
 // ── [4] property test ────────────────────────────────────────────────────────────────────
-console.log('\n[4] Property test (3,000 random orders)')
+console.log('\n[4] Property test (3,000 random orders, with tax since stage 4)')
 let seed = 20261106
 const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 }
 const int = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1))
@@ -112,21 +133,24 @@ for (let t = 0; t < N; t++) {
   const F = Object.values(food).reduce((s, n) => s + n, 0)
   const svc = serviceFeeCents(F, { serviceFeeBps: int(0, 2500), serviceFeeFlatCents: int(0, 200) })
   const curbFee = rnd() < 0.5 ? 0 : int(0, 600), tip = curbFee === 0 ? 0 : int(0, 2000)
-  const total = F + svc + curbFee + tip
+  const tax: Record<string, number> = {}
+  for (const id of Object.keys(food)) if (rnd() < 0.5) tax[id] = Math.floor(food[id] * int(0, 15000) / 100000 + 0.5)
+  const T = Object.values(tax).reduce((s, n) => s + n, 0)
+  const total = F + T + svc + curbFee + tip
   const fee = rnd() < 0.2 ? int(0, 40) : Math.max(0, Math.round(nominalStripeFee(total) * (0.6 + rnd() * 0.8)))
-  const input = { vendorFoodCents: food, serviceFeeCents: svc, curbsideFeeCents: curbFee, tipCents: tip, realStripeFeeCents: fee, cardFeesPaidBy: (rnd() < 0.5 ? 'VENDOR' : 'PLATFORM') as 'VENDOR' | 'PLATFORM' }
+  const input = { vendorFoodCents: food, vendorTaxCents: tax, serviceFeeCents: svc, curbsideFeeCents: curbFee, tipCents: tip, realStripeFeeCents: fee, cardFeesPaidBy: (rnd() < 0.5 ? 'VENDOR' : 'PLATFORM') as 'VENDOR' | 'PLATFORM' }
   const p = planExhibitAPayout(input)
   const weights = nominalWeights(input)
   const W = weights.reduce((s, w) => s + w.weight, 0)
   if (sum(p.feeShares) === fee) sumOk++
   if (weights.every(w => Math.abs(p.feeShares[w.key] - (fee * w.weight) / W) < 1)) nearOk++
   if (Object.values(p.feeShares).every(n => n >= 0)) nonNegOk++
-  if (conserved(p, F, svc, curbFee, tip, fee)) conservedOk++
+  if (conserved(p, F, svc, curbFee, tip, fee, T)) conservedOk++
 }
 assert(sumOk === N, `shares always sum to the real fee (${sumOk}/${N})`)
 assert(nearOk === N, `each share is within 1¢ of its exact proportional share (${nearOk}/${N})`)
 assert(nonNegOk === N, `no share is ever negative (${nonNegOk}/${N})`)
-assert(conservedOk === N, `money is conserved on every order (${conservedOk}/${N})`)
+assert(conservedOk === N, `money is conserved on every order, tax included (${conservedOk}/${N})`)
 
 // ── [5] refund policy ────────────────────────────────────────────────────────────────────
 console.log('\n[5] Refund policy (C-2) and C-4')
@@ -141,7 +165,9 @@ assert(NON_RETURNED_FEE_ABSORBED_BY === 'FAIRSYNQ', 'C-4 (a): FairSynq absorbs S
 // Updated 2026-11-18 (item 10 stage 3): the PRICE side is now wired (lib/checkout-total.ts since 2026-11-23, and the order
 // route imports FEE_MODEL_EXHIBIT_A for the snapshot). Payouts and refunds must still not use it until
 // stages 4 and 5.
-console.log('\n[6] Only the price side is wired (stage 3)')
+// Updated 2026-11-19 (item 10 stage 4): the PAYOUT side is wired too (fee split, payout, vendor estimate,
+// reconciler check). Refunds (stage 5) must still not use it.
+console.log('\n[6] Price (stage 3) and payout (stage 4) are wired; refunds are not')
 function walk(dir: string, out: string[] = []) {
   for (const n of readdirSync(dir)) { const q = join(dir, n); statSync(q).isDirectory() ? (n !== 'node_modules' && walk(q, out)) : out.push(q) }
   return out
@@ -153,8 +179,8 @@ const importers = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd()
   .filter(f => IMPORT.test(readFileSync(f, 'utf8')))
   .map(f => relative(process.cwd(), f).split(sep).join('/'))
 for (const i of importers) console.log(`     ↳ imports it: ${i}`)
-assert(JSON.stringify(importers.sort()) === JSON.stringify(['app/api/orders/route.ts', 'lib/checkout-total.ts']),
-  'only the price side imports it (lib/checkout-total.ts, app/api/orders/route.ts); payouts, refunds and the worker do not')
+assert(JSON.stringify(importers.sort()) === JSON.stringify(['app/api/orders/route.ts', 'lib/checkout-total.ts', 'lib/fee-split.ts', 'lib/process-payout.ts', 'lib/reconciler.ts', 'lib/vendor-earnings.ts']),
+  'importers are exactly the price side + the payout side (fee-split, process-payout, vendor-earnings, reconciler); no refund module')
 const constants = readFileSync('lib/constants.ts', 'utf8')
 assert(/export const SERVICE_FEE_RATE = 0\.10/.test(constants), 'the legacy 10% constant is still there (legacy orders keep their stored 10%)')
 

@@ -770,6 +770,10 @@ model Order {
   runnerEarning       RunnerEarning?
   organizerEarning    OrganizerEarning?
   vendorEarnings      VendorEarning[] // N per order (one per payable vendor)
+  // Item 10 / B1.13 stage 4 (feeModel 2 only): the Exhibit A split, written once at the first payout run,
+  // and the curbside fee + tip held as owed to the event's partner (C-6) until Batch 4 pays partners.
+  orderFeeSplit       OrderFeeSplit?
+  partnerEarning      PartnerEarning?
   owedBackHalt        OwedBackHalt?
 
   @@unique([placedAt, id], map: "uq_order_placed_id")
@@ -1465,6 +1469,71 @@ enum RunnerApplicationStatus {
 // Organizer's accrued share of the runner-fulfilled fee: (100 − runnerFeePercent)
 // × applicable fee. RECORDED only (status 'accrued') — organizer payout is Part B.
 // Mirrors RunnerEarning's shape. NO tip here (tip is 100% the runner's).
+/// Item 10 / B1.13 STAGE 4 — the Exhibit A split of the REAL Stripe fee for one feeModel 2 order.
+/// Computed ONCE at the order's first payout run, in the same transaction as its vendor rows and
+/// PartnerEarning, BEFORE any transfer; never changed after. Every later run (a held vendor
+/// released, a retry) pays from these stored figures, never a recalculation. Integer cents only.
+/// Money is conserved: Σ vendor payCents + fairsynqNetCents + partnerNetCents + realStripeFeeCents
+/// = the charge. Legacy (feeModel null) orders never get one.
+model OrderFeeSplit {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  eventId String
+
+  realStripeFeeCents Int
+  fairsynqShareCents Int // FairSynq's processing share (on its service fee)
+  fairsynqNetCents   Int // service fee − its share (− the vendors' shares in PLATFORM card mode)
+  partnerShareCents  Int // processing on the curbside fee + tip (0 with none)
+  partnerNetCents    Int // curbside fee + tip − its share = the PartnerEarning amount
+  cardFeesPaidBy     CardFeesPaidBy
+
+  createdAt DateTime            @default(now())
+  vendors   OrderFeeSplitVendor[]
+
+  @@index([eventId])
+}
+
+/// One vendor's line of an OrderFeeSplit. payCents is what the payout transfers (or holds) for
+/// that vendor: food + tax − feeShare (VENDOR card mode) or food + tax (PLATFORM). Tax is stored
+/// apart from food (B1.19) and is 0 until the tax build adds it.
+model OrderFeeSplitVendor {
+  id      String        @id @default(cuid())
+  splitId String
+  split   OrderFeeSplit @relation(fields: [splitId], references: [id], onDelete: Cascade)
+  orderId String
+  vendorId String
+
+  foodCents     Int
+  taxCents      Int @default(0)
+  feeShareCents Int
+  payCents      Int
+
+  @@unique([orderId, vendorId])
+  @@index([splitId])
+}
+
+/// Item 10 / B1.13 STAGE 4 (C-6) — a feeModel 2 curbside order's curbside fee + tip, less the partner's
+/// processing share, HELD as owed to the event's partner organization until Batch 4 adds partner
+/// payouts. One per order, written in the payout's split transaction. partnerId stays null until
+/// partner organizations can be attached to events. A chargeback reclaims the whole charge
+/// including this part: Batch 4 needs a rule for reducing the held amount (BATCH-1 §19).
+model PartnerEarning {
+  id      String @id @default(cuid())
+  eventId String
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  partnerId   String?
+  amountCents Int
+  status      String  @default("held") // held (until Batch 4)
+
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([status])
+}
+
 model OrganizerEarning {
   id      String @id @default(cuid())
   eventId String

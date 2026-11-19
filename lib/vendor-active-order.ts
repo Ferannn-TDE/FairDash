@@ -27,6 +27,8 @@ export interface VendorActiveOrderRow {
   status: string
   placedAt: Date | string
   total: number
+  feeModel: number | null
+  cardFeesPaidBy: string | null
   fulfillmentType: VendorFulfillmentType
   customerName: string
   customerPhone: string

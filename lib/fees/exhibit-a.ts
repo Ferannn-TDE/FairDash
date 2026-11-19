@@ -101,16 +101,25 @@ export interface PayoutInput {
   /** The REAL settled Stripe fee for the charge (balance transaction `fee`). */
   realStripeFeeCents: number
   cardFeesPaidBy: CardFeesPaidBy
+  /** Each vendor's tax (both parts), paid out WITH the vendor's food in VENDOR remitter mode
+   *  (B1.19, Tax-Q1/Q2). Optional; absent or missing for a vendor = 0. */
+  vendorTaxCents?: Record<string, number>
 }
 
 /** Nominal weights, scaled to integers by (1000 × total food) so the split can be exact:
- *    vendor i : 2.9% × food_i + food_i/totalFood × 30¢      (C-1 a: 30¢ split by food share)
+ *    vendor i : 2.9% × (food_i + tax_i) + food_i/totalFood × 30¢   (C-1 a: 30¢ split by FOOD share;
+ *               Tax-Q2: the tax's processing rides with the vendor's share)
  *    FairSynq : 2.9% × serviceFee
  *    partner  : 2.9% × (curbsideFee + tip)                  (omitted when there's nothing to carry) */
 export function nominalWeights(input: Omit<PayoutInput, 'realStripeFeeCents' | 'cardFeesPaidBy'>): Weighted[] {
   const ids = Object.keys(input.vendorFoodCents)
   if (ids.length === 0) throw new Error('nominalWeights: at least one vendor')
   ids.forEach(id => assertCents(`food for ${id}`, input.vendorFoodCents[id]))
+  const tax = (id: string) => input.vendorTaxCents?.[id] ?? 0
+  ids.forEach(id => assertCents(`tax for ${id}`, tax(id)))
+  for (const id of Object.keys(input.vendorTaxCents ?? {})) {
+    if (!(id in input.vendorFoodCents)) throw new Error(`nominalWeights: tax for ${id}, who has no food on the order`)
+  }
   assertCents('serviceFeeCents', input.serviceFeeCents)
   assertCents('curbsideFeeCents', input.curbsideFeeCents)
   assertCents('tipCents', input.tipCents)
@@ -118,7 +127,7 @@ export function nominalWeights(input: Omit<PayoutInput, 'realStripeFeeCents' | '
   if (F === 0) throw new Error('nominalWeights: the order has no food')
   const parties: Weighted[] = ids.map(id => ({
     key: id,
-    weight: NOMINAL_PCT_PER_MILLE * input.vendorFoodCents[id] * F + NOMINAL_FIXED_CENTS * 1000 * input.vendorFoodCents[id],
+    weight: NOMINAL_PCT_PER_MILLE * (input.vendorFoodCents[id] + tax(id)) * F + NOMINAL_FIXED_CENTS * 1000 * input.vendorFoodCents[id],
   }))
   parties.push({ key: FAIRSYNQ, weight: NOMINAL_PCT_PER_MILLE * input.serviceFeeCents * F })
   const partnerBase = input.curbsideFeeCents + input.tipCents
@@ -129,7 +138,7 @@ export function nominalWeights(input: Omit<PayoutInput, 'realStripeFeeCents' | '
 export interface PayoutPlan {
   /** Each party's share of the real Stripe fee (sums to realStripeFeeCents). */
   feeShares: Record<string, number>
-  /** What each vendor is paid. */
+  /** What each vendor is paid: food + tax − their processing share (VENDOR card mode) or food + tax. */
   vendorPayoutCents: Record<string, number>
   /** What FairSynq keeps of the service fee, after its processing share (and, in PLATFORM mode,
    *  the vendors' shares). Can be negative only if FairSynq's absorbed fees exceed the service fee. */
@@ -139,14 +148,15 @@ export interface PayoutPlan {
 }
 
 /** The Exhibit A payout for one paid order. Money is conserved:
- *  Σ vendors + fairsynqNet + partnerNet + realStripeFee === food + serviceFee + curbsideFee + tip. */
+ *  Σ vendors + fairsynqNet + partnerNet + realStripeFee === food + tax + serviceFee + curbsideFee + tip. */
 export function planExhibitAPayout(input: PayoutInput): PayoutPlan {
   assertCents('realStripeFeeCents', input.realStripeFeeCents)
   const shares = splitByLargestRemainder(input.realStripeFeeCents, nominalWeights(input))
   const ids = Object.keys(input.vendorFoodCents)
   const vendorShare = (id: string) => shares[id] ?? 0
+  const owed = (id: string) => input.vendorFoodCents[id] + (input.vendorTaxCents?.[id] ?? 0)
   const vendorPayoutCents = Object.fromEntries(ids.map(id => [
-    id, input.cardFeesPaidBy === 'PLATFORM' ? input.vendorFoodCents[id] : input.vendorFoodCents[id] - vendorShare(id),
+    id, input.cardFeesPaidBy === 'PLATFORM' ? owed(id) : owed(id) - vendorShare(id),
   ]))
   const vendorSharesTotal = ids.reduce((s, id) => s + vendorShare(id), 0)
   // C-3: in PLATFORM mode FairSynq takes over the vendors' processing only; the partner's stays.

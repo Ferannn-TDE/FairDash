@@ -200,9 +200,8 @@ export const SETTINGS = {
     label: 'Card processing fees',
     help: 'Who pays Stripe\'s card processing on the food: the vendor, or FairSynq. Changing this also requires a new Vendor Agreement version. Talk to your developer first.',
     class: 'money',
-    // The note stays until stage 4's payout reads this (the order stores it from stage 3 on).
+    // In effect since item 10 stage 4: the order stores it (stage 3) and the payout splits by it.
     default: null,
-    notInEffect: notInEffect('Today vendors pay the full card processing fee on every order.'),
     parse: parseCardFeesPaidBy,
     format: (v: CardFeesPaidBySetting) => CARD_FEES_LABEL[v] ?? String(v),
   } satisfies SettingDef<CardFeesPaidBySetting>,

@@ -37,6 +37,8 @@ import { enqueueOrderPayout } from './order-side-effects'
 import { refundVendorPortion } from './process-refund'
 import { retryChargebackClawback } from './process-chargeback'
 import { splitRunnerFee } from './payout-split'
+import { FEE_MODEL_EXHIBIT_A } from './fees/exhibit-a'
+import { alertPartnerEarningMissing } from './partner-earning-alert'
 import { reconcileRunnerPayouts } from './runner-payout'
 import { reconcileOrganizerPayouts } from './organizer-payout'
 import { reconcileTipRefunds, owedBackCandidateWhere } from './tip-refund'
@@ -1054,6 +1056,22 @@ async function patternY(sum: SweepSummary, o: { maxPerPattern: number }) {
 // earning when delivered, or owed-back-to-customer when cancelled with no runner.
 // Alert-only — never moves money (runner/organizer payouts + tip refunds are a
 // later money-flow phase). This is the guard that the tip is never silently kept.
+/** Pattern L check 3's scan (exported for scripts/fees-stage4-test.ts [6]). Read-only. */
+export async function selectPartnerEarningMissing(o: { maxPerPattern: number }) {
+  return db.order.findMany({
+    where: {
+      status: OrderStatus.DELIVERED,
+      feeModel: FEE_MODEL_EXHIBIT_A,
+      OR: [{ deliveryFee: { gt: 0 } }, { tip: { gt: 0 } }],
+      orderFeeSplit: { isNot: null },
+      partnerEarning: { is: null },
+    },
+    select: { id: true, tip: true, deliveryFee: true },
+    orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+    take: o.maxPerPattern,
+  })
+}
+
 async function patternL(
   sum: SweepSummary,
   o: { windowStart: Date; maxPerPattern: number },
@@ -1068,6 +1086,7 @@ async function patternL(
       status: OrderStatus.DELIVERED,
       updatedAt: { gte: o.windowStart },
       OR: [{ deliveryFee: { gt: 0 } }, { tip: { gt: 0 } }],
+      feeModel: null, // legacy only: a feeModel 2 order holds a PartnerEarning instead (check 3 below)
     },
     select: {
       id: true, deliveryFee: true, tip: true,
@@ -1117,6 +1136,18 @@ async function patternL(
     sum.details.L.push(ord.id)
     sum.alerted.push(`Pattern L: cancelled order ${ord.id} has a ${Math.round((ord.tip ?? 0) * 100)}¢ tip and ${Math.round((ord.deliveryFee ?? 0) * 100)}¢ delivery fee no runner earned — OWED BACK to customer (Pattern R executes the refund; alert means not yet refunded)`)
   }
+
+  // 3. Item 10 stage 4 (S4-Q3): a delivered feeModel 2 order with a curbside fee or tip whose fee
+  //    split exists but has NO held PartnerEarning. lib/fee-split.ts writes both in one transaction,
+  //    so this should never happen; if it does, the partner's money is unrecorded. READ-ONLY: alert
+  //    + Slack, never a write (who the partner is and what they're owed is a human call, C-6).
+  const partnerMissing = await selectPartnerEarningMissing(o)
+  for (const ord of partnerMissing) {
+    sum.details.L.push(ord.id)
+    sum.alerted.push(`Pattern L: feeModel 2 order ${ord.id} DELIVERED with a ${Math.round((ord.deliveryFee ?? 0) * 100)}¢ curbside fee and ${Math.round((ord.tip ?? 0) * 100)}¢ tip has a fee split but NO PartnerEarning — partner money unrecorded`)
+  }
+  // Slack at most once per order per 24 h (Redis key per order; sent anyway if Redis is down).
+  if (partnerMissing.length) await alertPartnerEarningMissing(partnerMissing.map(x => x.id))
 }
 
 // ─── PATTERN M — Fully-refunded order whose master is still non-terminal ──────

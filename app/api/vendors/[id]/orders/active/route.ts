@@ -59,6 +59,7 @@ export async function GET(
         status: true,
         placedAt: true,
         total: true,
+        feeModel: true, cardFeesPaidBy: true,
         fulfillmentType: true,
         customerName: true,
         customerPhone: true,

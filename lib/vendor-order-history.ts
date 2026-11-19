@@ -128,6 +128,7 @@ export async function fetchVendorOrderHistory(q: HistoryQuery) {
       customerName: true,
       customerPhone: true,
       total: true,
+      feeModel: true, cardFeesPaidBy: true,
       // The delivery address: this select did NOT carry it, while the orders page rendered
       // `{order.deliveryStreet}, {order.deliveryCity}` — so every HOME_DELIVERY row on the
       // vendor's history printed "undefined, undefined". Partial-rows class (the same one
