@@ -89,6 +89,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },
   { group: 'correctness', name: 'event-listing',          file: 'scripts/event-listing-test.ts' },
+  { group: 'correctness', name: 'test-fair',              file: 'scripts/test-fair-test.ts' },
   { group: 'correctness', name: 'delivery-switch',        file: 'scripts/delivery-test.ts' },
   { group: 'correctness', name: 'partner-application',    file: 'scripts/partner-application-test.ts' },
   { group: 'correctness', name: 'vendor-agreement',       file: 'scripts/vendor-agreement-test.ts' },

@@ -84,6 +84,7 @@ const SKIP_DIRS = new Set([
  * If you are here because one of these is "missing" the filter: it is not missing. Read the reason.
  */
 const MUST_NOT_FILTER: { file: string; why: string }[] = [
+  { file: 'lib/test-fair.ts', why: 'archiving the B1.17 test fair reports EVERY order row it keeps (voided included); filtering would under-report what stays (added 2026-11-21)' },
   { file: 'app/api/webhooks/stripe/route.ts',
     why: 'must find ANY order to reconcile a payment — a voided order still has a real charge' },
   { file: 'lib/process-chargeback.ts',

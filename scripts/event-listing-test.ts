@@ -88,7 +88,10 @@ async function main() {
   const OPERATOR = /^app\/(admin|organizer|vendor|runner)\/|^app\/api\/(admin|organizer|vendor|runners?|drivers)\//
   const ACTIVE_EVENT_FILTER = /status:\s*EventStatus\.ACTIVE/
   const SCOPED = /publicFairScope\(\)|customerReachableScope\(\)/
-  const unscopedLines = (fs: { path: string; text: string }[]) => fs.flatMap(f => OPERATOR.test(f.path) ? [] :
+  // Updated 2026-11-21: lib/test-fair.ts CREATES the hidden test fair with status ACTIVE (a write, never a customer
+  // read), so it's operator tooling like the paths above. Exempted by exact path, not by pattern.
+  const OPERATOR_FILES = new Set(['lib/test-fair.ts'])
+  const unscopedLines = (fs: { path: string; text: string }[]) => fs.flatMap(f => OPERATOR.test(f.path) || OPERATOR_FILES.has(f.path) ? [] :
     f.text.split('\n').map((l, i) => ({ l, i })).filter(({ l }) => ACTIVE_EVENT_FILTER.test(l) && !SCOPED.test(l) && !/^\s*(\/\/|\*)/.test(l))
       .map(({ i }) => `${f.path}:${i + 1}`))
   const planted = unscopedLines([...files, { path: 'lib/new-reader.ts', text: "await db.event.findMany({ where: { status: EventStatus.ACTIVE, archivedAt: null } })" }])
@@ -113,7 +116,9 @@ async function main() {
   }
 
   const LISTING_WRITE = /listing:\s*(EventListing\.|['"`]|body\b|data\b|input\b|req\b)/
-  const WRITERS_ALLOWED = new Set(['lib/event-listing.ts', 'lib/signup-event.ts'])
+  // Updated 2026-11-21: lib/test-fair.ts creates the hidden B1.17 test fair (UNLISTED) and is the only other writer;
+  // its own suite is scripts/test-fair-test.ts.
+  const WRITERS_ALLOWED = new Set(['lib/event-listing.ts', 'lib/signup-event.ts', 'lib/test-fair.ts'])
   assert(LISTING_WRITE.test("data: { listing: EventListing.UNLISTED }") && LISTING_WRITE.test("data: { listing: body.listing }"),
     '[0] positive control: the write scanner flags `listing: EventListing.X` and `listing: body.…`')
   assert(!LISTING_WRITE.test('select: { listing: true }') && !LISTING_WRITE.test('listing: f.listing,'), '[0] baseline: selects and response mapping are not writes')
