@@ -695,8 +695,8 @@ export function CancelModal({
           </p>
         ) : (
           <p className="text-[#A1A1A1] text-sm mb-6">
-            Your order will be cancelled and we&apos;ll refund what you paid for the food. The 10%
-            service fee isn&apos;t refunded. Refunds usually appear within 5–10 business days.
+            Your order will be cancelled and we&apos;ll refund what you paid for the food. The service
+            fee isn&apos;t refunded. Refunds usually appear within 5–10 business days.
           </p>
         )}
         <div className="flex gap-3">
