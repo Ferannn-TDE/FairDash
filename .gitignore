@@ -100,3 +100,6 @@ index.html
 
 # Local media and client documents folder: never in git, whatever the file type
 media/
+
+# Client documents and their working copies (BATCH-1 "Client documents"): never in git
+docs/client/
