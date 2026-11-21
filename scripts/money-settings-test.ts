@@ -21,7 +21,7 @@
  */
 // fee-baseline sets the environment (test Upstash proxy, stubbed Stripe key, .env.local) and
 // registers the route loader when imported, before anything below loads a route.
-import { runScenarios, compareToBaseline, loadBaseline, SCENARIOS, type Observed } from './fee-baseline'
+import { runScenarios, compareToBaseline, loadBaseline, SCENARIOS, acceptedScenarios, type Observed } from './fee-baseline'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { createServer } from 'node:http'
@@ -338,14 +338,27 @@ async function main() {
 
   // ── [9] ───────────────────────────────────────────────────────────────────────────────────
   console.log('\n[9] today\'s 10% checkout is unchanged')
+  // Since the Batch 1 merge (2026-11-21) checkout refuses an order below the card minimum (H5 2h,
+  // lib/checkout-floor.ts), so the $0.29 scenario is kept as a refusal; the other orders are
+  // compared with the frozen baseline, which is unchanged (scripts/fee-baseline.ts).
   const { results, stubCalls } = await runScenarios()
-  assert(stubCalls === SCENARIOS.length && Object.values(results).every(r => r.status === 201),
-    `[0] control: the Stripe stub was called once per order (${stubCalls}/${SCENARIOS.length}) and every order was created (201)`)
+  const accepted = acceptedScenarios()
+  const refused = SCENARIOS.filter(s => s.refusedBy)
+  assert(refused.length === 1 && refused[0].name === 'booth 0.29' && accepted.length === SCENARIOS.length - 1,
+    '[0] fixture: exactly one scenario (booth 0.29) is expected to be refused; the other five are compared')
+  assert(stubCalls === accepted.length && accepted.every(s => results[s.name]?.status === 201),
+    `[0] control: the Stripe stub was called once per accepted order (${stubCalls}/${accepted.length}) and every one was created (201)`)
+  for (const s of refused) {
+    const r = results[s.name]
+    assert(r?.status === 400 && !!r.floorCode && r.code === r.floorCode && r.stored === null && r.piAmount === null,
+      `${s.name}: refused by the checkout floor with its own code, 400 ${r?.floorCode}; no order stored and no payment started (got ${r?.status} ${r?.code})`)
+  }
   const baseline = loadBaseline()
   const diffs = compareToBaseline(results, baseline)
   for (const d of diffs) console.log(`     ↳ ${d}`)
-  assert(diffs.length === 0, `all ${SCENARIOS.length} orders identical to the 10% baseline recorded before stage 2 (stored fee, total, PaymentIntent amount and metadata)`)
-  assert(Object.values(results).every(r => r.snapshot && Object.values(r.snapshot).every(v => v === null)), 'new orders through POST /api/orders store all four snapshot columns as null')
+  assert(diffs.length === 0, `all ${accepted.length} accepted orders identical to the 10% baseline recorded before stage 2 (stored fee, total, PaymentIntent amount and metadata)`)
+  assert(accepted.every(s => { const r = results[s.name]; return !!r?.snapshot && Object.values(r.snapshot).every(v => v === null) }),
+    'new orders through POST /api/orders store all four snapshot columns as null')
   const at15: Record<string, Observed> = JSON.parse(JSON.stringify(baseline))
   const b50 = at15['booth 50.00']; (b50.stored as any).fairSynqFee = 7.5; (b50.stored as any).total = 57.5; b50.piAmount = 5750
   assert(compareToBaseline(at15, baseline).length >= 3, '[0] control: the comparison catches a 15% order (fee, total and PaymentIntent all flagged)')

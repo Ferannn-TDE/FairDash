@@ -12,6 +12,13 @@
  *
  * Exported for scripts/money-settings-test.ts [9]: runScenarios(), compareToBaseline(), SCENARIOS.
  *
+ * AFTER THE BATCH 1 MERGE (2026-11-21, Step 9): checkout now requires `expectedTotalCents`, the total
+ * the customer was shown (audit H5 2h), and refuses an order below the card minimum (the checkout
+ * floor, lib/checkout-floor.ts). So every order sends the total the checkout page would show,
+ * computed with the same lib/checkout-total.ts, and the $0.29 booth order is kept but marked
+ * `refusedBy: 'checkout-floor'`: it must be refused with the floor's own code. The baseline file
+ * is unchanged and not re-recorded; refused scenarios are left out of the comparison only.
+ *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/fee-baseline.ts [record|check]
  */
 import { config } from 'dotenv'
@@ -39,9 +46,13 @@ const MAIL = '@feebase.local'
 const BASELINE_FILE = 'scripts/fixtures/fee-baseline-10pct.json'
 const rand = () => Math.random().toString(36).slice(2, 8)
 
-export interface Scenario { name: string; fulfillment: 'BOOTH_PICKUP' | 'CURBSIDE'; prices: number[]; tip?: number; curbsideFee?: number }
+export interface Scenario {
+  name: string; fulfillment: 'BOOTH_PICKUP' | 'CURBSIDE'; prices: number[]; tip?: number; curbsideFee?: number
+  /** Set when checkout must refuse this order: 'checkout-floor' = below the card minimum (H5 2h). */
+  refusedBy?: 'checkout-floor'
+}
 export const SCENARIOS: Scenario[] = [
-  { name: 'booth 0.29', fulfillment: 'BOOTH_PICKUP', prices: [0.29] },
+  { name: 'booth 0.29', fulfillment: 'BOOTH_PICKUP', prices: [0.29], refusedBy: 'checkout-floor' },
   { name: 'booth 4.35', fulfillment: 'BOOTH_PICKUP', prices: [4.35] },
   { name: 'booth 15.25', fulfillment: 'BOOTH_PICKUP', prices: [15.25] },
   { name: 'booth 50.00', fulfillment: 'BOOTH_PICKUP', prices: [50] },
@@ -57,7 +68,14 @@ export interface Observed {
   /** The four stage 2 snapshot columns as stored (all null until stage 3). Not part of the
    *  baseline comparison: the baseline was recorded before the columns existed. */
   snapshot?: Record<string, unknown> | null
+  /** The route's error code, when it refused the order. Not part of the baseline comparison. */
+  code?: string | null
+  /** The code lib/checkout-floor.ts gives for this cart's page totals (null = the floor allows it). */
+  floorCode?: string | null
 }
+
+/** The scenarios checkout accepts: the ones the frozen baseline is compared on. */
+export const acceptedScenarios = () => SCENARIOS.filter(s => !s.refusedBy)
 
 const login = (clerkId: string) => { (globalThis as any).__MOCK_CLERK = { userId: clerkId, publicMetadata: { roles: [] } } }
 const req = (body: unknown) => new NextRequest('http://localhost/api/orders', {
@@ -97,6 +115,8 @@ export async function runScenarios(): Promise<{ results: Record<string, Observed
   await cleanup()
   const created = await stubStripe()
   const ordersPOST = (await import('../app/api/orders/route')).POST
+  const { checkoutTotals, toCents } = await import('../lib/checkout-total')
+  const { checkoutRefusal } = await import('../lib/checkout-floor')
   const results: Record<string, Observed> = {}
   try {
     for (const s of SCENARIOS) {
@@ -118,9 +138,20 @@ export async function runScenarios(): Promise<{ results: Record<string, Observed
       await prisma.user.create({ data: { clerkId, email: `c-${rand()}${MAIL}`, name: 'C' } })
       login(clerkId)
       const before = created.length
+      // The total the checkout page shows for this cart (same calculator, no markup on these fairs,
+      // the curbside fee as the delivery fee, the tip): what a real customer's checkout sends.
+      const page = checkoutTotals({
+        lines: s.prices.map(p => ({ inPersonCents: toCents(p), quantity: 1 })),
+        markupBps: 0,
+        deliveryFeeCents: s.fulfillment === 'CURBSIDE' ? toCents(s.curbsideFee ?? 0) : 0,
+        serviceChargeCents: 0,
+        tipCents: toCents(s.tip ?? 0),
+      })
+      const floorCode = checkoutRefusal({ subtotalCents: page.onlineSubtotalCents, totalCents: page.totalCents })?.code ?? null
       const res = await ordersPOST(req({
         eventId: ev.id, fulfillmentType: s.fulfillment, customerName: 'C', customerPhone: '6185550100',
         vehicleMake: 'Honda', vehicleColor: 'Blue', items, ...(s.tip ? { tip: s.tip } : {}),
+        expectedTotalCents: page.totalCents,
       }) as any)
       const body: any = await res.json().catch(() => ({}))
       const pi = created.length > before ? created[created.length - 1] : null
@@ -128,6 +159,8 @@ export async function runScenarios(): Promise<{ results: Record<string, Observed
       const row = orderId ? await prisma.order.findUnique({ where: { id: orderId } }) : null
       results[s.name] = {
         status: res.status,
+        code: body?.error?.code ?? null,
+        floorCode,
         stored: row ? {
           subtotal: row.subtotal, fairSynqFee: row.fairSynqFee, deliveryFee: row.deliveryFee, tip: row.tip,
           serviceCharge: row.serviceCharge, total: row.total, vendorPayout: row.vendorPayout,
@@ -150,10 +183,18 @@ export function loadBaseline(): Record<string, Observed> {
   return JSON.parse(readFileSync(BASELINE_FILE, 'utf8')).results
 }
 
-/** Field-by-field differences between a run and the frozen baseline (empty = identical). */
-export function compareToBaseline(results: Record<string, Observed>, baseline: Record<string, Observed>): string[] {
+/**
+ * Field-by-field differences between a run and the frozen baseline (empty = identical), over the
+ * scenarios checkout accepts unless `names` says otherwise.
+ */
+export function compareToBaseline(
+  results: Record<string, Observed>,
+  baseline: Record<string, Observed>,
+  names: string[] = acceptedScenarios().map(s => s.name),
+): string[] {
   const diffs: string[] = []
-  for (const name of Object.keys(baseline)) {
+  for (const name of names) {
+    if (!baseline[name]) { diffs.push(`${name}: missing from the baseline`); continue }
     const a = baseline[name], b = results[name]
     if (!b) { diffs.push(`${name}: missing from this run`); continue }
     // vendorSubtotalCents is keyed by vendor ids, which are fresh every run: compare its amounts in
@@ -186,9 +227,17 @@ async function main() {
     console.log(`recorded ${SCENARIOS.length} scenarios to ${BASELINE_FILE}`)
     for (const [n, r] of Object.entries(results)) console.log(`  ${n}: stored total ${(r.stored as any).total}, fee ${(r.stored as any).fairSynqFee}, PI ${r.piAmount}`)
   } else {
+    const accepted = acceptedScenarios()
+    const acceptedOk = accepted.every(s => results[s.name]?.status === 201 && results[s.name]?.stored && results[s.name]?.piAmount !== null)
+    const refused = SCENARIOS.filter(s => s.refusedBy)
+    const refusedOk = refused.every(s => {
+      const r = results[s.name]
+      return r?.status === 400 && r.floorCode !== null && r.code === r.floorCode && r.stored === null && r.piAmount === null
+    })
     const diffs = compareToBaseline(results, loadBaseline())
-    console.log(diffs.length === 0 ? `✅ fee baseline: ${SCENARIOS.length} orders identical to the 10% baseline` : `❌ fee baseline:\n  ${diffs.join('\n  ')}`)
-    process.exitCode = diffs.length === 0 && allOk ? 0 : 1
+    console.log(diffs.length === 0 ? `✅ fee baseline: ${accepted.length} accepted orders identical to the 10% baseline` : `❌ fee baseline:\n  ${diffs.join('\n  ')}`)
+    for (const s of refused) console.log(`${refusedOk ? '✅' : '❌'} ${s.name}: refused by the checkout floor (got ${results[s.name]?.status} ${results[s.name]?.code}, floor says ${results[s.name]?.floorCode})`)
+    process.exitCode = diffs.length === 0 && acceptedOk && refusedOk ? 0 : 1
   }
 }
 
