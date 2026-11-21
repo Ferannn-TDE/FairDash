@@ -42,7 +42,7 @@ interface Readiness {
 const STEP_META: Record<ReadinessStep['key'], { icon: typeof Check; blurb: string }> = {
   application: { icon: Check,            blurb: 'Your application to this fair.' },
   documents:   { icon: FileText,         blurb: 'Required before the organizer can approve you.' },
-  stripe:      { icon: CreditCard,       blurb: 'Connect Stripe so we can pay you out after each event.' },
+  stripe:      { icon: CreditCard,       blurb: 'Connect Stripe so we can pay you about 4 hours after each completed order.' },
   menu:        { icon: UtensilsCrossed,  blurb: 'Add at least one available item so customers can order.' },
   booth:       { icon: MapPin,           blurb: 'Optional — helps runners and customers find you.' },
 }
