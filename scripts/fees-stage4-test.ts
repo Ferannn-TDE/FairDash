@@ -44,10 +44,10 @@ async function splitRows(orderId: string) {
 const strip = (x: unknown) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'createdAt' || k === 'updatedAt' ? undefined : v)))
 
 const EARN_SELECT = {
-  total: true, status: true, feeModel: true, cardFeesPaidBy: true,
+  total: true, status: true, feeModel: true, cardFeesPaidBy: true, vendorTaxes: { select: { vendorId: true, salesTaxCents: true, localTaxCents: true } },
   orderItems: { select: { vendorId: true, subtotal: true } },
   payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
-  refunds: { select: { vendorId: true, status: true, amountCents: true } },
+  refunds: { select: { vendorId: true, status: true, amountCents: true, salesTaxCents: true, localTaxCents: true } },
   vendorOrderStatuses: { select: { vendorId: true, status: true } },
 } as const
 
@@ -287,7 +287,7 @@ async function main() {
         const wsum = Object.values(subs).reduce((x, y) => x + y, 0)
         for (const [k, w] of Object.entries(subs)) food[k] = Math.max(1, Math.floor((total / 1.1) * w / wsum))
         const o: OrderForEarnings = {
-          total: total / 100, status: 'COMPLETED', feeModel: null, cardFeesPaidBy: null,
+          total: total / 100, status: 'COMPLETED', feeModel: null, cardFeesPaidBy: null, vendorTaxes: [],
           orderItems: Object.entries(food).map(([vendorId, c]) => ({ vendorId, subtotal: c / 100 })),
           payouts: [], refunds: [], vendorOrderStatuses: Object.keys(food).map(vendorId => ({ vendorId, status: 'COMPLETED' })),
         }

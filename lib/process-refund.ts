@@ -34,6 +34,7 @@
 import { db } from './db'
 import { stripe } from './stripe'
 import { splitStripeFee } from './payout-split'
+import { refundTaxParts } from './fees/tax'
 import { reverseVendorPayout } from './clawback'
 import { logger } from './logger'
 import type { MoneyActor } from './admin-money'
@@ -105,6 +106,9 @@ export interface RefundVendorResult {
   stripeReversalId: string | null
   /** Stripe fee FairSynq absorbs on this refunded slice (not recovered). */
   absorbedStripeFeeCents: number
+  /** B1.19: tax returned with this refund, per part (0 without tax). The customer got sliceCents + both. */
+  salesTaxCents: number
+  localTaxCents: number
   negativeBalanceCents: number // > 0 if FairSynq fronted a clawback (CASE 2)
 }
 
@@ -118,7 +122,7 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
   // ── Idempotency: already fully refunded? ──────────────────────────────────
   const existing = await db.refund.findUnique({
     where: { orderId_vendorId: { orderId, vendorId } },
-    select: { status: true, amountCents: true, stripeRefundId: true, stripeReversalId: true },
+    select: { status: true, amountCents: true, stripeRefundId: true, stripeReversalId: true, salesTaxCents: true, localTaxCents: true },
   })
   if (existing?.status === 'COMPLETED') {
     return {
@@ -126,6 +130,7 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
       sliceCents: existing.amountCents,
       stripeRefundId: existing.stripeRefundId, stripeReversalId: existing.stripeReversalId,
       absorbedStripeFeeCents: 0, negativeBalanceCents: 0,
+      salesTaxCents: existing.salesTaxCents, localTaxCents: existing.localTaxCents,
     }
   }
 
@@ -134,9 +139,10 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
     where: { id: orderId },
     select: {
       id: true, eventId: true, voidedAt: true,
-      total: true, fairSynqFee: true, deliveryFee: true, serviceCharge: true, tip: true,
+      total: true, fairSynqFee: true, deliveryFee: true, serviceCharge: true, tip: true, taxCents: true,
       stripeChargeId: true, stripePaymentIntentId: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
+      vendorTaxes: { select: { vendorId: true, salesTaxCents: true, localTaxCents: true } }, // B1.19
       payouts: { select: { vendorId: true, netAmount: true, stripeTransferId: true, reversedAt: true } },
       // Second CASE-2 signal — see the CASE decision below.
       vendorEarnings: { select: { vendorId: true, status: true } },
@@ -167,11 +173,12 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
   const serviceChargeCents = cents(order.serviceCharge ?? 0)
   const tipCents = cents(order.tip ?? 0)
   const totalCents = cents(order.total)
-  const customerSide = totalSubtotalCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents
+  const taxCents = order.taxCents // B1.19: Σ the order's per-vendor tax parts (0 without rates)
+  const customerSide = totalSubtotalCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + taxCents
   if (customerSide !== totalCents) {
     throw new RefundReconciliationError(
       `order ${orderId}: customer-side mismatch — charge ${totalCents}¢ ≠ subtotal ${totalSubtotalCents} + ` +
-      `serviceFee ${serviceFeeCents} + delivery ${deliveryCents} + serviceCharge ${serviceChargeCents} + tip ${tipCents}. Refund halted.`,
+      `serviceFee ${serviceFeeCents} + delivery ${deliveryCents} + serviceCharge ${serviceChargeCents} + tip ${tipCents} + tax ${taxCents}. Refund halted.`,
     )
   }
 
@@ -193,6 +200,15 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
     }
     refundAmountCents = ov
   }
+
+  // ── B1.19 tax returned with the food ───────────────────────────────────────
+  // The override (organizer partial) is FOOD only; anything above the slice is the waived fee share, never
+  // taxed. Tax per part = the stored part (full food) or its exact half-up share (partial), capped at the part.
+  const storedTax = order.vendorTaxes.find(t => t.vendorId === vendorId) ?? { salesTaxCents: 0, localTaxCents: 0 }
+  const foodRefundedCents = Math.min(refundAmountCents, sliceCents)
+  const taxBack = refundTaxParts(storedTax, foodRefundedCents, sliceCents)
+  const taxBackCents = taxBack.salesTaxCents + taxBack.localTaxCents
+  const customerRefundCents = refundAmountCents + taxBackCents
 
   // ── Resolve charge id (for the refund + the real Stripe fee read) ─────────
   let chargeId = order.stripeChargeId ?? null
@@ -248,8 +264,9 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
     create: {
       eventId: order.eventId, orderId, vendorId,
       amountCents: refundAmountCents, reason: reason ?? null, status: 'PENDING', createdBy: actor ?? null,
+      salesTaxCents: taxBack.salesTaxCents, localTaxCents: taxBack.localTaxCents,
     },
-    update: { amountCents: refundAmountCents, reason: reason ?? null, status: 'PENDING' },
+    update: { amountCents: refundAmountCents, reason: reason ?? null, status: 'PENDING', salesTaxCents: taxBack.salesTaxCents, localTaxCents: taxBack.localTaxCents },
   })
 
   // ── 1) Refund the customer (BOTH cases). Amount = slice (fee kept) unless
@@ -259,8 +276,8 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
     const refund = await stripe.refunds.create(
       {
         charge: chargeId,
-        amount: refundAmountCents,
-        metadata: { orderId, vendorId, reason: reason ?? 'vendor_portion_refund', waiveFee: String(waiveFee) },
+        amount: customerRefundCents, // food (+ waived fee) + tax returned (B1.19)
+        metadata: { orderId, vendorId, reason: reason ?? 'vendor_portion_refund', waiveFee: String(waiveFee), taxCents: String(taxBackCents) },
       },
       { idempotencyKey: `refund_${orderId}_${vendorId}` },
     )
@@ -317,7 +334,7 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
       data: {
         orderId, eventType: 'refund_completed', actorId: actor ?? null,
         actorRole: 'system',
-        metadata: { vendorId, case: refundCase, refundAmountCents, sliceCents, waivedFeeCents, stripeRefundId, stripeReversalId, absorbedStripeFeeCents, negativeBalanceCents },
+        metadata: { vendorId, case: refundCase, refundAmountCents, sliceCents, waivedFeeCents, salesTaxCents: taxBack.salesTaxCents, localTaxCents: taxBack.localTaxCents, customerRefundCents, stripeRefundId, stripeReversalId, absorbedStripeFeeCents, negativeBalanceCents },
       },
     }),
   ])
@@ -361,7 +378,8 @@ export async function refundVendorPortion(input: RefundVendorInput): Promise<Ref
 
   return {
     status: 'refunded', case: refundCase, orderId, vendorId,
-    sliceCents: refundAmountCents,                   // amount actually returned to the customer
+    sliceCents: refundAmountCents,                   // food (+ waived fee) returned; tax is on top (below)
     stripeRefundId, stripeReversalId, absorbedStripeFeeCents, negativeBalanceCents,
+    salesTaxCents: taxBack.salesTaxCents, localTaxCents: taxBack.localTaxCents,
   }
 }

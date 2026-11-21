@@ -96,6 +96,8 @@ interface OrderSummary {
   tip?: number | null
   fairSynqFee: number
   serviceFee: number
+  /** B1.19: the order's tax (null when none). */
+  tax?: number | null
   total: number
 }
 
@@ -109,6 +111,8 @@ interface PriceChange {
     deliveryFee: number | null
     serviceCharge: number | null
     tip: number | null
+    /** B1.19: the order's tax (null when none). */
+    tax?: number | null
     total: number
   }
   /** The checkout inputs this answer was for; a different cart, pickup type or tip voids it. */
@@ -230,6 +234,12 @@ function PaymentStep({ orderId, fairSlug, summary, feeLabel, onBack, onSuccess }
             <div className="flex justify-between">
               <span className="text-[#A1A1A1]">Tip (runner)</span>
               <span className="text-white">${(summary.tip ?? 0).toFixed(2)}</span>
+            </div>
+          )}
+          {summary.tax != null && summary.tax > 0 && (
+            <div className="flex justify-between">
+              <span className="text-[#A1A1A1]">Tax</span>
+              <span className="text-white">${(summary.tax ?? 0).toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between pt-3 border-t border-white/10">
@@ -364,7 +374,8 @@ export default function CheckoutPage() {
 
   // THE ONE CALCULATION (lib/checkout-total.ts), the same function POST /api/orders charges with:
   // online food (per unit, half-up) + the service fee (percent + flat, once per order) on the
-  // IN-PERSON food + delivery/curbside fee + tip, all in cents. Every amount this page shows comes
+  // IN-PERSON food + delivery/curbside fee + tip + sales tax (B1.19, per vendor on the online food),
+  // all in cents. Every amount this page shows comes
   // from `totals`, and its total is sent as expectedTotalCents: the server refuses (409) rather
   // than charge anything else.
   const totals = useMemo(() => checkoutTotals({
@@ -373,7 +384,8 @@ export default function CheckoutPage() {
     feeTerms,
     deliveryFeeCents: estimatedDeliveryFeeCents,
     tipCents: toCents(tipAmount),
-  }), [calculatorLines, markupBps, feeTerms, estimatedDeliveryFeeCents, tipAmount])
+    taxRates: fair.taxRates,
+  }), [calculatorLines, markupBps, feeTerms, estimatedDeliveryFeeCents, tipAmount, fair.taxRates])
   const money = (cents: number) => `$${fromCents(cents).toFixed(2)}`
   // Checkout floor (audit H5, Step 2b): the SAME function POST /api/orders runs, on the same
   // totals, so the customer sees the refusal before submitting instead of after. The server is
@@ -385,7 +397,7 @@ export default function CheckoutPage() {
 
   // A 409 answer applies only to the exact inputs it was given for. If the customer then changes
   // the cart, the pickup type or the tip, it no longer applies and the panel goes away.
-  const inputsKey = JSON.stringify([calculatorLines, markupBps, fulfillmentType, totals.deliveryFeeCents, totals.serviceFeeCents, totals.tipCents])
+  const inputsKey = JSON.stringify([calculatorLines, markupBps, fulfillmentType, totals.deliveryFeeCents, totals.serviceFeeCents, totals.tipCents, totals.taxCents])
   const activePriceChange = priceChange && priceChange.inputsKey === inputsKey ? priceChange : null
 
   const estimatedReadyMin = useMemo(() => {
@@ -933,6 +945,9 @@ export default function CheckoutPage() {
                       {(activePriceChange.breakdown.tip ?? 0) > 0 && (
                         <div className="flex justify-between"><span className="text-[#A1A1A1]">Tip (runner)</span><span className="text-white">{money(toCents(activePriceChange.breakdown.tip))}</span></div>
                       )}
+                      {(activePriceChange.breakdown.tax ?? 0) > 0 && (
+                        <div className="flex justify-between"><span className="text-[#A1A1A1]">Tax</span><span className="text-white">{money(toCents(activePriceChange.breakdown.tax))}</span></div>
+                      )}
                       <div className="flex justify-between font-bold pt-1 border-t border-white/10"><span className="text-white">New total</span><span className="text-[#FF0077]">{money(activePriceChange.newTotalCents)}</span></div>
                     </div>
                     <div className="flex gap-2">
@@ -1078,6 +1093,13 @@ export default function CheckoutPage() {
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">Tip (runner)</span>
                     <span className="text-white">{orderSummary ? money(toCents(orderSummary.tip)) : money(totals.tipCents)}</span>
+                  </div>
+                )}
+                {/* B1.19: one combined Tax line, only when the fair charges tax. */}
+                {(orderSummary ? (orderSummary.tax ?? 0) > 0 : totals.taxCents > 0) && (
+                  <div className="flex justify-between">
+                    <span className="text-[#A1A1A1]">Tax</span>
+                    <span className="text-white">{orderSummary ? money(toCents(orderSummary.tax)) : money(totals.taxCents)}</span>
                   </div>
                 )}
               </div>

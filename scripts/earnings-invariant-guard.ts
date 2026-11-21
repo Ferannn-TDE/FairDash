@@ -51,7 +51,7 @@ function order(over: Partial<OrderForEarnings> = {}): OrderForEarnings {
   return {
     total: 13.20,
     status: 'COMPLETED',
-    feeModel: null, cardFeesPaidBy: null,
+    feeModel: null, cardFeesPaidBy: null, vendorTaxes: [],
     orderItems: [{ vendorId: 'v1', subtotal: 12.00 }],
     payouts: [],
     refunds: [],

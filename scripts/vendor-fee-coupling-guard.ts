@@ -89,7 +89,7 @@ for (const total of [500, 1_000, 2_599, 5_000, 12_345, 100_000]) {
 const order = (payoutNet?: number): OrderForEarnings => ({
   total: 50,
   status: 'COMPLETED',
-  feeModel: null, cardFeesPaidBy: null,
+  feeModel: null, cardFeesPaidBy: null, vendorTaxes: [],
   orderItems: [{ vendorId: 'v1', subtotal: 50 }],
   payouts: payoutNet == null ? [] : [{ vendorId: 'v1', netAmount: payoutNet, reversedAt: null, stripeTransferId: 'tr_realLookingId_000000001' }],
   refunds: [], vendorOrderStatuses: [{ vendorId: 'v1', status: 'COMPLETED' }],
@@ -123,7 +123,7 @@ assert(booth.vendorPayoutCents.v1 === 5000 - booth.feeShares.v1 && booth.feeShar
 const plat = planExhibitAPayout({ vendorFoodCents: { v1: 5000 }, serviceFeeCents: 750, curbsideFeeCents: 0, tipCents: 0, realStripeFeeCents: 197, cardFeesPaidBy: 'PLATFORM' })
 assert(plat.vendorPayoutCents.v1 === 5000, 'PLATFORM mode: the vendor is paid the full food, so its estimate deducts nothing')
 const m2 = (cardFeesPaidBy: string, payoutNet?: number): OrderForEarnings => ({
-  total: 57.50, status: 'COMPLETED', feeModel: 2, cardFeesPaidBy,
+  total: 57.50, status: 'COMPLETED', feeModel: 2, cardFeesPaidBy, vendorTaxes: [],
   orderItems: [{ vendorId: 'v1', subtotal: 50 }],
   payouts: payoutNet == null ? [] : [{ vendorId: 'v1', netAmount: payoutNet, reversedAt: null, stripeTransferId: 'tr_realLookingId_000000002' }],
   refunds: [], vendorOrderStatuses: [{ vendorId: 'v1', status: 'COMPLETED' }],

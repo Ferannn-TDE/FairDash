@@ -11,7 +11,10 @@
 //   - food subtotal = Σ online unit × quantity: what the customer pays for food and what vendors
 //     are paid on, so the markup reaches the vendor through the existing payout split;
 //   - the service fee is on the IN-PERSON subtotal only (Feran, 2026-11-23: the markup carries no fee);
-//   - total = food + service fee + delivery/curbside fee + tip.
+//   - sales tax (B1.19): per vendor, per part, half up, on FOOD only (lib/fees/tax.ts), on the ONLINE
+//     (marked-up) line totals, the price the customer pays (Feran, 2026-11-23); 0 when the event has
+//     no rates. Fees and tips are never taxed. Needs each line's vendorId when a rate applies;
+//   - total = food + service fee + delivery/curbside fee + tip + tax.
 //
 // THE FEE TERMS (item 10 stage 3, ported into this calculator 2026-11-23): the service fee is
 // lib/fees/exhibit-a's serviceFeeCents(): round-half-up(fee base × percentBps / 10000) + the flat fee,
@@ -26,6 +29,7 @@
 
 import { onlinePriceCents } from './menu/price'
 import { serviceFeeCents } from './fees/exhibit-a'
+import { vendorTaxes, totalTaxCents, hasTax, type TaxRates, type VendorTax } from './fees/tax'
 
 /** The fee terms a customer can see (the card-fee setting never reaches the browser). */
 export interface CustomerFeeTerms {
@@ -41,6 +45,8 @@ export type CheckoutLine = {
   /** The item's in-person price in cents (MenuItem.price × 100). */
   inPersonCents: number
   quantity: number
+  /** Required when a tax rate applies (tax is per vendor). */
+  vendorId?: string
 }
 
 export type CheckoutTotalsInput = {
@@ -52,6 +58,8 @@ export type CheckoutTotalsInput = {
   /** The runner fee: the PLATFORM curbside fee for curbside, the event's fee for delivery, 0 for booth. */
   deliveryFeeCents: number
   tipCents: number
+  /** B1.19: the event's tax rates (null parts are not charged). Absent = no tax. */
+  taxRates?: TaxRates | null
 }
 
 export type CheckoutTotals = {
@@ -65,6 +73,9 @@ export type CheckoutTotals = {
   serviceFeeCents: number
   deliveryFeeCents: number
   tipCents: number
+  /** B1.19: per-vendor tax parts on the online food (empty when no rate applies) and their sum. */
+  vendorTaxes: VendorTax[]
+  taxCents: number
   totalCents: number
 }
 
@@ -106,7 +117,8 @@ export function onlineUnitPrice(inPersonDollars: number, markupBps: number): num
 // so the cart, the checkout page and the server all use the one calculator above.
 
 /** A cart line as the browser stores it. `inPersonPrice` is missing on carts saved before 2h. */
-export type CartPricingItem = { menuItemId: string; price: number; inPersonPrice?: number; quantity: number }
+/** `vendorId` is carried into the calculator lines so sales tax (per vendor) can be computed. */
+export type CartPricingItem = { menuItemId: string; price: number; inPersonPrice?: number; quantity: number; vendorId?: string }
 
 /**
  * A markup the calculator can use: a whole number 0–1000, else 0. A bad or missing value (never
@@ -132,7 +144,7 @@ export function cartInPersonCents(item: CartPricingItem): number {
 
 /** Cart lines in the calculator's form. */
 export function cartCalculatorLines(items: CartPricingItem[]): CheckoutLine[] {
-  return items.map(i => ({ inPersonCents: cartInPersonCents(i), quantity: i.quantity }))
+  return items.map(i => ({ inPersonCents: cartInPersonCents(i), quantity: i.quantity, ...(i.vendorId ? { vendorId: i.vendorId } : {}) }))
 }
 
 export type CartPricing = {
@@ -189,7 +201,18 @@ export function checkoutTotals(input: CheckoutTotalsInput): CheckoutTotals {
   // floor, which refuses it.
   const serviceFee = feeBaseCents > 0 ? serviceFeeCents(feeBaseCents, input.feeTerms) : 0
 
-  const totalCents = onlineSubtotalCents + serviceFee + input.deliveryFeeCents + input.tipCents
+  let taxes: VendorTax[] = []
+  if (input.taxRates && hasTax(input.taxRates)) {
+    const food: Record<string, number> = {}
+    input.lines.forEach((l, i) => {
+      if (!l.vendorId) throw new Error(`checkoutTotals: line ${i} needs a vendorId to compute tax`)
+      food[l.vendorId] = (food[l.vendorId] ?? 0) + lineCents[i]
+    })
+    taxes = vendorTaxes(food, input.taxRates)
+  }
+  const taxCents = totalTaxCents(taxes)
+
+  const totalCents = onlineSubtotalCents + serviceFee + input.deliveryFeeCents + input.tipCents + taxCents
 
   return {
     unitCents,
@@ -199,6 +222,8 @@ export function checkoutTotals(input: CheckoutTotalsInput): CheckoutTotals {
     serviceFeeCents: serviceFee,
     deliveryFeeCents: input.deliveryFeeCents,
     tipCents: input.tipCents,
+    vendorTaxes: taxes,
+    taxCents,
     totalCents,
   }
 }

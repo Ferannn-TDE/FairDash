@@ -481,14 +481,17 @@ export async function POST(req: NextRequest) {
     //                    so the markup is vendor revenue)
     //   serviceFeeBase = Σ in-person unit × qty; serviceFee = round-half-up(base × bps / 10000) + flat
     //                    (lib/fees/exhibit-a), never on the online subtotal
-    //   total          = subtotal + serviceFee + deliveryFee + tip (serviceCharge is always 0, C-7;
+    //   tax            = B1.19: per vendor, per part, half up, on the ONLINE food (lib/fees/tax.ts)
+    //   total          = subtotal + serviceFee + deliveryFee + tip + tax (serviceCharge is always 0, C-7;
     //                    the fee is never on the markup, delivery fee or tip). Integer cents, dollars once.
     const totals = checkoutTotals({
-      lines: pricedLines.map(({ cartItem, mi }) => ({ inPersonCents: toCents(mi.price), quantity: cartItem.quantity })),
+      lines: pricedLines.map(({ cartItem, mi }) => ({ inPersonCents: toCents(mi.price), quantity: cartItem.quantity, vendorId: cartItem.vendorId })),
       markupBps,
       feeTerms: money,
       deliveryFeeCents: deliveryFeeCents ?? 0,
       tipCents,
+      // B1.19: the event's rates, read fresh with the event (admin-only, per event). Snapshotted below.
+      taxRates: { salesTaxRateMilli: event.salesTaxRateMilli, localTaxRateMilli: event.localTaxRateMilli },
     })
 
     const lineItems = pricedLines.map(({ cartItem, mi }, i) => {
@@ -513,6 +516,8 @@ export async function POST(req: NextRequest) {
     const fairSynqFee = serviceFee
     const vendorPayout = 0
     const total = fromCents(totals.totalCents)
+    // B1.19: the order's tax (Σ the per-vendor parts, on the online food; 0 without rates). Part of the total.
+    const tax = fromCents(totals.taxCents)
     const itemCount = lineItems.reduce((sum, i) => sum + i.quantity, 0)
 
     // ── Checkout floor (audit H5, Step 2b) ─────────────────────────────────────
@@ -548,6 +553,7 @@ export async function POST(req: NextRequest) {
             deliveryFee,
             serviceCharge: serviceCharge > 0 ? serviceCharge : null,
             tip: tip > 0 ? tip : null,
+            tax: tax > 0 ? tax : null,
             total,
             onlineMarkupBps: markupBps,
             lines: lineItems.map(l => ({ menuItemId: l.menuItemId, vendorId: l.vendorId, quantity: l.quantity, unitPrice: l.unitPrice })),
@@ -654,6 +660,8 @@ export async function POST(req: NextRequest) {
         serviceFeeBps: String(money.serviceFeeBps),
         serviceFeeFlatCents: String(money.serviceFeeFlatCents),
         cardFeesPaidBy: money.cardFeesPaidBy,
+        // B1.19: the order's tax (sum of the per-vendor parts), an addition like the four above.
+        taxCents: String(totals.taxCents),
       },
     }
 
@@ -711,6 +719,13 @@ export async function POST(req: NextRequest) {
           serviceFeeBps: money.serviceFeeBps,
           serviceFeeFlatCents: money.serviceFeeFlatCents,
           cardFeesPaidBy: money.cardFeesPaidBy,
+          // B1.19 tax snapshot: the rates used and the order's tax (= Σ the OrderVendorTax rows below).
+          salesTaxRateMilli: event.salesTaxRateMilli,
+          localTaxRateMilli: event.localTaxRateMilli,
+          taxCents: totals.taxCents,
+          ...(totals.vendorTaxes.length ? {
+            vendorTaxes: { create: totals.vendorTaxes.map(t => ({ vendorId: t.vendorId, foodCents: t.foodCents, salesTaxCents: t.salesTaxCents, localTaxCents: t.localTaxCents })) },
+          } : {}),
           customerName,
           customerPhone,
           vehicleMake: vehicleMake ?? null,
@@ -789,6 +804,7 @@ export async function POST(req: NextRequest) {
           serviceFee,
           serviceFeeBase,
           onlineMarkupBps: markupBps,
+          tax: tax > 0 ? tax : null,
           total,
           itemCount,
           fulfillmentType,

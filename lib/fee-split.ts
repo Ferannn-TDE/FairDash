@@ -32,6 +32,8 @@ export async function ensureOrderFeeSplit(input: {
   tipCents: number
   cardFeesPaidBy: CardFeesPaidBy
   realStripeFeeCents: number
+  /** B1.19: each vendor's stored tax (OrderVendorTax, both parts). Absent = no tax. */
+  vendorTaxCents?: Record<string, number>
 }): Promise<FeeModel2Split> {
   const existing = await readSplit(input.orderId)
   if (existing) {
@@ -50,7 +52,7 @@ export async function ensureOrderFeeSplit(input: {
     tipCents: input.tipCents,
     realStripeFeeCents: input.realStripeFeeCents,
     cardFeesPaidBy: input.cardFeesPaidBy,
-    // vendorTaxCents: from the order once B1.19 adds tax columns (0 until then)
+    vendorTaxCents: input.vendorTaxCents, // B1.19: paid out with each vendor's food; its processing rides with them
   })
   const vendorIds = Object.keys(input.vendorFoodCents)
   const partnerBase = input.runnerFeeCents + input.tipCents
@@ -70,7 +72,7 @@ export async function ensureOrderFeeSplit(input: {
       await tx.orderFeeSplitVendor.createMany({
         data: vendorIds.map(vendorId => ({
           splitId: split.id, orderId: input.orderId, vendorId,
-          foodCents: input.vendorFoodCents[vendorId], taxCents: 0,
+          foodCents: input.vendorFoodCents[vendorId], taxCents: input.vendorTaxCents?.[vendorId] ?? 0,
           feeShareCents: plan.feeShares[vendorId] ?? 0,
           payCents: plan.vendorPayoutCents[vendorId],
         })),
@@ -108,7 +110,7 @@ async function readSplit(orderId: string): Promise<Omit<FeeModel2Split, 'created
   return {
     lines: s.vendors
       .sort((a, b) => a.vendorId.localeCompare(b.vendorId))
-      .map(v => ({ vendorId: v.vendorId, subtotalCents: v.foodCents, feeShareCents: platform ? 0 : v.feeShareCents, transferCents: v.payCents })),
+      .map(v => ({ vendorId: v.vendorId, subtotalCents: v.foodCents, feeShareCents: platform ? 0 : v.feeShareCents, transferCents: v.payCents, taxCents: v.taxCents })),
     realStripeFeeCents: s.realStripeFeeCents,
     fairsynqNetCents: s.fairsynqNetCents,
     partnerNetCents: s.partnerNetCents,

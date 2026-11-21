@@ -10,6 +10,7 @@ import { adminErrorText } from '@/lib/admin-error-text'
 
 /** The example item the markup preview prices: "On a $10.00 item, customers pay …". */
 const MARKUP_EXAMPLE_PRICE = 10
+import TaxRatesCard from '@/app/admin/_components/TaxRatesCard'
 
 const INPUT = 'w-full bg-[#0f0f0f] border border-white/10 rounded-xl px-4 py-3 text-white text-sm font-inter outline-none focus:border-[#FF0077] transition-colors placeholder:text-[#444]'
 
@@ -261,6 +262,8 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
             </p>
           </div>
         </SectionCard>
+        {/* B1.19: admin-only tax rates, saved on their own (reason required, logged). */}
+        <TaxRatesCard eventSlug={params.eventSlug} />
 
         <SectionCard title="Customer Link">
           <div className="flex items-center justify-between gap-4">

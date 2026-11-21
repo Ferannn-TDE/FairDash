@@ -15,8 +15,10 @@ export interface VendorPayoutLine {
   subtotalCents: number
   /** This vendor's share of the Stripe fee (cents). */
   feeShareCents: number
-  /** What this vendor is owed: subtotalCents - feeShareCents (cents). */
+  /** What this vendor is owed: subtotalCents - feeShareCents (cents). With tax (B1.19): + taxCents. */
   transferCents: number
+  /** B1.19: the vendor's tax paid out with the food (feeModel 2 splits only; absent = 0). */
+  taxCents?: number
 }
 
 /**

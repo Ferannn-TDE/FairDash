@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from 'react'
 import { DollarSign, ShoppingBag, TrendingDown, Users } from 'lucide-react'
 import { adminErrorText } from '@/lib/admin-error-text'
+import TaxReportCard from '@/app/_components/TaxReportCard'
 
 // ─── Types (mirror lib/admin-fair-reports FairReport — all cents) ─────────────
 interface PayeeTakeHome { settledCents: number; estimatedCents: number }
@@ -94,6 +95,9 @@ export default function AdminReportsPage({ params: paramsPromise }: { params: Pr
         </h1>
         <p className="text-text-gray text-sm mt-0.5">{fairName} · figures from the ledger, live</p>
       </div>
+
+      {/* B1.19: per-vendor tax (renders nothing when the fair never collected tax). */}
+      <div className="mb-4"><TaxReportCard apiUrl={`/api/admin/events/${params.eventSlug}/reports/tax`} showVendors /></div>
 
       {/* Sales — CUSTOMER money. Gross and Net are distinct and labelled. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">

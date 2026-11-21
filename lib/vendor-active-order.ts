@@ -29,6 +29,7 @@ export interface VendorActiveOrderRow {
   total: number
   feeModel: number | null
   cardFeesPaidBy: string | null
+  vendorTaxes: { vendorId: string; salesTaxCents: number; localTaxCents: number }[]
   fulfillmentType: VendorFulfillmentType
   customerName: string
   customerPhone: string

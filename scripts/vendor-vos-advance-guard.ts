@@ -153,10 +153,10 @@ async function main() {
     /** Earnings for one lane, read the way every vendor surface reads it. */
     const laneCents = async (orderId: string, vendorId: string) => {
       const o = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: {
-        total: true, status: true, feeModel: true, cardFeesPaidBy: true,
+        total: true, status: true, feeModel: true, cardFeesPaidBy: true, vendorTaxes: { select: { vendorId: true, salesTaxCents: true, localTaxCents: true } },
         orderItems: { select: { vendorId: true, subtotal: true } },
         payouts: { select: { vendorId: true, netAmount: true, reversedAt: true, stripeTransferId: true } },
-        refunds: { select: { vendorId: true, status: true, amountCents: true } },
+        refunds: { select: { vendorId: true, status: true, amountCents: true, salesTaxCents: true, localTaxCents: true } },
         vendorOrderStatuses: { select: { vendorId: true, status: true } },
       } })
       return computeVendorOrderEarnings(o, vendorId)

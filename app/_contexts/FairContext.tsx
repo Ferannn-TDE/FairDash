@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { CustomerFeeTerms } from '@/lib/checkout-total'
+import type { TaxRates } from '@/lib/fees/tax'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FulfillmentConfig {
@@ -43,6 +44,8 @@ export interface FairData {
   onlineMarkupBps: number
   /** The fee terms checkout prices with (item 10 stage 3). null = ordering is paused. */
   feeTerms: CustomerFeeTerms | null
+  /** B1.19: the event's tax rates for the checkout estimate (null parts = not charged). */
+  taxRates: TaxRates
   // Optional fields not present in DB — pages handle them with conditional rendering
   tagline?: string
   location: { address: string; city: string; state: string }
@@ -112,6 +115,7 @@ function placeholderFair(fairSlug: string): FairData {
     serviceChargeAmount: null,
     onlineMarkupBps: 0,
     feeTerms: null,
+    taxRates: { salesTaxRateMilli: null, localTaxRateMilli: null },
     location: { address: '', city: '', state: '' },
     operatingHours: { open: '', close: '' },
     admissionFree: false,
@@ -151,6 +155,7 @@ function normalizeEvent(raw: any): FairData {
     // answers with 409 PRICE_CHANGED and the real total for the customer to confirm. Never more.
     onlineMarkupBps: typeof raw.onlineMarkupBps === 'number' ? raw.onlineMarkupBps : 0,
     feeTerms: raw.feeTerms ?? null,
+    taxRates: { salesTaxRateMilli: raw.salesTaxRateMilli ?? null, localTaxRateMilli: raw.localTaxRateMilli ?? null },
     location: {
       address: raw.address ?? raw.location ?? '',
       city: raw.city ?? '',

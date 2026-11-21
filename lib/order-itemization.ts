@@ -27,16 +27,19 @@ export interface ItemizationInput {
   deliveryFee?: number | null
   serviceCharge?: number | null
   tip?: number | null
+  /** B1.19: the order's tax in cents (Order.taxCents; 0 / absent = no tax line). */
+  taxCents?: number | null
   total: number
   orderItems: { vendorId: string; subtotal: number; vendor?: { name: string } | null }[]
   /** Optional name source when orderItems don't carry vendor names. */
   vendorNames?: Record<string, string>
-  refunds: { vendorId: string; status: string; amountCents: number }[]
+  /** salesTaxCents / localTaxCents: B1.19 tax returned with that refund (absent = 0). */
+  refunds: { vendorId: string; status: string; amountCents: number; salesTaxCents?: number | null; localTaxCents?: number | null }[]
   tipRefundId?: string | null
   deliveryFeeRefundCents?: number | null
 }
 
-export type ChargeKey = 'subtotal' | 'delivery_fee' | 'tip' | 'service_charge' | 'service_fee'
+export type ChargeKey = 'subtotal' | 'delivery_fee' | 'tip' | 'service_charge' | 'service_fee' | 'tax'
 
 export interface ChargeLine {
   key: ChargeKey
@@ -47,6 +50,7 @@ export interface ChargeLine {
 export type RefundLine =
   | { key: 'food'; vendorId: string; vendorName: string; label: string; cents: number; status: 'REFUNDED' | 'PROCESSING' }
   | { key: 'service_fee'; label: string; cents: number; status: 'REFUNDED' | 'PROCESSING' }
+  | { key: 'tax'; label: string; cents: number; status: 'REFUNDED' | 'PROCESSING' }
   | { key: 'delivery_tip'; label: string; cents: number; tipCents: number; feeCents: number; status: 'REFUNDED' }
 
 export interface OrderItemization {
@@ -98,6 +102,9 @@ export function itemizeOrder(o: ItemizationInput): OrderItemization {
   if (tipCents > 0) charges.push({ key: 'tip', label: 'Tip', cents: tipCents })
   if (serviceChargeCents > 0) charges.push({ key: 'service_charge', label: 'Event service charge', cents: serviceChargeCents })
   if (serviceFeeCents > 0) charges.push({ key: 'service_fee', label: 'Service fee', cents: serviceFeeCents })
+  // B1.19: ONE combined "Tax" line (both parts), shown only when the order was taxed.
+  const taxCents = o.taxCents ?? 0
+  if (taxCents > 0) charges.push({ key: 'tax', label: 'Tax', cents: taxCents })
   const linesSumCents = charges.reduce((s, l) => s + l.cents, 0)
 
   // Per-vendor food slices, and names, in first-seen item order (stable display).
@@ -126,6 +133,12 @@ export function itemizeOrder(o: ItemizationInput): OrderItemization {
   }
   for (const status of ['REFUNDED', 'PROCESSING'] as const) {
     if (waived[status] > 0) refunds.push({ key: 'service_fee', label: 'Service fee', cents: waived[status], status })
+  }
+  // B1.19: tax returned with the food refunds, one combined line per status.
+  const taxBack = { REFUNDED: 0, PROCESSING: 0 }
+  for (const r of live) taxBack[r.status === 'COMPLETED' ? 'REFUNDED' : 'PROCESSING'] += (r.salesTaxCents ?? 0) + (r.localTaxCents ?? 0)
+  for (const status of ['REFUNDED', 'PROCESSING'] as const) {
+    if (taxBack[status] > 0) refunds.push({ key: 'tax', label: 'Tax', cents: taxBack[status], status })
   }
 
   if (o.tipRefundId) {
@@ -158,6 +171,7 @@ export function itemizeOrder(o: ItemizationInput): OrderItemization {
   if (foodLanded > 0) parts.push(`Food refunded ${formatCents(foodLanded)}`)
   for (const r of landed) {
     if (r.key === 'service_fee') parts.push(`Service fee refunded ${formatCents(r.cents)}`)
+    if (r.key === 'tax') parts.push(`Tax refunded ${formatCents(r.cents)}`)
     if (r.key === 'delivery_tip') parts.push(`${r.label} refunded ${formatCents(r.cents)}`)
   }
 

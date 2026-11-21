@@ -29,7 +29,7 @@ const assert = (c: boolean, label: string) => { if (c) { pass++; console.log(`  
 
 console.log('[1] behavior: the shared mapper fills the whole contract, scoped to the vendor')
 const row: VendorActiveOrderRow = {
-  id: 'o1', status: 'PLACED', placedAt: new Date(), total: 45, feeModel: null, cardFeesPaidBy: null,
+  id: 'o1', status: 'PLACED', placedAt: new Date(), total: 45, feeModel: null, cardFeesPaidBy: null, vendorTaxes: [],
   fulfillmentType: 'HOME_DELIVERY',
   customerName: 'Cust', customerPhone: '+15550001111',
   vehicleMake: null, vehicleColor: null, vehiclePlate: null,

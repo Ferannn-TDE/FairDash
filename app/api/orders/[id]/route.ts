@@ -48,7 +48,7 @@ export async function GET(
         // read or returned; refund state comes from `itemization` below.
         cancellation: { select: { reason: true, cancelledAt: true } },
         // The money record for refunds, fed to itemizeOrder and not returned raw.
-        refunds: { select: { vendorId: true, status: true, amountCents: true } },
+        refunds: { select: { vendorId: true, status: true, amountCents: true, salesTaxCents: true, localTaxCents: true } },
         // Delivered-time for the customer timeline. RunnerEarning is created in the SAME
         // DELIVERED transition that accrues the runner's earning, so its createdAt is the
         // honest delivery timestamp. Not Order.completedAt: that is stamped on DELIVERED only for

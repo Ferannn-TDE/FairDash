@@ -319,10 +319,12 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       deliveryFee: true,
       serviceCharge: true,
       tip: true,
+      taxCents: true, // B1.19
       total: true,
       stripeChargeId: true,
       stripePaymentIntentId: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
+      vendorTaxes: { select: { vendorId: true, salesTaxCents: true, localTaxCents: true } }, // B1.19
       // Item 10 stage 4: the fee model decides the split (null = today's legacy split, unchanged).
       feeModel: true,
       cardFeesPaidBy: true,
@@ -369,12 +371,14 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   // Tip: platform-held but OWED to the runner (a liability, NOT FairSynq revenue).
   // Part of the charge, so it MUST appear in both identity sides.
   const tipCents = Math.round((order.tip ?? 0) * 100)
+  // B1.19: the order's tax (Σ its OrderVendorTax parts; 0 on legacy and untaxed orders). Paid out to the vendors.
+  const taxCents = order.taxCents
 
   // ── Reconciliation 1: customer side (no money moved yet) ──────────────────
-  const customerSide = totalSubtotalCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents
+  const customerSide = totalSubtotalCents + serviceFeeCents + deliveryCents + serviceChargeCents + tipCents + taxCents
   if (customerSide !== totalCents) {
     throw new PayoutReconciliationError(
-      `order ${orderId}: customer-side mismatch — charge ${totalCents}¢ ≠ subtotal ${totalSubtotalCents} + serviceFee ${serviceFeeCents} + delivery ${deliveryCents} + serviceCharge ${serviceChargeCents} + tip ${tipCents}`,
+      `order ${orderId}: customer-side mismatch — charge ${totalCents}¢ ≠ subtotal ${totalSubtotalCents} + serviceFee ${serviceFeeCents} + delivery ${deliveryCents} + serviceCharge ${serviceChargeCents} + tip ${tipCents} + tax ${taxCents}`,
     )
   }
 
@@ -387,8 +391,14 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
         orderId, eventId: order.eventId, vendorFoodCents: vendorSubtotalsCents,
         serviceFeeCents, runnerFeeCents: deliveryCents, tipCents,
         cardFeesPaidBy: (order.cardFeesPaidBy ?? 'VENDOR') as CardFeesPaidBy, realStripeFeeCents: stripeFeeCents,
+        vendorTaxCents: Object.fromEntries(order.vendorTaxes.map(t => [t.vendorId, t.salesTaxCents + t.localTaxCents])),
       })
     : null
+  // B1.19: tax exists only on feeModel 2 orders (the order route is the only writer). A legacy order carrying tax
+  // has no rule to pay it out: halt, never guess.
+  if (!exhibitA && taxCents > 0) {
+    throw new PayoutReconciliationError(`order ${orderId}: legacy (feeModel null) order carries ${taxCents}¢ tax; no payout rule for it. Halted.`)
+  }
   const lines = exhibitA ? exhibitA.lines : splitStripeFee(vendorSubtotalsCents, stripeFeeCents)
 
   const vendorIds = lines.map(l => l.vendorId)
@@ -570,6 +580,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
         grossAmount: p.subtotalCents / 100,   // vendor's subtotal slice
         fairSynqFee: p.feeShareCents / 100,   // Stripe fee share withheld from this transfer
         netAmount: p.transferCents / 100,     // amount actually transferred
+        taxAmount: (p.taxCents ?? 0) / 100,   // B1.19: tax inside netAmount (gross + tax − fee = net)
         stripeTransferId: transfer.id,
         stripeStatus: 'pending',
         processedAt: new Date(),
@@ -593,6 +604,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
         status: 'paid',
         feeShareCents: p.feeShareCents,
         netCents: p.transferCents,
+        taxCents: p.taxCents ?? 0, // B1.19
         stripeTransferId: transfer.id,
         paidAt: new Date(),
       },

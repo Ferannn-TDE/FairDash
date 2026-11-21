@@ -54,6 +54,8 @@ export const getFairBySlugCached = unstable_cache(
         admissionFree: true,
         openTime: true,
         closeTime: true,
+        salesTaxRateMilli: true, // B1.19: the checkout estimate's tax (the order route re-reads them fresh)
+        localTaxRateMilli: true,
         fulfillmentConfig: {
           select: {
             boothPickupEnabled: true,
@@ -107,6 +109,7 @@ export const getFairBySlugCached = unstable_cache(
       onlineMarkupBps: raw.onlineMarkupBps,
       // Never cached: the fair layout and /api/events/:slug merge the live terms in (item 10 stage 3).
       feeTerms: null,
+      taxRates: { salesTaxRateMilli: raw.salesTaxRateMilli, localTaxRateMilli: raw.localTaxRateMilli },
       featuredVendorIds: raw.featuredVendorIds ?? [],
       featuredLabel: raw.featuredLabel ?? null,
       featuredEnabled: raw.featuredEnabled ?? true,

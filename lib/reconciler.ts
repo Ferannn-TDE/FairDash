@@ -603,7 +603,7 @@ export async function selectPatternCCandidates(o: { windowStart: Date; now: Date
     },
     select: {
       id: true, eventId: true,
-      total: true, fairSynqFee: true, deliveryFee: true, serviceCharge: true, tip: true,
+      total: true, fairSynqFee: true, deliveryFee: true, serviceCharge: true, tip: true, taxCents: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
       payouts: { select: { vendorId: true } },
       payoutHolds: { select: { vendorId: true } },
@@ -650,6 +650,7 @@ export async function selectPatternCCandidates(o: { windowStart: Date; now: Date
       + Math.round((ord.deliveryFee ?? 0) * 100)
       + Math.round((ord.serviceCharge ?? 0) * 100)
       + Math.round((ord.tip ?? 0) * 100)
+      + ord.taxCents // B1.19
     const totalCents = Math.round(ord.total * 100)
     out.push({
       orderId: ord.id,

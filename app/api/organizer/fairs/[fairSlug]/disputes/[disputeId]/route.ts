@@ -75,10 +75,13 @@ export async function PATCH(
           actor: dbUser.id,
           ...(action === 'PARTIAL_REFUND' ? { amountCentsOverride: Math.round(amount! * 100) } : {}),
         })
+        const taxCents = res.salesTaxCents + res.localTaxCents // B1.19: tax returned with the food
         refundMeta = {
           partial: action === 'PARTIAL_REFUND',
           vendorId: dispute.vendorId,
           amount: res.sliceCents / 100,
+          tax: taxCents / 100,
+          total: (res.sliceCents + taxCents) / 100,
           stripeRefundId: res.stripeRefundId,
         }
         logger.info('[Dispute] refund via engine', { disputeId, orderId: order.id, ...refundMeta })
@@ -94,7 +97,7 @@ export async function PATCH(
 
     const resolutionText = resolution?.slice(0, 500)
       ?? (action === 'REFUND'         ? 'Full refund issued'
-        : action === 'PARTIAL_REFUND' ? `Partial refund of $${(amount ?? 0).toFixed(2)} issued`
+        : action === 'PARTIAL_REFUND' ? partialRefundText(refundMeta, amount ?? 0)
         : null)
 
     const updated = await db.dispute.update({
@@ -121,4 +124,14 @@ export async function PATCH(
   } catch (err) {
     return handleApiError(err)
   }
+}
+
+/** B1.19: the confirmation shows food + tax = total whenever tax came back (food only otherwise). */
+function partialRefundText(meta: Record<string, unknown>, enteredFood: number): string {
+  const food = meta.amount != null ? Number(meta.amount) : enteredFood
+  const tax = Number(meta.tax ?? 0)
+  const total = meta.total != null ? Number(meta.total) : food
+  return tax > 0
+    ? `Partial refund issued: food $${food.toFixed(2)} + tax $${tax.toFixed(2)} = $${total.toFixed(2)}`
+    : `Partial refund of $${food.toFixed(2)} issued`
 }

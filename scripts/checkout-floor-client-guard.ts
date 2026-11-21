@@ -15,7 +15,7 @@
  *       come from checkoutTotals in lib/checkout-total.ts, the calculator the server charges with)
  *   [3] the total has every term the server charges: the page passes the cart lines, the markup,
  *       the money settings' fee terms, the delivery fee and the tip to checkoutTotals, and
- *       checkoutTotals adds food + service fee + delivery fee + tip (no event service charge since
+ *       checkoutTotals adds food + service fee + delivery fee + tip + sales tax (B1.19) (no event service charge since
  *       item 10 stage 3, C-7; ported into this calculator 2026-11-23)
  *   [4] the button is disabled while there is a refusal, and the handler returns before its fetch
  *   [5] the text shown is the refusal's own message; none of the three messages is copied in
@@ -57,7 +57,7 @@ const fiveTerms = (s: string) => {
   const args = m[1].split(',').map(t => t.trim()).filter(Boolean).sort()
   return JSON.stringify(args) === JSON.stringify([
     'deliveryFeeCents: estimatedDeliveryFeeCents', 'feeTerms', 'lines: calculatorLines', 'markupBps',
-    'tipCents: toCents(tipAmount)',
+    'taxRates: fair.taxRates', 'tipCents: toCents(tipAmount)',
   ])
 }
 /** checkoutTotals itself adds the four terms the server charges. */
@@ -66,7 +66,7 @@ const calcAddsFiveTerms = (s: string) => {
   if (!m) return false
   const terms = m[1].split('+').map(t => t.trim()).sort()
   return JSON.stringify(terms) === JSON.stringify(
-    ['input.deliveryFeeCents', 'input.tipCents', 'onlineSubtotalCents', 'serviceFee'])
+    ['input.deliveryFeeCents', 'input.tipCents', 'onlineSubtotalCents', 'serviceFee', 'taxCents'])
 }
 const buttonDisabled = (s: string) => /onClick=\{\(\) => handlePlaceOrder\(totals\.totalCents\)\}\s*disabled=\{submitting \|\| !!floorRefusal \|\| orderingPaused\}/.test(s)
 /** The PRICE_CHANGED "Confirm" button is held to the same rule (added in audit H5 2h). */
@@ -113,10 +113,10 @@ function main() {
     assert(!check(planted), `${label.slice(0, 3)} [0] control: the same check FAILS on a page without the mirror`)
   }
 
-  assert(fiveTerms(page), '[3] the page passes exactly the cart lines, markup, fee terms, delivery fee and tip to checkoutTotals')
+  assert(fiveTerms(page), '[3] the page passes exactly the cart lines, markup, fee terms, delivery fee, tip and tax rates to checkoutTotals')
   assert(!fiveTerms(page.replace(/\s*tipCents: toCents\(tipAmount\),/, '')), '[3] [0] control: a total missing the tip fails the check')
   const calc = strip(readSource(CALC))
-  assert(calcAddsFiveTerms(calc), '[3] checkoutTotals adds exactly food + service fee + delivery fee + tip')
+  assert(calcAddsFiveTerms(calc), '[3] checkoutTotals adds exactly food + service fee + delivery fee + tip + tax')
   assert(!calcAddsFiveTerms(calc.replace(' + input.tipCents', '')), '[3] [0] control: a calculator total missing the tip fails the check')
 
   const copies = copiedMessages(page)

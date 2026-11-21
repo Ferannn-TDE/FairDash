@@ -66,7 +66,8 @@ export interface OrderForEarnings {
    * CONSTRUCTION, because the polluted row is removed before the lookup.
    */
   payouts: { vendorId: string; netAmount: number; reversedAt: Date | null; stripeTransferId: string }[]
-  refunds: { vendorId: string; status: string; amountCents: number }[]
+  /** salesTaxCents / localTaxCents: B1.19 tax returned with that refund (absent = 0). */
+  refunds: { vendorId: string; status: string; amountCents: number; salesTaxCents?: number; localTaxCents?: number }[]
   vendorOrderStatuses: { vendorId: string; status: string }[]
   /**
    * Item 10 stage 4 — REQUIRED for the same reason `status` is: without them the helper would
@@ -74,6 +75,11 @@ export interface OrderForEarnings {
    */
   feeModel: number | null
   cardFeesPaidBy: string | null
+  /**
+   * B1.19 — REQUIRED, same reason as feeModel: the vendor is paid their tax with their food, so an estimate that
+   * forgot it would under-state a taxed order. Empty on untaxed and legacy orders.
+   */
+  vendorTaxes: { vendorId: string; salesTaxCents: number; localTaxCents: number }[]
 }
 
 const c = (n: number) => Math.round(n * 100)
@@ -131,11 +137,14 @@ export function estimateStripeFeeCents(orderTotalCents: number): number {
  */
 export function estimateExhibitAVendorShareCents(
   vendorFoodCents: Record<string, number>, orderTotalCents: number, vendorId: string,
+  vendorTaxCents: Record<string, number> = {},
 ): number {
   if (!(vendorFoodCents[vendorId] > 0)) return 0
   const food = Object.values(vendorFoodCents).reduce((a, b) => a + b, 0)
-  const nonFood = Math.max(0, orderTotalCents - food)
-  const parties = nominalWeights({ vendorFoodCents, serviceFeeCents: nonFood, curbsideFeeCents: 0, tipCents: 0 })
+  const tax = Object.values(vendorTaxCents).reduce((a, b) => a + b, 0)
+  // B1.19: each vendor's tax is in their weight (its processing rides with them), so it leaves the non-food rest.
+  const nonFood = Math.max(0, orderTotalCents - food - tax)
+  const parties = nominalWeights({ vendorFoodCents, vendorTaxCents, serviceFeeCents: nonFood, curbsideFeeCents: 0, tipCents: 0 })
   const W = parties.reduce((a, p) => a + BigInt(p.weight), BigInt(0))
   const w = BigInt(parties.find(p => p.key === vendorId)!.weight)
   const P = BigInt(estimateStripeFeeCents(orderTotalCents))
@@ -189,10 +198,14 @@ export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: st
     // Estimate: slice − this vendor's share of the estimated Stripe fee, split
     // proportionally with the SAME function the real payout uses.
     const estFeeTotal = estimateStripeFeeCents(c(order.total))
+    // B1.19: a feeModel 2 vendor is paid their tax with their food (0 on untaxed and legacy orders).
+    const vendorTaxCents: Record<string, number> = {}
+    for (const t of order.vendorTaxes) vendorTaxCents[t.vendorId] = t.salesTaxCents + t.localTaxCents
+    const myTaxCents = order.feeModel === FEE_MODEL_EXHIBIT_A ? (vendorTaxCents[vendorId] ?? 0) : 0
     const feeShare = order.feeModel === FEE_MODEL_EXHIBIT_A
-      ? (order.cardFeesPaidBy === 'PLATFORM' ? 0 : estimateExhibitAVendorShareCents(vendorSubtotalsCents, c(order.total), vendorId))
+      ? (order.cardFeesPaidBy === 'PLATFORM' ? 0 : estimateExhibitAVendorShareCents(vendorSubtotalsCents, c(order.total), vendorId, vendorTaxCents))
       : splitStripeFee(vendorSubtotalsCents, estFeeTotal).find(l => l.vendorId === vendorId)?.feeShareCents ?? 0
-    base = Math.max(0, sliceCents - feeShare)
+    base = Math.max(0, sliceCents + myTaxCents - feeShare)
     status = 'estimated'
   }
 
@@ -201,7 +214,8 @@ export function computeVendorOrderEarnings(order: OrderForEarnings, vendorId: st
   if (vos === 'DECLINED') return { cents: 0, status: 'declined' }
   if (payout?.reversedAt) return { cents: 0, status: 'reversed' }
   if (refund) {
-    const remaining = Math.max(0, base - refund.amountCents)
+    // B1.19: the refund returns food AND its tax, so both come off what the vendor keeps.
+    const remaining = Math.max(0, base - refund.amountCents - (refund.salesTaxCents ?? 0) - (refund.localTaxCents ?? 0))
     return { cents: remaining, status: 'refunded' }
   }
 

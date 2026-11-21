@@ -31,7 +31,7 @@ export async function GET(
         vendorOrderStatuses: {
           select: { vendorId: true, status: true, vendor: { select: { name: true } } },
         },
-        refunds: { select: { vendorId: true, status: true, amountCents: true } },
+        refunds: { select: { vendorId: true, status: true, amountCents: true, salesTaxCents: true, localTaxCents: true } },
         refundRequests: { select: { vendorId: true, status: true, reason: true } },
         chargebacks: {
           select: {

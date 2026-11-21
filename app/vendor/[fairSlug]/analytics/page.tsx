@@ -10,6 +10,7 @@ import {
 import EarningsChart, { type ChartDataPoint, type ChartPeriod } from '@/app/_components/EarningsChart'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { PENDING_ESTIMATE_NOTE } from '@/lib/vendor-estimate-copy'
+import TaxReportCard from '@/app/_components/TaxReportCard'
 
 interface AnalyticsData {
   chartData: ChartDataPoint[]
@@ -144,6 +145,9 @@ export default function VendorAnalyticsPage() {
           loading={loading}
         />
       </div>
+
+      {/* B1.19: this vendor's own tax row (renders nothing when the fair never collected tax). */}
+      {vendorId && <TaxReportCard apiUrl={`/api/vendors/${vendorId}/tax-report`} showVendors={false} />}
 
       {/* Today's snapshot */}
       {analytics && (
