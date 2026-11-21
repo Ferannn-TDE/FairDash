@@ -14,10 +14,13 @@ import { AUDIT_ACTIONS } from '../vendor-audit'
 export type MenuPriceChangeSource =
   | 'DIRECT_CREATE'            // historical: the removed POST /api/menu (2026-11-21). Old rows may hold it
   | 'DIRECT_EDIT'              // historical: the removed PATCH /api/menu/[id] (2026-11-21). Old rows may hold it
-  | 'REQUEST_APPROVED_ADD'     // the approver approves an ADD menu request
-  | 'REQUEST_APPROVED_EDIT'    // the approver approves an EDIT menu request that carries a price
-  | 'REQUEST_APPLIED_EDIT'     // a vendor EDIT of a live item, applied at once (2g)
-  | 'REQUEST_APPLIED_SIZE'     // a new size added to a live item, applied at once (Fix B)
+  | 'REQUEST_APPROVED_ADD'     // the approver approves an ADD menu request (a brand-new item, every size)
+  | 'REQUEST_APPROVED_SIZE'    // the approver approves a new size of a live item (F4, 2026-11-21)
+  | 'REQUEST_APPROVED_EDIT'    // the approver approves an EDIT that carries a price (a live increase since F2)
+  | 'REQUEST_APPLIED_EDIT'     // a vendor EDIT of a live item, applied at once: since F2 (2026-11-21) only a
+                               // lower price; before F2 any price, so old rows may hold an increase
+  | 'REQUEST_APPLIED_SIZE'     // historical: a new size of a live item applied at once (Fix B), until F4
+                               // (2026-11-21). Old rows may hold it
   | 'REQUEST_APPLIED_RESTORE'  // a vendor restore at the same or a lower price, applied at once (2g)
   | 'REQUEST_APPROVED_RESTORE' // the approver approves a restore at a higher price (2g)
 

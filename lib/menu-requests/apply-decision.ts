@@ -90,9 +90,14 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
   const menuItemId = menuRequest.menuItemId
 
   // SIZES ARE PART OF THE ITEM (Nov 12). A brand-new item's sizes are PENDING ADDs sharing a
-  // variantGroup; deciding one decides them all, in this one transaction. Every other request is
-  // decided on its own.
-  const group = requestType === 'ADD' && menuRequest.variantGroup !== null
+  // variantGroup; deciding one decides them all, in this one transaction. A new size of an item
+  // that is already LIVE (F4, Nov 13) is decided on its own: approving "Large" must not also approve
+  // an "XL" the vendor filed separately. Every other request is decided on its own.
+  const isNewSizeOfLiveItem = requestType === 'ADD' && menuRequest.variantGroup !== null
+    && (await db.menuItem.count({
+      where: { vendorId, variantGroup: menuRequest.variantGroup, removedAt: null },
+    })) > 0
+  const group = requestType === 'ADD' && menuRequest.variantGroup !== null && !isNewSizeOfLiveItem
     ? await db.menuRequest.findMany({
       where: { vendorId, type: 'ADD', status: 'PENDING', variantGroup: menuRequest.variantGroup },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -165,18 +170,25 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
           })
           await recordMenuPriceChange(tx, {
             vendorId, userId: reviewerUserId, menuItemId: created.id, name: created.name,
-            previousPrice: null, newPrice: created.price, source: 'REQUEST_APPROVED_ADD', requestId: r.id,
+            previousPrice: null, newPrice: created.price,
+            source: isNewSizeOfLiveItem ? 'REQUEST_APPROVED_SIZE' : 'REQUEST_APPROVED_ADD', requestId: r.id,
           })
         }
         break
       }
       case 'EDIT': {
-        // Reachable only for an EDIT filed before 2g: since then a vendor's EDIT of a live item
-        // applies at once and is written already APPROVED.
+        // A live price increase (F2, Nov 13): file-item.ts writes it PENDING carrying the price
+        // only, while the item keeps selling at its old price. (An EDIT filed before 2g may also
+        // carry other fields; they are applied with it, as before.)
         const itemId = menuItemId as string // checked above
         // The price as it is NOW, read inside the transaction. If the live price dropped while
         // this increase waited, the audit row records that real starting point.
-        const before = await tx.menuItem.findUniqueOrThrow({ where: { id: itemId }, select: { price: true } })
+        const before = await tx.menuItem.findUniqueOrThrow({ where: { id: itemId }, select: { price: true, removedAt: true } })
+        // Removed while the increase waited: nothing to raise. Refused, so the request stays
+        // PENDING and the approver rejects it.
+        if (before.removedAt !== null) {
+          throw new ApiError('This item is removed from the menu. Reject this request.', 409, 'CONFLICT')
+        }
         const after = await tx.menuItem.update({
           where: { id: itemId },
           data: {

@@ -162,9 +162,10 @@ async function main() {
   // ── [2] a vendor's ADD request ──────────────────────────────────────────────────────────────
   // Since H5 Fix B a brand-new item waits for approval: no item and no price row until it is
   // approved (approval writes REQUEST_APPROVED_ADD, section [4]). A new SIZE of an item that is
-  // already live is a live edit: created at once with one REQUEST_APPLIED_SIZE row. (Moved from
-  // the removed POST /api/menu, 2026-11-21, D1; the request route answers 201 either way.)
-  console.log('\n[2] ADD request: a brand-new item writes nothing yet; a new size of a live item writes one row')
+  // already live waits too (F4, Nov 13): nothing until it is approved, and the approval writes one
+  // REQUEST_APPROVED_SIZE row. (Moved from the removed POST /api/menu, 2026-11-21, D1; the request
+  // route answers 201 either way.)
+  console.log('\n[2] ADD request: a brand-new item or a new size writes nothing yet; approving the size writes one row')
   login(vUser.clerkId)
   {
     const fresh = await file({ type: 'ADD', name: `${PFX}fresh`, price: 12.5, category: 'Mains' })
@@ -178,14 +179,22 @@ async function main() {
       type: 'ADD', name: `${PFX}soda Large`, price: 3.5, category: 'Drinks', variantGroup: `${PFX}soda`, variantLabel: 'Large',
     })
     const sizeBody = await bodyOf(size)
+    const notYet = await prisma.menuItem.findFirst({ where: { vendorId: vendor.id, variantGroup: `${PFX}soda`, variantLabel: 'Large' } })
+    assert(size.status === 201 && sizeBody?.data?.status === 'PENDING' && notYet === null && (await auditRows()).length === 0,
+      `new size of a live item → 201 PENDING, not created, no MENU_PRICE_CHANGED row yet (got ${size.status} ${sizeBody?.data?.status}, ${notYet ? 'created' : 'not created'})`)
+    login(orgUser.clerkId)
+    const sizeId = sizeBody?.data?.id as string
+    const sizeAp = await approvePATCH(jsonReq(`/api/organizer/fairs/${event.urlSlug}/menu-requests/${sizeId}`, 'PATCH', { action: 'APPROVE' }),
+      { params: Promise.resolve({ fairSlug: event.urlSlug, id: sizeId }) })
+    login(vUser.clerkId)
     const created = await prisma.menuItem.findFirst({ where: { vendorId: vendor.id, variantGroup: `${PFX}soda`, variantLabel: 'Large' } })
     const rows = await auditRows()
     const m = rows[0]?.meta
-    assert(size.status === 201 && sizeBody?.data?.status === 'APPROVED' && !!created && sizeBody?.data?.menuItemId === created.id && rows.length === 1,
-      `new size of a live item → 201 APPROVED, created, one MENU_PRICE_CHANGED row (got ${size.status} ${sizeBody?.data?.status}, ${rows.length})`)
-    assert(m?.source === 'REQUEST_APPLIED_SIZE' && m.previousPrice === null && m.newPrice === 3.5 && m.newCents === 350
-      && rows[0]?.userId === vUser.id && m.menuItemId === created?.id,
-    `row: REQUEST_APPLIED_SIZE, previous null, new 3.50 / 350¢, by the operator, naming the new size (got ${JSON.stringify(m)})`)
+    assert(sizeAp.status === 200 && !!created && created.price === 3.5 && rows.length === 1,
+      `approving it → 200, created at 3.50, one MENU_PRICE_CHANGED row (got ${sizeAp.status}, ${rows.length})`)
+    assert(m?.source === 'REQUEST_APPROVED_SIZE' && m.previousPrice === null && m.newPrice === 3.5 && m.newCents === 350
+      && rows[0]?.userId === orgUser.id && m.menuItemId === created?.id && m.requestId === sizeId,
+    `row: REQUEST_APPROVED_SIZE, previous null, new 3.50 / 350¢, by the organizer, naming the new size and the request (got ${JSON.stringify(m)})`)
     await prisma.vendorAuditLog.deleteMany({ where: { vendorId: vendor.id } })
   }
   const itemId = (await prisma.menuItem.create({ data: { vendorId: vendor.id, name: `${PFX}taco`, price: 12.5, category: 'Mains' } })).id
@@ -306,9 +315,16 @@ async function main() {
   // db.$transaction. (This check first read the removed POST /api/menu, 2026-11-21, D1.)
   {
     const fileItem = strip(readSource('lib/menu-requests/file-item.ts'))
-    const calls = [...fileItem.matchAll(/record(?:MenuPriceChange|MenuItemRemoved)\((\w+),/g)]
-    assert(calls.length >= 4 && calls.every(c => c[1] === 'tx'),
-      `lib/menu-requests/file-item.ts: every audit write passes the caller's tx (${calls.length} call(s))`)
+    // The exact set, in file order (F2 + F4, 2026-11-21): the removal row, the vendor's own
+    // decrease, the restore's price row; and the approvers' notices for a removal, a live increase,
+    // a higher restore and a new size. Every one passes the caller's tx.
+    const calls = [...fileItem.matchAll(/(record(?:MenuPriceChange|MenuItemRemoved|MenuDeleted|PriceChangePending))\((\w+),/g)]
+    const names = calls.map(c => c[1]).join(',')
+    const EXPECTED = 'recordMenuItemRemoved,recordMenuDeleted,recordPriceChangePending,recordMenuPriceChange,recordPriceChangePending,recordMenuPriceChange,recordPriceChangePending'
+    assert(names === EXPECTED && calls.every(c => c[2] === 'tx'),
+      `lib/menu-requests/file-item.ts: exactly the expected audit and notice writes, each passing the caller's tx (got ${names}; tx on all: ${calls.every(c => c[2] === 'tx')})`)
+    assert([...'recordMenuPriceChange(db, {'.matchAll(/(record(?:MenuPriceChange|MenuItemRemoved|MenuDeleted|PriceChangePending))\((\w+),/g)].every(c => c[2] !== 'tx'),
+      '[0] control: a call passing db is not counted as passing tx')
     const TX_FILES = /db\.\$transaction\(\s*async tx =>[\s\S]*?fileMenuRequestItem\(tx,/
     const reqRoute = strip(readSource('app/api/menu-requests/route.ts'))
     assert(TX_FILES.test(reqRoute),

@@ -89,6 +89,10 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'menu-ownership',            file: 'scripts/menu-ownership-guard.ts' },
   { group: 'correctness', name: 'menu-immediate-delete',     file: 'scripts/menu-immediate-delete-test.ts' },
   { group: 'correctness', name: 'menu-notifications',        file: 'scripts/menu-notifications-test.ts' },
+  { group: 'money',       name: 'price-increase-approval',   file: 'scripts/price-increase-approval-test.ts' },
+  // H5 2a / 2f suites, written to the test DB but never registered here until F2 (2026-11-21).
+  { group: 'money',       name: 'menu-price-rules',          file: 'scripts/menu-price-rules-test.ts' },
+  { group: 'money',       name: 'menu-price-audit',          file: 'scripts/menu-price-audit-test.ts' },
   { group: 'correctness', name: 'free-text-limits',          file: 'scripts/free-text-limits-test.ts' },
   { group: 'boundary',    name: 'menu-alert-preferences',    file: 'scripts/menu-alert-preferences-test.ts' },
   { group: 'boundary',    name: 'notification-feed',         file: 'scripts/notification-feed-test.ts' },

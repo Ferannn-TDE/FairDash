@@ -5,30 +5,38 @@
 // already passed; this re-reads each named item through `tx`, scoped to the vendor, so the state
 // it acts on is the state it writes against.
 //
-// THE RULES (Jordan, Nov 12): vendors set their own prices; only brand-new items, and bringing a
-// removed item back at a HIGHER price, wait for the approver.
+// THE RULES (Jordan, Nov 13, F2 + F4; they replace the Nov 12 "vendors set their own prices" rule
+// for increases): a price that goes UP waits for the approver (the event's organizer, or a strict
+// admin when it has none) and the old price keeps selling until then. Decreases, deletes and
+// non-price edits go live at once. Brand-new items and every new size of a live item wait.
 //   DELETE   Applied now. The item leaves the menu (removedAt); the request is written already
 //            APPROVED, reviewed by the vendor, with a MENU_ITEM_REMOVED audit row.
-//   EDIT     A LIVE item: applied now, every field sent (price up or down, name, description,
-//            photo, category, prep time), request APPROVED, and a MENU_PRICE_CHANGED row if the
-//            price moved. Any existing item counts as approved. A REMOVED item: refused (409),
-//            because raising a removed item's price and then restoring it "at the same price"
-//            would get round the restore rule below. Restore it first.
+//   EDIT     A LIVE item. The same, a lower, or no price: applied now, every field sent (name,
+//            description, photo, category, prep time, size name), request APPROVED, and a
+//            MENU_PRICE_CHANGED row if the price moved. A HIGHER price (F2, items and sizes
+//            alike): the price is written PENDING and the item keeps selling at its old price;
+//            any other fields in the same EDIT still go live now, recorded as their own APPROVED
+//            EDIT row without a price. A REMOVED item: refused (409), because raising a removed
+//            item's price and then restoring it "at the same price" would get round the restore
+//            rule below. Restore it first.
 //   RESTORE  The same or a lower price than the item's last recorded price (or none given):
 //            applied now, request APPROVED, audit row if the price moved. A HIGHER price: PENDING,
 //            and the item stays removed at its old price until the approver decides.
 //   ADD      If the name is one of the vendor's removed items (re-add.ts), it IS that item coming
 //            back: a RESTORE of the matched row under the same price rule, carrying the
 //            description, category, photo and prep time the vendor typed (the stored name is
-//            kept). If its variantGroup matches a LIVE item of the vendor, it is a new size of an
-//            approved item: created now (REQUEST_APPLIED_SIZE audit row). Otherwise a brand-new
-//            item, with all its sizes: PENDING, approved together (apply-decision.ts).
+//            kept). If its variantGroup matches a LIVE item of the vendor, it is a new size of a
+//            live item (F4): PENDING at any price, created only when the approver approves it,
+//            on its own (apply-decision.ts). Otherwise a brand-new item, with all its sizes:
+//            PENDING, approved together.
 //
 // ONE PENDING PRICE CHANGE PER ITEM: before an EDIT that carries a price, or any RESTORE, older
-// PENDING price changes for that item are closed (supersede.ts).
+// PENDING price changes for that item are closed (supersede.ts). A second increase therefore
+// replaces the first; a decrease replaces a waiting increase and applies now.
 //
-// ALERTS (audit H5, step 3): a DELETE and a PENDING higher-priced restore each record a menu
-// change for the approvers' notifications (lib/menu-notify/record.ts) in the same transaction.
+// ALERTS (audit H5, step 3): a DELETE and every PENDING price (a higher-priced restore or re-add,
+// a live increase, a new size) record a menu change for the approvers' notifications
+// (lib/menu-notify/record.ts) in the same transaction.
 //
 // Every refusal throws ApiError, which rolls the whole submission back.
 
@@ -49,12 +57,26 @@ import {
 export const REMOVED_NOTE = 'Removed immediately by vendor'
 export const RESTORED_NOTE = 'Restored immediately by vendor'
 export const EDITED_NOTE = 'Applied immediately by vendor'
-export const SIZE_ADDED_NOTE = 'New size of a live item, applied immediately'
 export const EDIT_REMOVED_MESSAGE = 'This item is removed from the menu. Restore it first, then edit it.'
 
 type RowData = ReturnType<typeof buildMenuRequestData>
 
+/** What filing one item did. */
+export interface FiledItem {
+  /** The row the vendor's screen follows: APPROVED when applied now, PENDING when it waits. */
+  row: MenuRequest
+  /**
+   * True when this item changed the live menu now, so the caller expires the menu cache after the
+   * commit. Not the same as `row.status === 'APPROVED'`: an EDIT that raises the price AND renames
+   * the item answers with its PENDING price row, while the rename went live.
+   */
+  menuChanged: boolean
+}
+
 const itemNotFound = () => new ApiError('Menu item not found', 404, 'NOT_FOUND')
+
+/** A row is "applied now" exactly when it was written APPROVED. */
+const filed = (row: MenuRequest): FiledItem => ({ row, menuChanged: row.status === 'APPROVED' })
 
 /** The non-name fields a request may set on an existing item; null means "leave as is". */
 function carriedFields(data: RowData) {
@@ -70,30 +92,30 @@ export async function fileMenuRequestItem(
   tx: Prisma.TransactionClient,
   item: MenuRequestItemInput,
   ctx: MenuRequestRowContext,
-): Promise<MenuRequest> {
+): Promise<FiledItem> {
   const data = buildMenuRequestData(item, ctx)
   const now = new Date()
 
   switch (data.type) {
   case 'DELETE':
-    return applyDelete(tx, data, now)
+    return filed(await applyDelete(tx, data, now))
   case 'EDIT':
     return applyEdit(tx, data, now)
   case 'RESTORE':
-    return fileRestore(tx, data, data.menuItemId as string, now)
+    return filed(await fileRestore(tx, data, data.menuItemId as string, now))
   case 'ADD': {
     const match = await findRemovedNameMatch(tx, ctx.vendorId, data.name as string)
-    if (match) return fileRestore(tx, data, match.id, now)
-    // A new SIZE of an item that is already live is a live edit (Nov 12): created at once.
+    if (match) return filed(await fileRestore(tx, data, match.id, now))
+    // A new SIZE of an item that is already live waits for the approver at any price (F4).
     if (data.variantGroup !== null) {
       const liveSibling = await tx.menuItem.findFirst({
         where: { vendorId: data.vendorId, variantGroup: data.variantGroup, removedAt: null },
         select: { id: true },
       })
-      if (liveSibling) return applyNewSize(tx, data, now)
+      if (liveSibling) return filed(await fileNewSize(tx, data))
     }
     // Brand-new item (with or without sizes): waits for the approver.
-    return tx.menuRequest.create({ data })
+    return filed(await tx.menuRequest.create({ data }))
   }
   default:
     return assertNeverRequestType(data.type)
@@ -114,6 +136,9 @@ async function applyDelete(tx: Prisma.TransactionClient, data: RowData, now: Dat
     data: { removedAt: now },
   })
   if (flipped.count === 0) throw new ApiError('This item is already removed from the menu', 409, 'CONFLICT')
+  // A price increase still waiting for this item (F2) can never apply now: close it, so the
+  // approver isn't left a request for an item that is gone.
+  await supersedePendingPriceChanges(tx, { menuItemId, vendorId: data.vendorId, replacedBy: data.requestedBy, now })
 
   const row = await tx.menuRequest.create({
     data: { ...data, status: 'APPROVED', reviewedBy: data.requestedBy, reviewedAt: now, reviewNote: REMOVED_NOTE },
@@ -129,12 +154,15 @@ async function applyDelete(tx: Prisma.TransactionClient, data: RowData, now: Dat
   return row
 }
 
-/** An EDIT of a LIVE item applies now, every field sent; an EDIT of a removed item is refused. */
-async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date): Promise<MenuRequest> {
+/**
+ * An EDIT of a LIVE item. A higher price waits (F2); everything else in it applies now. An EDIT of
+ * a removed item is refused.
+ */
+async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date): Promise<FiledItem> {
   const menuItemId = data.menuItemId as string
   const before = await tx.menuItem.findFirst({
     where: { id: menuItemId, vendorId: data.vendorId },
-    select: { price: true, removedAt: true },
+    select: { name: true, price: true, removedAt: true },
   })
   if (!before) throw itemNotFound()
   if (before.removedAt !== null) throw new ApiError(EDIT_REMOVED_MESSAGE, 409, 'CONFLICT')
@@ -143,30 +171,63 @@ async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date)
     await supersedePendingPriceChanges(tx, { menuItemId, vendorId: data.vendorId, replacedBy: data.requestedBy, now })
   }
 
-  // Only a row still on the menu is written: a concurrent removal finds nothing and refuses.
-  const written = await tx.menuItem.updateMany({
-    where: { id: menuItemId, vendorId: data.vendorId, removedAt: null },
-    data: {
-      ...(data.name  !== null && { name: data.name }),
-      ...(data.price !== null && { price: data.price }),
-      // Renaming a size is a live edit too (Nov 12); moving it to another item is refused upstream.
-      ...(data.variantLabel !== null && { variantLabel: data.variantLabel }),
-      ...carriedFields(data),
-    },
-  })
-  if (written.count === 0) throw new ApiError(EDIT_REMOVED_MESSAGE, 409, 'CONFLICT')
-  const after = await tx.menuItem.findUniqueOrThrow({ where: { id: menuItemId }, select: { name: true, price: true } })
+  // F2: A HIGHER PRICE WAITS. The item keeps selling at its old price; the price alone is written
+  // PENDING for the approver, and the approvers are told in this same transaction.
+  if (data.price !== null && priceNeedsApproval(before.price, data.price)) {
+    const requestedPrice = data.price
+    const otherFields = { ...data, price: null }
+    const hasOtherFields = otherFields.name !== null || otherFields.variantLabel !== null
+      || Object.keys(carriedFields(otherFields)).length > 0
+    if (hasOtherFields) await applyLiveFields(tx, otherFields, now)
+    const pending = await tx.menuRequest.create({
+      data: {
+        vendorId: data.vendorId, requestedBy: data.requestedBy, batchId: data.batchId,
+        type: 'EDIT', menuItemId, price: requestedPrice,
+        name: null, description: null, category: null, prepTime: null, imageUrl: null,
+        variantGroup: null, variantLabel: null,
+      },
+    })
+    const current = await tx.menuItem.findUniqueOrThrow({ where: { id: menuItemId }, select: { name: true } })
+    await recordPriceChangePending(tx, {
+      vendorId: data.vendorId, menuItemId, menuRequestId: pending.id, batchId: data.batchId,
+      name: current.name, previousPrice: before.price, requestedPrice, reason: 'LIVE_INCREASE',
+    })
+    return { row: pending, menuChanged: hasOtherFields }
+  }
 
-  const row = await tx.menuRequest.create({
-    data: { ...data, status: 'APPROVED', reviewedBy: data.requestedBy, reviewedAt: now, reviewNote: EDITED_NOTE },
-  })
+  // The same, a lower, or no price: every field sent goes live now.
+  const row = await applyLiveFields(tx, data, now)
+  const after = await tx.menuItem.findUniqueOrThrow({ where: { id: menuItemId }, select: { name: true, price: true } })
   if (data.price !== null && priceChanged(before.price, after.price)) {
     await recordMenuPriceChange(tx, {
       vendorId: data.vendorId, userId: data.requestedBy, menuItemId, name: after.name,
       previousPrice: before.price, newPrice: after.price, source: 'REQUEST_APPLIED_EDIT', requestId: row.id,
     })
   }
-  return row
+  return { row, menuChanged: true }
+}
+
+/**
+ * Write an EDIT's fields to the live item and record the EDIT as APPROVED by the vendor. The
+ * caller has already decided that every field in `data` may go live (a higher price never does).
+ */
+async function applyLiveFields(tx: Prisma.TransactionClient, data: RowData, now: Date): Promise<MenuRequest> {
+  const menuItemId = data.menuItemId as string
+  // Only a row still on the menu is written: a concurrent removal finds nothing and refuses.
+  const written = await tx.menuItem.updateMany({
+    where: { id: menuItemId, vendorId: data.vendorId, removedAt: null },
+    data: {
+      ...(data.name  !== null && { name: data.name }),
+      ...(data.price !== null && { price: data.price }),
+      // Renaming a size is a live edit too; moving it to another item is refused upstream.
+      ...(data.variantLabel !== null && { variantLabel: data.variantLabel }),
+      ...carriedFields(data),
+    },
+  })
+  if (written.count === 0) throw new ApiError(EDIT_REMOVED_MESSAGE, 409, 'CONFLICT')
+  return tx.menuRequest.create({
+    data: { ...data, status: 'APPROVED', reviewedBy: data.requestedBy, reviewedAt: now, reviewNote: EDITED_NOTE },
+  })
 }
 
 /**
@@ -239,32 +300,17 @@ async function fileRestore(tx: Prisma.TransactionClient, data: RowData, menuItem
 
 /**
  * A new size of an item that is already live (an ADD whose variantGroup matches a live row of this
- * vendor). Sizes are part of the item, and the item is approved, so this is a live edit (Nov 12):
- * the row is created now, the request written APPROVED, and the price recorded as a
- * MENU_PRICE_CHANGED row (source REQUEST_APPLIED_SIZE, previous null) in the same transaction, in
- * VendorAuditLog where the organizer price-change log reads it.
+ * vendor). F4 (Jordan, Nov 13): it waits for the approver at any price, so a new size can't be used
+ * to slip a higher price onto a live item. Nothing is created now; the approver's decision creates
+ * it, on its own, with its MENU_PRICE_CHANGED row (apply-decision.ts). The approvers are told in
+ * this same transaction.
  */
-async function applyNewSize(tx: Prisma.TransactionClient, data: RowData, now: Date): Promise<MenuRequest> {
-  const created = await tx.menuItem.create({
-    data: {
-      vendorId: data.vendorId,
-      name: data.name as string,
-      description: data.description ?? undefined,
-      price: data.price as number,
-      category: data.category as string,
-      prepTime: data.prepTime ?? 15,
-      imageUrl: data.imageUrl ?? undefined,
-      variantGroup: data.variantGroup,
-      variantLabel: data.variantLabel,
-      isAvailable: true,
-    },
+async function fileNewSize(tx: Prisma.TransactionClient, data: RowData): Promise<MenuRequest> {
+  const pending = await tx.menuRequest.create({ data })
+  await recordPriceChangePending(tx, {
+    vendorId: data.vendorId, menuItemId: null, menuRequestId: pending.id, batchId: data.batchId,
+    name: data.name as string,
+    previousPrice: null, requestedPrice: data.price as number, reason: 'NEW_SIZE',
   })
-  const row = await tx.menuRequest.create({
-    data: { ...data, menuItemId: created.id, status: 'APPROVED', reviewedBy: data.requestedBy, reviewedAt: now, reviewNote: SIZE_ADDED_NOTE },
-  })
-  await recordMenuPriceChange(tx, {
-    vendorId: data.vendorId, userId: data.requestedBy, menuItemId: created.id, name: created.name,
-    previousPrice: null, newPrice: created.price, source: 'REQUEST_APPLIED_SIZE', requestId: row.id,
-  })
-  return row
+  return pending
 }

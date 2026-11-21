@@ -13,7 +13,7 @@ import {
   type MenuRequestItemInput,
 } from '@/lib/menu-requests/validate-item'
 import { checkMenuRequestItemOwnership } from '@/lib/menu-requests/item-ownership'
-import { fileMenuRequestItem } from '@/lib/menu-requests/file-item'
+import { fileMenuRequestItem, type FiledItem } from '@/lib/menu-requests/file-item'
 import { menuApproverLabel, type MenuApproverLabel } from '@/lib/menu-requests/approver-label'
 import { randomUUID } from 'node:crypto'
 
@@ -23,9 +23,9 @@ async function vendorApprover(vendorId: string): Promise<MenuApproverLabel> {
   return menuApproverLabel(v?.event.organizerId)
 }
 
-// POST /api/menu-requests — submit menu changes. Removals, edits of live items, and restores that
-// don't raise the price apply immediately; brand-new items and higher-priced restores wait for the
-// approver (see the transaction below).
+// POST /api/menu-requests — submit menu changes. Removals, edits of live items that don't raise the
+// price, and restores that don't raise it apply immediately; a higher price (F2), a new size of a
+// live item (F4), and brand-new items wait for the approver (see the transaction below).
 //
 // TWO BODY SHAPES, ONE PATH:
 //   { vendorId, type, name, ... }             one request, batchId null (standalone)
@@ -107,20 +107,23 @@ export async function POST(req: NextRequest) {
     // forge a batch id and graft rows onto someone else's submission.
     const batchId = isBatchForm ? `mrb_${randomUUID()}` : null
 
-    // ONE TRANSACTION, items applied in submission order (audit H5, Step 2g). Each item is either
-    // APPLIED NOW and written already APPROVED, or written PENDING for the approver:
+    // ONE TRANSACTION, items applied in submission order (audit H5, Step 2g; F2 + F4, Nov 13). Each
+    // item is either APPLIED NOW and written already APPROVED, or written PENDING for the approver:
     //   DELETE                            applied now: the item leaves the menu immediately
-    //   EDIT of a live item               applied now, every field (a price move is audited)
+    //   EDIT, no price / same / lower     applied now, every field (a price move is audited)
+    //   EDIT, higher price (F2)           the price PENDING, the old price keeps selling; any other
+    //                                     fields in it still apply now (their own APPROVED row)
     //   RESTORE, no price / same / lower  applied now: back on the menu (the price write audited)
     //   RESTORE, higher price             PENDING; the item stays removed at its old price
     //   ADD naming a removed item         becomes a RESTORE of that row, same price rule
+    //   ADD, new size of a live item (F4) PENDING at any price
     //   any other ADD (a brand-new item)  PENDING
     // A newer price change for an item replaces any older PENDING one (supersede.ts). Each item
     // goes through the same per-item code whichever body shape it arrived in, so the two forms
     // cannot diverge; if any write or audit row fails, the whole submission rolls back.
-    const rows = await db.$transaction(
+    const filedItems = await db.$transaction(
       async tx => {
-        const written: MenuRequest[] = []
+        const written: FiledItem[] = []
         for (const item of inputs) {
           written.push(await fileMenuRequestItem(tx, item, { vendorId, requestedBy: dbUser.id, batchId }))
         }
@@ -130,9 +133,11 @@ export async function POST(req: NextRequest) {
       // connection. The cap on batch size (MAX_BATCH_ITEMS) is what bounds this.
       { timeout: 20_000 },
     )
+    const rows: MenuRequest[] = filedItems.map(f => f.row)
 
-    // The live menu changed only if something was applied now.
-    if (rows.some(r => r.status === 'APPROVED')) expireVendorMenu(vendorId)
+    // The live menu changed only if something was applied now (a rename riding on a waiting price
+    // increase counts: its PENDING row is the answer, but the rename is live).
+    if (filedItems.some(f => f.menuChanged)) expireVendorMenu(vendorId)
 
     // ONE AUDIT ENTRY PER ROW — never one per submission. The audit log is the per-decision
     // record: collapsing a batch of 8 into a single entry would lose seven of them, and the

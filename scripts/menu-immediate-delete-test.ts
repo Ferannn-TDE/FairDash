@@ -1,11 +1,13 @@
 /**
  * IMMEDIATE DELETE AND RESTORE THROUGH MENU REQUESTS — audit H5, Step 2g.
  *
- * Vendor menu requests now split into "applied now" and "waits for the approver" (Nov 12 rules:
- * vendors set their own prices; only brand-new items and higher-priced restores wait):
+ * Vendor menu requests now split into "applied now" and "waits for the approver" (Nov 13 rules,
+ * F2 + F4: a price that goes up waits, and so do brand-new items and new sizes of live items):
  *   - DELETE applies immediately (request written APPROVED, MENU_ITEM_REMOVED audit row);
- *   - EDIT of a live item applies immediately, every field, price up or down (audited); EDIT of a
- *     removed item is refused (the direct PATCH /api/menu/[id] was removed 2026-11-21, D1);
+ *   - EDIT of a live item applies immediately, every field, when the price stays the same or goes
+ *     down (audited); a HIGHER price waits as its own PENDING row while the other fields go live
+ *     (F2; covered in full by scripts/price-increase-approval-test.ts); EDIT of a removed item is
+ *     refused (the direct PATCH /api/menu/[id] was removed 2026-11-21, D1);
  *   - RESTORE at no price, the same price or a lower one applies immediately; a HIGHER price than
  *     the item's last recorded price waits, and the item stays removed at its old price;
  *   - an ADD whose name matches a removed item (exact full name, trimmed, any case) is a RESTORE of
@@ -30,8 +32,9 @@
  *        name-only EDIT does not; a restore replaces an older pending restore
  *   [7]  live price drops while an older increase waits: list shows current → requested;
  *        approval's audit row starts from the current price
- *   [10] EDIT of a live item: applied at once, every field, one REQUEST_APPLIED_EDIT row per price
- *        move; EDIT of a removed item → 409
+ *   [10] EDIT of a live item: a price increase waits (the other fields go live at once, the price
+ *        is approved later with a REQUEST_APPROVED_EDIT row); a decrease applies at once with one
+ *        REQUEST_APPLIED_EDIT row; EDIT of a removed item → 409
  *   [11] the vendor is told who a pending request waits for: every POST / GET ?vendorId= row says
  *        approver "organizer" or "FairSynq"; rowsFromSubmitResponse keeps price and approver; the
  *        page words its toast, banner and chip with waitingFor() and opens Removed when a restore
@@ -39,9 +42,10 @@
  *   [12] H5 Fix B: an ADD with a removed item's name at a lower price is restored at once (the
  *        direct POST /api/menu that this section first covered was removed 2026-11-21, D1; its
  *        brand-new, higher-price and new-size rows are covered in [4] and below); a brand-new
- *        item's sizes wait together and approving or rejecting one decides all; a new size of a live item applies at once with a
- *        REQUEST_APPLIED_SIZE row in VendorAuditLog; size renames and price edits are live; the
- *        price rule applies per size
+ *        item's sizes wait together and approving or rejecting one decides all; a new size of a
+ *        live item waits (F4) and its approval writes a REQUEST_APPROVED_SIZE row in
+ *        VendorAuditLog; a size rename is live, a size price increase waits, a size price decrease
+ *        is live; the price rule applies per size
  *   [8]  approver rule: organizer / other organizer / strict admin / event_operator, with and
  *        without an organizer; GET ?eventId= on an organizer-less fair; simultaneous approvals
  *   [9]  checkout refuses an item removed while in the cart (409 ITEM_REMOVED, no order)
@@ -393,7 +397,8 @@ async function main() {
   // ── [6] one PENDING price change per item ───────────────────────────────────────────────────
   console.log('\n[6] a newer price change replaces the older PENDING one')
   {
-    // An EDIT filed before 2g can still be PENDING; vendors' EDITs now apply at once.
+    // A pending price EDIT: seeded the way one filed before 2g looks (a vendor's increase is filed
+    // PENDING the same way since F2).
     const item = await mkItem(A.vendor.id, `${PFX}one-pending`, 8)
     const legacy = await prisma.menuRequest.create({
       data: { vendorId: A.vendor.id, requestedBy: A.user.id, type: 'EDIT', menuItemId: item.id, price: 10 },
@@ -405,10 +410,17 @@ async function main() {
     const f = await reqOf(legacy.id)
     assert(f.status === 'REJECTED' && f.reviewNote === 'Replaced by newer request' && f.reviewedBy === A.user.id,
       `the older pending price EDIT is REJECTED "Replaced by newer request" (got ${f.status}, ${f.reviewNote})`)
-    assert(newer.data?.status === 'APPROVED' && (await itemOf(item.id)).price === 9,
-      `the newer price EDIT applied at once: price 9 (got ${newer.data?.status}, ${(await itemOf(item.id)).price})`)
-    const pending = await prisma.menuRequest.count({ where: { menuItemId: item.id, status: 'PENDING', price: { not: null } } })
-    assert(pending === 0, `no PENDING price change is left for the item (got ${pending})`)
+    // 8 → 9 is an increase (F2): it waits, and the item keeps selling at 8.
+    assert(newer.data?.status === 'PENDING' && (await itemOf(item.id)).price === 8,
+      `the newer price EDIT (8 → 9, an increase) is PENDING and the item still sells at 8 (got ${newer.data?.status}, ${(await itemOf(item.id)).price})`)
+    const pendingRows = await prisma.menuRequest.findMany({ where: { menuItemId: item.id, status: 'PENDING', price: { not: null } } })
+    assert(pendingRows.length === 1 && pendingRows[0].id === newer.data?.id && pendingRows[0].price === 9,
+      `exactly one PENDING price change is left for the item: the newer one, at 9 (got ${pendingRows.length})`)
+    login(orgA.user.clerkId)
+    const approved = await orgDecide(fair.urlSlug, newer.data?.id as string)
+    assert(approved.status === 200 && (await itemOf(item.id)).price === 9,
+      `approving it puts the price at 9 (got ${approved.status}, ${(await itemOf(item.id)).price})`)
+    login(A.user.clerkId)
 
     const removed = await mkItem(A.vendor.id, `${PFX}one-pending-r`, 8, new Date())
     const high = await bodyOf(await file(A.vendor.id, { type: 'RESTORE', menuItemId: removed.id, price: 11 }))
@@ -422,8 +434,8 @@ async function main() {
   // ── [7] live price drops while an increase waits ────────────────────────────────────────────
   console.log('\n[7] approval compares against the CURRENT live price')
   {
-    // A pending price increase can only be an EDIT filed before 2g (seeded here) or a higher
-    // restore. The live price moving while it waits is set directly in the database: the direct
+    // A pending price increase is a vendor's live increase (F2; seeded here in the same shape) or a
+    // higher restore. The live price moving while it waits is set directly in the database: the direct
     // PATCH /api/menu/[id] that used to do it was removed (2026-11-21, D1), and a vendor's own
     // EDIT through the request path would replace the pending row ([6]), not leave it waiting.
     const item = await mkItem(A.vendor.id, `${PFX}moving`, 8)
@@ -502,8 +514,8 @@ async function main() {
       `two approvals at once: one 200, one 409, one audit row (got ${statuses.join('/')}, ${raceRows.length} rows)`)
   }
 
-  // ── [10] EDIT of a live item applies at once; a removed item cannot be edited ───────────────
-  console.log('\n[10] a vendor EDIT of a live item goes live at once; a removed item must be restored first')
+  // ── [10] EDIT of a live item: an increase waits, the rest is live; a removed item can't be edited
+  console.log('\n[10] a vendor EDIT of a live item: the other fields go live at once, a higher price waits (F2); a removed item must be restored first')
   login(A.user.clerkId)
   {
     const live = await mkItem(A.vendor.id, `${PFX}edit-live`, 8)
@@ -514,21 +526,32 @@ async function main() {
     const b = await bodyOf(r)
     const after = await itemOf(live.id)
     const row = await reqOf(b.data?.id as string)
-    assert(r.status === 201 && row.status === 'APPROVED' && row.reviewNote === 'Applied immediately by vendor' && row.reviewedBy === A.user.id,
-      `the EDIT is written APPROVED, "Applied immediately by vendor" (got ${r.status} ${row.status})`)
-    assert(after.price === 11 && after.name === `${PFX}edit-live v2` && after.description === 'New recipe' && after.category === 'Specials'
+    assert(r.status === 201 && row.status === 'PENDING' && row.type === 'EDIT' && row.price === 11 && row.name === null && row.description === null,
+      `the answer is the PENDING price row: EDIT at 11, carrying the price only (got ${r.status} ${row.status} ${row.price})`)
+    const liveRow = await prisma.menuRequest.findFirst({ where: { menuItemId: live.id, status: 'APPROVED', type: 'EDIT' } })
+    assert(liveRow !== null && liveRow.reviewNote === 'Applied immediately by vendor' && liveRow.reviewedBy === A.user.id
+      && liveRow.price === null && liveRow.name === `${PFX}edit-live v2`,
+    `the other fields are their own EDIT row, APPROVED "Applied immediately by vendor", with no price (got ${liveRow?.status}, price ${liveRow?.price})`)
+    assert(after.price === 8 && after.name === `${PFX}edit-live v2` && after.description === 'New recipe' && after.category === 'Specials'
       && after.prepTime === 12 && after.imageUrl === 'https://example.com/v2.jpg',
-    'price UP (8 → 11), name, description, category, prep time and photo are all live at once')
+    `name, description, category, prep time and photo are live at once; the price stays 8 while UP (8 → 11) waits (got ${after.price})`)
+    const rows0 = (await audit(A.vendor.id, 'MENU_PRICE_CHANGED')).filter(x => x.meta.menuItemId === live.id)
+    assert(rows0.length === 0, `no MENU_PRICE_CHANGED row while the increase waits (got ${rows0.length})`)
+
+    login(orgA.user.clerkId)
+    const ap = await orgDecide(fair.urlSlug, row.id)
+    login(A.user.clerkId)
     const rows = (await audit(A.vendor.id, 'MENU_PRICE_CHANGED')).filter(x => x.meta.menuItemId === live.id)
-    assert(rows.length === 1 && rows[0].meta.source === 'REQUEST_APPLIED_EDIT' && rows[0].meta.previousPrice === 8 && rows[0].meta.newPrice === 11
-      && rows[0].meta.requestId === row.id && rows[0].userId === A.user.id,
-    `one REQUEST_APPLIED_EDIT row 8 → 11 by the vendor (got ${JSON.stringify(rows[0]?.meta)})`)
+    assert(ap.status === 200 && (await itemOf(live.id)).price === 11 && rows.length === 1 && rows[0].meta.source === 'REQUEST_APPROVED_EDIT'
+      && rows[0].meta.previousPrice === 8 && rows[0].meta.newPrice === 11 && rows[0].meta.requestId === row.id && rows[0].userId === orgA.user.id,
+    `approval puts the price at 11 with one REQUEST_APPROVED_EDIT row 8 → 11 by the organizer (got ${ap.status}, ${JSON.stringify(rows[0]?.meta)})`)
 
     const down = await bodyOf(await file(A.vendor.id, { type: 'EDIT', menuItemId: live.id, price: 7 }))
     const descOnly = await bodyOf(await file(A.vendor.id, { type: 'EDIT', menuItemId: live.id, description: 'Tweaked' }))
     const rows2 = (await audit(A.vendor.id, 'MENU_PRICE_CHANGED')).filter(x => x.meta.menuItemId === live.id)
-    assert(down.data?.status === 'APPROVED' && descOnly.data?.status === 'APPROVED' && (await itemOf(live.id)).price === 7 && rows2.length === 2,
-      `price DOWN (11 → 7) applies with a second row; a description-only EDIT applies with no price row (got ${rows2.length} rows)`)
+    assert(down.data?.status === 'APPROVED' && descOnly.data?.status === 'APPROVED' && (await itemOf(live.id)).price === 7 && rows2.length === 2
+      && rows2[1].meta.source === 'REQUEST_APPLIED_EDIT' && rows2[1].meta.previousPrice === 11 && rows2[1].meta.newPrice === 7,
+    `price DOWN (11 → 7) applies at once with a second row, REQUEST_APPLIED_EDIT; a description-only EDIT applies with no price row (got ${rows2.length} rows)`)
 
     const removed = await mkItem(A.vendor.id, `${PFX}edit-removed`, 8, new Date())
     const e = await file(A.vendor.id, { type: 'EDIT', menuItemId: removed.id, price: 20 })
@@ -599,7 +622,7 @@ async function main() {
   }
 
   // ── [12] sizes, and a lower-priced name restore (H5 Fix B) ──────────────────────────────────
-  console.log('\n[12] brand-new items wait (with all their sizes); a new size of a live item is a live edit')
+  console.log('\n[12] brand-new items wait (with all their sizes); a new size of a live item waits too (F4)')
   login(A.user.clerkId)
   {
     const sizeRows = async (menuItemId: string) => (await audit(A.vendor.id, 'MENU_PRICE_CHANGED')).filter(x => x.meta.menuItemId === menuItemId)
@@ -656,24 +679,42 @@ async function main() {
       && await prisma.menuItem.count({ where: { vendorId: A.vendor.id, variantGroup: rgroup } }) === 0,
     'rejecting one size rejects both, and no item is created')
 
-    // A new size of an item that is now live → applied at once, audited for the price-change log.
+    // A new size of an item that is now live → waits for the approver (F4); approval creates it,
+    // audited for the price-change log.
     login(A.user.clerkId)
     const xl = await bodyOf(await file(A.vendor.id, { type: 'ADD', name: `${group} XL`, price: 6, category: 'Drinks', variantGroup: group, variantLabel: 'XL' }))
+    const xlBefore = await prisma.menuItem.findFirst({ where: { vendorId: A.vendor.id, variantGroup: group, variantLabel: 'XL' } })
+    const xlNotice = await prisma.menuChangeEvent.findFirst({ where: { menuRequestId: xl.data?.id as string } })
+    assert(xl.data?.status === 'PENDING' && xlBefore === null,
+      `a new size (XL) of the live Lemonade → PENDING, and no XL item exists yet (got ${xl.data?.status}, ${xlBefore ? 'created' : 'not created'})`)
+    assert(xlNotice !== null && xlNotice.kind === 'PRICE_PENDING' && (xlNotice.payload as Record<string, unknown>).reason === 'NEW_SIZE'
+      && (xlNotice.payload as Record<string, unknown>).previousPrice === null && (xlNotice.payload as Record<string, unknown>).requestedPrice === 6,
+    `the approvers are told: one PRICE_PENDING notice, reason NEW_SIZE, null → 6 (got ${JSON.stringify(xlNotice?.payload)})`)
+    login(orgA.user.clerkId)
+    const xlAp = await orgDecide(fair.urlSlug, xl.data?.id as string)
+    login(A.user.clerkId)
     const xlItem = await prisma.menuItem.findFirst({ where: { vendorId: A.vendor.id, variantGroup: group, variantLabel: 'XL' } })
     const xlRows = xlItem ? await sizeRows(xlItem.id) : []
-    assert(xl.data?.status === 'APPROVED' && !!xlItem && xlItem.price === 6 && xlItem.removedAt === null,
-      `a new size (XL) of the live Lemonade → applied at once, request APPROVED (got ${xl.data?.status})`)
-    assert(xlRows.length === 1 && xlRows[0].meta.source === 'REQUEST_APPLIED_SIZE' && xlRows[0].meta.previousPrice === null
-      && xlRows[0].meta.newPrice === 6 && xlRows[0].userId === A.user.id,
-    `it writes one MENU_PRICE_CHANGED row in VendorAuditLog, source REQUEST_APPLIED_SIZE, null → 6 (what the organizer price-change log will read) (got ${JSON.stringify(xlRows[0]?.meta)})`)
+    assert(xlAp.status === 200 && !!xlItem && xlItem.price === 6 && xlItem.removedAt === null,
+      `approving it creates XL at 6 (got ${xlAp.status}, ${xlItem ? 'created' : 'missing'})`)
+    assert(xlRows.length === 1 && xlRows[0].meta.source === 'REQUEST_APPROVED_SIZE' && xlRows[0].meta.previousPrice === null
+      && xlRows[0].meta.newPrice === 6 && xlRows[0].userId === orgA.user.id,
+    `it writes one MENU_PRICE_CHANGED row in VendorAuditLog, source REQUEST_APPROVED_SIZE, null → 6, by the organizer (what the organizer price-change log will read) (got ${JSON.stringify(xlRows[0]?.meta)})`)
 
-    // Size edits are live edits.
+    // Size edits: a rename is live; a price increase waits (F2); a price decrease is live.
     const medium = created.find(c => c.variantLabel === 'Medium')!
     const repriced = await bodyOf(await file(A.vendor.id, { type: 'EDIT', menuItemId: medium.id, price: 4.5, variantLabel: 'Regular' }))
     const m2 = await itemOf(medium.id)
-    const mRows = (await sizeRows(medium.id)).filter(r => r.meta.source === 'REQUEST_APPLIED_EDIT')
-    assert(repriced.data?.status === 'APPROVED' && m2.price === 4.5 && m2.variantLabel === 'Regular' && mRows.length === 1,
-      'renaming a size and changing its price → live at once, one REQUEST_APPLIED_EDIT row')
+    const mApplied = (await sizeRows(medium.id)).filter(r => r.meta.source === 'REQUEST_APPLIED_EDIT')
+    assert(repriced.data?.status === 'PENDING' && repriced.data?.price === 4.5 && m2.price === 4 && m2.variantLabel === 'Regular' && mApplied.length === 0,
+      `renaming a size and raising its price (4 → 4.5) → the rename is live, the price waits at 4, no applied price row (got ${repriced.data?.status}, ${m2.price}, ${m2.variantLabel})`)
+    const lowered = await bodyOf(await file(A.vendor.id, { type: 'EDIT', menuItemId: medium.id, price: 3.5 }))
+    const m3 = await itemOf(medium.id)
+    const mApplied2 = (await sizeRows(medium.id)).filter(r => r.meta.source === 'REQUEST_APPLIED_EDIT')
+    const replaced = await reqOf(repriced.data?.id as string)
+    assert(lowered.data?.status === 'APPROVED' && m3.price === 3.5 && mApplied2.length === 1 && mApplied2[0].meta.previousPrice === 4
+      && mApplied2[0].meta.newPrice === 3.5 && replaced.status === 'REJECTED' && replaced.reviewNote === 'Replaced by newer request',
+    `lowering the size (4 → 3.5) is live at once with one REQUEST_APPLIED_EDIT row, and it replaces the waiting 4.5 (got ${lowered.data?.status}, ${m3.price}, ${replaced.status})`)
 
     // Rules: the price rule per size, and sizes need both fields.
     const badBatch = await file(A.vendor.id, { items: [

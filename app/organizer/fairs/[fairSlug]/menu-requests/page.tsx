@@ -48,6 +48,8 @@ interface MenuRequest {
   variantLabel?: string | null
   /** How many pending sizes deciding this row decides; null when it is not a size of a new item. */
   sizesInGroup?: number | null
+  /** F4: the live item this pending size is added to (decided on its own); null otherwise. */
+  newSizeOf?: string | null
   reviewNote: string | null
   createdAt: string
   vendor: { id: string; name: string }
@@ -197,6 +199,11 @@ function RequestCard({
               {req.sizesInGroup != null && req.sizesInGroup > 1 && (
                 <p className="text-amber-300/80 text-[0.6875rem] font-inter mt-0.5">
                   {req.sizesInGroup} sizes of {req.variantGroup} — approving or rejecting one decides all {req.sizesInGroup}
+                </p>
+              )}
+              {req.newSizeOf && (
+                <p className="text-amber-300/80 text-[0.6875rem] font-inter mt-0.5">
+                  New size of {req.newSizeOf}, which is already on the menu
                 </p>
               )}
               <p className="text-white/40 text-xs font-inter mt-0.5">
@@ -587,10 +594,11 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
 
   function handleReviewed(id: string, status: 'APPROVED' | 'REJECTED') {
     // Deciding one size of a brand-new item decides every pending size of it (H5 Fix B), so the
-    // sibling cards change with it rather than waiting for the next poll.
+    // sibling cards change with it rather than waiting for the next poll. A new size of a live
+    // item (F4) is decided on its own, so only its card changes.
     setRequests(prev => {
       const decided = prev.find(r => r.id === id)
-      const sameItem = (r: MenuRequest) => !!decided && decided.type === 'ADD' && !!decided.variantGroup
+      const sameItem = (r: MenuRequest) => !!decided && decided.type === 'ADD' && !!decided.variantGroup && !decided.newSizeOf
         && r.type === 'ADD' && r.status === 'PENDING' && r.vendor.id === decided.vendor.id && r.variantGroup === decided.variantGroup
       return prev.map(r => r.id === id || sameItem(r) ? { ...r, status } : r)
     })

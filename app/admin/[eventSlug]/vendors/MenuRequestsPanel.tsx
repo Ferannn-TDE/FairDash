@@ -20,8 +20,10 @@ interface PendingMenuRequest {
   priceChange: PriceChangeSummary | null
   variantGroup: string | null
   variantLabel: string | null
-  /** How many pending sizes deciding this row decides (H5 Fix B); null when not a size. */
+  /** How many pending sizes deciding this row decides (H5 Fix B); null when not a size of a new item. */
   sizesInGroup: number | null
+  /** F4: the live item this pending size is added to (decided on its own); null otherwise. */
+  newSizeOf: string | null
   createdAt: string
   vendor: { id: string; name: string }
 }
@@ -64,10 +66,11 @@ export default function MenuRequestsPanel({ eventSlug }: { eventSlug: string }) 
       })
       const json = await res.json()
       if (!json.success) { setError(json.error?.message ?? 'Action failed'); return }
-      // Deciding one size of a brand-new item decides all its pending sizes, so they all leave the list.
+      // Deciding one size of a brand-new item decides all its pending sizes, so they all leave the
+      // list. A new size of a live item (F4) is decided on its own, so only it leaves.
       setRequests(prev => {
         const decided = (prev ?? []).find(r => r.id === id)
-        return (prev ?? []).filter(r => r.id !== id && !(decided?.type === 'ADD' && decided.variantGroup
+        return (prev ?? []).filter(r => r.id !== id && !(decided?.type === 'ADD' && decided.variantGroup && !decided.newSizeOf
           && r.type === 'ADD' && r.vendor.id === decided.vendor.id && r.variantGroup === decided.variantGroup))
       })
     } catch {
@@ -104,6 +107,9 @@ export default function MenuRequestsPanel({ eventSlug }: { eventSlug: string }) 
                   <p className="text-[11px] text-amber-300/80 font-inter">
                     {r.sizesInGroup} sizes of {r.variantGroup} — approving or rejecting one decides all {r.sizesInGroup}
                   </p>
+                )}
+                {r.newSizeOf && (
+                  <p className="text-[11px] text-amber-300/80 font-inter">New size of {r.newSizeOf}, which is already on the menu</p>
                 )}
                 <p className="text-xs text-[#666] font-inter truncate">
                   {r.vendor.name}

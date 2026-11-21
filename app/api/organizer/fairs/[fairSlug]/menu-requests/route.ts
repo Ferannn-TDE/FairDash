@@ -6,7 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { MenuRequestStatus } from '@prisma/client'
 import { reviewPriceChange } from '@/lib/menu-requests/review-price'
-import { pendingSizeCounts, sizeCountFor } from '@/lib/menu-requests/size-groups'
+import { pendingSizeCounts, sizeCountFor, newSizeOf } from '@/lib/menu-requests/size-groups'
 
 const ALL_STATUSES: MenuRequestStatus[] = ['PENDING', 'APPROVED', 'REJECTED']
 
@@ -101,9 +101,11 @@ export async function GET(
       prepTime: r.prepTime,
       imageUrl: r.imageUrl,
       // Sizes (H5 Fix B): a brand-new item's sizes share a variantGroup and are decided together.
+      // A new size of a LIVE item (F4) is decided on its own and named as such instead.
       variantGroup: r.variantGroup,
       variantLabel: r.variantLabel,
       sizesInGroup: sizeCountFor(sizesInGroup, r),
+      newSizeOf: newSizeOf(sizesInGroup, r),
       // Linked item (current state for diff)
       menuItemId: r.menuItemId,
       currentItem: r.menuItem ?? null,

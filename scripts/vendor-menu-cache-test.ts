@@ -12,9 +12,11 @@
  *
  *   [1] each real write route, one change at a time, records exactly one `vendor-menu-{vendorId}`
  *       entry, with { expire: 0 } and never a string profile:
- *         POST /api/menu-requests: a DELETE (the D.4 case), an EDIT, a same-price RESTORE and a
- *         new size of a live item (each applied at once); PATCH /api/menu-items/[id]/availability;
- *         and an organizer approval (lib/menu-requests/apply-decision.ts)
+ *         POST /api/menu-requests: a DELETE (the D.4 case), an EDIT and a same-price RESTORE (each
+ *         applied at once), and a rename riding on a price increase (the rename is live, the price
+ *         waits, F2); PATCH /api/menu-items/[id]/availability; and organizer approvals
+ *         (lib/menu-requests/apply-decision.ts) of a new size of a live item (which waits, F4) and
+ *         of a brand-new item. A price-only increase and a new size clear nothing when filed
  *       (the EDIT, RESTORE, new-size and refusal rows first ran on the direct PATCH/DELETE
  *        /api/menu/[id] and POST /api/menu, removed in the Batch 1 merge, 2026-11-21, D1)
  *       and a refused request (another vendor's item → 404) records nothing for the tag
@@ -201,9 +203,31 @@ async function main() {
       vendorId: A.vendor.id, type: 'ADD', name: `${group} Large`, price: 5, category: 'Drinks', variantGroup: group, variantLabel: 'Large',
     })
     const sb = await bodyOf(res)
+    const sizeReq = sb.data as { id?: string; status?: string } | undefined
+    // A new size of a live item waits (F4): nothing is on the menu yet, so filing it clears nothing.
+    assert(res.status === 201 && sizeReq?.status === 'PENDING' && cache.revalidatedWith.every(c => c.tag !== `vendor-menu-${A.vendor.id}`),
+      `ADD request, a new size of a live item → 201 PENDING, clears nothing yet (got ${res.status} ${sizeReq?.status})`)
+    login(orgUser.clerkId)
+    reset()
+    const ap = await orgPATCH(jsonReq(`/api/organizer/fairs/${fair.urlSlug}/menu-requests/${sizeReq?.id}`, 'PATCH', { action: 'APPROVE' }),
+      { params: Promise.resolve({ fairSlug: fair.urlSlug, id: sizeReq?.id ?? '' }) })
     const r = expiredOnce(A.vendor.id)
-    assert(res.status === 201 && (sb.data as { status?: string } | undefined)?.status === 'APPROVED' && r.ok,
-      `ADD request, a new size of a live item → 201 APPROVED, expires at once (got ${res.status}, seen ${r.seen})`)
+    assert(ap.status === 200 && r.ok, `approving the new size → 200, expires at once (got ${ap.status}, seen ${r.seen})`)
+    login(A.user.clerkId)
+  }
+  {
+    // F2: a price-only increase waits, so the live menu is unchanged and nothing is cleared; an
+    // increase that also renames the item changes the menu now (the rename is live), so it clears.
+    const wrap = await mkItem(A.vendor.id, `${PFX}wrap`, 7)
+    reset()
+    const up = await bodyOf(await file({ vendorId: A.vendor.id, type: 'EDIT', menuItemId: wrap.id, price: 8 }))
+    assert((up.data as { status?: string } | undefined)?.status === 'PENDING' && cache.revalidatedWith.every(c => c.tag !== `vendor-menu-${A.vendor.id}`),
+      `a price-only increase is PENDING and clears nothing (got ${(up.data as { status?: string } | undefined)?.status})`)
+    reset()
+    const mixed = await bodyOf(await file({ vendorId: A.vendor.id, type: 'EDIT', menuItemId: wrap.id, price: 9, name: `${PFX}wrap-xl` }))
+    const r = expiredOnce(A.vendor.id)
+    assert((mixed.data as { status?: string } | undefined)?.status === 'PENDING' && r.ok,
+      `an increase plus a rename answers PENDING but expires at once for the live rename (got ${(mixed.data as { status?: string } | undefined)?.status}, seen ${r.seen})`)
   }
   {
     // A brand-new item waits for the organizer; nothing is on the menu yet, so filing it clears nothing.
@@ -236,8 +260,9 @@ async function main() {
   }
   reset()
   const vendorMenuCalls = allCalls.filter(c => c.tag.startsWith('vendor-menu-'))
-  // 7 recorded writes: request DELETE, EDIT, RESTORE, availability ×2, new size, organizer approval.
-  assert(vendorMenuCalls.length === 7 && !vendorMenuCalls.some(c => typeof c.profile === 'string'),
+  // 8 recorded writes: request DELETE, EDIT, RESTORE, availability ×2, the new size's approval, the
+  // live rename riding on a waiting increase, and the brand-new item's organizer approval.
+  assert(vendorMenuCalls.length === 8 && !vendorMenuCalls.some(c => typeof c.profile === 'string'),
     `across the whole run (${vendorMenuCalls.length} vendor-menu-{id} entries), none used a string (stale-while-revalidate) profile`)
 
   // ── [2] source guard ────────────────────────────────────────────────────────────────────────

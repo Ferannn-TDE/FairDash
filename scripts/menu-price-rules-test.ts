@@ -5,8 +5,10 @@
  * negative, NaN or $1,000,000 price went straight onto a live menu, and the menu-request path had
  * its own looser rule ($0.01–$10,000, any number of decimals). Then all three paths shared
  * lib/menu/price.ts: at least $1.00, at most $10,000, at most 2 decimals. The two direct routes
- * were removed in the Batch 1 merge (2026-11-21, D1), so the request path is the only one left;
- * an EDIT of a live item applies at once there, which is what [3] and [5] now prove.
+ * were removed in the Batch 1 merge (2026-11-21, D1), so the request path is the only one left.
+ * There an EDIT of a live item applies at once when the price stays the same or goes down, and a
+ * higher price waits for the approver (F2, Nov 13), which is what [3] and [5] now prove: a raised
+ * price is checked on the PENDING row, then on the item once it is approved.
  *
  *   [1] the rule itself (pure), including the inputs JSON cannot carry (NaN, Infinity)
  *   [3] EDIT of a live item     — each bad price is refused with 400 and the stored price is unchanged
@@ -188,9 +190,20 @@ async function main() {
   const requestEdit = (price: unknown) =>
     requestsPOST(jsonReq('/api/menu-requests', 'POST', { vendorId: vendor.id, type: 'EDIT', menuItemId: existing.id, price }))
 
+  // The event has no organizer, so a strict admin approves (the approver rule). Called through the
+  // shared decision both approver routes use, so a raised price can be followed onto the item.
+  const { applyMenuRequestDecision } = await import('../lib/menu-requests/apply-decision')
+  const approver = await prisma.user.create({
+    data: { clerkId: `${PFX}adm-${rand()}`, email: `${PFX}adm-${rand()}${MAIL}`, name: 'Admin' },
+  })
+  const adminApprove = (requestId: string) => applyMenuRequestDecision({
+    requestId, event: { id: event.id, organizerId: null }, approver: { kind: 'admin' }, reviewerUserId: approver.id, action: 'APPROVE',
+  })
+
   // ── [3] EDIT of a live item ─────────────────────────────────────────────────────────────────
-  // Moved from the removed PATCH /api/menu/[id] (2026-11-21, D1). An EDIT of a live item applies
-  // at once on the request path, so the stored price is what must stay put on a refusal.
+  // Moved from the removed PATCH /api/menu/[id] (2026-11-21, D1). On the request path an EDIT of a
+  // live item applies at once unless it raises the price (F2), so the stored price is what must
+  // stay put on a refusal.
   console.log('\n[3] an EDIT of a live item refuses every bad price and leaves the stored price alone')
   {
     await prisma.menuItem.update({ where: { id: existing.id }, data: { price: 8 } })
@@ -200,13 +213,17 @@ async function main() {
       assert(res.status === 400 && b?.error?.code === 'VALIDATION_ERROR', `${label}: 400 VALIDATION_ERROR (got ${res.status} ${b?.error?.code})`)
     }
     assert(await storedPrice() === 8, `the stored price is still 8 after every refused EDIT (got ${await storedPrice()})`)
-    const ok = await requestEdit(9.5)
+    const ok = await requestEdit(7.5)
     const okb = await bodyOf(ok)
-    assert(ok.status === 201 && okb?.data?.status === 'APPROVED' && await storedPrice() === 9.5,
-      `[0] positive control: EDIT 9.5 is applied at once (got ${ok.status} ${okb?.data?.status}, price ${await storedPrice()})`)
+    assert(ok.status === 201 && okb?.data?.status === 'APPROVED' && await storedPrice() === 7.5,
+      `[0] positive control: EDIT 7.5 (a decrease) is applied at once (got ${ok.status} ${okb?.data?.status}, price ${await storedPrice()})`)
+    const up = await requestEdit(9.5)
+    const upb = await bodyOf(up)
+    assert(up.status === 201 && upb?.data?.status === 'PENDING' && upb?.data?.price === 9.5 && await storedPrice() === 7.5,
+      `EDIT 9.5 (an increase) is accepted as PENDING at 9.5 and the item still sells at 7.5 (got ${up.status} ${upb?.data?.status}, price ${await storedPrice()})`)
     // An EDIT without a price must still work and keep the stored price.
     const noPrice = await requestsPOST(jsonReq('/api/menu-requests', 'POST', { vendorId: vendor.id, type: 'EDIT', menuItemId: existing.id, description: 'x' }))
-    assert(noPrice.status === 201 && await storedPrice() === 9.5, `an EDIT that leaves price out keeps the stored price (got ${noPrice.status}, price ${await storedPrice()})`)
+    assert(noPrice.status === 201 && await storedPrice() === 7.5, `an EDIT that leaves price out keeps the stored price (got ${noPrice.status}, price ${await storedPrice()})`)
   }
 
   // ── [4] POST /api/menu-requests ─────────────────────────────────────────────────────────────
@@ -233,10 +250,22 @@ async function main() {
   // ── [5] accepted prices, stored as parsed ───────────────────────────────────────────────────
   console.log('\n[5] accepted prices land, stored as the parsed value')
   for (const [label, price, stored] of ACCEPTED) {
-    // An EDIT of a live item applies at once: the item itself stores the parsed price. (This row
-    // first ran on the removed PATCH /api/menu/[id], 2026-11-21, D1.)
+    // The item itself must end up storing the parsed price. The same or a lower price applies at
+    // once; a higher one waits (F2) with the parsed price on its PENDING row and the item unchanged,
+    // and lands when approved. (This row first ran on the removed PATCH /api/menu/[id], 2026-11-21, D1.)
+    const was = await storedPrice()
     const p = await requestEdit(price)
-    assert(p.status === 201 && await storedPrice() === stored, `menu request EDIT ${label}: applied, item stored ${stored} (got ${p.status}, ${await storedPrice()})`)
+    const pb = await bodyOf(p)
+    if (stored > was) {
+      assert(p.status === 201 && pb?.data?.status === 'PENDING' && pb?.data?.price === stored && await storedPrice() === was,
+        `menu request EDIT ${label} (up from ${was}): PENDING carrying ${stored}, item still ${was} (got ${p.status} ${pb?.data?.status}, ${pb?.data?.price}, ${await storedPrice()})`)
+      const decided = await adminApprove(pb?.data?.id as string)
+      assert(decided.status === 'APPROVED' && await storedPrice() === stored,
+        `menu request EDIT ${label}: approved, item stored ${stored} (got ${decided.status}, ${await storedPrice()})`)
+    } else {
+      assert(p.status === 201 && pb?.data?.status === 'APPROVED' && await storedPrice() === stored,
+        `menu request EDIT ${label} (from ${was}): applied at once, item stored ${stored} (got ${p.status} ${pb?.data?.status}, ${await storedPrice()})`)
+    }
 
     const name = `${PFX}acc-${rand()}`
     const r = await requestsPOST(jsonReq('/api/menu-requests', 'POST', { vendorId: vendor.id, type: 'ADD', name, price, category: 'Mains' }))

@@ -61,7 +61,7 @@ interface PendingRequest {
   menuItemId: string | null
   menuItem: { name: string } | null
   createdAt: string
-  /** The requested price, when the request carries one (a restore at a higher price). */
+  /** The requested price, when the request carries one (a higher-priced restore or live increase). */
   price?: number | null
   /** Who a pending request waits for: the organizer, or FairSynq when the fair has none. */
   approver?: MenuApproverLabel
@@ -312,9 +312,12 @@ function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
 
 // ─── Item row ─────────────────────────────────────────────────────────────────
 
-function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
+function ItemRow({ item, hasPendingRequest, pendingPrice, onToggle, onEdit, onDelete }: {
   item: MenuItem
   hasPendingRequest: boolean
+  /** F2: a higher price waiting for approval. The item keeps selling at its own price meanwhile,
+   *  and stays editable: a lower price, a newer increase or a removal replaces the waiting one. */
+  pendingPrice: number | null
   onToggle: (id: string) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
@@ -335,6 +338,14 @@ function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
           {hasPendingRequest && (
             <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 text-[0.6rem] font-bold rounded-full uppercase tracking-wider border border-amber-500/20">
               Pending Approval
+            </span>
+          )}
+          {pendingPrice !== null && (
+            <span
+              className="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 text-[0.6rem] font-bold rounded-full uppercase tracking-wider border border-amber-500/20"
+              title="Customers pay the current price until the new price is approved"
+            >
+              ${pendingPrice.toFixed(2)} waiting for approval
             </span>
           )}
         </div>
@@ -547,11 +558,19 @@ export default function VendorMenuPage() {
     .map(cat => ({ cat, items: items.filter(i => i.category === cat) }))
     .filter(g => g.items.length > 0)
 
-  // Set of menuItemIds that have a pending change request — edit/delete disabled on these
+  // Set of menuItemIds that have a pending change request — edit/delete disabled on these. A
+  // waiting price increase (a PENDING EDIT, F2) does not lock the item: the vendor may still lower
+  // the price, raise it again, or remove the item, and the newer change replaces the waiting one.
   const pendingItemIds = new Set(
     pendingRequests
+      .filter(r => r.type !== 'EDIT')
       .map(r => r.menuItemId)
       .filter((id): id is string => !!id)
+  )
+  const pendingPriceByItem = new Map(
+    pendingRequests
+      .filter(r => r.type === 'EDIT' && r.menuItemId && r.price != null)
+      .map(r => [r.menuItemId as string, r.price as number]),
   )
 
   async function handleToggleAvailability(item: MenuItem) {
@@ -670,9 +689,9 @@ export default function VendorMenuPage() {
   async function handleSaveEdit(id: string, form: Partial<MenuItem>) {
     if (!vendorId) return
     const item = items.find(i => i.id === id)
-    // SEND ONLY WHAT CHANGED. An edit goes live at once (audit H5, 2g), and the form is seeded with
-    // the DISPLAY name, which for a size variant is "Base (Size)" rather than the stored name, so
-    // sending the whole form would rename the item on every save.
+    // SEND ONLY WHAT CHANGED. An edit goes live at once (audit H5, 2g) unless it raises the price
+    // (F2), and the form is seeded with the DISPLAY name, which for a size variant is "Base (Size)"
+    // rather than the stored name, so sending the whole form would rename the item on every save.
     const updates: Partial<MenuItem> = {}
     for (const key of ['name', 'description', 'price', 'prepTime', 'category', 'imageUrl'] as const) {
       if (form[key] !== undefined && form[key] !== item?.[key]) (updates as Record<string, unknown>)[key] = form[key]
@@ -685,9 +704,28 @@ export default function VendorMenuPage() {
         body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, ...updates }),
       })
       const json = await res.json()
-      // An edit of a live item applies immediately (audit H5, 2g): the row comes back APPROVED,
-      // so reload the menu to show the saved values instead of a pending chip.
-      if (json.success) {
+      // The server decides and answers with the row's status; the page follows that answer.
+      // APPROVED: applied now. PENDING: a higher price waits for approval (F2) and the old price
+      // keeps selling; anything else in the same edit (a new name, photo...) is already live, so
+      // the menu is reloaded either way.
+      if (json.success && json.data.status === 'PENDING') {
+        const oldPrice = item?.price
+        setPendingRequests(prev => [{
+          id: json.data.id, type: 'EDIT', status: 'PENDING', name: json.data.name ?? null,
+          menuItemId: id, menuItem: { name: updates.name ?? item?.name ?? '' }, createdAt: json.data.createdAt,
+          price: json.data.price ?? null, approver: json.data.approver,
+        }, ...prev.filter(r => !(r.type === 'EDIT' && r.menuItemId === id))])
+        loadMenu()
+        toast.success(
+          `${waitingFor(json.data.approver)} — a higher price needs approval.`
+          + (oldPrice !== undefined ? ` $${oldPrice.toFixed(2)} keeps selling until then.` : ''),
+        )
+      } else if (json.success) {
+        // A lower price or a non-price edit: live now. A lower or newer price replaced any waiting
+        // increase on the server, so its chip goes too.
+        if (updates.price !== undefined) {
+          setPendingRequests(prev => prev.filter(r => !(r.type === 'EDIT' && r.menuItemId === id)))
+        }
         loadMenu()
         toast.success(`${updates.name ?? item?.name ?? 'Item'} updated`)
       } else {
@@ -1001,6 +1039,7 @@ export default function VendorMenuPage() {
                     key={item.id}
                     item={item}
                     hasPendingRequest={pendingItemIds.has(item.id)}
+                    pendingPrice={pendingPriceByItem.get(item.id) ?? null}
                     onToggle={handleAvailabilityClick}
                     onEdit={setEditingId}
                     onDelete={id => {

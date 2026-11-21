@@ -63,9 +63,9 @@ export const ALERT_TYPE_FOR_KIND: Record<ChangeKind, MenuAlertType> = {
 }
 
 /**
- * Why a price waits for approval. This step files RESTORE and READD; the price-increase approval
- * step adds LIVE_INCREASE (a live item's price going up) and NEW_SIZE (a new size of a live item)
- * through the same recorder.
+ * Why a price waits for approval: a higher-priced RESTORE or READD (step 3), a live item's price
+ * going up (LIVE_INCREASE, F2) and a new size of a live item (NEW_SIZE, F4), all filed through the
+ * same recorder by lib/menu-requests/file-item.ts.
  */
 export const PRICE_PENDING_REASONS = ['RESTORE', 'READD', 'LIVE_INCREASE', 'NEW_SIZE'] as const
 export type PricePendingReason = (typeof PRICE_PENDING_REASONS)[number]

@@ -25,7 +25,8 @@ export interface MenuDeletedRecord {
 
 export interface PriceChangePendingRecord {
   vendorId: string
-  menuItemId: string
+  /** The item whose price would change; null for a new size, which has no item until approved. */
+  menuItemId: string | null
   /** The PENDING request the approver will decide. */
   menuRequestId: string
   /** One vendor submission: rows sharing it become one notification. Null = on its own. */

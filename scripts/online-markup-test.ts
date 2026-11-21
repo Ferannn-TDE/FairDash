@@ -988,11 +988,25 @@ async function main() {
     assert(await stored(nc.id) === 10 && load3?.inPersonPrice === 10 && load3.price === 11,
       `after two saves the stored price is still $10.00 and customers still pay $11.00 (stored ${await stored(nc.id)}, online ${load3?.price})`)
     // Control: had the page loaded the ONLINE price into the form (the bug this prevents), one save
-    // would have raised the stored price by the markup.
+    // would have raised the stored price by the markup. A raise waits for the approver (F2), so the
+    // control files it, approves it through the shared decision, and then reads the stored price.
     const ctrl = await mkItem(V1.id, 'compound-ctrl', 10)
     const ctrlLoad = await loadAsPage(ctrl.id)
-    await fileReq({ type: 'EDIT', menuItemId: ctrl.id, price: ctrlLoad?.price })
-    assert(await stored(ctrl.id) === 11, `[0] control: saving the online price instead WOULD change the stored price to $11.00 (got ${await stored(ctrl.id)}), so the test can see compounding`)
+    const ctrlFiled = await bodyOf(await fileReq({ type: 'EDIT', menuItemId: ctrl.id, price: ctrlLoad?.price }))
+    const liveEvent = await prisma.event.findUniqueOrThrow({ where: { id: live.id }, select: { id: true, organizerId: true } })
+    const orgMember = liveEvent.organizerId
+      ? await prisma.orgMember.findFirstOrThrow({ where: { organizerId: liveEvent.organizerId }, select: { userId: true } })
+      : null
+    const { applyMenuRequestDecision } = await import('../lib/menu-requests/apply-decision')
+    const ctrlDecided = await applyMenuRequestDecision({
+      requestId: ctrlFiled.data?.id as string,
+      event: liveEvent,
+      approver: liveEvent.organizerId ? { kind: 'organizer', organizerId: liveEvent.organizerId } : { kind: 'admin' },
+      reviewerUserId: orgMember?.userId ?? owner.id,
+      action: 'APPROVE',
+    })
+    assert(ctrlFiled.data?.status === 'PENDING' && ctrlDecided.status === 'APPROVED' && await stored(ctrl.id) === 11,
+      `[0] control: saving the online price instead WOULD raise the stored price to $11.00 once approved (got ${ctrlFiled.data?.status}, ${ctrlDecided.status}, ${await stored(ctrl.id)}), so the test can see compounding`)
 
     // The price rules still judge the in-person price.
     const low = await fileReq({ type: 'EDIT', menuItemId: nc.id, price: 0.95 })
