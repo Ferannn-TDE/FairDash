@@ -100,10 +100,15 @@ export async function ensureOrderFeeSplit(input: {
 async function readSplit(orderId: string): Promise<Omit<FeeModel2Split, 'created'> | null> {
   const s = await db.orderFeeSplit.findUnique({ where: { orderId }, include: { vendors: true } })
   if (!s) return null
+  // The line's feeShareCents is what is WITHHELD from the vendor's transfer, and it is what the payout writes to
+  // Payout.fairSynqFee and VendorEarning.feeShareCents. In PLATFORM mode FairSynq absorbs the vendor's processing,
+  // so nothing is withheld: 0, and withheld = gross − net holds in both modes. The absorbed share stays recorded
+  // on the split row (OrderFeeSplitVendor.feeShareCents) and in FairSynq's net. (Record fix, 2026-11-20.)
+  const platform = s.cardFeesPaidBy === 'PLATFORM'
   return {
     lines: s.vendors
       .sort((a, b) => a.vendorId.localeCompare(b.vendorId))
-      .map(v => ({ vendorId: v.vendorId, subtotalCents: v.foodCents, feeShareCents: v.feeShareCents, transferCents: v.payCents })),
+      .map(v => ({ vendorId: v.vendorId, subtotalCents: v.foodCents, feeShareCents: platform ? 0 : v.feeShareCents, transferCents: v.payCents })),
     realStripeFeeCents: s.realStripeFeeCents,
     fairsynqNetCents: s.fairsynqNetCents,
     partnerNetCents: s.partnerNetCents,

@@ -13,6 +13,7 @@
  *       feeModel 2 order (no partner earning) still is
  *   [6] the missing-PartnerEarning check: quiet on healthy orders, catches a planted one; legacy Pattern L
  *       skips feeModel 2; Slack at most once per order per 24 h (Redis key), sent anyway when Redis is down
+ *   [6b] records: withheld = gross − net on Payout + VendorEarning in VENDOR and PLATFORM mode (0 in PLATFORM)
  *   [7] vendor estimate: feeModel 2 before payout ≤ settled after; PLATFORM exact; legacy byte-identical
  *   [8] copy and settings: the two approved estimate lines, the card-fee note gone
  *
@@ -235,6 +236,36 @@ async function main() {
     assert(/export async function notifyPartnerEarningMissing[\s\S]*?postToSlack\(/.test(notifySrc), 'the notice goes to Slack (postToSlack)')
 
     // ── [7] vendor estimate ─────────────────────────────────────────────────────────────
+    // ── [6b] withheld = gross − net, both card-fee modes (record fix 2026-11-20) ─────────────
+    console.log('\n[6b] Payout and earning records: withheld = gross − net in both card-fee modes')
+    const wh: Record<string, any> = {}
+    for (const mode of ['VENDOR', 'PLATFORM'] as const) {
+      const o = await buildOrder({ name: `fm2 withheld ${mode}`, fee: 208, vendors: [{ price: 50 }], curbside: { fee: 3.99, tip: 0, runnerPct: 50 } }, fm2(mode))
+      await prisma.order.update({ where: { id: o.orderId }, data: { status: 'DELIVERED' } })
+      setStripeFee(208)
+      const at = transfers.length
+      await processOrderPayout(o.orderId)
+      const p = await prisma.payout.findFirst({ where: { orderId: o.orderId } })
+      const e = await prisma.vendorEarning.findFirst({ where: { orderId: o.orderId } })
+      const sp = await splitRows(o.orderId)
+      const c = (n: number | null | undefined) => Math.round((n ?? 0) * 100)
+      wh[mode] = {
+        sent: transfers.slice(at).map(t => t.params.amount), gross: c(p?.grossAmount), withheld: c(p?.fairSynqFee), net: c(p?.netAmount),
+        earnShare: e?.feeShareCents, earnSub: e?.subtotalCents, earnNet: e?.netCents,
+        splitShare: sp.split?.vendors[0].feeShareCents, fsNet: sp.split?.fairsynqNetCents, partner: sp.partner?.amountCents,
+      }
+      const r = wh[mode]
+      console.log(`     ${mode}: ${JSON.stringify(r)}`)
+      assert(r.withheld === r.gross - r.net, `${mode}: Payout fairSynqFee ${r.withheld}¢ = gross ${r.gross} − net ${r.net}`)
+      assert(r.earnShare === r.earnSub - r.earnNet, `${mode}: VendorEarning feeShareCents ${r.earnShare} = subtotal ${r.earnSub} − net ${r.earnNet}`)
+    }
+    assert(wh.VENDOR.withheld === 175 && wh.VENDOR.sent.join() === '4825',
+      '[0] control: in VENDOR mode the same check sees a real 175¢ withheld (transfer 4825), so it is not vacuous')
+    assert(wh.PLATFORM.withheld === 0 && wh.PLATFORM.earnShare === 0 && wh.PLATFORM.sent.join() === '5000' && wh.PLATFORM.net === 5000,
+      'PLATFORM: transfer 5000¢ (food in full), 0 withheld on the Payout row and the earning')
+    assert(wh.PLATFORM.splitShare === 175 && wh.PLATFORM.fsNet === 553 && wh.PLATFORM.partner === 388,
+      'PLATFORM: the absorbed 175¢ stays on the fee split row; FairSynq nets 553¢ (750 − 22 − 175); partner held 388¢')
+
     console.log('\n[7] Vendor take-home estimate')
     const fresh = await buildOrder({ name: 'fm2 estimate', fee: 197, vendors: [{ price: 50 }] }, fm2())
     const pre = await prisma.order.findUnique({ where: { id: fresh.orderId }, select: EARN_SELECT })
