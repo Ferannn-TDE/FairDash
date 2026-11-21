@@ -3,6 +3,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAdminFairContext } from '@/lib/admin-fair-context'
 import { getFairVendors } from '@/lib/fair-vendors'
+import { latestVendorReviews } from '@/lib/vendor-review'
 
 // GET /api/admin/events/[id]/vendors
 // Admin (cross-fair) vendor roster for a fair. [id] may be the event UUID or urlSlug.
@@ -26,7 +27,11 @@ export async function GET(
       status: searchParams.get('status') ?? undefined,
     })
 
-    return success(data)
+    // Who decided each vendor, full name (admin view; Jordan, Nov 16). Added HERE, not in the
+    // shared getFairVendors core, because the organizer route uses that core and organizers may
+    // not see FairSynq reviewers' names (lib/reviewer-label.ts).
+    const reviews = await latestVendorReviews(data.vendors.map(v => v.id), { kind: 'admin' })
+    return success({ ...data, vendors: data.vendors.map(v => ({ ...v, review: reviews.get(v.id) ?? null })) })
   } catch (err) {
     return handleApiError(err)
   }

@@ -5,6 +5,8 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { MenuRequestStatus } from '@prisma/client'
+import { reviewPriceChange } from '@/lib/menu-requests/review-price'
+import { pendingSizeCounts, sizeCountFor } from '@/lib/menu-requests/size-groups'
 
 const ALL_STATUSES: MenuRequestStatus[] = ['PENDING', 'APPROVED', 'REJECTED']
 
@@ -76,6 +78,10 @@ export async function GET(
       },
     })
 
+    // How many PENDING sizes each brand-new item has, so the card can say that approving one
+    // approves them all (H5 Fix B). Counted across the whole fair, not just this page of rows.
+    const sizesInGroup = await pendingSizeCounts({ vendor: { eventId: event.id } })
+
     const result = requests.map(r => ({
       id: r.id,
       type: r.type,
@@ -94,9 +100,15 @@ export async function GET(
       category: r.category,
       prepTime: r.prepTime,
       imageUrl: r.imageUrl,
+      // Sizes (H5 Fix B): a brand-new item's sizes share a variantGroup and are decided together.
+      variantGroup: r.variantGroup,
+      variantLabel: r.variantLabel,
+      sizesInGroup: sizeCountFor(sizesInGroup, r),
       // Linked item (current state for diff)
       menuItemId: r.menuItemId,
       currentItem: r.menuItem ?? null,
+      // Current → requested, computed from the item's price as it is NOW (audit H5, 2g).
+      priceChange: reviewPriceChange(r),
       reviewNote: r.reviewNote,
       createdAt: r.createdAt,
       vendor: { id: r.vendor.id, name: r.vendor.name },

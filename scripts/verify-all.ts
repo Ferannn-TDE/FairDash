@@ -20,6 +20,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 
 interface Suite { group: string; name: string; file: string }
 
@@ -59,7 +60,7 @@ const SUITES: Suite[] = [
   { group: 'boundary', name: 'organizer-admin-panel',  file: 'scripts/organizer-admin-panel-test.ts' },
   { group: 'boundary', name: 'organizer-portal-gate',  file: 'scripts/organizer-portal-gate-test.ts' },
   { group: 'boundary', name: 'runner-boundary',        file: 'scripts/runner-boundary-proof.ts' },
-  { group: 'boundary', name: 'menu-ownership',         file: 'scripts/menu-ownership-boundary-proof.ts' },
+  { group: 'boundary', name: 'menu-ownership-boundary', file: 'scripts/menu-ownership-boundary-proof.ts' },
 
   // Security — the vendor-document exposure and its guards.
   { group: 'security', name: 'vendor-doc-privacy',     file: 'scripts/vendor-doc-privacy-test.ts' },
@@ -85,6 +86,19 @@ const SUITES: Suite[] = [
   { group: 'boundary',    name: 'vendor-operator-admittance', file: 'scripts/vendor-operator-admittance-test.ts' },
   { group: 'boundary',    name: 'vendor-operator-gate',      file: 'scripts/vendor-operator-gate-test.ts' },
   { group: 'boundary',    name: 'vendor-accept-verb',        file: 'scripts/vendor-accept-verb-test.ts' },
+  { group: 'boundary',    name: 'menu-ownership',            file: 'scripts/menu-ownership-guard.ts' },
+  { group: 'correctness', name: 'menu-immediate-delete',     file: 'scripts/menu-immediate-delete-test.ts' },
+  { group: 'correctness', name: 'menu-notifications',        file: 'scripts/menu-notifications-test.ts' },
+  { group: 'correctness', name: 'free-text-limits',          file: 'scripts/free-text-limits-test.ts' },
+  { group: 'boundary',    name: 'menu-alert-preferences',    file: 'scripts/menu-alert-preferences-test.ts' },
+  { group: 'boundary',    name: 'notification-feed',         file: 'scripts/notification-feed-test.ts' },
+  { group: 'money',       name: 'online-markup',             file: 'scripts/online-markup-test.ts' },
+  { group: 'boundary',    name: 'vendor-go-live',            file: 'scripts/vendor-go-live-test.ts' },
+  { group: 'boundary',    name: 'vendor-approval-payouts',   file: 'scripts/vendor-approval-payouts-test.ts' },
+  { group: 'boundary',    name: 'vendor-approver',           file: 'scripts/vendor-approver-test.ts' },
+  { group: 'boundary',    name: 'booth-operators-approve',   file: 'scripts/booth-operators-approve-test.ts' },
+  { group: 'boundary',    name: 'demo-vendor',               file: 'scripts/demo-vendor-test.ts' },
+  { group: 'boundary',    name: 'vendor-rejected-exit',      file: 'scripts/vendor-rejected-exit-test.ts' },
   { group: 'correctness', name: 'admin-money-panel',      file: 'scripts/admin-money-panel-guard.ts' },
   { group: 'correctness', name: 'admin-settings',         file: 'scripts/admin-settings-test.ts' },
   { group: 'correctness', name: 'platform-settings',      file: 'scripts/platform-settings-test.ts' },
@@ -125,6 +139,8 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'connect-card',           file: 'scripts/connect-card-state-test.ts' },
   { group: 'correctness', name: 'connect-status',         file: 'scripts/connect-status-test.ts' },
   { group: 'correctness', name: 'role-reconcile',         file: 'scripts/role-reconcile-test.ts' },
+  { group: 'correctness', name: 'seed-dev-fair',          file: 'scripts/seed-dev-fair-test.ts' },
+  { group: 'correctness', name: 'vendor-menu-cache',      file: 'scripts/vendor-menu-cache-test.ts' },
   { group: 'correctness', name: 'migration-drift',        file: 'scripts/migration-drift-guard.ts' },
   { group: 'correctness', name: 'order-map-center',       file: 'scripts/order-map-center-guard.ts' },
   { group: 'correctness', name: 'rate-limit',             file: 'scripts/rate-limit-test.ts' },
@@ -289,7 +305,13 @@ const expectedFailed: string[] = []
 const unexpectedPass: string[] = []
 let lastGroup = ''
 
-const runSuite = (file: string) => spawnSync('npx', ['tsx', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+// Run each suite as `node <tsx cli> <file>` instead of `npx tsx <file>`. On Windows npx is
+// npx.cmd, which spawnSync cannot start without a shell (ENOENT, status null), so every suite
+// "failed" without running; and shell: true trips Node's DEP0190 warning. Starting tsx's CLI
+// with the current node binary behaves the same on every platform and needs no shell.
+const TSX_CLI = createRequire(import.meta.url).resolve('tsx/cli')
+const runSuite = (file: string) =>
+  spawnSync(process.execPath, [TSX_CLI, file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 // The failure evidence display: the suite's own ❌ lines + the actionable stderr TAIL with
 // benign noise removed — never the FIRST line, which is often a graceful-degradation warn.

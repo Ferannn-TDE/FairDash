@@ -43,7 +43,19 @@ interface Operator {
   rejectionReason: string | null
   operator: { id: string; name: string | null; email: string | null }
   booth: { id: string; name: string; slug: string; status: string; stripeVerified: boolean }
-  fair: { id: string; name: string; slug: string } | null
+  /** organizerApproves: the fair has an organizer, who approves its booths (Nov 16). */
+  fair: { id: string; name: string; slug: string; organizerApproves: boolean } | null
+}
+
+export const BOOTH_WAITS_FOR_ORGANIZER = "Booth waits for the organizer's approval."
+
+/** The owner of a PENDING booth: admitting them also approves the booth (fair with no organizer:
+ *  the full approval, Stripe and checklist), or the booth waits for the organizer (sub-step C). */
+function ownerApprovalNote(op: Operator): string | null {
+  if (op.role !== 'owner' || op.booth.status !== 'PENDING') return null
+  return op.fair?.organizerApproves
+    ? BOOTH_WAITS_FOR_ORGANIZER
+    : 'Approving the owner also approves the booth (Stripe payouts and the go-live checklist are checked first).'
 }
 
 const OPERATOR_BADGE: Record<Approval, { label: string; cls: string }> = {
@@ -68,6 +80,9 @@ function consequenceOf(op: Operator): { text: string; tone: 'ok' | 'warn' | 'sto
     return { text: 'Admitted, and the booth can trade.', tone: 'ok' }
   }
   if (op.approvalStatus === 'APPROVED' && !boothTrades) {
+    if (op.role === 'owner' && op.booth.status === 'PENDING' && op.fair?.organizerApproves) {
+      return { text: `Admitted. ${BOOTH_WAITS_FOR_ORGANIZER} No orders can be placed until then.`, tone: 'warn' }
+    }
     return { text: 'Admitted — but the booth is not approved to trade, so no orders can be placed.', tone: 'warn' }
   }
   if (op.approvalStatus === 'PENDING' && boothTrades) {
@@ -118,7 +133,7 @@ export default function VendorOperatorsPanel() {
   const pendingItems: ApprovalItem[] = pending.map(o => ({
     id: o.id,
     name: o.operator.name ?? o.operator.email,
-    detail: [o.booth.name, o.fair?.name].filter(Boolean).join(' · '),
+    detail: [o.booth.name, o.fair?.name, ownerApprovalNote(o)].filter(Boolean).join(' · '),
   }))
 
   if (loading) return <p className="text-sm text-[#666] font-inter">Loading operators…</p>

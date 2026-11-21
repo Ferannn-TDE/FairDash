@@ -4,6 +4,7 @@ import { currentUser } from '@clerk/nextjs/server'
 import Stripe from 'stripe'
 import { FulfillmentType, EventStatus, EventListing, VendorStatus, OrderStatus } from '@prisma/client'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
+import { demoVendorHidden, demoRefusalMessage, VENDOR_DEMO_CODE } from '@/lib/demo-vendor'
 import { db } from '@/lib/db'
 import { SELLABLE } from '@/lib/menu/on-menu'
 import { stripe } from '@/lib/stripe'
@@ -17,7 +18,10 @@ import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { ensureDbUser } from '@/lib/ensure-db-user'
 import { enforceRateLimit } from '@/lib/ratelimit'
-import { calculateServiceFee } from '@/lib/constants'
+import { checkoutRefusal } from '@/lib/checkout-floor'
+import { checkoutTotals, fromCents, toCents } from '@/lib/checkout-total'
+import { CLIENT_LINE_PRICE_KEYS, CLIENT_ORDER_TOTAL_KEYS, CLIENT_PRICE_MESSAGE, clientPriceKey } from '@/lib/menu/price'
+import { MAX_QTY_PER_ITEM, MAX_ITEMS_PER_ORDER, QUANTITY_LIMIT_MESSAGE, ORDER_ITEM_LIMIT_MESSAGE } from '@/lib/order-limits'
 import { logger } from '@/lib/logger'
 import { effectiveFulfillment, isDeliveryEnabled } from '@/lib/delivery'
 
@@ -41,6 +45,9 @@ interface CreateOrderBody {
   customerName: string
   customerPhone: string
   tip?: number // dollars; runner-fulfilled orders only; 100% the runner's
+  // The total the checkout page showed, in cents (audit H5, 2h). Required. If the server's total
+  // differs, nothing is charged: 409 PRICE_CHANGED with the new total, for the customer to confirm.
+  expectedTotalCents?: number
   // Curbside
   vehicleMake?: string
   vehicleColor?: string
@@ -102,6 +109,7 @@ export async function POST(req: NextRequest) {
       deliveryState,
       deliveryZip,
       tip: tipInput,
+      expectedTotalCents,
     } = body
 
     if (!eventId || !fulfillmentType || !customerName || !customerPhone) {
@@ -118,16 +126,42 @@ export async function POST(req: NextRequest) {
     if (items.length > 20) {
       return apiError('Cart cannot exceed 20 items', 400, 'VALIDATION_ERROR')
     }
+    // Prices are worked out here from the database (audit H5, 2h). A body or cart line that
+    // carries a price, a total or a markup is refused, not silently ignored (review F8).
+    if (clientPriceKey(body, CLIENT_ORDER_TOTAL_KEYS)) {
+      return apiError(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
+    }
+    for (const item of items as unknown[]) {
+      // Each cart line must be a plain object: null, a string, a number or an array used to reach
+      // item.menuItemId below and crash with a 500.
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        return apiError('Invalid item in cart', 400, 'VALIDATION_ERROR')
+      }
+      if (clientPriceKey(item, CLIENT_LINE_PRICE_KEYS)) {
+        return apiError(CLIENT_PRICE_MESSAGE, 400, 'CLIENT_PRICE_NOT_ACCEPTED')
+      }
+    }
+    // QUANTITY (Jordan, Nov 17; lib/order-limits.ts): each line a whole number of at least 1 (review
+    // F9: 1.5 or "2" used to reach the calculator and give a 500), and at most MAX_ITEMS_PER_ORDER
+    // in all. The per-item limit counts every size of a dish together, so it needs each line's
+    // variantGroup: it is checked right after the menu items are read (step 2 below), still before
+    // anything is written or sent to Stripe.
+    let totalQty = 0
     for (const item of items) {
       if (!item.menuItemId || typeof item.menuItemId !== 'string') {
         return apiError('Invalid item in cart', 400, 'VALIDATION_ERROR')
       }
-      if (!item.quantity || item.quantity < 1 || item.quantity > 99) {
+      const quantity: unknown = item.quantity
+      if (!(typeof quantity === 'number' && Number.isInteger(quantity) && quantity >= 1)) {
         return apiError('Invalid quantity', 400, 'VALIDATION_ERROR')
       }
       if (!item.vendorId || typeof item.vendorId !== 'string') {
         return apiError('Invalid vendorId in cart item', 400, 'VALIDATION_ERROR')
       }
+      totalQty += quantity
+    }
+    if (totalQty > MAX_ITEMS_PER_ORDER) {
+      return apiError(ORDER_ITEM_LIMIT_MESSAGE, 400, 'ORDER_ITEM_LIMIT')
     }
 
     if (!Object.values(FulfillmentType).includes(fulfillmentType)) {
@@ -271,6 +305,12 @@ export async function POST(req: NextRequest) {
           'VENDOR_INACTIVE'
         )
       }
+      // DEMO BOOTH (Jordan, Nov 16; lib/demo-vendor.ts): never a real order. With live Stripe keys
+      // (anything not sk_test_/rk_test_, lib/stripe-mode.ts) it is refused here — before the price
+      // check, any write and any Stripe call. In test mode it takes test orders normally.
+      if (demoVendorHidden(vendor)) {
+        throw new ApiError(demoRefusalMessage(vendor.name), 409, VENDOR_DEMO_CODE)
+      }
       if (vendor.isOffline) {
         throw new ApiError(`${vendor.name} is currently offline`, 409, 'VENDOR_OFFLINE')
       }
@@ -335,12 +375,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ONE DISH, ALL ITS SIZES (Jordan, Nov 17): sizes are separate menu items that share a
+    // variantGroup within a vendor (prisma/schema.prisma, MenuItem.variantGroup), so the
+    // MAX_QTY_PER_ITEM limit is counted per vendor + variantGroup; a standalone item counts alone,
+    // and the same item on two lines adds up. 3 Small + 2 Large = 5, allowed; 3 Small + 3 Large = 6,
+    // refused. Uses the rows read above: no extra query, and still before any write or Stripe call.
+    const qtyPerDish = new Map<string, number>()
+    for (const item of items) {
+      const mi = menuItemMap.get(item.menuItemId)
+      if (!mi) continue // unreachable: the loop above refused a missing item
+      const dish = mi.variantGroup ? `group|${mi.vendorId}|${mi.variantGroup}` : `item|${mi.id}`
+      const forDish = (qtyPerDish.get(dish) ?? 0) + item.quantity
+      if (forDish > MAX_QTY_PER_ITEM) {
+        throw new ApiError(QUANTITY_LIMIT_MESSAGE, 400, 'QUANTITY_LIMIT')
+      }
+      qtyPerDish.set(dish, forDish)
+    }
+
     // ── 3. Re-price from DB ────────────────────────────────────────────────
     const vendorMap = new Map(vendors.map(v => [v.id, v]))
 
-    let subtotalAccumulator = 0
-
-    const lineItems = items.map(cartItem => {
+    // ONLINE PRICE (audit H5, 2h): each unit is charged the event's online price, worked out here
+    // from the in-person MenuItem.price and Event.onlineMarkupBps. Never from the client.
+    const markupBps = event.onlineMarkupBps
+    const pricedLines = items.map(cartItem => {
       const mi = menuItemMap.get(cartItem.menuItemId)
       const vendor = vendorMap.get(cartItem.vendorId)
       if (!mi || !vendor) {
@@ -351,32 +409,19 @@ export async function POST(req: NextRequest) {
           'PRICING_ERROR'
         )
       }
-      const unitPrice = mi.price
-      const lineSubtotal = parseFloat((unitPrice * cartItem.quantity).toFixed(2))
-      subtotalAccumulator += lineSubtotal
-      return {
-        menuItemId: cartItem.menuItemId,
-        itemName: mi.name,
-        vendorId: cartItem.vendorId,
-        quantity: cartItem.quantity,
-        specialInstructions: cartItem.specialInstructions ?? null,
-        unitPrice,
-        totalPrice: lineSubtotal,
-        subtotal: lineSubtotal,
-      }
+      return { cartItem, mi }
     })
-
-    const subtotal = parseFloat(subtotalAccumulator.toFixed(2))
 
     // The applicable runner-fulfilled fee (delivery OR curbside), server-derived
     // from config — never client-supplied. Stored in Order.deliveryFee (the fee
     // line the reconciler already understands). Null for booth pickup.
-    const deliveryFee: number | null =
+    const deliveryFeeCents: number | null =
       fulfillmentType === FulfillmentType.HOME_DELIVERY
-        ? parseFloat((config?.homeDeliveryFee ?? DEFAULT_DELIVERY_FEE).toFixed(2))
+        ? toCents(config?.homeDeliveryFee ?? DEFAULT_DELIVERY_FEE)
         : fulfillmentType === FulfillmentType.CURBSIDE
-          ? parseFloat((config?.curbsideFee ?? 0).toFixed(2))
+          ? toCents(config?.curbsideFee ?? 0)
           : null
+    const deliveryFee: number | null = deliveryFeeCents === null ? null : fromCents(deliveryFeeCents)
 
     // Tip: runner-fulfilled orders only (delivery + curbside). 100% the runner's;
     // no service fee, no split. Forced to 0 for booth pickup (ignore client input).
@@ -386,18 +431,22 @@ export async function POST(req: NextRequest) {
     if (tipInput != null && (!Number.isFinite(tipInput) || tipInput < 0)) {
       throw new ApiError('Invalid tip amount', 400, 'VALIDATION_ERROR')
     }
-    const tip = isRunnerFulfilled && tipInput && tipInput > 0
-      ? parseFloat(tipInput.toFixed(2))
-      : 0
+    // Cents through the same toCents() the checkout page uses (lib/checkout-total.ts), so a custom
+    // tip like 3.335 is the same amount on both sides.
+    const tipCents = isRunnerFulfilled && tipInput && tipInput > 0 ? toCents(tipInput) : 0
+    const tip = fromCents(tipCents)
 
-    const serviceCharge =
+    const serviceChargeCents =
       event.serviceChargeEnabled && event.serviceChargeAmount
-        ? parseFloat(event.serviceChargeAmount.toFixed(2))
+        ? toCents(event.serviceChargeAmount)
         : 0
+    const serviceCharge = fromCents(serviceChargeCents)
 
     // ── Fee model ──────────────────────────────────────────────────────────
     // FairSynq's sole revenue is the 10% service fee charged to the CUSTOMER on
-    // top of the subtotal, kept CLEAN (Stripe fees do NOT come out of it).
+    // top of the food, computed on the IN-PERSON subtotal (serviceFeeBase), NOT on
+    // the online subtotal: the online markup is vendor revenue and carries no fee
+    // (audit H5, 2h). The fee is kept CLEAN (Stripe fees do NOT come out of it).
     // Vendors absorb the Stripe processing fee: each vendor receives their
     // subtotal slice minus their proportional share of the real settled fee.
     // That per-vendor math runs in the PAYOUT WORKER at fulfillment, when the
@@ -407,14 +456,86 @@ export async function POST(req: NextRequest) {
     // `vendorPayout` is NOT meaningful per-order under multi-vendor; the real
     // per-vendor payout amounts are recorded as Payout rows by the worker. We
     // store 0 on the draft (column is non-null) — do not read it for payouts.
-    const serviceFee = calculateServiceFee(subtotal)
+    //
+    // THE ONE CALCULATION (lib/checkout-total.ts), shared with the checkout page:
+    //   subtotal       = Σ online unit × qty  (what the customer pays for food; vendors are paid on it,
+    //                    so the markup is vendor revenue)
+    //   serviceFeeBase = Σ in-person unit × qty; serviceFee = 10% of serviceFeeBase (audit H5, 2h),
+    //                    never 10% of the online subtotal
+    //   total          = subtotal + serviceFee + deliveryFee + serviceCharge + tip (5-term money
+    //                    identity; the fee is never on the markup, delivery fee, service charge or tip)
+    const totals = checkoutTotals({
+      lines: pricedLines.map(({ cartItem, mi }) => ({ inPersonCents: toCents(mi.price), quantity: cartItem.quantity })),
+      markupBps,
+      deliveryFeeCents: deliveryFeeCents ?? 0,
+      serviceChargeCents,
+      tipCents,
+    })
+
+    const lineItems = pricedLines.map(({ cartItem, mi }, i) => {
+      const unitPrice = fromCents(totals.unitCents[i])
+      const lineSubtotal = fromCents(totals.lineCents[i])
+      return {
+        menuItemId: cartItem.menuItemId,
+        itemName: mi.name,
+        vendorId: cartItem.vendorId,
+        quantity: cartItem.quantity,
+        specialInstructions: cartItem.specialInstructions ?? null,
+        unitPrice, // the ONLINE unit price the customer pays
+        inPersonUnitPrice: mi.price, // snapshot: the booth price at checkout
+        totalPrice: lineSubtotal,
+        subtotal: lineSubtotal,
+      }
+    })
+
+    const subtotal = fromCents(totals.onlineSubtotalCents)
+    const serviceFeeBase = fromCents(totals.feeBaseCents)
+    const serviceFee = fromCents(totals.serviceFeeCents)
     const fairSynqFee = serviceFee
     const vendorPayout = 0
-
-    // Money identity (5 terms): subtotal + serviceFee(10%×subtotal) + deliveryFee
-    // + serviceCharge + tip. 10% is on subtotal ONLY — never on the fee or tip.
-    const total = parseFloat((subtotal + (deliveryFee ?? 0) + serviceCharge + serviceFee + tip).toFixed(2))
+    const total = fromCents(totals.totalCents)
     const itemCount = lineItems.reduce((sum, i) => sum + i.quantity, 0)
+
+    // ── Checkout floor (audit H5, Step 2b) ─────────────────────────────────────
+    // No food, food smaller than the estimated card fee on the full charge, or a charge under
+    // Stripe's $0.50 minimum. Refused HERE, before the user upsert, the Stripe call and the order
+    // transaction below, so a refused order writes nothing and charges nothing. See
+    // lib/checkout-floor.ts. totalCents is computed exactly as the PaymentIntent amount is.
+    // Uses the ONLINE food subtotal (what the customer pays and the vendors are paid on).
+    const floorRefusal = checkoutRefusal({ subtotalCents: totals.onlineSubtotalCents, totalCents: totals.totalCents })
+    if (floorRefusal) throw new ApiError(floorRefusal.message, 400, floorRefusal.code)
+
+    // ── Never charge more than the customer saw (audit H5, 2h) ─────────────────────
+    // The checkout page sends the total it showed, computed with the same checkoutTotals(). Any
+    // difference (an organizer or admin changed the markup, a vendor changed a price, a fee changed)
+    // is refused HERE — after the floor, before the user upsert, the Stripe call and the order
+    // transaction — so nothing is written and nothing is charged. The page shows the new total and
+    // the customer confirms before paying. Missing → 400 (Batch 1 merge checklist).
+    if (typeof expectedTotalCents !== 'number' || !Number.isInteger(expectedTotalCents) || expectedTotalCents < 0) {
+      throw new ApiError('expectedTotalCents (the total shown to the customer, in cents) is required', 400, 'VALIDATION_ERROR')
+    }
+    if (expectedTotalCents !== totals.totalCents) {
+      throw new ApiError(
+        `Prices updated — new total $${total.toFixed(2)}`,
+        409,
+        'PRICE_CHANGED',
+        {
+          newTotal: total,
+          newTotalCents: totals.totalCents,
+          expectedTotalCents,
+          breakdown: {
+            subtotal,
+            serviceFee,
+            deliveryFee,
+            serviceCharge: serviceCharge > 0 ? serviceCharge : null,
+            tip: tip > 0 ? tip : null,
+            total,
+            onlineMarkupBps: markupBps,
+            lines: lineItems.map(l => ({ menuItemId: l.menuItemId, vendorId: l.vendorId, quantity: l.quantity, unitPrice: l.unitPrice })),
+          },
+        },
+      )
+    }
 
     // Primary vendor — first item's vendor (used for Order.vendorId and RTDB routing)
     const primaryVendorId = items[0].vendorId
@@ -459,7 +580,7 @@ export async function POST(req: NextRequest) {
     // dashboard see the split source without trusting the client. The worker is
     // authoritative from the DB; this is belt-and-suspenders.
     //
-    // ⚠️ N IS BOUNDED BY THE 20-ITEM CAP ABOVE (`items.length > 20`, :113), NOT by a vendor cap.
+    // ⚠️ N IS BOUNDED BY MAX_ITEMS_PER_ORDER (lib/order-limits.ts: 15 items, so at most 15 vendors) and the 20-line cap above, NOT by a vendor cap.
     // This comment used to claim "Max 5 vendors/order keeps this well under Stripe's 500-char
     // metadata value limit" — but MAX_VENDORS_PER_ORDER is DEAD (lib/constants.ts:157; its only
     // appearance in the repo is its own definition), so nothing enforces 5. Since each vendor
@@ -501,6 +622,8 @@ export async function POST(req: NextRequest) {
         fulfillmentType,
         fairSynqFee: fairSynqFee.toFixed(2),
         serviceFee: serviceFee.toFixed(2),
+        serviceFeeBase: serviceFeeBase.toFixed(2),
+        onlineMarkupBps: String(markupBps),
         deliveryFee: (deliveryFee ?? 0).toFixed(2),
         serviceCharge: serviceCharge.toFixed(2),
         tip: tip.toFixed(2),
@@ -555,6 +678,9 @@ export async function POST(req: NextRequest) {
           total,
           fairSynqFee,
           vendorPayout,
+          // Snapshots (audit H5, 2h): the in-person base the fee used, and the markup in force.
+          serviceFeeBase,
+          onlineMarkupBps: markupBps,
           customerName,
           customerPhone,
           vehicleMake: vehicleMake ?? null,
@@ -578,6 +704,7 @@ export async function POST(req: NextRequest) {
               vendorId: item.vendorId,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
+              inPersonUnitPrice: item.inPersonUnitPrice,
               totalPrice: item.totalPrice,
               subtotal: item.subtotal,
               specialInstructions: item.specialInstructions,
@@ -630,6 +757,8 @@ export async function POST(req: NextRequest) {
           tip: tip > 0 ? tip : null,
           fairSynqFee,
           serviceFee,
+          serviceFeeBase,
+          onlineMarkupBps: markupBps,
           total,
           itemCount,
           fulfillmentType,

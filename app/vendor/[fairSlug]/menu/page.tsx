@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import {
   PlusIcon, PencilIcon, TrashIcon, ClockIcon,
@@ -11,6 +11,9 @@ import {
 import { ImagePlus } from 'lucide-react'
 import { useVendorMeta } from '@/lib/contexts/VendorContext'
 import { downscaleImage } from '@/lib/downscale-image'
+import { MIN_PRICE_CENTS, PRICE_MIN_MESSAGE, bpsToPercent } from '@/lib/menu/price'
+import { onlineUnitPrice } from '@/lib/checkout-total'
+import { waitingFor, type MenuApproverLabel } from '@/lib/menu-requests/approver-label'
 import {
   STAGE_BUTTON_LABEL,
   addStaged,
@@ -34,10 +37,15 @@ import {
   isWithinUploadCap,
 } from '@/lib/upload-limits'
 
+// IN-PERSON PRICES ONLY (audit H5, 2h). Every price on this page is the in-person (booth) price the
+// vendor sets and the server stores; it is loaded from `variant.inPersonPrice`, never from the
+// online `price` customers see. Loading the online price here would raise the stored price by the
+// markup on every save. The online price is only SHOWN, by OnlinePriceHint, via lib/checkout-total.ts.
 interface MenuItem {
   id: string
   name: string
   description: string
+  /** The in-person price (MenuItem.price). */
   price: number
   prepTime: number
   category: string
@@ -53,6 +61,10 @@ interface PendingRequest {
   menuItemId: string | null
   menuItem: { name: string } | null
   createdAt: string
+  /** The requested price, when the request carries one (a restore at a higher price). */
+  price?: number | null
+  /** Who a pending request waits for: the organizer, or FairSynq when the fair has none. */
+  approver?: MenuApproverLabel
 }
 
 /** An item taken off the menu. Vendor-only: the complement of the active list. */
@@ -72,6 +84,29 @@ const labelCls = 'block text-[0.6875rem] uppercase tracking-wide text-text-gray 
 const BLANK = {
   name: '', description: '', price: 0, prepTime: 10,
   category: '', imageUrl: '', isAvailable: true,
+}
+
+/**
+ * "Customers pay $X online (+N%)" under an in-person price: the online price, from the same
+ * function checkout charges with (lib/checkout-total.ts) and the fair's markup. Display only; the
+ * vendor always edits and saves the in-person price. Nothing is shown until the price is valid.
+ */
+function OnlinePriceHint({ inPersonPrice, compact = false }: { inPersonPrice: number; compact?: boolean }) {
+  const { onlineMarkupBps } = useVendorMeta()
+  if (!(inPersonPrice * 100 >= MIN_PRICE_CENTS)) return null
+  const online = onlineUnitPrice(inPersonPrice, onlineMarkupBps).toFixed(2)
+  if (compact) {
+    return onlineMarkupBps > 0
+      ? <span className="text-text-gray text-[0.6rem]">${online} online</span>
+      : null
+  }
+  return (
+    <p className="mt-1 text-[0.6875rem] text-text-gray">
+      {onlineMarkupBps > 0
+        ? `Customers pay $${online} online (+${bpsToPercent(onlineMarkupBps)}%)`
+        : `Customers pay $${online} online (same as in person)`}
+    </p>
+  )
 }
 
 // ─── Image upload ─────────────────────────────────────────────────────────────
@@ -220,7 +255,8 @@ function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
     e.preventDefault()
     if (uploading) { toast.error('Wait for the photo to finish uploading'); return }
     if (!form.name.trim()) { toast.error('Name is required'); return }
-    if (form.price <= 0) { toast.error('Price must be greater than 0'); return }
+    // The server is the gate (lib/menu/price.ts); this only saves a round trip.
+    if (!(form.price * 100 >= MIN_PRICE_CENTS)) { toast.error(PRICE_MIN_MESSAGE); return }
     onSubmit(form)
   }
 
@@ -245,7 +281,8 @@ function AddItemForm({ categories, onSubmit, onCancel, submitLabel }: {
         </div>
         <div>
           <label className={labelCls}>Price (USD) *</label>
-          <input required type="number" min="0.01" step="0.01" value={form.price || ''} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} placeholder="0.00" className={inputCls} />
+          <input required type="number" min="1.00" step="0.01" value={form.price || ''} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} placeholder="0.00" className={inputCls} />
+          <OnlinePriceHint inPersonPrice={form.price} />
         </div>
         <div>
           <label className={labelCls}>Prep Time (min)</label>
@@ -303,6 +340,7 @@ function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-neon-pink font-semibold text-xs">${(item.price ?? 0).toFixed(2)}</span>
+          <OnlinePriceHint inPersonPrice={item.price} compact />
           {item.prepTime && (
             <span className="flex items-center gap-0.5 text-text-gray text-[0.6rem]">
               <ClockIcon className="w-2.5 h-2.5" />{item.prepTime}m
@@ -322,7 +360,7 @@ function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
         <button
           onClick={() => !hasPendingRequest && onEdit(item.id)}
           disabled={hasPendingRequest}
-          title={hasPendingRequest ? 'Edit request already pending approval' : 'Request edit (needs approval)'}
+          title={hasPendingRequest ? 'A change to this item is pending approval' : 'Edit item'}
           className="p-1.5 text-text-gray hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer border-0 disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <PencilIcon className="w-3.5 h-3.5" />
@@ -330,7 +368,7 @@ function ItemRow({ item, hasPendingRequest, onToggle, onEdit, onDelete }: {
         <button
           onClick={() => !hasPendingRequest && onDelete(item.id)}
           disabled={hasPendingRequest}
-          title={hasPendingRequest ? 'Change request already pending approval' : 'Request removal (needs approval)'}
+          title={hasPendingRequest ? 'A change to this item is pending approval' : 'Remove from menu'}
           className="p-1.5 text-text-gray hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer border-0 disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <TrashIcon className="w-3.5 h-3.5" />
@@ -362,11 +400,12 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
         onSubmit={e => {
           e.preventDefault()
           if (uploading) { toast.error('Wait for the photo to finish uploading'); return }
+          if (!(form.price * 100 >= MIN_PRICE_CENTS)) { toast.error(PRICE_MIN_MESSAGE); return }
           onSubmit(item.id, form)
           onClose()
         }}>
         <h3 className="font-bebas text-xl tracking-wide text-white mb-1">Edit Item</h3>
-        <p className="text-amber-400/70 text-xs mb-4">Change request requires organizer approval.</p>
+        <p className="text-text-gray text-xs mb-4">Changes go live on your menu as soon as you save.</p>
         <div className="space-y-3">
           <ImageUpload imageUrl={form.imageUrl} onChange={url => setForm(p => ({ ...p, imageUrl: url }))} onUploadingChange={setUploading} />
           <div>
@@ -376,7 +415,8 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Price</label>
-              <input required type="number" min="0.01" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputCls} />
+              <input required type="number" min="1.00" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputCls} />
+              <OnlinePriceHint inPersonPrice={form.price} />
             </div>
             <div>
               <label className={labelCls}>Prep (min)</label>
@@ -396,7 +436,7 @@ function EditItemModal({ item, categories, onSubmit, onClose }: {
         <div className="flex gap-2 justify-end mt-5">
           <button type="button" onClick={onClose} className="px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-sm font-semibold hover:bg-white/10 transition-colors cursor-pointer">Cancel</button>
           <button type="submit" disabled={uploading} className="px-5 py-2 bg-neon-pink text-white rounded-xl text-sm font-semibold hover:bg-[#e0006b] disabled:opacity-40 disabled:hover:bg-neon-pink shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors cursor-pointer">
-            {uploading ? 'Uploading photo…' : 'Submit for Approval'}
+            {uploading ? 'Uploading photo…' : 'Save changes'}
           </button>
         </div>
       </form>
@@ -424,11 +464,11 @@ function DeleteConfirmModal({ item, onConfirm, onClose }: {
           </div>
         </div>
         <p className="text-white/60 text-sm mb-6">
-          A removal request will be sent to the organizer for approval. The item stays live until they approve.
+          The item comes off your menu right away. You can restore it later from &ldquo;Removed from menu&rdquo;.
         </p>
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-semibold hover:bg-white/5 transition-colors cursor-pointer">Cancel</button>
-          <button onClick={onConfirm} className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold whitespace-nowrap transition-colors cursor-pointer">Yes, Request Removal</button>
+          <button onClick={onConfirm} className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold whitespace-nowrap transition-colors cursor-pointer">Yes, Remove</button>
         </div>
       </div>
     </div>
@@ -447,12 +487,17 @@ export default function VendorMenuPage() {
   const [removed, setRemoved] = useState<RemovedItem[]>([])
   const [showRemoved, setShowRemoved] = useState(false)
   const [restoring, setRestoring] = useState<string | null>(null)
+  // The price typed into a removed item's "restore at" box, keyed by item id. Absent = its old price.
+  const [restorePrice, setRestorePrice] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MenuItem | null>(null)
   const [unavailableTarget, setUnavailableTarget] = useState<MenuItem | null>(null)
 
-  useEffect(() => {
+  // One loader for the active menu, the removed list and the pending requests. Called on mount and
+  // again after any change the server applied immediately (a removal, or a restore that did not
+  // raise the price), so the three lists always agree with the server.
+  const loadMenu = useCallback(() => {
     if (!vendorId) return
     setLoading(true)
     Promise.all([
@@ -470,7 +515,9 @@ export default function VendorMenuPage() {
                 id: variant.id,
                 name: group.variants.length > 1 ? `${group.baseName} (${variant.label})` : group.baseName,
                 description: group.description ?? '',
-                price: variant.price,
+                // The IN-PERSON price, never variant.price (the online price): saving the online
+                // price back would raise the stored price by the markup on every save (audit H5, 2h).
+                price: variant.inPersonPrice,
                 prepTime: group.prepTime ?? 10,
                 category: group.category,
                 imageUrl: group.imageUrl ?? '',
@@ -481,12 +528,19 @@ export default function VendorMenuPage() {
           setItems(flat)
         }
         if (reqJson.success) {
-          setPendingRequests((reqJson.data as PendingRequest[]).filter(r => r.status === 'PENDING'))
+          const pending = (reqJson.data as PendingRequest[]).filter(r => r.status === 'PENDING')
+          setPendingRequests(pending)
+          // A restore waiting for approval lives in the Removed section; open it so the vendor sees
+          // the item marked as waiting instead of it seeming to have vanished.
+          const removedIds = new Set(removedJson.success ? (removedJson.data.items as RemovedItem[]).map(i => i.id) : [])
+          if (pending.some(r => r.type === 'RESTORE' && r.menuItemId && removedIds.has(r.menuItemId))) setShowRemoved(true)
         }
       })
       .catch(() => toast.error('Failed to load menu'))
       .finally(() => setLoading(false))
   }, [vendorId])
+
+  useEffect(() => { loadMenu() }, [loadMenu])
 
   const categories = [...new Set(items.map(i => i.category))].filter(Boolean)
   const grouped = categories
@@ -577,12 +631,24 @@ export default function VendorMenuPage() {
 
       if (json.success) {
         const rows = rowsFromSubmitResponse(json.data)
-        setPendingRequests(prev => reconcileAfterSubmit(prev, tempIds, rows) as PendingRequest[])
+        // An ADD that matched one of this booth's removed items comes back as a RESTORE. At the
+        // same or a lower price it was applied at once (APPROVED), so it is not pending.
+        setPendingRequests(prev =>
+          (reconcileAfterSubmit(prev, tempIds, rows) as PendingRequest[]).filter(r => r.status === 'PENDING'))
         setStaged([])
+        const applied = rows.filter(r => r.status === 'APPROVED').length
+        const waiting = rows.length - applied
+        const who = waitingFor(rows[0]?.approver)
+        if (applied > 0) loadMenu()
+        // A re-add at a higher price comes back as a pending RESTORE of the removed item: show it
+        // there, marked as waiting.
+        if (rows.some(r => r.type === 'RESTORE' && r.status === 'PENDING')) setShowRemoved(true)
         toast.success(
-          rows.length === 1
-            ? 'Request submitted — awaiting organizer approval'
-            : `${rows.length} items submitted — awaiting organizer approval`,
+          applied === 0
+            ? (rows.length === 1 ? `Request submitted — ${who}` : `${rows.length} items submitted — ${who}`)
+            : waiting === 0
+              ? `${applied === 1 ? 'Item' : `${applied} items`} back on your menu`
+              : `${applied} back on your menu · ${waiting} ${who.toLowerCase()}`,
         )
       } else {
         // ALL-OR-NOTHING, ON BOTH SIDES OF THE WIRE. The route wrote nothing, so every
@@ -601,9 +667,17 @@ export default function VendorMenuPage() {
     }
   }
 
-  async function handleSaveEdit(id: string, updates: Partial<MenuItem>) {
+  async function handleSaveEdit(id: string, form: Partial<MenuItem>) {
     if (!vendorId) return
     const item = items.find(i => i.id === id)
+    // SEND ONLY WHAT CHANGED. An edit goes live at once (audit H5, 2g), and the form is seeded with
+    // the DISPLAY name, which for a size variant is "Base (Size)" rather than the stored name, so
+    // sending the whole form would rename the item on every save.
+    const updates: Partial<MenuItem> = {}
+    for (const key of ['name', 'description', 'price', 'prepTime', 'category', 'imageUrl'] as const) {
+      if (form[key] !== undefined && form[key] !== item?.[key]) (updates as Record<string, unknown>)[key] = form[key]
+    }
+    if (Object.keys(updates).length === 0) { toast('No changes to save'); return }
     try {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
@@ -611,9 +685,11 @@ export default function VendorMenuPage() {
         body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, ...updates }),
       })
       const json = await res.json()
+      // An edit of a live item applies immediately (audit H5, 2g): the row comes back APPROVED,
+      // so reload the menu to show the saved values instead of a pending chip.
       if (json.success) {
-        setPendingRequests(prev => [{ id: json.data.id, type: 'EDIT', status: 'PENDING', name: updates.name ?? item?.name ?? null, menuItemId: id, menuItem: { name: item?.name ?? '' }, createdAt: json.data.createdAt }, ...prev])
-        toast.success('Edit request submitted — awaiting organizer approval')
+        loadMenu()
+        toast.success(`${updates.name ?? item?.name ?? 'Item'} updated`)
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
       }
@@ -622,29 +698,43 @@ export default function VendorMenuPage() {
     }
   }
 
-  // RESTORE — a REQUEST, not a direct write. Removal is organizer-approved, so undoing it is
-  // too; a vendor-direct restore would let a booth unilaterally reverse an organizer's menu
-  // decision. This files a RESTORE MenuRequest exactly as removal files a DELETE one, and the
-  // item stays off the menu until the organizer approves it.
+  // RESTORE — filed through /api/menu-requests (audit H5, 2g). At the item's old price or lower
+  // it goes straight back on the menu; at a HIGHER price it waits for the organizer and the item
+  // stays removed at its old price until then. The server decides, and answers with the row's
+  // status, so the page follows that answer rather than guessing.
   //
-  // History appends: the original DELETE request keeps its APPROVED status and this is a new
-  // row, so the trail reads "removed (approved) → restored (approved)".
+  // History appends: the DELETE that removed the item keeps its APPROVED row and this is a new
+  // one, so the trail reads "removed → restored".
   async function handleRequestRestore(item: RemovedItem) {
     if (!vendorId || restoring) return
+    const typed = restorePrice[item.id]
+    let price: number | undefined
+    if (typed !== undefined && typed.trim() !== '') {
+      price = Number(typed)
+      if (!Number.isFinite(price) || Math.round(price * 100) < MIN_PRICE_CENTS) {
+        toast.error(PRICE_MIN_MESSAGE)
+        return
+      }
+    }
     setRestoring(item.id)
     try {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vendorId, type: 'RESTORE', menuItemId: item.id }),
+        body: JSON.stringify({ vendorId, type: 'RESTORE', menuItemId: item.id, ...(price !== undefined && { price }) }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (json.success && json.data.status === 'APPROVED') {
+        setRestorePrice(prev => { const next = { ...prev }; delete next[item.id]; return next })
+        loadMenu()
+        toast.success(`${item.name} is back on your menu`)
+      } else if (json.success) {
         setPendingRequests(prev => [{
           id: json.data.id, type: 'RESTORE', status: 'PENDING', name: item.name,
           menuItemId: item.id, menuItem: { name: item.name }, createdAt: json.data.createdAt,
+          price: json.data.price ?? null, approver: json.data.approver,
         }, ...prev])
-        toast.success('Restore request submitted — awaiting organizer approval')
+        toast.success(`${waitingFor(json.data.approver)} — a higher price needs approval`)
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
       }
@@ -664,9 +754,11 @@ export default function VendorMenuPage() {
         body: JSON.stringify({ vendorId, type: 'DELETE', menuItemId: item.id }),
       })
       const json = await res.json()
+      // A removal applies immediately (audit H5, 2g): the row comes back APPROVED and the item is
+      // already off the menu, so reload rather than showing a pending chip.
       if (json.success) {
-        setPendingRequests(prev => [{ id: json.data.id, type: 'DELETE', status: 'PENDING', name: null, menuItemId: item.id, menuItem: { name: item.name }, createdAt: json.data.createdAt }, ...prev])
-        toast.success('Removal request submitted — awaiting organizer approval')
+        loadMenu()
+        toast.success(`${item.name} removed from your menu`)
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
       }
@@ -725,7 +817,7 @@ export default function VendorMenuPage() {
           {showRemoved && (
             <div className="mt-2 space-y-2">
               {removed.map(item => {
-                const pendingRestore = pendingRequests.some(
+                const pendingRestore = pendingRequests.find(
                   r => r.type === 'RESTORE' && r.menuItemId === item.id && r.status === 'PENDING',
                 )
                 return (
@@ -746,19 +838,38 @@ export default function VendorMenuPage() {
                       </p>
                     </div>
                     {pendingRestore ? (
-                      <span className="shrink-0 text-amber-400/80 text-xs font-semibold px-3">
-                        Restore pending
+                      <span className="shrink-0 text-amber-400/80 text-xs font-semibold px-3 text-right">
+                        {waitingFor(pendingRestore.approver)}
+                        {pendingRestore.price != null && (
+                          <span className="block font-normal text-amber-400/60">
+                            Was ${item.price.toFixed(2)}, now ${pendingRestore.price.toFixed(2)}
+                          </span>
+                        )}
                       </span>
                     ) : (
-                      <button
-                        onClick={() => handleRequestRestore(item)}
-                        disabled={restoring === item.id}
-                        title="Request that the organizer put this back on the menu"
-                        className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white/80 rounded-lg text-xs font-semibold hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
-                      >
-                        <ArrowPathIcon className={`w-3.5 h-3.5 ${restoring === item.id ? 'animate-spin' : ''}`} />
-                        {restoring === item.id ? 'Requesting…' : 'Request restore'}
-                      </button>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <label className="sr-only" htmlFor={`restore-price-${item.id}`}>Restore at price</label>
+                        <input
+                          id={`restore-price-${item.id}`}
+                          type="number"
+                          inputMode="decimal"
+                          min="1.00"
+                          step="0.01"
+                          value={restorePrice[item.id] ?? item.price.toFixed(2)}
+                          onChange={e => setRestorePrice(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          title="Same price or lower goes straight back on the menu; a higher price needs organizer approval"
+                          className="w-20 bg-bg-dark border border-white/10 rounded-lg px-2 py-2 text-white text-xs outline-none focus:border-neon-pink"
+                        />
+                        <button
+                          onClick={() => handleRequestRestore(item)}
+                          disabled={restoring === item.id}
+                          title="Same price or lower goes straight back on the menu; a higher price needs organizer approval"
+                          className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 text-white/80 rounded-lg text-xs font-semibold hover:bg-white/10 disabled:opacity-40 transition-colors cursor-pointer"
+                        >
+                          <ArrowPathIcon className={`w-3.5 h-3.5 ${restoring === item.id ? 'animate-spin' : ''}`} />
+                          {restoring === item.id ? 'Restoring…' : 'Restore'}
+                        </button>
+                      </div>
                     )}
                   </div>
                 )
@@ -774,7 +885,7 @@ export default function VendorMenuPage() {
           <PendingIcon className="w-4 h-4 text-amber-400 shrink-0" />
           <p className="text-amber-300 text-sm">
             <span className="font-semibold">{pendingCount} pending {pendingCount === 1 ? 'request' : 'requests'}</span>
-            {' '}awaiting organizer approval
+            {' · '}{waitingFor(pendingRequests[0]?.approver)}
           </p>
         </div>
       )}
@@ -815,7 +926,7 @@ export default function VendorMenuPage() {
                   <p className="text-text-gray text-xs">${s.price.toFixed(2)} · {s.category || 'Uncategorised'}</p>
                 </div>
                 <input
-                  type="number" min="0.01" step="0.01" value={s.price}
+                  type="number" min="1.00" step="0.01" value={s.price}
                   onChange={e => handleEditStaged(s.stageId, { price: parseFloat(e.target.value) || 0 })}
                   disabled={submitting}
                   title="Edit price (not sent until you submit)"

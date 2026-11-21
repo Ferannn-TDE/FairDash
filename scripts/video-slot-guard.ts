@@ -98,8 +98,14 @@ assert(has(vids, 'return url ? {'), 'no main video = no slot, even with a phone 
 
 console.log('[2b] the Content-Security-Policy lets videos and posters load')
 const cfg = readFileSync('next.config.mjs', 'utf8')
-assert(/"media-src 'self' https:"/.test(cfg), "media-src allows https (without it default-src 'self' blocks every video)")
-assert(/"img-src [^"]* https:"/.test(cfg), 'img-src allows https posters')
+// Updated 2026-11-21 (merge decisions D4/D7): both name the one Vercel Blob host exactly; no bare https:.
+const BLOB_HOST = 'https://8nu6qii9bn5wxpzs.public.blob.vercel-storage.com'
+const mediaSrc = cfg.match(/"media-src ([^"]*)"/)?.[1] ?? ''
+const imgSrc = cfg.match(/"img-src ([^"]*)"/)?.[1] ?? ''
+assert(mediaSrc === `'self' ${BLOB_HOST}`, `media-src is exactly 'self' + the blob host (without it default-src 'self' blocks every video) (got "${mediaSrc}")`)
+assert(imgSrc.split(/\s+/).includes(BLOB_HOST), 'img-src allows posters from the blob host')
+assert(!/(^|\s)https:(\s|$)/.test(mediaSrc) && !/(^|\s)https:(\s|$)/.test(imgSrc), 'neither img-src nor media-src allows every https site (no bare https:)')
+assert(/(^|\s)https:(\s|$)/.test("'self' https:") && !/(^|\s)https:(\s|$)/.test(`'self' ${BLOB_HOST}`), 'control: the bare-https check catches "https:" and passes a named host')
 
 console.log('[3] never Supabase storage for video')
 function walk(dir: string, out: string[] = []) {

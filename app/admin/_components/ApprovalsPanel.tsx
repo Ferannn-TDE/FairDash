@@ -12,6 +12,8 @@ interface VendorApp {
   id: string; name: string; cuisineType: string; description: string | null
   contactName: string | null; contactEmail: string | null; contactPhone: string | null; createdAt: string
   fair: string; ownerStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | null
+  /** Set when the fair has an organizer: they decide; FairSynq only by a strict-admin override. */
+  organizerName: string | null
   documents: { key: string; label: string; onFile: boolean }[]
 }
 interface OrganizerApp { id: string; name: string; contactEmail: string; contactPhone: string | null; createdAt: string }
@@ -56,7 +58,9 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function DecisionControls({ kind, id, onDone }: { kind: Kind; id: string; onDone: () => void }) {
+/** `override`: the vendor's fair has an organizer, and this strict admin decides anyway. Both
+ *  buttons then need a reason (recorded; the organizer is emailed; lib/vendor-approver.ts). */
+function DecisionControls({ kind, id, onDone, override = false }: { kind: Kind; id: string; onDone: () => void; override?: boolean }) {
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -67,7 +71,7 @@ function DecisionControls({ kind, id, onDone }: { kind: Kind; id: string; onDone
     try {
       const res = await fetch(`/api/admin/approvals/${kind}/${id}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, reason: decision === 'reject' ? reason : undefined }),
+        body: JSON.stringify({ decision, reason: decision === 'reject' || override ? reason : undefined }),
       })
       const json = await res.json()
       if (!json.success) {
@@ -83,6 +87,31 @@ function DecisionControls({ kind, id, onDone }: { kind: Kind; id: string; onDone
     } finally {
       setBusy(false)
     }
+  }
+
+  if (override) {
+    return (
+      <div className="mt-4 space-y-2">
+        {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+        <label className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold block" htmlFor={`override-${kind}-${id}`}>
+          Override reason <span className="normal-case tracking-normal font-normal">(recorded and emailed to the organizer; a rejection reason is also shown to the applicant)</span>
+        </label>
+        <textarea
+          id={`override-${kind}-${id}`} rows={2} value={reason} onChange={e => setReason(e.target.value)} disabled={busy}
+          className="w-full bg-[#0F0F0F] border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink"
+        />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => send('approve')} disabled={busy || !reason.trim()}
+            className="px-4 py-2 rounded-xl bg-neon-pink text-white text-xs font-semibold border-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+            {busy ? 'Working…' : 'Approve anyway'}
+          </button>
+          <button type="button" onClick={() => send('reject')} disabled={busy || !reason.trim()}
+            className="px-4 py-2 rounded-xl bg-red-500/80 text-white text-xs font-semibold border-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+            {busy ? 'Working…' : 'Reject anyway'}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -151,7 +180,9 @@ function ViewDocButton({ vendorId, docKey, label }: { vendorId: string; docKey: 
   )
 }
 
-export default function ApprovalsPanel() {
+/** `canOverride`: the viewer is a strict admin (admin | super_admin), who may decide a vendor on a
+ *  fair that has an organizer, with a reason. The server enforces it either way. */
+export default function ApprovalsPanel({ canOverride = false }: { canOverride?: boolean }) {
   const [data, setData] = useState<Data | null>(null)
   const [error, setError] = useState(false)
   const [tab, setTab] = useState<Kind>('vendor')
@@ -224,7 +255,17 @@ export default function ApprovalsPanel() {
                     </li>
                   ))}
                 </ul>
-                <DecisionControls kind="vendor" id={v.id} onDone={load} />
+                {v.organizerName ? (
+                  <>
+                    <p className="mt-4 text-xs text-amber-300">
+                      This fair&apos;s organizer ({v.organizerName}) approves or rejects this vendor.
+                      {canOverride ? ' You can decide as FairSynq anyway, with a reason.' : ''}
+                    </p>
+                    {canOverride && <DecisionControls kind="vendor" id={v.id} onDone={load} override />}
+                  </>
+                ) : (
+                  <DecisionControls kind="vendor" id={v.id} onDone={load} />
+                )}
               </div>
             ))}
 

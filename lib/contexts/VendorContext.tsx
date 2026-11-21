@@ -20,6 +20,9 @@ export interface VendorMeta {
    *  change their own status — cannot bring themselves back. That is "admin-set sticky
    *  offline" for free, via the status axis; the toggle just reflects it. */
   status: string
+  /** The fair's online price markup, basis points (audit H5, 2h). The menu page shows the online
+   *  price customers pay next to the in-person price the vendor sets; it never edits it. */
+  onlineMarkupBps: number
 }
 
 export const VendorContext = createContext<VendorMeta | null>(null)

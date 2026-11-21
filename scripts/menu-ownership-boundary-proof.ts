@@ -15,17 +15,21 @@
  *      (read from source: that module's unstable_cache require can't load outside Next; the
  *      export check is proven on a planted PATCH export first), and the two customer menu
  *      pages still fetch GET /api/menu
- *  [2] sold-out toggle: another booth's item → 403, unchanged
+ *  [2] sold-out toggle: another booth's item → 404 NOT_FOUND (audit C1: refused looks like
+ *      missing, so item ids can't be probed), unchanged
  *  [3] vendor request path: an EDIT/DELETE/RESTORE on another booth's item (same fair or
- *      another fair) → 404 MENU_ITEM_NOT_FOUND, 0 rows; a mixed batch lands 0 rows; filing as
- *      another booth → 403; positive: own-item EDIT → 201
+ *      another fair) → 404 NOT_FOUND, 0 rows; a mixed batch lands 0 rows; filing as another
+ *      booth → 404 NOT_FOUND; positive: own-item EDIT → 201
+ *      (codes: merge decisions D2 and D6, 2026-11-21 — the same 404 as every other C1 refusal)
  *  [4] organizer approval: a planted request pointing at another vendor's item → 409
  *      ITEM_VENDOR_MISMATCH, still PENDING, item unchanged; another fair's organizer → 404 (fair
  *      resolver, existence not revealed), nothing changed;
  *      positive: a legitimate EDIT approved → 200 and the price changes
  *  [5] who may write menu items (static): direct writes only in the sold-out toggle and the
- *      organizer approval; Event/Vendor deletes (they cascade to menu items) only in the
- *      draft-fair delete; each list proven on a planted bad file
+ *      reviewed request path (lib/menu-requests/file-item.ts files a vendor's request,
+ *      lib/menu-requests/apply-decision.ts applies an organizer's or admin's decision; the
+ *      organizer route calls it since audit H5 2g); Event/Vendor deletes (they cascade to menu
+ *      items) only in the draft-fair delete; each list proven on a planted bad file
  *  [6] the cascade chain into MenuItem, read from prisma/schema.prisma, is exactly
  *      {Vendor, Event}; proven on a planted schema copy with an extra cascade into Vendor
  *
@@ -199,23 +203,23 @@ async function main() {
   }
 
   console.log('[2] sold-out toggle')
-  assertRefused(await toggle(A.owner.clerkId, B.item.id, false), 403, 'FORBIDDEN', "vendor A marks booth B's item sold out")
+  assertRefused(await toggle(A.owner.clerkId, B.item.id, false), 404, 'NOT_FOUND', "vendor A marks booth B's item sold out")
   assert((await prisma.menuItem.findUniqueOrThrow({ where: { id: B.item.id } })).isAvailable === true, "booth B's item is unchanged")
 
   console.log('[3] vendor request path')
   for (const type of ['EDIT', 'DELETE', 'RESTORE'] as const) {
     const r = await fileRequest(A.owner.clerkId, { vendorId: A.vendor.id, type, menuItemId: B.item.id, ...(type === 'EDIT' && { price: 1 }) })
-    assertRefused(r, 404, 'MENU_ITEM_NOT_FOUND', `vendor A files ${type} on booth B's item (same fair)`)
+    assertRefused(r, 404, 'NOT_FOUND', `vendor A files ${type} on booth B's item (same fair)`)
   }
-  assertRefused(await fileRequest(A.owner.clerkId, { vendorId: A.vendor.id, type: 'EDIT', menuItemId: C.item.id, price: 1 }), 404, 'MENU_ITEM_NOT_FOUND', "vendor A files EDIT on booth C's item (another fair)")
+  assertRefused(await fileRequest(A.owner.clerkId, { vendorId: A.vendor.id, type: 'EDIT', menuItemId: C.item.id, price: 1 }), 404, 'NOT_FOUND', "vendor A files EDIT on booth C's item (another fair)")
   assert(await requestsOf(A.vendor.id) === 0, 'none of those refusals wrote a request row')
   const mixed = await fileRequest(A.owner.clerkId, { vendorId: A.vendor.id, items: [
     { type: 'EDIT', menuItemId: A.item.id, price: 12 },
     { type: 'EDIT', menuItemId: B.item.id, price: 1 },
   ] })
-  assertRefused(mixed, 404, 'MENU_ITEM_NOT_FOUND', "a batch of [own edit, booth B's item]")
+  assertRefused(mixed, 404, 'NOT_FOUND', "a batch of [own edit, booth B's item]")
   assert(await requestsOf(A.vendor.id) === 0, 'the mixed batch landed 0 rows (all or nothing)')
-  assertRefused(await fileRequest(A.owner.clerkId, { vendorId: B.vendor.id, type: 'EDIT', menuItemId: B.item.id, price: 1 }), 403, 'FORBIDDEN', 'vendor A files a request as booth B')
+  assertRefused(await fileRequest(A.owner.clerkId, { vendorId: B.vendor.id, type: 'EDIT', menuItemId: B.item.id, price: 1 }), 404, 'NOT_FOUND', 'vendor A files a request as booth B')
   const legit = await fileRequest(A.owner.clerkId, { vendorId: A.vendor.id, type: 'EDIT', menuItemId: A.item.id, price: 12.5 })
   assert(legit.status === 201 && await requestsOf(A.vendor.id) === 1, `POSITIVE: vendor A files EDIT on their own item → 201, 1 row (got ${legit.status})`)
 
@@ -239,7 +243,8 @@ async function main() {
 
   console.log('[5] who may write menu items (static)')
   const ROOTS = ['app', 'lib', 'workers']
-  const DIRECT_ALLOWED = ['app/api/menu-items/[id]/availability/route.ts', 'app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts']
+  // The sold-out toggle stays first: the isAvailable-only check below reads DIRECT_ALLOWED[0].
+  const DIRECT_ALLOWED = ['app/api/menu-items/[id]/availability/route.ts', 'lib/menu-requests/apply-decision.ts', 'lib/menu-requests/file-item.ts']
   const CASCADE_DELETE = /\.\s*(?:event|vendor)\s*\.\s*(?:delete|deleteMany)\b/g
   const CASCADE_ALLOWED = ['app/api/organizer/fairs/drafts/[fairSlug]/route.ts']
   const tmp = mkdtempSync(join(tmpdir(), 'mob-guard-'))
@@ -252,7 +257,7 @@ async function main() {
     assert(plantedCascade.length === 1 && plantedCascade[0].endsWith('rogue-delete.ts'), `[5] probe control: a planted tx.vendor.delete is caught and named (${plantedCascade.join(', ') || 'nothing'})`)
   } finally { rmSync(tmp, { recursive: true, force: true }) }
   const direct = filesMatching(ROOTS, DIRECT_MENU_WRITE)
-  assert(DIRECT_ALLOWED.every(f => direct.includes(f)), '[5] baseline: the scan finds both allowed direct writers')
+  assert(DIRECT_ALLOWED.every(f => direct.includes(f)), '[5] baseline: the scan finds all three allowed direct writers')
   const extraDirect = direct.filter(f => !DIRECT_ALLOWED.includes(f))
   assert(extraDirect.length === 0, `no other file writes menu items directly${extraDirect.length ? `: ${extraDirect.join(', ')}` : ''}`)
   const toggleSrc = readFileSync(DIRECT_ALLOWED[0], 'utf8')

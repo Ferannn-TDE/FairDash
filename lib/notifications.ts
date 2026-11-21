@@ -9,7 +9,9 @@
 //   time; with none set they wait (held: NO_ALERT_EMAIL).
 // NO PROVIDER (production today): nothing is sent, logged or marked SENT; rows are held with
 //   NO_EMAIL_PROVIDER. When a provider is connected later, held ADMIN alerts older than 48 hours
-//   are marked SKIPPED (kept, not deleted); applicant emails go out whatever their age.
+//   are marked SKIPPED (kept, not deleted), held MENU-ALERT emails older than 48 hours are marked
+//   EXPIRED (kept, never sent; audit H5 step 3), and applicant emails go out whatever their age.
+// MENU ALERTS: queued by lib/menu-notify/digest.ts with audience 'user' and a `to` address.
 
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { db } from '@/lib/db'
@@ -17,6 +19,8 @@ import { getSetting } from '@/lib/settings'
 import { SITE_URL } from '@/lib/seo'
 import { CONTACT_EMAIL } from '@/lib/contact-info'
 import { getEmailTransport, type EmailTransport, type OutgoingEmail } from '@/lib/email/transport'
+import { MENU_ALERT_TEMPLATE, MENU_ALERT_TEMPLATES, MENU_ALERT_EMAIL_EXPIRY_MS } from '@/lib/menu-notify/constants'
+import type { MenuAlertEmailPayload } from '@/lib/menu-notify/digest'
 
 type Tx = Pick<PrismaClient, 'notification'> | Prisma.TransactionClient
 
@@ -31,9 +35,17 @@ const SENDING_RECLAIM_MS = 10 * 60e3
 
 // ── Templates ───────────────────────────────────────────────────────────────────────────────
 export interface SignupAlertPayload { kind: ApplicationKind; name: string; contactName: string | null; email: string | null; phone: string | null }
-export interface DecisionPayload { kind: ApplicationKind; name: string; contactName: string | null; reason?: string }
+/** `decidedBy` (vendor decisions): who decided, as the VENDOR may see it — "FairSynq" or the
+ *  organizer's organization name, never a person (lib/reviewer-label.ts; Jordan, Nov 16). Absent on
+ *  rows queued before Nov 16, which read as FairSynq. */
+export interface DecisionPayload { kind: ApplicationKind; name: string; contactName: string | null; reason?: string; decidedBy?: string }
+/** The organizer's notice that FairSynq decided a vendor on their event (strict-admin override). */
+export interface OverridePayload { vendorName: string; fairName: string; decision: 'approved' | 'rejected'; reason: string; link: string }
+export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
+const byFairSynq = (p: DecisionPayload) => !p.decidedBy || p.decidedBy === 'FairSynq'
 
-export function renderEmail(template: string, payload: unknown): { subject: string; text: string } {
+/** The templates themselves. Private: every caller goes through renderEmail, which makes the subject one safe line. */
+function renderEmailParts(template: string, payload: unknown): { subject: string; text: string } {
   if (template === 'signup_admin_alert') {
     const p = payload as SignupAlertPayload
     const label = KIND_LABEL[p.kind]
@@ -47,7 +59,7 @@ export function renderEmail(template: string, payload: unknown): { subject: stri
     const p = payload as DecisionPayload
     const hi = `Hi ${p.contactName || p.name}`
     const text =
-      p.kind === 'vendor' ? `${hi}, ${p.name} is approved. Sign in to finish your setup (payouts and menu): ${SITE_URL}/sign-in/vendor`
+      p.kind === 'vendor' ? `${hi}, ${p.name} is approved${byFairSynq(p) ? '' : ` by ${p.decidedBy}`}. Sign in to finish your setup (payouts and menu): ${SITE_URL}/sign-in/vendor`
       : p.kind === 'organizer' ? `${hi}, your organizer account is approved. Sign in to create your first fair: ${SITE_URL}/organizer/login`
       : `${hi}, ${p.name} is approved as a FairSynq partner organization. We'll be in touch about upcoming events.`
     return { subject: "You're approved on FairSynq", text }
@@ -56,10 +68,72 @@ export function renderEmail(template: string, payload: unknown): { subject: stri
     const p = payload as DecisionPayload
     return {
       subject: 'Your FairSynq application',
-      text: `Hi ${p.contactName || p.name}, we're not able to approve ${p.name} right now. Reason: ${p.reason ?? ''}. If you have questions, contact ${CONTACT_EMAIL}.`,
+      text: `Hi ${p.contactName || p.name}, ${byFairSynq(p) ? "we're" : `${p.decidedBy} is`} not able to approve ${p.name} right now. Reason: ${p.reason ?? ''}. If you have questions, contact ${CONTACT_EMAIL}.`,
+    }
+  }
+  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
+  if (template === VENDOR_OVERRIDE_TEMPLATE) {
+    const p = payload as OverridePayload
+    return {
+      subject: `FairSynq ${p.decision} ${p.vendorName} at ${p.fairName}`,
+      text: `FairSynq ${p.decision} ${p.vendorName}, a vendor at your event ${p.fairName}, instead of waiting for your decision. Reason: ${p.reason}\n\nSee the vendor: ${p.link}`,
+    }
+  }
+  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
+  if (template === MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED) {
+    const p = payload as MenuAlertEmailPayload
+    const n = p.lines.length
+    return {
+      subject: `${p.vendorName} removed ${n} menu item${n === 1 ? '' : 's'} at ${p.fairName}`,
+      text: `${p.vendorName} removed ${n === 1 ? 'this item' : 'these items'} from their menu at ${p.fairName}:\n`
+        + p.lines.map(l => `- ${l}`).join('\n')
+        + `\n\nSee the vendor's menu requests: ${p.link}`,
+    }
+  }
+  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
+  if (template === MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING) {
+    const p = payload as MenuAlertEmailPayload
+    const n = p.lines.length
+    return {
+      subject: `${n === 1 ? 'A price increase is' : `${n} price increases are`} waiting for your approval: ${p.vendorName}`,
+      text: `${p.vendorName} at ${p.fairName} asked for ${n === 1 ? 'this price increase' : 'these price increases'}. Nothing changes on the menu until it is approved:\n`
+        + p.lines.map(l => `- ${l}`).join('\n')
+        + `\n\nApprove or reject: ${p.link}`,
     }
   }
   throw new Error(`Unknown email template: ${template}`)
+}
+
+// ── Subject line (independent review F17; Jordan, Nov 17) ─────────────────────────────────────
+// Vendor, fair and applicant names go into subjects. A line break in a name could start a new
+// email header, so every subject is made ONE line here, at the single exit of renderEmail, for
+// every template now and later. Not live today (no email provider; lib/email/transport.ts), but
+// cheap and easy to forget. The email body keeps its line breaks: they are not headers.
+// When a real provider is connected, its transport must ALSO refuse CR/LF in subjects and
+// addresses (audit progress note, "Before any email provider is connected").
+
+/** At most this many characters in an email subject (whole characters, after flattening). */
+export const EMAIL_SUBJECT_MAX = 200
+
+/** Control characters (C0, DEL, C1 — CR, LF and tab among them) and the Unicode line/paragraph separators. */
+const SUBJECT_LINE_BREAKS_AND_CONTROLS = /[\p{Cc}\p{Zl}\p{Zp}]/gu
+
+/**
+ * One safe subject line: line breaks and other control characters become spaces, repeated spaces
+ * become one, the ends are trimmed. Over EMAIL_SUBJECT_MAX characters it keeps the first
+ * EMAIL_SUBJECT_MAX − 1 and adds "…". Counted and cut by WHOLE characters (Array.from, code points),
+ * so an emoji or other 2-unit character is never split in half.
+ */
+export function emailSubjectLine(subject: string): string {
+  const flat = subject.replace(SUBJECT_LINE_BREAKS_AND_CONTROLS, ' ').replace(/ {2,}/g, ' ').trim()
+  const chars = Array.from(flat)
+  return chars.length > EMAIL_SUBJECT_MAX ? `${chars.slice(0, EMAIL_SUBJECT_MAX - 1).join('')}…` : flat
+}
+
+/** Renders a template. The subject always leaves as one safe line (emailSubjectLine). */
+export function renderEmail(template: string, payload: unknown): { subject: string; text: string } {
+  const { subject, text } = renderEmailParts(template, payload)
+  return { subject: emailSubjectLine(subject), text }
 }
 
 // ── Enqueue (inside the caller's transaction) ───────────────────────────────────────────────
@@ -70,12 +144,28 @@ export async function enqueueSignupAlert(tx: Tx, applicationId: string, payload:
   })
 }
 
-export async function enqueueDecisionEmail(tx: Tx, applicationId: string, decision: 'approved' | 'rejected', to: string | null, payload: DecisionPayload) {
+/** `decisionId`: set for a LATER decision on the same application (a rejected booth re-approved, a
+ *  live booth rejected), so its email isn't swallowed by the first decision's dedupe key. */
+export async function enqueueDecisionEmail(tx: Tx, applicationId: string, decision: 'approved' | 'rejected', to: string | null, payload: DecisionPayload, decisionId?: string) {
   if (!to) return // no address on file: nothing to send to (the decision itself still stands)
   await tx.notification.createMany({
     data: [{
       audience: 'applicant', to, template: decision === 'approved' ? 'decision_approved' : 'decision_rejected',
-      payload: payload as unknown as Prisma.InputJsonValue, dedupeKey: `decision:${payload.kind}:${applicationId}:${decision}`,
+      payload: payload as unknown as Prisma.InputJsonValue,
+      dedupeKey: `decision:${payload.kind}:${applicationId}:${decision}${decisionId ? `:${decisionId}` : ''}`,
+    }],
+    skipDuplicates: true,
+  })
+}
+
+/** Tells the event's organizer that FairSynq decided one of their vendors (strict-admin override).
+ *  Same transaction as the decision; one email per decision (keyed by its ApprovalAction id). */
+export async function enqueueOverrideNotice(tx: Tx, vendorId: string, decisionId: string, to: string | null, payload: OverridePayload) {
+  if (!to) return // no organizer address on file: the decision and its audit row still stand
+  await tx.notification.createMany({
+    data: [{
+      audience: 'user', to, template: VENDOR_OVERRIDE_TEMPLATE,
+      payload: payload as unknown as Prisma.InputJsonValue, dedupeKey: `vendor-override:${vendorId}:${decisionId}`,
     }],
     skipDuplicates: true,
   })
@@ -89,7 +179,7 @@ export interface DeliverDeps {
   alertEmails?: () => Promise<string[]>
   limit?: number
 }
-export interface DeliverResult { sent: number; retried: number; failed: number; held: number; skipped: number }
+export interface DeliverResult { sent: number; retried: number; failed: number; held: number; skipped: number; expired: number }
 
 async function defaultAlertEmails(): Promise<string[]> {
   return ((await getSetting('alerts.email')) as string[] | null) ?? []
@@ -99,7 +189,7 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
   const now = deps.now ?? new Date()
   const transport = deps.transport ?? getEmailTransport()
   const alertEmails = deps.alertEmails ?? defaultAlertEmails
-  const res: DeliverResult = { sent: 0, retried: 0, failed: 0, held: 0, skipped: 0 }
+  const res: DeliverResult = { sent: 0, retried: 0, failed: 0, held: 0, skipped: 0, expired: 0 }
 
   // A worker that died mid-send leaves SENDING rows; give them back after 10 minutes.
   await db.notification.updateMany({
@@ -125,6 +215,16 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
     data: { status: 'SKIPPED', lastError: 'Older than 48 hours when email was connected' },
   })
   res.skipped = skipped.count
+  // Menu alerts held for no provider and older than 48 hours are out of date: EXPIRED, kept, never
+  // sent (Jordan, Nov 15). Must run before the release below, or they would go out.
+  const expired = await db.notification.updateMany({
+    where: {
+      status: 'PENDING', heldReason: 'NO_EMAIL_PROVIDER', template: { in: [...MENU_ALERT_TEMPLATES] },
+      createdAt: { lt: new Date(now.getTime() - MENU_ALERT_EMAIL_EXPIRY_MS) },
+    },
+    data: { status: 'EXPIRED', lastError: 'Expired: older than 48 hours when email was connected' },
+  })
+  res.expired = expired.count
   await db.notification.updateMany({ where: { status: 'PENDING', heldReason: 'NO_EMAIL_PROVIDER' }, data: { heldReason: null } })
 
   const due = await db.notification.findMany({

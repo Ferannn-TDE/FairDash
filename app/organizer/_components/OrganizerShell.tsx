@@ -13,8 +13,8 @@ import {
   Cog6ToothIcon,
   ExclamationTriangleIcon,
   QueueListIcon,
-  BellIcon,
 } from '@heroicons/react/24/outline'
+import NotificationBell from '@/app/_components/NotificationBell'
 import {
   HomeIcon as HomeIconSolid,
   CalendarDaysIcon as CalendarSolid,
@@ -143,7 +143,7 @@ function SidebarContent({
   return (
     <>
       {/* Logo */}
-      <div className="h-16 flex items-center px-5 border-b border-white/5 shrink-0">
+      <div className="h-16 flex items-center justify-between px-5 border-b border-white/5 shrink-0">
         <Link href="/" className="group flex items-center">
           <span className="font-bebas text-lg text-white group-hover:text-[#FF0077] transition-colors leading-none">FAIR</span>
           <span className="font-bebas text-lg text-[#FF0077] group-hover:text-white transition-colors leading-none">SYNQ</span>
@@ -151,6 +151,8 @@ function SidebarContent({
             Organizer
           </span>
         </Link>
+        {/* Desktop bell (Jordan, Nov 15): the panel opens to the right, over the page. */}
+        <NotificationBell align="left" />
       </div>
 
       {/* Nav */}
@@ -247,10 +249,7 @@ export default function OrganizerShell({ children, userInitials, userName, userE
             </span>
           </Link>
           <div className="flex items-center gap-2">
-            <button className="relative p-2 rounded-lg hover:bg-white/5 transition-colors">
-              <BellIcon className="w-5 h-5 text-[#888]" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#FF0077]" />
-            </button>
+            <NotificationBell />
             <div className="w-8 h-8 rounded-full bg-[#FF0077]/20 flex items-center justify-center">
               <span className="text-xs font-semibold text-[#FF0077]">{userInitials}</span>
             </div>

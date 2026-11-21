@@ -263,7 +263,7 @@ async function main() {
     'app/_components/faq-content.ts': { count: 4, why: 'runner + organizer FAQ answers — rewritten with the runner/partner rework (item 7)' },
     'app/refund-policy/page.tsx': { count: 4, why: 'refund policy — replaced in full by the legal pages (item 11)' },
     'lib/legal/vendor-agreement.ts': { count: 1, why: 'Vendor Agreement text (shown in the wizard and on /vendor-agreement) — replaced by the legal pages (item 11)' },
-    'app/fair/[fairSlug]/checkout/page.tsx': { count: 10, why: 'the Home Delivery option, its address/area sections and fee label (render only when delivery is offered or chosen), plus an import and the delivery-check URL' },
+    'app/fair/[fairSlug]/checkout/page.tsx': { count: 11, why: 'the Home Delivery option, its address/area sections and fee label (render only when delivery is offered or chosen), plus an import and the delivery-check URL, and the same fee label in the 2h "Prices changed" confirm box (shown only for a non-zero fee on a delivery/curbside order, 425a909)' },
     'app/account/orders/[orderId]/page.tsx': { count: 5, why: 'existing delivery orders: fee label + address (HOME_DELIVERY only); the DELIVERED status token (curbside handoff state, stays); an import' },
     'app/fair/[fairSlug]/order/[orderId]/page.tsx': { count: 1, why: 'the DELIVERED status token in the terminal-status set (curbside handoff state, stays)' },
     'app/account/settings/page.tsx': { count: 1, why: '"Default Delivery Address", rendered only while the platform delivery switch is on' },

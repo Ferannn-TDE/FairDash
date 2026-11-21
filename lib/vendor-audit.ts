@@ -25,6 +25,11 @@ export const AUDIT_ACTIONS = {
   // Menu
   MENU_CHANGE_REQUESTED:   'MENU_CHANGE_REQUESTED',   // ADD | EDIT | DELETE submitted
   MENU_CHANGE_REVIEWED:    'MENU_CHANGE_REVIEWED',    // APPROVED or REJECTED by organizer
+  // Written in the SAME transaction as the price write (lib/menu/price-audit.ts), not through
+  // logVendorAction: if this row cannot be written, the price change does not happen.
+  MENU_PRICE_CHANGED:      'MENU_PRICE_CHANGED',
+  // Same transactional rule (recordMenuItemRemoved): a removal that cannot be recorded rolls back.
+  MENU_ITEM_REMOVED:       'MENU_ITEM_REMOVED',
 
   // Settings
   SETTINGS_PROFILE_UPDATED: 'SETTINGS_PROFILE_UPDATED',

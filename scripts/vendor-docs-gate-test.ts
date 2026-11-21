@@ -5,13 +5,14 @@
  *   • the SSOT predicate agrees with its own where-fragment (the dual-form invariant
  *     lib/vendor-readiness.ts established — a predicate that disagrees with the query
  *     is exactly the drift both files exist to prevent),
- *   • BOTH approve doors refuse a docs-incomplete PENDING vendor with 409
- *     DOCS_INCOMPLETE — organizer PATCH *and* platform-admin approve, so admin is a
- *     second door to one rule and not a bypass,
+ *   • BOTH doors into ACTIVE refuse a docs-incomplete vendor with 409
+ *     VENDOR_NOT_READY_TO_GO_LIVE — organizer PATCH *and* platform-admin approve, so admin is
+ *     a second door to one rule (lib/vendor-go-live.ts) and not a bypass,
  *   • both doors ACCEPT once all three documents are present,
- *   • REACTIVATE is NOT gated: a docs-incomplete PAUSED vendor still goes ACTIVE.
- *     This is the regression that matters — gating every transition into ACTIVE would
- *     make "pause a vendor" a one-way door for any booth predating the requirement.
+ *   • REACTIVATE IS GATED since M1 (decided Nov 12): a docs-incomplete PAUSED, SUSPENDED or
+ *     REJECTED vendor can't be moved into ACTIVE. This reverses the old "reactivate is never
+ *     gated" rule, which is what let PENDING → PAUSED → ACTIVE put an unapproved booth live.
+ *     A VENDOR's own pause (isBusy/isOffline) never touches status and is not affected.
  *
  * POSITIVE CONTROLS ON THE PROBE ITSELF. A suite of "this is refused" assertions passes
  * vacuously if the probe is broken (wrong id, unresolvable route, throwing harness), so
@@ -196,9 +197,9 @@ async function main() {
   // against each door's real precondition rather than over HTTP (no server needed).
   console.log('\n[2] Two-door gate: organizer PATCH + admin approve, one rule')
 
-  // Door 1 — organizer: gated only on PENDING → ACTIVE.
+  // Door 1 — organizer: gated on EVERY move into ACTIVE (M1, Nov 12).
   const organizerWouldRefuse = (v: { status: string } & VendorDocPaths, next: string) =>
-    v.status === 'PENDING' && next === 'ACTIVE' && !vendorDocsComplete(v)
+    v.status !== 'ACTIVE' && next === 'ACTIVE' && !vendorDocsComplete(v)
 
   // Door 2 — admin: the route's own PENDING check runs first, so the gate is unconditional.
   const adminWouldRefuse = (v: VendorDocPaths) => !vendorDocsComplete(v)
@@ -221,19 +222,23 @@ async function main() {
     [bare, partialV, complete].every(v =>
       organizerWouldRefuse(v as never, 'ACTIVE') === adminWouldRefuse(v as never)))
 
-  // ── 3. Reactivate is NOT gated ──────────────────────────────────────────────
-  console.log('\n[3] Reactivate/re-approve stay ungated (the regression to watch)')
+  // ── 3. Reactivate IS gated (M1, decided Nov 12) ─────────────────────────────
+  console.log('\n[3] Every move into ACTIVE is gated, including lifting a pause or suspension')
 
-  check('PAUSED → ACTIVE with NO documents is ALLOWED',
-    organizerWouldRefuse(pausedIncomplete as never, 'ACTIVE') === false)
-  check('…and that same vendor WOULD be refused if it were PENDING (proves the clause bites)',
-    organizerWouldRefuse({ ...pausedIncomplete, status: 'PENDING' } as never, 'ACTIVE') === true)
+  check('PAUSED → ACTIVE with NO documents is REFUSED (the PENDING → PAUSED → ACTIVE bypass)',
+    organizerWouldRefuse(pausedIncomplete as never, 'ACTIVE') === true)
+  check('SUSPENDED → ACTIVE with NO documents is REFUSED',
+    organizerWouldRefuse({ ...pausedIncomplete, status: 'SUSPENDED' } as never, 'ACTIVE') === true)
+  check('…and the same PAUSED vendor WITH documents is not refused on documents (positive control)',
+    organizerWouldRefuse({ ...pausedIncomplete, ...all } as never, 'ACTIVE') === false)
 
   const rejected = { ...bare, status: 'REJECTED' }
-  check('REJECTED → ACTIVE (re-approve) with NO documents is ALLOWED',
-    organizerWouldRefuse(rejected as never, 'ACTIVE') === false)
+  check('REJECTED → ACTIVE (re-approve) with NO documents is REFUSED',
+    organizerWouldRefuse(rejected as never, 'ACTIVE') === true)
   check('PENDING → REJECTED is never doc-gated',
     organizerWouldRefuse(bare as never, 'REJECTED') === false)
+  check('ACTIVE → PAUSED (pausing a vendor) is never doc-gated',
+    organizerWouldRefuse({ ...bare, status: 'ACTIVE' } as never, 'PAUSED') === false)
 
   // ── 4. Source fingerprint ───────────────────────────────────────────────────
   // Sections [2]–[3] model the gate conditions; this asserts the ROUTES actually
@@ -258,26 +263,30 @@ async function main() {
 
   const organizerSrc = src('app/api/organizer/vendors/[id]/route.ts')
   const adminSrc     = src('app/api/admin/vendors/[id]/approve/route.ts')
+  const approvalsSrc = src('lib/approvals.ts')
+  const goLiveSrc    = src('lib/vendor-go-live.ts')
 
-  check('organizer route imports the SSOT predicate',
-    /import\s*\{[^}]*vendorDocsComplete[^}]*\}\s*from\s*'@\/lib\/vendor-documents'/.test(organizerSrc))
-  check('organizer route calls vendorDocsComplete', /!vendorDocsComplete\(vendor\)/.test(organizerSrc))
-  check('organizer gate is scoped to PENDING → ACTIVE',
-    /vendor\.status === VendorStatus\.PENDING/.test(organizerSrc) &&
-    /body\.status === VendorStatus\.ACTIVE/.test(organizerSrc))
-  check('organizer refusal is 409 DOCS_INCOMPLETE', /409,\s*\n?\s*'DOCS_INCOMPLETE'/.test(organizerSrc))
-  check('organizer gate sits BEFORE the write',
-    orderedBefore(organizerSrc, 'vendorDocsComplete', 'db.vendor.update'))
-  check('organizer select loads all three path columns',
+  check('the shared go-live check calls the SSOT documents predicate',
+    /import\s*\{[^}]*vendorDocsComplete[^}]*\}\s*from\s*'\.\/vendor-documents'/.test(goLiveSrc) &&
+    /!vendorDocsComplete\(vendor\)/.test(goLiveSrc))
+  check('the shared go-live select loads all three path columns',
     ['foodHandlerPermitPath', 'insurancePath', 'businessLicensePath']
-      .every(c => new RegExp(`${c}:\\s*true`).test(organizerSrc)))
+      .every(c => new RegExp(`${c}:\\s*true`).test(goLiveSrc)))
 
-  check('admin route imports the SAME predicate (one rule, two doors)',
-    /import\s*\{\s*vendorDocsComplete\s*\}\s*from\s*'@\/lib\/vendor-documents'/.test(adminSrc))
-  check('admin route calls vendorDocsComplete', /!vendorDocsComplete\(vendor\)/.test(adminSrc))
-  check('admin refusal is 409 DOCS_INCOMPLETE', /409,\s*\n?\s*'DOCS_INCOMPLETE'/.test(adminSrc))
-  check('admin gate sits BEFORE the write',
-    orderedBefore(adminSrc, 'vendorDocsComplete', 'db.vendor.update'))
+  check('organizer route calls the shared go-live check', /vendorGoLiveRefusal\(db,/.test(organizerSrc))
+  check('organizer gate covers EVERY move into ACTIVE (not only PENDING → ACTIVE)',
+    /if \(statusChanging && body\.status === VendorStatus\.ACTIVE\) \{\s*\n\s*const refusal = await vendorGoLiveRefusal/.test(organizerSrc))
+  check('organizer refusal is 409 with the check\'s own code', /apiError\(refusal\.message, 409, refusal\.code/.test(organizerSrc))
+  check('organizer gate sits BEFORE the write',
+    orderedBefore(organizerSrc, 'vendorGoLiveRefusal(db,', 'db.vendor.update'))
+  check('organizer select uses the shared go-live columns', /\.\.\.GO_LIVE_VENDOR_SELECT/.test(organizerSrc))
+
+  check('admin approve route runs the shared decision (decideVendor)', /await decideVendor\(id, 'approve'/.test(adminSrc))
+  check('decideVendor calls the SAME go-live check (one rule, two doors)',
+    /vendorGoLiveRefusal\(db,[\s\S]{0,120}approving: true/.test(approvalsSrc))
+  check('decideVendor refusal is 409 with the check\'s code', /409, refusal\.code/.test(approvalsSrc))
+  check('decideVendor gate sits BEFORE the write',
+    orderedBefore(approvalsSrc, 'vendorGoLiveRefusal(db,', 'tx.vendor.updateMany'))
 
   // The wizard must never label an in-memory File as uploaded — the exact defect that
   // got the previous document step deleted.

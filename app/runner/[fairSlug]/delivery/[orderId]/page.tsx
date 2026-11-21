@@ -310,7 +310,7 @@ export default function DeliveryPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="font-bebas text-3xl tracking-wide text-white leading-tight">Active <span className="text-neon-pink">Delivery</span></h1>
-          <p className="text-text-gray text-sm">#{order.id.slice(-8).toUpperCase()} · {order.customerName}</p>
+          <p className="text-text-gray text-sm">#{order.id.slice(-8).toUpperCase()}{order.customerName ? ` · ${order.customerName}` : ''}</p>
         </div>
         <span className="shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/20">{FULFILLMENT_LABEL[order.fulfillmentType]}</span>
       </div>
@@ -409,7 +409,7 @@ export default function DeliveryPage() {
         )}
 
         <div className="border-t border-white/5 pt-3 flex items-center justify-between">
-          <span className="flex items-center gap-2 text-text-gray text-sm"><Package className="w-4 h-4" />{itemCount} items · ${(order.total ?? 0).toFixed(2)}</span>
+          <span className="flex items-center gap-2 text-text-gray text-sm"><Package className="w-4 h-4" />{itemCount} items</span>
           <span className="text-emerald-400 text-sm font-semibold">+${(order.deliveryFee ?? 0).toFixed(2)} fee</span>
         </div>
 

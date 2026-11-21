@@ -5,6 +5,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { getFairVendors } from '@/lib/fair-vendors'
+import { latestVendorReviews } from '@/lib/vendor-review'
 
 // GET /api/organizer/fairs/[fairSlug]/vendors?status=ACTIVE&take=50&cursor=<id>
 // Returns vendors with document status, Stripe status, order counts + readiness.
@@ -29,7 +30,10 @@ export async function GET(
       status: searchParams.get('status') ?? undefined,
     })
 
-    return success(data)
+    // Who decided each vendor, as an ORGANIZER may see it (own team by name, FairSynq staff as
+    // "FairSynq"; lib/reviewer-label.ts). Added here, not in the shared core the admin route uses.
+    const reviews = await latestVendorReviews(data.vendors.map(v => v.id), { kind: 'organizer', organizerId })
+    return success({ ...data, vendors: data.vendors.map(v => ({ ...v, review: reviews.get(v.id) ?? null })) })
   } catch (err) {
     return handleApiError(err)
   }

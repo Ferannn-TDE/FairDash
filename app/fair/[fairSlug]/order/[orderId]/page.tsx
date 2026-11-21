@@ -13,13 +13,14 @@ import RunnerLocationBanner from '@/components/order/RunnerLocationBanner'
 import { buildVendorGroups } from '@/components/order/helpers'
 import { deriveOrderView } from '@/lib/order-view'
 import { isFailedVendorLane } from '@/lib/order-derive'
+import { dishKeyFor } from '@/lib/order-limits'
 import type { Order } from '@/components/order/types'
 
 export default function OrderTrackingPage() {
   const { fairSlug, orderId } = useParams<{ fairSlug: string; orderId: string }>()
   const router = useRouter()
   const { isLoaded, isSignedIn } = useAuth()
-  const { addItem, clearCart } = useFairCart()
+  const { replaceCart } = useFairCart()
 
   const [order, setOrder]               = useState<Order | null>(null)
   const [loading, setLoading]           = useState(true)
@@ -166,15 +167,27 @@ export default function OrderTrackingPage() {
 
   const handleOrderAgain = useCallback(() => {
     if (!order) return
-    clearCart()
-    order.orderItems.forEach(item => {
-      addItem(
-        { id: item.menuItemId, name: item.menuItem.name, price: item.unitPrice, prepTime: item.menuItem.prepTime ?? undefined, imageUrl: item.menuItem.imageUrl },
-        { id: item.vendor?.id ?? item.vendorId, name: item.vendor?.name ?? order.vendor.name }
-      )
-    })
+    // ORDER LIMITS (Jordan, Nov 17; lib/order-limits.ts): the cart is replaced in one step. Lines of
+    // the same item are joined, then the cart is trimmed to 5 per dish and 15 in all; whatever was
+    // cut is SAID (the matching fixed sentence, once), never dropped silently. Each line carries its
+    // dish (vendor + variantGroup, the server's rule), so all sizes of one dish count together.
+    // Each line is re-added at quantity 1 (parked, Jordan Nov 17: the original quantities are not
+    // used; see the audit progress note).
+    replaceCart(order.orderItems.map(item => ({
+      item: {
+        id: item.menuItemId, name: item.menuItem.name, price: item.unitPrice,
+        // The calculator works from the in-person price (audit H5, 2h). An order from before 2h has
+        // none stored; it was placed at 0% markup, so its unitPrice WAS the in-person price.
+        // Today's prices may differ: checkout re-prices, and a changed total is answered with
+        // 409 PRICE_CHANGED for the customer to confirm.
+        inPersonPrice: item.inPersonUnitPrice ?? item.unitPrice,
+        prepTime: item.menuItem.prepTime ?? undefined, imageUrl: item.menuItem.imageUrl,
+        dishKey: dishKeyFor(item.vendorId, item.menuItem.variantGroup, item.menuItemId),
+      },
+      vendor: { id: item.vendor?.id ?? item.vendorId, name: item.vendor?.name ?? order.vendor.name },
+    })))
     router.push(`/fair/${fairSlug}/checkout`)
-  }, [order, clearCart, addItem, router, fairSlug])
+  }, [order, replaceCart, router, fairSlug])
 
   if (loading) return (
     <div className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-6 animate-pulse">

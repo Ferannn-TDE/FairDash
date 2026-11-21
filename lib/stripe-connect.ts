@@ -101,7 +101,13 @@ export async function createConnectedAccount(params: {
 }
 
 export interface ConnectStatus {
+  /** stripe_balance.stripe_transfers is active: the account can RECEIVE transfers. This is what
+   *  the stored Vendor.stripeVerified flag means (lib/connect-status.ts). */
   readyToReceivePayments: boolean
+  /** stripe_balance.payouts is active: Stripe will pay the balance out to the payee's bank.
+   *  Requested automatically with stripe_transfers. Vendor approval needs BOTH (Jordan, Nov 16;
+   *  lib/vendor-payouts-check.ts). */
+  payoutsEnabled: boolean
   onboardingComplete: boolean
   /** Raw requirements summary from Stripe, for surfacing outstanding items in the UI. */
   requirements: unknown
@@ -124,6 +130,9 @@ export async function getConnectStatus(accountId: string): Promise<ConnectStatus
   const transfersStatus =
     account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status
   const readyToReceivePayments = transfersStatus === 'active'
+  const payoutsStatus =
+    account?.configuration?.recipient?.capabilities?.stripe_balance?.payouts?.status
+  const payoutsEnabled = payoutsStatus === 'active'
 
   // requirements.summary.minimum_deadline.status ∈ currently_due | eventually_due | past_due | none
   // "Complete" = nothing immediately or overdue. ('none' is fully clear; we also
@@ -137,6 +146,7 @@ export async function getConnectStatus(accountId: string): Promise<ConnectStatus
 
   return {
     readyToReceivePayments,
+    payoutsEnabled,
     onboardingComplete,
     requirements: account.requirements?.summary ?? null,
     dueItems,

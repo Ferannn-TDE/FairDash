@@ -10,9 +10,11 @@ import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import { isVendorReadinessEnforced, vendorReady } from '@/lib/vendor-readiness'
+import { demoVendorHidden } from '@/lib/demo-vendor'
 import { resolveVendorWhere } from '@/lib/resolve-vendor'
 import { callerMayViewInactiveVendor } from '@/lib/vendor-visibility'
 import { SELLABLE } from '@/lib/menu/on-menu'
+import { onlineUnitPrice } from '@/lib/checkout-total'
 
 // GET /api/vendors/:id
 // Returns a single vendor with their active menu items (public-safe fields only).
@@ -62,6 +64,8 @@ export async function GET(
         // stripeVerified: NOT customer data, but the readiness gate below needs it.
         // It is stripped from the response — see the destructure at the return.
         stripeVerified: true,
+        // isDemo: the same — read only by the demo gate below, stripped from the response.
+        isDemo: true,
         menuItems: {
           // SELLABLE, not a bare isAvailable: this list is BOTH the customer's menu payload and
           // (via .length below) the readiness count, so a removed item here would be served to
@@ -120,9 +124,27 @@ export async function GET(
       return apiError('Vendor not found', 404, 'NOT_FOUND')
     }
 
-    // Strip the gate-only field so it never reaches the wire.
-    const { stripeVerified: _gateOnly, ...publicVendor } = vendor
-    return success(publicVendor)
+    // Strip the gate-only fields so they never reach the wire.
+    const { stripeVerified: _gateOnly, isDemo, ...publicVendor } = vendor
+
+    // Demo gate (Jordan, Nov 16; lib/demo-vendor.ts): with live Stripe keys a demo booth is not
+    // found, exactly like the marketplace list leaving it out. In test mode it shows.
+    if (demoVendorHidden({ isDemo })) return apiError('Vendor not found', 404, 'NOT_FOUND')
+
+    // ONLINE PRICE (audit H5, 2h): customers see the online price, from lib/checkout-total.ts (the
+    // function checkout charges with). The markup is read from the vendor's own event here rather
+    // than added to the select above, so the public select stays exactly the boundary it documents.
+    // `inPersonPrice` is for the cart's calculator only; customer screens show `price`.
+    const { onlineMarkupBps } = await db.event.findUniqueOrThrow({
+      where: { id: vendor.eventId },
+      select: { onlineMarkupBps: true },
+    })
+    const menuItems = publicVendor.menuItems.map(mi => ({
+      ...mi,
+      price: onlineUnitPrice(mi.price, onlineMarkupBps),
+      inPersonPrice: mi.price,
+    }))
+    return success({ ...publicVendor, menuItems })
   } catch (err) {
     return handleApiError(err)
   }

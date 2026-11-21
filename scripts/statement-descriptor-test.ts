@@ -89,7 +89,10 @@ const settings = strip(readFileSync('app/api/organizer/fairs/[fairSlug]/settings
 assert(/'statementName',/.test(settings), 'statementName is an allowed settings field')
 assert(/parseStatementNameInput\(data\.statementName\)/.test(settings) && /if \(!parsed\.ok\) return apiError\(parsed\.message, 400/.test(settings),
   'the settings route stores parseStatementNameInput\'s value and refuses with its message')
-assert(settings.indexOf('parseStatementNameInput(') < settings.indexOf('db.event.update('), 'parsed before the write')
+// `.event.update(`: the write is `tx.event.update(` inside the settings transaction since audit H5 2h
+// (it was `db.event.update(`). The write must exist, and the parse must come before it.
+const writeAt = settings.indexOf('.event.update(')
+assert(writeAt > 0 && settings.indexOf('parseStatementNameInput(') < writeAt, 'parsed before the write')
 const page = readFileSync('app/organizer/fairs/[fairSlug]/settings/page.tsx', 'utf8')
 assert(/statementName:\s+settings\.statementName/.test(page) && /statementPreview\(/.test(page), 'the settings page saves it and shows the live preview')
 

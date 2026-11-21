@@ -12,6 +12,8 @@ import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { groupByVendor } from '@/lib/menu-requests/group-by-vendor'
 import type { BatchGroup } from '@/lib/menu-requests/group-by-batch'
+import { formatPriceChange, type PriceChangeSummary } from '@/lib/menu/price-gate'
+import { REVIEW_REASON_MAX } from '@/lib/menu-requests/review-reason'
 
 interface CurrentItem {
   id: string
@@ -39,6 +41,13 @@ interface MenuRequest {
   imageUrl: string | null
   menuItemId: string | null
   currentItem: CurrentItem | null
+  /** Current → requested, computed by the server from the item's price as it is now. */
+  priceChange: PriceChangeSummary | null
+  /** Sizes (H5 Fix B): a brand-new item's sizes share a group and are decided together. */
+  variantGroup?: string | null
+  variantLabel?: string | null
+  /** How many pending sizes deciding this row decides; null when it is not a size of a new item. */
+  sizesInGroup?: number | null
   reviewNote: string | null
   createdAt: string
   vendor: { id: string; name: string }
@@ -155,6 +164,18 @@ function RequestCard({
       {/* Body */}
       <div className="px-4 pb-4 space-y-3">
 
+        {/* PRICE CHANGE — current → requested, against the price as it is NOW. If the vendor
+            lowered the live price while this waited, this shows the real jump being approved. */}
+        {req.priceChange && req.priceChange.direction !== 'same' && (
+          <p className={`text-xs font-inter font-semibold px-2.5 py-1.5 rounded-lg border w-fit ${
+            req.priceChange.direction === 'up'
+              ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+              : 'bg-white/[0.04] border-white/10 text-white/70'
+          }`}>
+            Price {formatPriceChange(req.priceChange)}
+          </p>
+        )}
+
         {/* ADD — show proposed item */}
         {req.type === 'ADD' && (
           <div className="flex gap-3">
@@ -166,9 +187,17 @@ function RequestCard({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <p className="text-white text-sm font-semibold font-inter">{req.name}</p>
+              <p className="text-white text-sm font-semibold font-inter">
+                {req.name}
+                {req.variantLabel && <span className="text-white/50 font-normal"> · Size: {req.variantLabel}</span>}
+              </p>
               {req.price !== null && (
                 <p className="text-neon-pink text-sm font-inter font-semibold">${req.price.toFixed(2)}</p>
+              )}
+              {req.sizesInGroup != null && req.sizesInGroup > 1 && (
+                <p className="text-amber-300/80 text-[0.6875rem] font-inter mt-0.5">
+                  {req.sizesInGroup} sizes of {req.variantGroup} — approving or rejecting one decides all {req.sizesInGroup}
+                </p>
               )}
               <p className="text-white/40 text-xs font-inter mt-0.5">
                 {[req.category, req.prepTime != null ? `${req.prepTime}m prep` : null]
@@ -262,6 +291,7 @@ function RequestCard({
             </label>
             <input
               autoFocus
+              maxLength={REVIEW_REASON_MAX}
               value={reason}
               onChange={e => setReason(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') submit('REJECT') }}
@@ -556,7 +586,14 @@ export default function MenuRequestsPage({ params }: { params: Promise<{ fairSlu
   }, [fetchRequests])
 
   function handleReviewed(id: string, status: 'APPROVED' | 'REJECTED') {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r))
+    // Deciding one size of a brand-new item decides every pending size of it (H5 Fix B), so the
+    // sibling cards change with it rather than waiting for the next poll.
+    setRequests(prev => {
+      const decided = prev.find(r => r.id === id)
+      const sameItem = (r: MenuRequest) => !!decided && decided.type === 'ADD' && !!decided.variantGroup
+        && r.type === 'ADD' && r.status === 'PENDING' && r.vendor.id === decided.vendor.id && r.variantGroup === decided.variantGroup
+      return prev.map(r => r.id === id || sameItem(r) ? { ...r, status } : r)
+    })
     // THE #5 SYMPTOM: the sidebar badge and this page's banner went stale until a hard refresh
     // after working the queue. The SERVER cache was never the problem — the approval route
     // already revalidates the `event-badges-<id>` tag. The staleness was client-side: react-query

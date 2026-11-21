@@ -18,6 +18,7 @@
  *   [2] REAL SDK shapes — transient
  *   [3] the UNDECIDED bucket returns `unknown`, never a guess — and ORDER protects it
  *   [4] non-Stripe and malformed inputs are `unknown`, never terminal
+ *   [4b] isMissingStripeObject: only a REAL Stripe "not found" counts, never a look-alike
  *   [5] single source — nothing else in lib/ decides terminal-vs-transient
  *   [6] anti-vacuity
  *
@@ -27,7 +28,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import Stripe from 'stripe'
-import { classifyStripeError, isTerminalStripeError } from '../lib/stripe-error-class'
+import { classifyStripeError, isTerminalStripeError, isMissingStripeObject } from '../lib/stripe-error-class'
 import { stripComments } from './_strip-comments'
 
 let pass = 0, fail = 0
@@ -96,6 +97,13 @@ for (const [label, input] of [
 // require Stripe-shaped fields would read it as a Stripe code.
 assert(classifyStripeError(Object.assign(new Error('db'), { code: 'resource_missing' })).class === 'unknown',
   'a NON-Stripe error carrying code=resource_missing is still unknown (Stripe fields are required, not just a code)')
+
+console.log('\n[4b] isMissingStripeObject — a REAL Stripe "not found", never a look-alike')
+assert(isMissingStripeObject(mk('StripeInvalidRequestError', { message: 'Not found', type: 'invalid_request_error', statusCode: 404 })),
+  'a real Stripe HTTP 404 with no code is "missing" (the v2 accounts API shape)')
+assert(isMissingStripeObject(deadDestination), 'a real Stripe resource_missing on HTTP 400 is "missing" (the v1 shape)')
+assert(!isMissingStripeObject(Object.assign(new Error('db'), { code: 'resource_missing', statusCode: 404 })),
+  'a NON-Stripe error carrying resource_missing AND 404 is NOT "missing" (the caller fails closed)')
 
 console.log('\n[5] single source — nothing else in lib/ decides terminal-vs-transient')
 const SKIP = new Set(['node_modules', '.next', 'mock', '__tests__', '__mocks__'])

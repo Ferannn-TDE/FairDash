@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { currentUser } from '@clerk/nextjs/server'
 import { ChevronLeft } from 'lucide-react'
-import { hasApprovalsRole, isPlatformManagerOnly } from '@/lib/roles'
+import { hasApprovalsRole, hasStrictAdminRole, isPlatformManagerOnly } from '@/lib/roles'
 import ApprovalsPanel from '../_components/ApprovalsPanel'
 import PlatformManagerHeader from '../_components/PlatformManagerHeader'
 
@@ -32,7 +32,7 @@ export default async function ApprovalsPage() {
             <ChevronLeft className="w-3.5 h-3.5" /> All fairs
           </Link>
         )}
-        <ApprovalsPanel />
+        <ApprovalsPanel canOverride={hasStrictAdminRole(user.publicMetadata)} />
       </div>
     </div>
   )

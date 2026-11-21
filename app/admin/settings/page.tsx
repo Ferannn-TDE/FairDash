@@ -2,8 +2,9 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { currentUser } from '@clerk/nextjs/server'
 import { ChevronLeft } from 'lucide-react'
-import { hasSettingsRole, isPlatformManagerOnly } from '@/lib/roles'
+import { hasSettingsRole, hasStrictAdminRole, isPlatformManagerOnly } from '@/lib/roles'
 import PlatformSettingsPanel from '../_components/PlatformSettingsPanel'
+import MenuAlertPreferences from '../../_components/MenuAlertPreferences'
 import PlatformManagerHeader from '../_components/PlatformManagerHeader'
 
 export const metadata = { title: 'Platform settings — FairSynq Admin' }
@@ -30,6 +31,9 @@ export default async function PlatformSettingsPage() {
   if (!hasSettingsRole(user.publicMetadata)) redirect('/admin')
 
   const managerOnly = isPlatformManagerOnly(user.publicMetadata)
+  // Menu alerts reach strict admins only (fairs with no organizer; audit H5, step 3). A platform
+  // manager can open this page but gets no menu alerts, so the card isn't shown to them.
+  const strictAdmin = hasStrictAdminRole(user.publicMetadata)
 
   return (
     <div className="min-h-screen bg-[#0F0F0F] px-4 sm:px-5 md:px-[6%] lg:px-8 py-8 sm:py-10">
@@ -45,6 +49,15 @@ export default async function PlatformSettingsPage() {
           </Link>
         )}
         <PlatformSettingsPanel />
+        {strictAdmin && (
+          <section className="mt-8 bg-[#1a1a1a] border border-white/[0.07] rounded-2xl p-6">
+            <h2 className="text-white font-semibold text-base mb-1">My notifications</h2>
+            <p className="text-white/40 text-xs mb-4 font-inter">
+              Menu alerts for fairs with no organizer. Your own choice; other admins choose theirs.
+            </p>
+            <MenuAlertPreferences />
+          </section>
+        )}
       </div>
     </div>
   )

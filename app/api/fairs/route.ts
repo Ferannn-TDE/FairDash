@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
+import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { publicFairScope } from '@/lib/event-listing'
 
 // GET /api/fairs
@@ -26,7 +27,8 @@ export async function GET() {
         primaryColor: true,
         startDate: true,
         endDate: true,
-        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced() } } } },
+        // Demo booths are not counted with live Stripe keys (lib/demo-vendor.ts).
+        _count: { select: { vendors: { where: { status: VendorStatus.ACTIVE, ...readinessWhereIfEnforced(), ...demoHiddenWhere() } } } },
       },
     })
 

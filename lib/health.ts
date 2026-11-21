@@ -1,6 +1,7 @@
 import IORedis from 'ioredis'
 import { db } from './db'
 import { readMigrationState, type MigrationState } from './migration-status'
+import { decideRedisAccess } from './prod-db-guard'
 
 /**
  * Health checks (rider 3) — turn the /api/health stubs into real measurements, and close the
@@ -99,7 +100,8 @@ function parseRoleReconcile(raw: string | null | undefined): RoleReconcileStatus
  */
 export const WORKER_COMMIT: string = process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown'
 
-export type ServiceCheck = 'ok' | 'error' | 'unreachable' | 'not_configured'
+/** 'refused': a local process was not allowed to use a REMOTE Redis (lib/prod-db-guard.ts). */
+export type ServiceCheck = 'ok' | 'error' | 'unreachable' | 'not_configured' | 'refused'
 export interface HealthReport {
   status: 'ok' | 'degraded'
   database: ServiceCheck
@@ -145,11 +147,11 @@ export function computeHealth(input: {
     roleReconcile: parseRoleReconcile(input.roleReconcile),
   }
   const migrations: MigrationState = input.migrations ?? { status: 'unknown', pending: [] }
-  // Degraded if the DB is unreachable, Redis is down, the worker is stale (money engine silent),
-  // or the code is ahead of the database's migrations (or that can't be read).
+  // Degraded if the DB is unreachable, Redis is down or refused, the worker is stale (money engine
+  // silent), or the code is ahead of the database's migrations (or that can't be read).
   const degraded =
     input.database !== 'ok' ||
-    input.redis === 'unreachable' || input.redis === 'error' ||
+    input.redis === 'unreachable' || input.redis === 'error' || input.redis === 'refused' ||
     worker.status === 'stale' ||
     migrations.status !== 'ok'
   return { status: degraded ? 'degraded' : 'ok', database: input.database, redis: input.redis, worker, migrations }
@@ -205,19 +207,37 @@ export async function queueHealth(): Promise<{ httpStatus: number; body: Record<
   }
 }
 
-function redisClient(): IORedis | null {
+/**
+ * The health/heartbeat Redis, or why there is none. Decided on EACH call (lazily), never at import,
+ * so a refused host can't break a page load or the build.
+ */
+function healthRedis(): { client: IORedis | null; refused: boolean } {
   const url = process.env.REDIS_URL
-  if (!url) return null
+  if (!url) return { client: null, refused: false }
+  // A local process never writes heartbeats into, or reads health from, a REMOTE Redis: the same
+  // rule as the job queue (lib/prod-db-guard.ts). Deployed runtimes (Vercel, Railway) are exempt.
+  // A refusal is reported as redis 'refused' (degraded), and the heartbeat writers skip quietly.
+  const access = decideRedisAccess(process.env, url, 'health/heartbeat Redis (REDIS_URL)')
+  if (!access.allowed) {
+    console.error(`[Health] 🛑 REFUSING: ${access.reason}`)
+    return { client: null, refused: true }
+  }
   // ioredis parses rediss:// (TLS) from the scheme — proven against Upstash. Fail fast: no
   // retry storms, no offline queue, short connect timeout, so a health check can never hang.
   // enableReadyCheck:false + disableClientInfo:true — Upstash bills per command, and on connect
   // ioredis otherwise sends INFO + two CLIENT SETINFO this one-shot client never needs. Measured:
   // 6 commands → 3 per heartbeat / health check (AUTH + the real work). The first real command
   // still proves the connection, so a dead Redis is still 'unreachable'.
-  return new IORedis(url, {
+  const client = new IORedis(url, {
     maxRetriesPerRequest: 1, lazyConnect: true, connectTimeout: 3000, enableOfflineQueue: false,
     enableReadyCheck: false, disableClientInfo: true,
   })
+  return { client, refused: false }
+}
+
+/** The client for the best-effort heartbeat writers: none when unset or refused. */
+function redisClient(): IORedis | null {
+  return healthRedis().client
 }
 
 /** Best-effort: the sweep stamps its heartbeat. A heartbeat write must NEVER break the sweep. */
@@ -241,11 +261,12 @@ export async function runHealthChecks(): Promise<HealthReport> {
   const database: ServiceCheck = await db.$queryRaw`SELECT 1`.then(() => 'ok' as const).catch(() => 'error' as const)
   const migrations = await readMigrationState(db)
 
-  let redis: ServiceCheck = 'not_configured'
+  const { client: r, refused } = healthRedis()
+  // No REDIS_URL → 'not_configured' (off); a refused remote host → 'refused' (degraded, no throw).
+  let redis: ServiceCheck = refused ? 'refused' : 'not_configured'
   let lastSweepAt: string | null = null
   let workerCommit: string | null = null
   let roleReconcile: string | null = null
-  const r = redisClient()
   if (r) {
     try {
       await r.connect()

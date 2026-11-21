@@ -43,6 +43,7 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
       createdAt: true,
       stripeVerified: true,
       stripeConnectedAt: true,
+      isDemo: true,
       foodHandlerPermitPath: true,
       insurancePath: true,
       businessLicensePath: true,
@@ -99,6 +100,9 @@ export async function getFairVendors(eventId: string, opts: FairVendorsOpts = {}
     joinedAt: v.createdAt,
     stripeVerified: v.stripeVerified,
     stripeConnectedAt: v.stripeConnectedAt,
+    // The DEMO badge (lib/demo-vendor.ts). Admins and the fair's organizer see it; only a strict
+    // admin can change it (PATCH /api/admin/vendors/[id]/demo).
+    isDemo: v.isDemo,
     // Document presence flags — never the paths, and there are no URLs to expose.
     // Built from the SSOT (lib/vendor-documents.ts) so this payload, the vendor-detail
     // payload, and the vendor's own documents endpoint all emit ONE shape. The former

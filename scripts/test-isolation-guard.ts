@@ -155,6 +155,61 @@ for (const v of ['DATABASE_URL', 'DIRECT_URL', 'TEST_DATABASE_URL']) {
 assert(/REFUSING/.test(wrapper) && /localhost\|127\.0\.0\.1/.test(wrapper),
   'the wrapper REFUSES a non-local host rather than trusting the caller')
 
+// The wrapper's DEFAULT test-DB address is 127.0.0.1, never `localhost` (Nov 17–18, Windows):
+// Node and Prisma try ::1 first for "localhost", and on Windows ::1:55432 timed out while
+// 127.0.0.1:55432 answered, so every Windows test run stopped with P1001. Naming the IPv4
+// address removes the lookup. TEST_DATABASE_URL_OVERRIDE can still move it, locally only.
+const testDbDefaultHost = (src: string): string | null => {
+  const m = src.replace(/\r\n/g, '\n').match(/^TEST_DB="\$\{TEST_DATABASE_URL_OVERRIDE:-([^}]+)\}"$/m)
+  if (!m) return null
+  try { return new URL(m[1]).hostname } catch { return null }
+}
+const OLD_WRAPPER_LINE = 'TEST_DB="${TEST_DATABASE_URL_OVERRIDE:-postgresql://u:p@localhost:55432/fairsynq_test}"'
+assert(testDbDefaultHost(OLD_WRAPPER_LINE) === 'localhost',
+  '[0] POSITIVE CONTROL: the address reader finds `localhost` in the old wrapper line, so the check below can fail')
+const wrapperDbHost = testDbDefaultHost(wrapper)
+assert(wrapperDbHost !== null, 'the wrapper has a TEST_DB default line this check can read (not vacuous)')
+assert(wrapperDbHost === '127.0.0.1',
+  `the wrapper's default test DB host is 127.0.0.1, not localhost (found ${wrapperDbHost ?? 'none'})`)
+
+// The wrapper also pins the test rate limiter and blanks the queue Redis (found Nov 16: suites
+// loaded .env.local's Upstash, and the order routes failed closed with 429 when it was not
+// reachable). dotenv never overrides a variable that is already set, so these win.
+const wrapperLf = wrapper.replace(/\r\n/g, '\n')
+assert(/UPSTASH_REDIS_REST_URL="\$TEST_UPSTASH" \\\n/.test(wrapperLf) && /UPSTASH_REDIS_REST_TOKEN="\$TEST_UPSTASH_TOKEN" \\\n/.test(wrapperLf)
+  && /\n\s*REDIS_URL= \\\n/.test(wrapperLf),
+  'the wrapper pins UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN and an EMPTY REDIS_URL')
+assert(/TEST_UPSTASH="\$\{TEST_UPSTASH_URL:-http:\/\/localhost:58080\}"/.test(wrapperLf),
+  'the pinned Upstash is the test stand-in on localhost:58080 (TEST_UPSTASH_URL may only move it locally)')
+assert(/case "\$upstash_host" in\s*\n\s*localhost\|127\.0\.0\.1\) ;;/.test(wrapperLf) && /REFUSING: test Upstash host/.test(wrapperLf),
+  'the wrapper REFUSES a non-local Upstash host')
+assert(/SRH_TOKEN/.test(wrapperLf) && /docker-compose\.test\.yml/.test(wrapperLf) && !/UPSTASH_REDIS_REST_TOKEN="[^$]/.test(wrapperLf),
+  'the test token is read from docker-compose.test.yml (one copy), never written into the wrapper')
+
+// One flush clears the test rate limiter: the Upstash stand-in keeps no data of its own.
+const composeTest = readFileSync('docker-compose.test.yml', 'utf8').replace(/\r\n/g, '\n')
+const upstashAt = composeTest.indexOf('\n  fairsynq-test-upstash:')
+const upstashBlock = upstashAt >= 0 ? composeTest.slice(upstashAt) : ''
+assert(/SRH_CONNECTION_STRING: redis:\/\/fairsynq-test-redis:6379/.test(upstashBlock) && !/\n\s*(volumes|tmpfs):/.test(upstashBlock),
+  'the test Upstash stand-in stores its data in fairsynq-test-redis (no storage of its own)')
+
+// The gate clears that test Redis at the start of every run: by container name, from inside the
+// container, on its own port; never a URL or token from the environment; refused unless the
+// container is the test compose file's Redis service.
+const gateSh = readFileSync('scripts/gate.sh', 'utf8').replace(/\r\n/g, '\n')
+  .split('\n').filter(l => !/^\s*#/.test(l)).join('\n')
+const flushLines = gateSh.split('\n').filter(l => /FLUSHALL|FLUSHDB/.test(l))
+assert(flushLines.length === 1 && flushLines[0].trim() === 'docker exec fairsynq-test-redis redis-cli -p 6379 FLUSHALL >/dev/null',
+  `gate.sh has exactly one flush: fairsynq-test-redis by container name, inside it, on port 6379 (${flushLines.length} found)`)
+assert(flushLines.length === 1 && !/\$/.test(flushLines[0]),
+  'the flush line uses no variable: no URL or token from the environment')
+assert(/fairsynq-test-redis\\\|\*docker-compose\.test\.yml\*\) ;;/.test(gateSh) && /not flushing/.test(gateSh),
+  'the flush is refused unless the container is the test compose file\'s fairsynq-test-redis service')
+const gUp = gateSh.indexOf('npm run test:db:up'), gCheck = gateSh.indexOf('com.docker.compose.service')
+const gFlush = gateSh.indexOf('FLUSHALL'), gVerify = gateSh.indexOf('scripts/verify-all.ts')
+assert(gUp >= 0 && gUp < gCheck && gCheck < gFlush && gFlush < gVerify,
+  'gate.sh order: test:db:up, then the label check, then the flush, then verify-all')
+
 // Shared helpers that gate suites construct clients through must honour TEST_DATABASE_URL.
 const guardSrc = stripComments(readFileSync('lib/prod-write-guard.ts', 'utf8'))
 assert(/resolveToolingDatabaseUrl\(process\.env\)/.test(guardSrc),

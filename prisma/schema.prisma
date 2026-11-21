@@ -84,6 +84,10 @@ model Event {
   serviceChargeAmount     Float? // e.g., 1.50 per order
   operatorStripeAccountId String? // destination for service charge + delivery fee transfers
 
+  // Online price markup (audit H5, step 2h), basis points: 0 = 0%, 1000 = 10%. Default 0: the online
+  // price equals the in-person price. The 10% cap is a code constant (lib/menu/price.ts), not stored.
+  onlineMarkupBps Int @default(0)
+
   // Organizer
   organizerId String?
   organizer   FairOrganizer? @relation(fields: [organizerId], references: [id])
@@ -106,6 +110,8 @@ model Event {
   runners           Runner[]
   postEventReport   PostEventReport?
   organizerPayouts  OrganizerPayout[]
+  menuChangeEvents  MenuChangeEvent[]
+  markupChanges     EventMarkupChange[]
 
   @@index([urlSlug])
   @@index([status])
@@ -235,6 +241,8 @@ model User {
   orgMembers         OrgMember[]
   favoriteItems      FavoriteItem[]
   vendorAuditLogs    VendorAuditLog[]
+  notificationPreferences NotificationPreference[]
+  inAppNotifications      InAppNotification[]
 
   @@index([clerkId])
   @@index([email])
@@ -267,6 +275,12 @@ model Vendor {
   busyUntil       DateTime? // Auto-clears after 15 min
   isOffline       Boolean      @default(false) // Vendor entirely offline
   lastHeartbeatAt DateTime? // Updated every 30s by vendor dashboard; stale > 5 min → auto-hide
+
+  // Demo booth (Jordan, Nov 16). Set ONLY by a strict admin (PATCH /api/admin/vendors/[id]/demo)
+  // and by the local dev-fair seed. A demo booth skips the Stripe payouts check for approval; with
+  // live Stripe keys it is hidden from customers and checkout refuses it; in test mode it takes
+  // test orders. Never public (not in PUBLIC_VENDOR_SELECT).
+  isDemo Boolean @default(false)
 
   // ── Onboarding documents (SENSITIVE — insurance certificate, business licence) ──
   // Stores the STORAGE OBJECT PATH inside the PRIVATE `vendor-documents` bucket —
@@ -351,6 +365,7 @@ model Vendor {
   refunds             Refund[]
   refundRequests      RefundRequest[]
   vendorEarnings      VendorEarning[]
+  menuChangeEvents    MenuChangeEvent[]
 
   @@unique([eventId, slug], map: "uq_vendor_event_slug")
   @@index([eventId, status], map: "idx_vendor_event_status")
@@ -507,6 +522,13 @@ model MenuRequest {
   prepTime    Int?
   imageUrl    String?
 
+  // SIZES ARE PART OF THE ITEM (H5 Fix B, Nov 12). The same pair as MenuItem: rows sharing a
+  // variantGroup are one dish in several sizes. A brand-new item's sizes wait for approval
+  // together (approving one approves every PENDING ADD of that vendor with the same group); a
+  // new size of an item that is already live is a live edit and applies at once.
+  variantGroup String?
+  variantLabel String?
+
   // For EDIT and DELETE — the existing item being modified
   menuItemId String?
   menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
@@ -594,6 +616,11 @@ model Order {
   serviceFeeFlatCents Int?
   cardFeesPaidBy      CardFeesPaidBy?
   vendorPayout Float // = subtotal in full — vendor keeps everything, no commission deducted
+  /// The in-person subtotal the 10% service fee was computed on (audit H5, 2h). Null on orders before 2h,
+  /// whose fee was computed on `subtotal`.
+  serviceFeeBase  Float?
+  /// The event's markup at checkout, basis points (2h). Null on orders before 2h.
+  onlineMarkupBps Int?
 
   // Customer info
   customerName   String
@@ -809,6 +836,9 @@ model OrderItem {
   totalPrice          Float // unitPrice * quantity, stored at creation time
   subtotal            Float
   specialInstructions String?
+  /// The in-person (booth) unit price at checkout (audit H5, 2h). unitPrice is the online price the
+  /// customer paid. Null on items ordered before 2h.
+  inPersonUnitPrice   Float?
 
   createdAt DateTime @default(now())
 
@@ -2073,7 +2103,9 @@ model Notification {
   template String
   payload  Json
 
-  /// PENDING | SENDING | SENT | FAILED | SKIPPED
+  /// PENDING | SENDING | SENT | FAILED | SKIPPED | EXPIRED
+  /// EXPIRED: a menu-alert email held for no provider and older than 48 hours when a provider
+  /// was connected (lib/notifications.ts); kept, never sent. Bell notifications are separate.
   status        String    @default("PENDING")
   /// Why a PENDING row is waiting: NO_EMAIL_PROVIDER | NO_ALERT_EMAIL (null = due normally).
   heldReason    String?
@@ -2092,10 +2124,71 @@ model Notification {
   @@index([audience, status])
 }
 
+// ── Menu-alert notifications (audit H5, step 3) ──────────────────────────────────────────────
+// Organizers and strict admins are told about vendor menu deletes and pending price increases.
+// eventType, channel, type and kind are plain text checked against constants in lib/menu-notify,
+// not database enums, so a new alert type needs no migration.
+
+/// One person's channel for one alert type. No row = the default (both).
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// MENU_ITEMS_DELETED | MENU_PRICE_CHANGE_PENDING
+  eventType String
+  /// EMAIL | IN_APP | BOTH | NONE (NONE is allowed for MENU_ITEMS_DELETED only)
+  channel   String
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, eventType])
+}
+
+/// A bell notification in the organizer or admin portal. Holds its own copy of the text.
+model InAppNotification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The alert type: MENU_ITEMS_DELETED | MENU_PRICE_CHANGE_PENDING
+  type      String
+  title     String
+  body      String
+  link      String?
+  payload   Json
+  readAt    DateTime?
+  /// menu:{kind}:{digestId}:{userId}: a retried worker tick can't create it twice.
+  dedupeKey String    @unique
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+/// The grouping queue: one row per delete or pending price increase, written in the same
+/// transaction as the change. The worker claims rows (digestId) and turns each group into one
+/// notification. Item and request ids are deliberately not foreign keys.
+model MenuChangeEvent {
+  id            String   @id @default(cuid())
+  /// DELETE | PRICE_PENDING
+  kind          String
+  vendorId      String
+  vendor        Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  menuItemId    String?
+  menuRequestId String?
+  batchId       String?
+  /// Item name and price, or previous and new price, plus reason.
+  payload       Json
+  /// null = not yet sent; set when a worker claims the row into a notification.
+  digestId      String?
+  createdAt     DateTime @default(now())
+
+  @@index([digestId, kind, vendorId, createdAt])
+}
+
 /// Audit for the approvals page (item 9): every approve, reject and document view. Append-only.
 model ApprovalAction {
   id              String   @id @default(cuid())
-  /// APPROVE | REJECT | VIEW_DOCUMENT
+  /// APPROVE | REJECT | VIEW_DOCUMENT | DEMO_ON | DEMO_OFF (the demo switch, Nov 16)
   action          String
   /// vendor | organizer | partner
   applicationType String
@@ -2103,6 +2196,10 @@ model ApprovalAction {
   /// Clerk id of who acted, and the role they acted as (super_admin | admin | platform_manager).
   actorId   String
   actorType String
+  /// The reviewer's name AS IT WAS when they decided (a snapshot, never re-read). NULL on rows
+  /// written before names were recorded (Nov 16). Shown in full on admin screens only; who else
+  /// sees it is decided by lib/reviewer-label.ts (organizers: own org only; vendors: never).
+  actorName String?
   reason    String?
   /// The document viewed (VIEW_DOCUMENT), or decision detail (e.g. whether the owner row changed).
   detail    Json?
@@ -2111,4 +2208,22 @@ model ApprovalAction {
   @@index([applicationType, applicationId])
   @@index([actorId])
   @@index([createdAt])
+}
+
+/// One row per change of an event's online price markup (audit H5, step 2h). Written in the same
+/// transaction as the change, by lib/event-markup.ts. Restrict on delete: the log cannot vanish.
+model EventMarkupChange {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  /// ORGANIZER | ADMIN
+  actorRole    String
+  actorClerkId String
+  /// User.id when the actor has a User row.
+  actorUserId  String?
+  oldBps       Int
+  newBps       Int
+  createdAt    DateTime @default(now())
+
+  @@index([eventId, createdAt])
 }

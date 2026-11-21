@@ -39,6 +39,10 @@ export interface PendingRow {
   menuItem: { name: string } | null
   createdAt: string
   batchId?: string | null
+  /** The price the request carries, e.g. a restore waiting at a higher price (H5 2g). */
+  price?: number | null
+  /** Who a PENDING row waits for, stamped by the server (lib/menu-requests/approver-label.ts). */
+  approver?: 'organizer' | 'FairSynq'
   /** True while this row exists only on the client, awaiting the server's answer. */
   optimistic?: boolean
 }
@@ -221,6 +225,10 @@ export function rowsFromSubmitResponse(data: unknown): PendingRow[] {
       menuItem: null,
       createdAt: row.createdAt ?? new Date().toISOString(),
       batchId: row.batchId ?? null,
+      // Kept so a restore waiting at a higher price can show "Was $X, now $Y" straight away, and
+      // say who it is waiting for, without a reload.
+      price: row.price ?? null,
+      ...(row.approver !== undefined && { approver: row.approver }),
     }
   })
 }

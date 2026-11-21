@@ -30,7 +30,8 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 let pass = 0, fail = 0
 function assert(cond: boolean, label: string) {
@@ -149,6 +150,104 @@ const stringEnvelope = walk('app/api').filter(f =>
 for (const f of stringEnvelope) console.log(`       STRING ENVELOPE: ${f}`)
 assert(stringEnvelope.length === 0,
   `every route returns { error: { message, code } } (${stringEnvelope.length} string-shaped offenders)`)
+
+// ── [5] organizer fair settings: a failed save shows fixed text ──────────────────────────────────
+// The 2h markup work (425a909) put `${json.error.message}` in a toast on this page; the Linux gate
+// caught it (Nov 16). RAW_ERROR above reads one line at a time and does not recognise `?.message`,
+// so the same page's `json.error?.message ?? 'Failed to save'` passed it. These rows read WHOLE
+// toast calls (brackets matched, multi-line) on this ONE page. The same shapes on other organizer
+// and admin screens are a later step: widening RAW_ERROR now would fail them all at once.
+
+/** The full argument text of every `<name>(` call in `src`: brackets matched, quoted text skipped. */
+function callArgs(src: string, name: RegExp): string[] {
+  const out: string[] = []
+  const re = new RegExp(name.source, 'g')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(src)) !== null) {
+    const start = m.index + m[0].length
+    let depth = 1, i = start
+    while (i < src.length && depth > 0) {
+      const ch = src[i]
+      if (ch === "'" || ch === '"' || ch === '`') {
+        i++
+        while (i < src.length && src[i] !== ch) { if (src[i] === '\\') i++; i++ }
+      } else if (ch === '(') depth++
+      else if (ch === ')') depth--
+      i++
+    }
+    out.push(src.slice(start, i - 1))
+  }
+  return out
+}
+
+/** Server or exception text: `.message` read from a response, its `error`, or a caught binding. */
+const LEAKY_MESSAGE = /\b(json|err|error|e|res|data|body)\b\??\.(error\??\.)?message\b/
+const leakyToast = (src: string) => callArgs(src, /toast\.[a-z]+\(/).some(a => LEAKY_MESSAGE.test(a))
+
+console.log('\n[5] organizer fair settings: every failed save shows fixed text, never the server\'s')
+assert(leakyToast("toast.error(`${json.error.message} Nothing was saved; press Save again to save your other changes.`)"),
+  '[5] positive control: flags the toast that shipped in 2h (425a909)')
+assert(leakyToast("toast.error(json.error?.message ?? 'Failed to save')"),
+  '[5] positive control: flags the `json.error?.message ?? …` shape that RAW_ERROR does not see')
+assert(leakyToast("toast.error(missing?.length\n  ? `${json.error.message} Missing: ${missing.join(', ')}.`\n  : json.error?.message ?? 'Action failed')"),
+  '[5] positive control: flags a toast split over several lines')
+assert(leakyToast("toast.error('Could not save :) ' + err.message)"),
+  '[5] positive control: a bracket inside quoted text does not end the call early')
+assert(!leakyToast('toast.error(saveFailedCopy(code, markupRangeRefused))')
+    && !leakyToast('toast.error(markupParse.message)')
+    && !leakyToast('toast.error(`${MARKUP_LOCKED_MESSAGE} Nothing was saved.`)'),
+  '[5] PASSES fixed copy, the page\'s own parse message and a *_MESSAGE constant (not flag-everything)')
+
+const SETTINGS_PAGE = 'app/organizer/fairs/[fairSlug]/settings/page.tsx'
+const settingsPage = stripComments(readFileSync(SETTINGS_PAGE, 'utf8').replace(/\r\n/g, '\n'))
+const settingsToasts = callArgs(settingsPage, /toast\.[a-z]+\(/)
+assert(settingsToasts.length >= 4,
+  `${settingsToasts.length} toast calls read on the settings page (≥4 expected: saved, markup check, refused save, network)`)
+const leakySettingsToasts = settingsToasts.filter(a => LEAKY_MESSAGE.test(a))
+for (const a of leakySettingsToasts) console.log(`       SERVER TEXT: ${SETTINGS_PAGE}: toast(${a.replace(/\s+/g, ' ').trim()})`)
+assert(leakySettingsToasts.length === 0,
+  `no toast on the settings page reads .message from json/err/error/e (${leakySettingsToasts.length} offenders)`)
+const markupErrorArgs = callArgs(settingsPage, /setMarkupError\(/)
+assert(markupErrorArgs.length >= 3 && markupErrorArgs.every(a => !/\bjson\b/.test(a)),
+  'the markup box never shows the server\'s text (setMarkupError is never given json…)')
+
+const copyAt = settingsPage.indexOf('const SAVE_FAILED_COPY')
+const copyEnd = settingsPage.indexOf('return SAVE_FAILED\n', copyAt)
+const copyBlock = copyAt >= 0 && copyEnd > copyAt ? settingsPage.slice(copyAt, copyEnd) : ''
+const SETTINGS_CODES = [
+  'UNAUTHORIZED', 'FORBIDDEN', 'ORGANIZER_NOT_APPROVED', 'ORGANIZER_REJECTED', 'ORGANIZER_SUSPENDED',
+  'DB_POOL_TIMEOUT', 'NOT_FOUND', 'VALIDATION_ERROR', 'MARKUP_LOCKED',
+]
+const missingCodes = SETTINGS_CODES.filter(c => !copyBlock.includes(`'${c}'`))
+assert(copyBlock.length > 0 && missingCodes.length === 0,
+  `the copy table has fixed text for all ${SETTINGS_CODES.length} codes the settings PATCH sends${missingCodes.length ? ` (missing: ${missingCodes.join(', ')})` : ''}`)
+assert(/const SAVE_FAILED = "Couldn't save settings\. Try again\."/.test(settingsPage) && copyEnd > 0,
+  'any other code falls back to "Couldn\'t save settings. Try again."')
+assert(/function saveFailedCopy\(code: string \| undefined, markupRangeRefused: boolean\): string/.test(settingsPage),
+  'saveFailedCopy takes the error CODE and a yes/no, never the server\'s message')
+assert(/toast\.error\(saveFailedCopy\(code, markupRangeRefused\)\)/.test(settingsPage),
+  'a refused save toasts saveFailedCopy(…)')
+assert(/catch \(err\) \{\s*console\.error\('\[FairSettings\] save failed', err\)\s*toast\.error\(SAVE_FAILED\)/.test(settingsPage),
+  'a network failure or an HTML error page toasts the fixed sentence; the details go to the console')
+assert(/console\.error\('\[FairSettings\] save failed', \{ status: res\.status, code, message: json\.error\?\.message \}\)/.test(settingsPage),
+  'a refused save logs status, code and message to the browser console only')
+
+// The page recognises a markup over 10% by comparing the server's message with MARKUP_RANGE_MESSAGE
+// (the server has no separate code for it). These rows fail if that sentence stops being what
+// lib/event-markup.ts sends, so the comparison cannot silently stop matching.
+const price = await import(pathToFileURL(resolve('lib/menu/price.ts')).href) as {
+  parseMarkupBps: (input: unknown) => { ok: boolean; message?: string }
+  MARKUP_RANGE_MESSAGE: string
+}
+const refusals = [1001, -1, 2.5, '5', null].map(v => price.parseMarkupBps(v))
+assert(refusals.every(r => !r.ok && r.message === price.MARKUP_RANGE_MESSAGE),
+  'parseMarkupBps refuses 1001, -1, 2.5, "5" and null with exactly MARKUP_RANGE_MESSAGE')
+const THROWS_RANGE = /const parsed = parseMarkupBps\(input\)\s*\n\s*if \(!parsed\.ok\) throw new ApiError\(parsed\.message, 400, 'VALIDATION_ERROR'\)/
+assert(!THROWS_RANGE.test("const parsed = parseMarkupBps(input)\n  if (!parsed.ok) throw new ApiError('Markup must be 0–10%', 400, 'VALIDATION_ERROR')"),
+  '[5] positive control: the tie row fails if event-markup.ts stops sending parseMarkupBps\'s message')
+const eventMarkup = stripComments(readFileSync('lib/event-markup.ts', 'utf8').replace(/\r\n/g, '\n'))
+assert(THROWS_RANGE.test(eventMarkup),
+  'lib/event-markup.ts still sends parseMarkupBps\'s message as 400 VALIDATION_ERROR (what the page compares with)')
 
 console.log(`\n${'─'.repeat(66)}`)
 console.log(`  ${pass} passed, ${fail} failed`)

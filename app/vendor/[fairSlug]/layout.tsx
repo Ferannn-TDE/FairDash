@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { VendorContext, type VendorMeta } from '@/lib/contexts/VendorContext'
+import { safeMarkupBps } from '@/lib/checkout-total'
 import VendorPortalShell from './_components/VendorPortalShell'
 
 interface Props {
@@ -59,6 +60,8 @@ export default function VendorFairLayout({ params: paramsPromise, children }: Pr
           cuisineType: v.cuisineType,
           isOffline:   Boolean(v.isOffline),
           status:      String(v.status ?? 'PENDING'),
+          // Display only (the "Customers pay … online" hint); a bad value shows the in-person price.
+          onlineMarkupBps: safeMarkupBps(v.event?.onlineMarkupBps),
         })
       })
       .catch(() => setError(true))

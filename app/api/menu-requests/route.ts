@@ -1,19 +1,31 @@
 import { NextRequest } from 'next/server'
+import { expireVendorMenu } from '@/lib/menu/menu-cache'
+import type { MenuRequest } from '@prisma/client'
 import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, requireVendorMayEditMenu } from '@/lib/auth'
 import { getVendorAuth } from '@/lib/vendor-auth-cache'
 import { logVendorAction, AUDIT_ACTIONS } from '@/lib/vendor-audit'
 import {
   MAX_BATCH_ITEMS,
-  buildMenuRequestData,
   validateMenuRequestItem,
   type MenuRequestItemInput,
 } from '@/lib/menu-requests/validate-item'
+import { checkMenuRequestItemOwnership } from '@/lib/menu-requests/item-ownership'
+import { fileMenuRequestItem } from '@/lib/menu-requests/file-item'
+import { menuApproverLabel, type MenuApproverLabel } from '@/lib/menu-requests/approver-label'
 import { randomUUID } from 'node:crypto'
 
-// POST /api/menu-requests — submit menu change requests for organizer approval.
+/** Who this vendor's pending requests wait for: the fair's organizer, or FairSynq if it has none. */
+async function vendorApprover(vendorId: string): Promise<MenuApproverLabel> {
+  const v = await db.vendor.findUnique({ where: { id: vendorId }, select: { event: { select: { organizerId: true } } } })
+  return menuApproverLabel(v?.event.organizerId)
+}
+
+// POST /api/menu-requests — submit menu changes. Removals, edits of live items, and restores that
+// don't raise the price apply immediately; brand-new items and higher-priced restores wait for the
+// approver (see the transaction below).
 //
 // TWO BODY SHAPES, ONE PATH:
 //   { vendorId, type, name, ... }             one request, batchId null (standalone)
@@ -42,7 +54,8 @@ export async function POST(req: NextRequest) {
     if (!dbUser) return apiError('User not found', 404, 'NOT_FOUND')
 
     const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-    if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+    if (!isMember) return apiError('Vendor not found', 404, 'NOT_FOUND')
+    await requireVendorMayEditMenu(dbUser.id, vendorId)
 
     const isBatchForm = Array.isArray(items)
     const inputs: MenuRequestItemInput[] = isBatchForm
@@ -79,42 +92,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // THE ITEM MUST BE THIS BOOTH'S. The membership check above proves the caller may act for
-    // vendorId; it says nothing about the menuItemId inside each EDIT / DELETE / RESTORE. Without
-    // this, vendor A could file a change against vendor B's item under A's own name, and A's
-    // organizer approving it would rewrite B's menu. Checked before anything is written, so a
-    // batch with one foreign item lands nothing (menu-ownership-boundary-proof [3]).
-    const targetIds = [...new Set(inputs.filter(i => i.type !== 'ADD').map(i => String(i.menuItemId)))]
-    if (targetIds.length > 0) {
-      const owned = await db.menuItem.findMany({ where: { id: { in: targetIds }, vendorId }, select: { id: true } })
-      const ownedIds = new Set(owned.map(o => o.id))
-      const i = inputs.findIndex(it => it.type !== 'ADD' && !ownedIds.has(String(it.menuItemId)))
-      if (i !== -1) {
-        return apiError(
-          isBatchForm ? `Item ${i + 1}: that menu item isn't on this booth's menu` : "That menu item isn't on this booth's menu",
-          404,
-          'MENU_ITEM_NOT_FOUND',
-        )
-      }
+    // OWNERSHIP (audit H4). Every item an EDIT, DELETE or RESTORE names must be this vendor's
+    // own, in the right removed state. Checked before anything is written, like validation.
+    const ownership = await checkMenuRequestItemOwnership(vendorId, inputs)
+    if (ownership) {
+      return apiError(
+        isBatchForm ? `Item ${ownership.index + 1}: ${ownership.message}` : ownership.message,
+        ownership.status,
+        ownership.code,
+      )
     }
 
     // Opaque, server-minted, and never accepted from the client — a caller must not be able to
     // forge a batch id and graft rows onto someone else's submission.
     const batchId = isBatchForm ? `mrb_${randomUUID()}` : null
 
-    // N creates in ONE transaction, using the same `create` the single form uses rather than
-    // createMany: createMany is a different query path in Prisma, and the point of this refactor
-    // is that the two forms cannot diverge. (There is no Prisma middleware on this client — the
-    // only $extends in the repo is the scripts-only prod-write-guard — so nothing per-row is
-    // skipped at the ORM layer either way. The one per-row side effect is the audit write
-    // below, which is fanned out deliberately.)
+    // ONE TRANSACTION, items applied in submission order (audit H5, Step 2g). Each item is either
+    // APPLIED NOW and written already APPROVED, or written PENDING for the approver:
+    //   DELETE                            applied now: the item leaves the menu immediately
+    //   EDIT of a live item               applied now, every field (a price move is audited)
+    //   RESTORE, no price / same / lower  applied now: back on the menu (the price write audited)
+    //   RESTORE, higher price             PENDING; the item stays removed at its old price
+    //   ADD naming a removed item         becomes a RESTORE of that row, same price rule
+    //   any other ADD (a brand-new item)  PENDING
+    // A newer price change for an item replaces any older PENDING one (supersede.ts). Each item
+    // goes through the same per-item code whichever body shape it arrived in, so the two forms
+    // cannot diverge; if any write or audit row fails, the whole submission rolls back.
     const rows = await db.$transaction(
-      inputs.map(item =>
-        db.menuRequest.create({
-          data: buildMenuRequestData(item, { vendorId, requestedBy: dbUser.id, batchId }),
-        }),
-      ),
+      async tx => {
+        const written: MenuRequest[] = []
+        for (const item of inputs) {
+          written.push(await fileMenuRequestItem(tx, item, { vendorId, requestedBy: dbUser.id, batchId }))
+        }
+        return written
+      },
+      // A 50-item batch is a few hundred statements; the default 5 s would cut it off on a slow
+      // connection. The cap on batch size (MAX_BATCH_ITEMS) is what bounds this.
+      { timeout: 20_000 },
     )
+
+    // The live menu changed only if something was applied now.
+    if (rows.some(r => r.status === 'APPROVED')) expireVendorMenu(vendorId)
 
     // ONE AUDIT ENTRY PER ROW — never one per submission. The audit log is the per-decision
     // record: collapsing a batch of 8 into a single entry would lose seven of them, and the
@@ -126,14 +144,20 @@ export async function POST(req: NextRequest) {
         name:        row.name,
         requestId:   row.id,
         batchId:     row.batchId,
+        status:      row.status,
       })
     }
+
+    // Every row names who a PENDING request waits for: the organizer, or FairSynq when the fair has
+    // none, so the vendor's screen can say so (lib/menu-requests/approver-label.ts).
+    const approver = await vendorApprover(vendorId)
+    const answered = rows.map(r => ({ ...r, approver }))
 
     // The batch form answers with the submission id alongside its rows; the single form keeps
     // its original bare-request shape, so every existing caller is untouched.
     return isBatchForm
-      ? success({ batchId, requests: rows }, 201)
-      : success(rows[0], 201)
+      ? success({ batchId, requests: answered }, 201)
+      : success(answered[0], 201)
   } catch (err) {
     return handleApiError(err)
   }
@@ -152,14 +176,16 @@ export async function GET(req: NextRequest) {
 
     if (vendorId) {
       const isMember = await getVendorAuth(dbUser.id, vendorId, req)
-      if (!isMember) return apiError('Access denied', 403, 'FORBIDDEN')
+      if (!isMember) return apiError('Vendor not found', 404, 'NOT_FOUND')
 
       const requests = await db.menuRequest.findMany({
         where: { vendorId },
         orderBy: { createdAt: 'desc' },
         include: { menuItem: { select: { name: true } } },
       })
-      return success(requests)
+      // Same per-row approver label as POST; the response stays a flat array for every caller.
+      const approver = await vendorApprover(vendorId)
+      return success(requests.map(r => ({ ...r, approver })))
     }
 
     if (eventId) {
@@ -167,10 +193,13 @@ export async function GET(req: NextRequest) {
       // Soft-deleted fair's menu-requests are not accessible.
       const event = await db.event.findFirst({ where: { id: eventId, archivedAt: null }, select: { organizerId: true } })
       if (!event) return apiError('Event not found', 404, 'NOT_FOUND')
-      if (event.organizerId) {
-        const isOrg = await db.orgMember.findFirst({ where: { organizerId: event.organizerId, userId: dbUser.id } })
-        if (!isOrg) return apiError('Access denied', 403, 'FORBIDDEN')
-      }
+      // A fair with NO organizer is decided by platform admins, through
+      // /api/admin/events/[id]/menu-requests. This branch used to skip the membership check for
+      // such a fair, so any signed-in user could list its requests (audit H5, 2g).
+      if (!event.organizerId) return apiError('Event not found', 404, 'NOT_FOUND')
+      const isOrg = await db.orgMember.findFirst({ where: { organizerId: event.organizerId, userId: dbUser.id } })
+      // Same answer as a fair that doesn't exist, so fair ids can't be probed.
+      if (!isOrg) return apiError('Event not found', 404, 'NOT_FOUND')
 
       const requests = await db.menuRequest.findMany({
         where: { vendor: { eventId } },

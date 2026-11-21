@@ -16,7 +16,9 @@ import { useUser, useAuth } from '@clerk/clerk-react'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { APIProvider } from '@vis.gl/react-google-maps'
 import { getStripe } from '@/lib/stripe-client'
-import { calculateServiceFee } from '@/lib/constants'
+import { checkoutRefusal } from '@/lib/checkout-floor'
+import { checkoutTotals, fromCents, toCents } from '@/lib/checkout-total'
+import { ORDER_ITEM_LIMIT_MESSAGE, QUANTITY_LIMIT_MESSAGE } from '@/lib/order-limits'
 import { validateDeliveryAddress, streetLineFromPlace, type DeliveryAddressError } from '@/lib/delivery-address'
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
@@ -94,6 +96,22 @@ interface OrderSummary {
   fairSynqFee: number
   serviceFee: number
   total: number
+}
+
+/** What POST /api/orders sends with 409 PRICE_CHANGED (app/api/orders/route.ts). */
+interface PriceChange {
+  newTotal: number
+  newTotalCents: number
+  breakdown: {
+    subtotal: number
+    serviceFee: number
+    deliveryFee: number | null
+    serviceCharge: number | null
+    tip: number | null
+    total: number
+  }
+  /** The checkout inputs this answer was for; a different cart, pickup type or tip voids it. */
+  inputsKey: string
 }
 
 // ─── Stripe appearance ────────────────────────────────────────────────────────
@@ -254,7 +272,10 @@ export default function CheckoutPage() {
   const params = useParams<{ fairSlug: string }>()
   const { isLoaded: authLoaded, isSignedIn } = useAuth()
   const { fair, fairLoading } = useFair()
-  const { items, itemCount, subtotal, clearCart } = useFairCart()
+  // calculatorLines + markupBps feed checkoutTotals (lib/checkout-total.ts), the same calculator the
+  // server charges with (audit H5, 2h). No amount on this page is worked out any other way.
+  // atOrderLimit: the cart holds 15 items (lib/order-limits.ts); the fixed sentence shows in the summary.
+  const { items, itemCount, calculatorLines, markupBps, clearCart, atOrderLimit } = useFairCart()
   const { user } = useUser()
 
   // Redirect unauthenticated users to sign-in with a return URL
@@ -319,6 +340,10 @@ export default function CheckoutPage() {
   const [orderShortId, setOrderShortId] = useState<string | null>(null)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null)
+  // 409 PRICE_CHANGED: the server's new total, waiting for the customer to confirm it.
+  const [priceChange, setPriceChange] = useState<PriceChange | null>(null)
+  // A second click before `submitting` re-renders must not send a second order.
+  const inFlight = useRef(false)
 
   const hasOrder = orderId !== null && clientSecret !== null
 
@@ -326,19 +351,38 @@ export default function CheckoutPage() {
   const isRunnerFulfilled = fulfillmentType === 'HOME_DELIVERY' || fulfillmentType === 'CURBSIDE'
   const configCurbsideFee = fc?.curbsideFee ?? 0
 
-  // Service fee estimate (before order creation) — single source of truth.
-  // Must match the backend's calculateServiceFee and the final Stripe charge.
   const estimatedDeliveryFee =
     fulfillmentType === 'HOME_DELIVERY' ? configDeliveryFee
     : fulfillmentType === 'CURBSIDE'    ? configCurbsideFee
     : 0
-  const estimatedServiceFee = calculateServiceFee(subtotal)
   // Tip — runner-fulfilled only; 100% the runner's; NO service fee, NO split.
   const tipAmount = isRunnerFulfilled ? tip : 0
-  // 5-term identity: subtotal + serviceFee(10%) + deliveryFee + serviceCharge + tip.
-  const estimatedTotal = parseFloat(
-    (subtotal + estimatedDeliveryFee + serviceChargeAmount + estimatedServiceFee + tipAmount).toFixed(2),
-  )
+
+  // THE ONE CALCULATION (lib/checkout-total.ts), the same function POST /api/orders charges with:
+  // online food (per unit, half-up) + 10% service fee on the IN-PERSON food + delivery/curbside fee
+  // + service charge + tip, all in cents. Every amount this page shows comes from `totals`, and its
+  // total is sent as expectedTotalCents: the server refuses (409) rather than charge anything else.
+  const totals = useMemo(() => checkoutTotals({
+    lines: calculatorLines,
+    markupBps,
+    deliveryFeeCents: toCents(estimatedDeliveryFee),
+    serviceChargeCents: toCents(serviceChargeAmount),
+    tipCents: toCents(tipAmount),
+  }), [calculatorLines, markupBps, estimatedDeliveryFee, serviceChargeAmount, tipAmount])
+  const money = (cents: number) => `$${fromCents(cents).toFixed(2)}`
+
+  // Checkout floor (audit H5, Step 2b): the SAME function POST /api/orders runs, on the same
+  // totals, so the customer sees the refusal before submitting instead of after. The server is
+  // still the gate: it re-prices from the database and refuses on its own numbers.
+  const floorRefusal = checkoutRefusal({
+    subtotalCents: totals.onlineSubtotalCents,
+    totalCents: totals.totalCents,
+  })
+
+  // A 409 answer applies only to the exact inputs it was given for. If the customer then changes
+  // the cart, the pickup type or the tip, it no longer applies and the panel goes away.
+  const inputsKey = JSON.stringify([calculatorLines, markupBps, fulfillmentType, totals.deliveryFeeCents, totals.serviceChargeCents, totals.tipCents])
+  const activePriceChange = priceChange && priceChange.inputsKey === inputsKey ? priceChange : null
 
   const estimatedReadyMin = useMemo(() => {
     const times = items.map(i => i.prepTime).filter((t): t is number => t != null)
@@ -442,12 +486,23 @@ export default function CheckoutPage() {
     return true
   }
 
-  const handlePlaceOrder = async () => {
+  /**
+   * Places the order, telling the server the exact total the customer agreed to.
+   *   - "Continue to Payment" passes totals.totalCents (what the page shows);
+   *   - "Confirm" after a 409 passes the SERVER'S newTotalCents, never a browser recalculation.
+   * Any other total is refused by the server (409) and nothing is charged. No automatic retry.
+   */
+  const handlePlaceOrder = async (expectedTotalCents: number) => {
     if (!isSignedIn) {
       router.push(`/login?redirect=${encodeURIComponent(`/fair/${params.fairSlug}/checkout`)}`)
       return
     }
     if (!validate()) return
+    // The button is disabled while the floor refuses; this covers any other way of calling it.
+    if (floorRefusal) return
+    // One order at a time: a second click before the first answer is ignored.
+    if (inFlight.current) return
+    inFlight.current = true
     setSubmitting(true)
     try {
       const res = await fetch('/api/orders', {
@@ -459,6 +514,10 @@ export default function CheckoutPage() {
           customerName: form.name.trim(),
           customerPhone: form.phone.trim(),
           tip: tipAmount > 0 ? tipAmount : undefined,
+          // The total the customer saw (or confirmed): the server charges exactly this, or refuses.
+          expectedTotalCents,
+          // Each line names an item and a quantity only. Never a price: the server works prices
+          // out itself and refuses any price field (400 CLIENT_PRICE_NOT_ACCEPTED).
           items: items.map(i => ({
             menuItemId: i.menuItemId,
             vendorId: i.vendorId,
@@ -485,6 +544,18 @@ export default function CheckoutPage() {
       })
 
       const json = await res.json()
+      if (!json.success && json.error?.code === 'PRICE_CHANGED') {
+        // Prices changed since this page worked out its total (a markup, a vendor price or a fee).
+        // Nothing was charged. Show the server's new total and breakdown; the customer must
+        // confirm before anything is tried again. If prices change again, this asks again.
+        const d = json.error.details as Omit<PriceChange, 'inputsKey'> | undefined
+        if (d && Number.isInteger(d.newTotalCents) && d.breakdown) {
+          setPriceChange({ newTotal: d.newTotal, newTotalCents: d.newTotalCents, breakdown: d.breakdown, inputsKey })
+        } else {
+          toast.error('Prices have changed. Please review your order and try again.')
+        }
+        return
+      }
       if (!json.success) {
         // REVIEWED INTENTIONAL EXCEPTION (scripts/toast-leak-guard.ts allowlist).
         // Surface the SERVER'S OWN sentence. A generic "failed to create order" hides the one
@@ -501,6 +572,16 @@ export default function CheckoutPage() {
           return
         }
         const code: string | undefined = json.error?.code
+        // ORDER LIMITS (Jordan, Nov 17): the page's own fixed sentences (lib/order-limits.ts), not
+        // the server's text, with the cart's toast ids so a sentence already showing isn't repeated.
+        if (code === 'ORDER_ITEM_LIMIT') {
+          toast.error(ORDER_ITEM_LIMIT_MESSAGE, { id: 'cart-limit-total' })
+          return
+        }
+        if (code === 'QUANTITY_LIMIT') {
+          toast.error(QUANTITY_LIMIT_MESSAGE, { id: 'cart-limit-dish' })
+          return
+        }
         if (code === 'OUT_OF_DELIVERY_RANGE' || code === 'ADDRESS_NOT_FOUND') {
           setAreaCheck({ state: 'out', text: message })
         }
@@ -508,6 +589,7 @@ export default function CheckoutPage() {
         return
       }
 
+      setPriceChange(null)
       setOrderId(json.data.orderId)
       setOrderShortId(json.data.shortId ?? json.data.orderId.slice(-8).toUpperCase())
       setClientSecret(json.data.clientSecret)
@@ -515,6 +597,7 @@ export default function CheckoutPage() {
     } catch {
       toast.error('Network error — please try again')
     } finally {
+      inFlight.current = false
       setSubmitting(false)
     }
   }
@@ -813,9 +896,58 @@ export default function CheckoutPage() {
                   </div>
                 )}
 
+                {floorRefusal && (
+                  <p role="alert" className="mb-3 text-sm text-red-400">
+                    {floorRefusal.message}
+                  </p>
+                )}
+                {activePriceChange ? (
+                  // 409 PRICE_CHANGED: the server's new total and breakdown. Confirm resubmits with
+                  // the SERVER'S total (activePriceChange.newTotalCents), never a recalculation.
+                  <div role="alert" className="mb-3 p-4 rounded-xl border border-[#FF0077]/40 bg-[#FF0077]/10">
+                    <p className="text-white font-bold text-sm mb-1">
+                      Prices updated — new total {money(activePriceChange.newTotalCents)}
+                    </p>
+                    <p className="text-[#A1A1A1] text-xs mb-3">
+                      Prices changed since you opened checkout. You have not been charged. Please confirm the new total to continue.
+                    </p>
+                    <div className="space-y-1 text-xs mb-4">
+                      <div className="flex justify-between"><span className="text-[#A1A1A1]">Subtotal</span><span className="text-white">{money(toCents(activePriceChange.breakdown.subtotal))}</span></div>
+                      {(activePriceChange.breakdown.deliveryFee ?? 0) > 0 && (
+                        <div className="flex justify-between"><span className="text-[#A1A1A1]">{fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}</span><span className="text-white">{money(toCents(activePriceChange.breakdown.deliveryFee))}</span></div>
+                      )}
+                      {(activePriceChange.breakdown.serviceCharge ?? 0) > 0 && (
+                        <div className="flex justify-between"><span className="text-[#A1A1A1]">Event service charge</span><span className="text-white">{money(toCents(activePriceChange.breakdown.serviceCharge))}</span></div>
+                      )}
+                      <div className="flex justify-between"><span className="text-[#A1A1A1]">Service Fee</span><span className="text-white">{money(toCents(activePriceChange.breakdown.serviceFee))}</span></div>
+                      {(activePriceChange.breakdown.tip ?? 0) > 0 && (
+                        <div className="flex justify-between"><span className="text-[#A1A1A1]">Tip (runner)</span><span className="text-white">{money(toCents(activePriceChange.breakdown.tip))}</span></div>
+                      )}
+                      <div className="flex justify-between font-bold pt-1 border-t border-white/10"><span className="text-white">New total</span><span className="text-[#FF0077]">{money(activePriceChange.newTotalCents)}</span></div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handlePlaceOrder(activePriceChange.newTotalCents)}
+                        disabled={submitting || !!floorRefusal}
+                        className="flex-1 py-3 bg-[#FF0077] text-black font-bold rounded-xl hover:bg-[#ff3399] transition-colors uppercase tracking-wide text-sm border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {submitting ? 'Loading…' : `Confirm ${money(activePriceChange.newTotalCents)}`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPriceChange(null)}
+                        disabled={submitting}
+                        className="px-4 py-3 bg-transparent border border-white/20 text-white rounded-xl text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                 <button
-                  onClick={handlePlaceOrder}
-                  disabled={submitting}
+                  onClick={() => handlePlaceOrder(totals.totalCents)}
+                  disabled={submitting || !!floorRefusal}
                   className="w-full flex items-center justify-center gap-2 py-4 bg-[#FF0077] text-black font-bold rounded-xl hover:bg-[#ff3399] transition-colors duration-200 uppercase tracking-wide border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
@@ -830,6 +962,7 @@ export default function CheckoutPage() {
                     </>
                   )}
                 </button>
+                )}
               </>
             )}
           </div>
@@ -839,8 +972,14 @@ export default function CheckoutPage() {
             <div className="bg-[#1A1A1A] border border-white/10 rounded-2xl p-6 lg:sticky lg:top-36">
               <h2 className="font-bebas text-xl tracking-wide text-white mb-5">Order Summary</h2>
 
+              {atOrderLimit && (
+                <p className="-mt-3 mb-4 text-xs leading-snug text-amber-300" role="status">
+                  {ORDER_ITEM_LIMIT_MESSAGE}
+                </p>
+              )}
+
               <div className="space-y-3 mb-5 max-h-64 overflow-y-auto -mx-1 px-1">
-                {items.map(item => (
+                {items.map((item, idx) => (
                   <div key={item.menuItemId} className="flex gap-3 pb-3 border-b border-white/5 last:border-0 last:pb-0">
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.name} className="w-14 h-14 object-cover rounded-lg flex-shrink-0" />
@@ -853,7 +992,7 @@ export default function CheckoutPage() {
                       <p className="text-white font-semibold text-sm truncate">{item.name}</p>
                       {item.vendorName && <p className="text-[#A1A1A1] text-xs">{item.vendorName}</p>}
                       <p className="text-[#FF0077] font-bold text-sm mt-0.5">
-                        {item.quantity} × ${(item.price ?? 0).toFixed(2)}
+                        {item.quantity} × {money(totals.unitCents[idx] ?? 0)}
                       </p>
                     </div>
                   </div>
@@ -911,30 +1050,30 @@ export default function CheckoutPage() {
               <div className="space-y-2 pb-4 border-b border-white/10 text-sm">
                 <div className="flex justify-between">
                   <span className="text-[#A1A1A1]">Subtotal</span>
-                  <span className="text-white">${(orderSummary?.subtotal ?? subtotal).toFixed(2)}</span>
+                  <span className="text-white">{orderSummary ? money(toCents(orderSummary.subtotal)) : money(totals.onlineSubtotalCents)}</span>
                 </div>
                 {isRunnerFulfilled && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">{fulfillmentType === 'CURBSIDE' ? 'Curbside Fee' : 'Delivery Fee'}</span>
-                    <span className="text-white">${(orderSummary?.deliveryFee ?? estimatedDeliveryFee).toFixed(2)}</span>
+                    <span className="text-white">{orderSummary ? money(toCents(orderSummary.deliveryFee)) : money(totals.deliveryFeeCents)}</span>
                   </div>
                 )}
-                {serviceChargeAmount > 0 && (
+                {(orderSummary ? (orderSummary.serviceCharge ?? 0) > 0 : totals.serviceChargeCents > 0) && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">Event service charge</span>
-                    <span className="text-white">${(serviceChargeAmount ?? 0).toFixed(2)}</span>
+                    <span className="text-white">{orderSummary ? money(toCents(orderSummary.serviceCharge)) : money(totals.serviceChargeCents)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
                   <span className="text-[#A1A1A1]">Service Fee</span>
                   <span className="text-white">
-                    ${(orderSummary?.serviceFee ?? estimatedServiceFee).toFixed(2)}
+                    {orderSummary ? money(toCents(orderSummary.serviceFee)) : money(totals.serviceFeeCents)}
                   </span>
                 </div>
-                {((orderSummary?.tip ?? tipAmount) > 0) && (
+                {(orderSummary ? (orderSummary.tip ?? 0) > 0 : totals.tipCents > 0) && (
                   <div className="flex justify-between">
                     <span className="text-[#A1A1A1]">Tip (runner)</span>
-                    <span className="text-white">${(orderSummary?.tip ?? tipAmount).toFixed(2)}</span>
+                    <span className="text-white">{orderSummary ? money(toCents(orderSummary.tip)) : money(totals.tipCents)}</span>
                   </div>
                 )}
               </div>
@@ -944,9 +1083,7 @@ export default function CheckoutPage() {
                   {orderSummary ? 'Total' : 'Est. Total'}
                 </span>
                 <span className="text-[#FF0077] font-bold text-xl">
-                  ${orderSummary
-                    ? (orderSummary.total ?? 0).toFixed(2)
-                    : (estimatedTotal ?? 0).toFixed(2)}
+                  {orderSummary ? money(toCents(orderSummary.total)) : money(totals.totalCents)}
                 </span>
               </div>
             </div>

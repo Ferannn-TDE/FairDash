@@ -39,9 +39,14 @@ function assert(cond: boolean, label: string) {
   else { fail++; console.log(`  ❌ ${label}`) }
 }
 
+/** Reads a source file as text with LF endings, so the scans behave the same on a CRLF checkout. */
+function readSource(path: string): string {
+  return readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
+}
+
 /** Strip block and line comments so a scan matches code rather than the prose beside it. */
 function codeOf(path: string): string {
-  return readFileSync(path, 'utf8')
+  return readSource(path)
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n')
 }
@@ -55,7 +60,7 @@ function main() {
 
   // ── [0] THE SCANNER SEES CODE, NOT COMMENTS ────────────────────────────────────────────
   console.log('\n[0] the scanner reads code, not the prose beside it')
-  const raw = readFileSync(PAGE, 'utf8')
+  const raw = readSource(PAGE)
   assert(/silently DEAD under that tab/.test(raw) && !/silently DEAD under that tab/.test(page),
     'comment-stripping works — prose in the raw file is absent from the scanned code')
 

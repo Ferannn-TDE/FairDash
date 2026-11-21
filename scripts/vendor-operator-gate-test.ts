@@ -43,6 +43,11 @@ import {
   type VendorOperatorFacts,
 } from '../lib/vendor-operator-state'
 
+/** Reads a source file as text with LF endings, so the scans behave the same on a CRLF checkout. */
+function readSource(path: string): string {
+  return readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
+}
+
 let pass = 0, fail = 0
 function assert(cond: boolean, label: string) {
   if (cond) { pass++; console.log(`  ✅ ${label}`) }
@@ -136,8 +141,8 @@ async function main() {
   // ── [6] 🔴 CLIENT-BUNDLE PURITY — the failure that type-checking cannot see ─
   console.log('\n[6] 🔴 no client file on this path reaches a server-only module')
   const SERVER_ONLY = ['lib/db', '@prisma/client', 'stripe', 'ioredis', 'firebase-admin', '@clerk/nextjs/server']
-  const stateSrc  = readFileSync('lib/vendor-operator-state.ts', 'utf8')
-  const screenSrc = readFileSync('app/vendor/_components/VendorOperatorGateScreen.tsx', 'utf8')
+  const stateSrc  = readSource('lib/vendor-operator-state.ts')
+  const screenSrc = readSource('app/vendor/_components/VendorOperatorGateScreen.tsx')
 
   assert(/^'use client'/m.test(screenSrc), 'positive control: the gate screen really is a client component')
   // The policy module is what the client file imports, so it is the edge that must stay clean.
@@ -164,7 +169,7 @@ async function main() {
 
   // ── [7] the hand-written status union matches the real enum ─────────────────
   console.log('\n[7] the local ApprovalStatus union has not drifted from schema.prisma')
-  const schema = readFileSync('prisma/schema.prisma', 'utf8')
+  const schema = readSource('prisma/schema.prisma')
   const enumBlock = schema.match(/enum ApprovalStatus\s*\{([^}]*)\}/)?.[1] ?? ''
   const values = enumBlock.split('\n').map(s => s.trim()).filter(Boolean)
   assert(values.length === 3, `the enum still has 3 values (got ${values.length}: ${values.join(',')})`)
@@ -174,7 +179,7 @@ async function main() {
 
   // ── [8] the door is wired — the gate is actually CALLED by the layout ───────
   console.log('\n[8] app/vendor/layout.tsx actually runs this gate (wiring, not just existence)')
-  const layout = readFileSync('app/vendor/layout.tsx', 'utf8')
+  const layout = readSource('app/vendor/layout.tsx')
   assert(layout.includes('vendorOperatorState('), 'the layout calls vendorOperatorState')
   assert(layout.includes('isVendorGateCarveOut('), 'the layout applies the carve-out')
   assert(layout.includes('VendorOperatorGateScreen'), 'the layout renders the gate screen')
@@ -193,7 +198,7 @@ async function main() {
   // false. A stale version of it is at its most dangerous precisely when it stops being true:
   // an admin told a rejection is inert, while it locks an operator out of a booth mid-fair.
   console.log('\n[9] the admin panel tells the truth about enforcement')
-  const panelRaw = readFileSync('app/admin/_components/VendorOperatorsPanel.tsx', 'utf8')
+  const panelRaw = readSource('app/admin/_components/VendorOperatorsPanel.tsx')
   // Strip comments first: the doc block above the banner QUOTES the old wording to explain why
   // it was retired, and a whole-file scan fires on that explanation rather than on anything an
   // admin can read. Same code-vs-prose distinction as [8]. What ships to the screen is the
@@ -214,7 +219,7 @@ async function main() {
   // where the screen POINTS, or about whether clicking it navigates at all. Both halves live
   // here now.
   console.log('\n[10] the gate screen links to exactly the routes the door carves out')
-  const screen = readFileSync('app/vendor/_components/VendorOperatorGateScreen.tsx', 'utf8')
+  const screen = readSource('app/vendor/_components/VendorOperatorGateScreen.tsx')
 
   // (a) ROUND-TRIP: every path the screen can build is one the door lets through. Derived from
   //     the shared builder, so this cannot drift into two hand-written copies of the path set.
@@ -298,13 +303,13 @@ async function main() {
   assert(/vendorCarveOutPath\(/.test(screen),
     'positive control: the gate screen DOES render links (the exits) — so "no portal link" is not "no links at all"')
   // It is rendered BARE by the layout — no portal chrome — matching OrganizerGateScreen.
-  const layoutSrc = readFileSync('app/vendor/layout.tsx', 'utf8')
+  const layoutSrc = readSource('app/vendor/layout.tsx')
   assert(/return <VendorOperatorGateScreen[^>]*\/>/.test(layoutSrc),
     'the gate screen is returned standalone, not wrapped in the portal shell')
 
   // ── [13] both nav surfaces are filtered, and from the SHARED source ────────
   console.log('\n[13] the shell derives its nav from the door\'s verdict (both surfaces)')
-  const shellRaw = readFileSync('app/vendor/[fairSlug]/_components/VendorPortalShell.tsx', 'utf8')
+  const shellRaw = readSource('app/vendor/[fairSlug]/_components/VendorPortalShell.tsx')
   // Strip comments FIRST. A raw count of `vendorShellNavKeys(` silently included the phrase from
   // a doc comment, so unfiltering the mobile nav still left two "call sites" and this check
   // passed while the hole was open. Same code-vs-prose trap as [8] and [9]; caught by the
@@ -331,7 +336,7 @@ async function main() {
     'the shell no longer hand-rolls its own nav list — the key set is shared with the door')
   assert(/useVendorAdmittance\(/.test(shell),
     'the shell reads the DOOR\'s verdict rather than deriving admittance a second time')
-  const provider = readFileSync('app/vendor/_components/VendorAdmittanceProvider.tsx', 'utf8')
+  const provider = readSource('app/vendor/_components/VendorAdmittanceProvider.tsx')
   for (const mod of SERVER_ONLY) {
     assert(!importsServerOnly(provider, mod), `the admittance provider does not import ${mod} (§7)`)
   }
@@ -368,7 +373,7 @@ async function main() {
   // The whole point of step 4. Existence of the helper proves nothing — [15] asserts the two
   // routes that could previously be driven by a non-admitted operator actually call it.
   console.log('\n[15] requireVendorMayOperate is called by the action verbs')
-  const authSrc = readFileSync('lib/auth.ts', 'utf8')
+  const authSrc = readSource('lib/auth.ts')
   assert(/export async function requireVendorMayOperate\(/.test(authSrc), 'the gate helper exists')
   // It must read FRESH. Routing it through the 600s membership cache would keep a just-rejected
   // operator working for ~10 minutes — the same trap the door refuses at [8].
@@ -386,7 +391,7 @@ async function main() {
     'app/api/vendors/[id]/route.ts',
   ] as const
   for (const route of ACTION_ROUTES) {
-    const src = readFileSync(route, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    const src = readSource(route).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     assert(/requireVendorMayOperate\(/.test(src), `${route} calls the gate (code, not comment)`)
   }
   // NEGATIVE CONTROL on that probe: comment-stripping is what makes the assertion above mean
@@ -407,7 +412,7 @@ async function main() {
     'app/api/vendors/[id]/documents/route.ts',
   ] as const
   for (const route of CARVE_OUT_ROUTES) {
-    const src = strip(readFileSync(route, 'utf8'))
+    const src = strip(readSource(route))
     assert(!/requireVendorMayOperate\(/.test(src),
       `${route} is NOT gated — a gated operator must still be able to become approvable`)
   }

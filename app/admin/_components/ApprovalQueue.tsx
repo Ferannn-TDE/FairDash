@@ -51,7 +51,14 @@ export default function ApprovalQueue({
     try {
       const res = await fetch(approveUrl(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' } })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json.success) { setError(json.error?.message ?? 'Could not approve'); return }
+      if (!res.ok || !json.success) {
+        // Name what is missing when the server lists it (e.g. a booth owner's approval that also
+        // approves the booth: Stripe payouts, documents, menu, booth number).
+        const missing = json.error?.details?.missing as string[] | undefined
+        const msg = json.error?.message ?? 'Could not approve'
+        setError(missing?.length && !msg.includes(missing[0]) ? `${msg} Missing: ${missing.join(', ')}.` : msg)
+        return
+      }
       onResolved()
     } catch { setError('Network error') } finally { setBusy(null) }
   }
