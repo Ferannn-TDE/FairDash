@@ -243,12 +243,43 @@ export interface PayoutResult {
  */
 export const NON_PAYABLE_VENDOR_STATUSES = new Set(['DECLINED', 'REFUNDED', 'CANCELLED'])
 
+/** Order states where a WORKED portion closed CANCELLED is still owed its earning (payout gap fix, 2026-11-22). */
+export const WORKED_PORTION_PAYABLE_ORDER_STATUSES = new Set(['UNDELIVERABLE', 'UNCOLLECTED'])
+
+/**
+ * THE ONE payable rule for a vendor portion (BATCH-1 §19, payout gap Q1). Used by the accrual gate, reconciler
+ * Pattern S, the accrual reverser, Pattern T and the executor, so they can't drift.
+ *   DECLINED / REFUNDED            → never payable.
+ *   CANCELLED                      → payable ONLY when ALL hold: the order is UNDELIVERABLE or UNCOLLECTED (the order
+ *                                    died after the food was made), that vendor has no completed refund, and the
+ *                                    portion has acceptedAt (proof the vendor worked it). Otherwise not payable —
+ *                                    which keeps the July phantom-earning case (refunded/cancelled orders) blocked and
+ *                                    leaves operator-cancelled orders exactly as before.
+ *   anything else                  → payable.
+ */
+export function isPortionPayable(
+  portion: { status: string; acceptedAt?: Date | null },
+  ctx: { orderStatus: string; vendorRefunded: boolean },
+): boolean {
+  if (portion.status === 'DECLINED' || portion.status === 'REFUNDED') return false
+  if (portion.status === 'CANCELLED') {
+    return WORKED_PORTION_PAYABLE_ORDER_STATUSES.has(ctx.orderStatus) && !ctx.vendorRefunded && !!portion.acceptedAt
+  }
+  return true
+}
+
+/** Vendors with a COMPLETED refund on the order (the "vendor refunded" input to isPortionPayable). */
+export const refundedVendorIds = (refunds: { vendorId: string; status: string }[]) =>
+  new Set(refunds.filter(r => r.status === 'COMPLETED').map(r => r.vendorId))
+
 export function payableVendorIds(
   orderItems: { vendorId: string }[],
-  vendorStatuses: { vendorId: string; status: string }[],
+  vendorStatuses: { vendorId: string; status: string; acceptedAt?: Date | null }[],
+  ctx: { orderStatus: string; refunds: { vendorId: string; status: string }[] },
 ): Set<string> {
+  const refunded = refundedVendorIds(ctx.refunds)
   const excluded = new Set(
-    vendorStatuses.filter(v => NON_PAYABLE_VENDOR_STATUSES.has(v.status)).map(v => v.vendorId),
+    vendorStatuses.filter(v => !isPortionPayable(v, { orderStatus: ctx.orderStatus, vendorRefunded: refunded.has(v.vendorId) })).map(v => v.vendorId),
   )
   return new Set(orderItems.map(i => i.vendorId).filter(v => !excluded.has(v)))
 }
@@ -257,14 +288,15 @@ export async function accrueVendorEarnings(orderId: string): Promise<number> {
   const order = await db.order.findUnique({
     where: { id: orderId },
     select: {
-      id: true, eventId: true,
+      id: true, eventId: true, status: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
-      vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      vendorOrderStatuses: { select: { vendorId: true, status: true, acceptedAt: true } },
+      refunds: { select: { vendorId: true, status: true } },
     },
   })
   if (!order) return 0
 
-  const payable = payableVendorIds(order.orderItems, order.vendorOrderStatuses)
+  const payable = payableVendorIds(order.orderItems, order.vendorOrderStatuses, { orderStatus: order.status, refunds: order.refunds })
   const subtotals: Record<string, number> = {}
   for (const item of order.orderItems) {
     if (!payable.has(item.vendorId)) continue // refunded/declined/cancelled portion — no earning owed
@@ -320,6 +352,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
       serviceCharge: true,
       tip: true,
       taxCents: true, // B1.19
+      status: true, // payout gap Q4: an UNDELIVERABLE order's partner earns nothing
       total: true,
       stripeChargeId: true,
       stripePaymentIntentId: true,
@@ -392,6 +425,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
         serviceFeeCents, runnerFeeCents: deliveryCents, tipCents,
         cardFeesPaidBy: (order.cardFeesPaidBy ?? 'VENDOR') as CardFeesPaidBy, realStripeFeeCents: stripeFeeCents,
         vendorTaxCents: Object.fromEntries(order.vendorTaxes.map(t => [t.vendorId, t.salesTaxCents + t.localTaxCents])),
+        partnerEarns: order.status !== 'UNDELIVERABLE',
       })
     : null
   // B1.19: tax exists only on feeModel 2 orders (the order route is the only writer). A legacy order carrying tax
@@ -410,7 +444,7 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     }),
     db.vendorOrderStatus.findMany({
       where: { orderId },
-      select: { vendorId: true, status: true },
+      select: { vendorId: true, status: true, acceptedAt: true },
     }),
     // C1: the hold anchor — accrued above, so a row exists for every payable vendor.
     db.vendorEarning.findMany({
@@ -425,6 +459,10 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   ])
   const vendorMap = new Map(vendors.map(v => [v.id, v]))
   const statusMap = new Map(statuses.map(s => [s.vendorId, s.status]))
+  const portionMap = new Map(statuses.map(s => [s.vendorId, s]))
+  // The shared payable rule needs the order's state and which vendors were refunded.
+  const payCtx = await db.order.findUnique({ where: { id: orderId }, select: { status: true, refunds: { select: { vendorId: true, status: true } } } })
+  const refundedForPay = refundedVendorIds(payCtx?.refunds ?? [])
   const earningMap = new Map(earnings.map(e => [e.vendorId, e]))
   const transferVendorIds = new Set(existingPayouts.map(p => p.vendorId))
 
@@ -446,7 +484,10 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
     // window is marked REFUNDED, so when this DELAYED payout finally fires it
     // skips them and still pays every other vendor on the cart.
     const status = statusMap.get(line.vendorId)
-    const declined = status === 'DECLINED' || status === 'REFUNDED'
+    // Payout gap fix: the ONE payable rule decides (a worked CANCELLED portion on an UNDELIVERABLE / UNCOLLECTED order is
+    // payable; any other CANCELLED portion is skipped like DECLINED / REFUNDED). A vendor with no portion row stays payable.
+    const portion = portionMap.get(line.vendorId)
+    const declined = !!portion && !isPortionPayable(portion, { orderStatus: payCtx?.status ?? '', vendorRefunded: refundedForPay.has(line.vendorId) })
     const earning = earningMap.get(line.vendorId)
 
     // The decision is a pure function (classifyVendorSlice) so it can be proven with a
@@ -493,9 +534,12 @@ export async function processOrderPayout(orderId: string): Promise<PayoutResult>
   //   in the identity, or an admin hold would look like money that vanished.
   // feeModel 2: FairSynq keeps its NET (service fee − its processing share), the partner's curbside
   // fee + tip sit HELD net of its share (PartnerEarning), and the stored split's fee is the real fee.
+  // Payout gap Q4: on a feeModel 2 UNDELIVERABLE order the curbside fee + tip are OWED BACK to the customer (owed-back
+  // refunds them, before or after this payout), not held for the partner — so they sit on this side as owed back.
+  const owedBackCents = exhibitA && order.status === 'UNDELIVERABLE' ? deliveryCents + tipCents : 0
   const payoutSide = sentCents + alreadyPaidCents + heldCents + blockedCents + skippedCents + serviceChargeCents
     + (exhibitA
-      ? exhibitA.fairsynqNetCents + exhibitA.partnerNetCents + exhibitA.realStripeFeeCents
+      ? exhibitA.fairsynqNetCents + exhibitA.partnerNetCents + exhibitA.realStripeFeeCents + owedBackCents
       : serviceFeeCents + deliveryCents + tipCents + stripeFeeCents)
   if (payoutSide !== totalCents) {
     throw new PayoutReconciliationError(

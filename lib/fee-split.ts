@@ -34,6 +34,9 @@ export async function ensureOrderFeeSplit(input: {
   realStripeFeeCents: number
   /** B1.19: each vendor's stored tax (OrderVendorTax, both parts). Absent = no tax. */
   vendorTaxCents?: Record<string, number>
+  /** Payout gap Q4: false on an UNDELIVERABLE order — the run wasn't completed, owed-back refunds the curbside fee + tip,
+   *  so NO PartnerEarning; the partner's processing share is still recorded and FairSynq absorbs it (C-4). */
+  partnerEarns?: boolean
 }): Promise<FeeModel2Split> {
   const existing = await readSplit(input.orderId)
   if (existing) {
@@ -55,7 +58,11 @@ export async function ensureOrderFeeSplit(input: {
     vendorTaxCents: input.vendorTaxCents, // B1.19: paid out with each vendor's food; its processing rides with them
   })
   const vendorIds = Object.keys(input.vendorFoodCents)
-  const partnerBase = input.runnerFeeCents + input.tipCents
+  const partnerEarns = input.partnerEarns !== false
+  // Partner paid nothing (UNDELIVERABLE): its share of the real fee moves onto FairSynq's net (C-4); its net is 0.
+  const fairsynqNetCents = partnerEarns ? plan.fairsynqNetCents : plan.fairsynqNetCents - (plan.feeShares.partner ?? 0)
+  const partnerNetCents = partnerEarns ? plan.partnerNetCents : 0
+  const partnerBase = partnerEarns ? input.runnerFeeCents + input.tipCents : 0
   try {
     await db.$transaction(async (tx) => {
       const split = await tx.orderFeeSplit.create({
@@ -63,9 +70,9 @@ export async function ensureOrderFeeSplit(input: {
           orderId: input.orderId, eventId: input.eventId,
           realStripeFeeCents: input.realStripeFeeCents,
           fairsynqShareCents: plan.feeShares.fairsynq ?? 0,
-          fairsynqNetCents: plan.fairsynqNetCents,
+          fairsynqNetCents,
           partnerShareCents: plan.feeShares.partner ?? 0,
-          partnerNetCents: plan.partnerNetCents,
+          partnerNetCents,
           cardFeesPaidBy: input.cardFeesPaidBy,
         },
       })
@@ -79,7 +86,7 @@ export async function ensureOrderFeeSplit(input: {
       })
       if (partnerBase > 0) {
         await tx.partnerEarning.create({
-          data: { eventId: input.eventId, orderId: input.orderId, amountCents: plan.partnerNetCents, status: 'held' },
+          data: { eventId: input.eventId, orderId: input.orderId, amountCents: partnerNetCents, status: 'held' },
         })
       }
     })
@@ -93,7 +100,7 @@ export async function ensureOrderFeeSplit(input: {
   }
   logger.warn('[FeeSplit] Exhibit A split recorded', {
     orderId: input.orderId, realStripeFeeCents: input.realStripeFeeCents, feeShares: plan.feeShares,
-    fairsynqNetCents: plan.fairsynqNetCents, partnerHeldCents: partnerBase > 0 ? plan.partnerNetCents : 0,
+    fairsynqNetCents, partnerHeldCents: partnerBase > 0 ? partnerNetCents : 0, partnerEarns,
   })
   const stored = await readSplit(input.orderId)
   return { ...stored!, created: true }

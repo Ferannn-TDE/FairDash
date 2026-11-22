@@ -54,12 +54,15 @@ async function main() {
       { vendorId: 'B', status: 'REFUNDED' },
       { vendorId: 'C', status: 'DECLINED' },
     ]
-    const payable = payableVendorIds(items, vos)
+    // Updated 2026-11-22 (payout gap Q1): the rule now also needs the order's state and its refunds.
+    const ctx = { orderStatus: 'COMPLETED', refunds: [] as { vendorId: string; status: string }[] }
+    const payable = payableVendorIds(items, vos, ctx)
     assert(payable.has('A'), 'COMPLETED portion → payable')
     assert(!payable.has('B'), '⛔ REFUNDED portion → NOT payable')
     assert(!payable.has('C'), '⛔ DECLINED portion → NOT payable')
-    assert(payableVendorIds(items, []).size === 3, 'no VOS rows → all payable (legacy orders keep accruing)')
-    assert(NON_PAYABLE_VENDOR_STATUSES.has('CANCELLED'), 'CANCELLED is in the exclusion set')
+    assert(payableVendorIds(items, [], ctx).size === 3, 'no VOS rows → all payable (legacy orders keep accruing)')
+    assert(NON_PAYABLE_VENDOR_STATUSES.has('CANCELLED') && !payableVendorIds([{ vendorId: 'D' }], [{ vendorId: 'D', status: 'CANCELLED', acceptedAt: new Date() }], ctx).has('D'),
+      'CANCELLED on a COMPLETED order is not payable (the payout-gap exception covers UNDELIVERABLE / UNCOLLECTED only)')
 
     // ── seed: one order, vendor P portion COMPLETED (real gap), vendor R portion REFUNDED ─
     const ev = await prisma.event.create({ data: { name: `ACCX ${rand()}`, urlSlug: `${SLUG}${rand()}`, startDate: new Date(), endDate: new Date(Date.now() + 864e5), status: 'ACTIVE' } })

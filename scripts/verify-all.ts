@@ -126,6 +126,7 @@ const SUITES: Suite[] = [
   { group: 'money',       name: 'fees-stage4',            file: 'scripts/fees-stage4-test.ts' },
   { group: 'money',       name: 'tax',                    file: 'scripts/tax-test.ts' },
   { group: 'money',       name: 'refunds-stage5',         file: 'scripts/refunds-stage5-test.ts' },
+  { group: 'money',       name: 'payout-gap',             file: 'scripts/payout-gap-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
   { group: 'money',       name: 'earnings-invariant',     file: 'scripts/earnings-invariant-guard.ts' },
   { group: 'correctness', name: 'incoming-divergence',    file: 'scripts/incoming-divergence-guard.ts' },
@@ -244,7 +245,7 @@ const AREA_SUITES: Record<string, string[]> = {
   // Delivery custody / runner escape path (Commit 2). Touched-area guards + the cross-cutting
   // runner boundary + one reconcile guard (the smoke set that catches breakage they didn't mean).
   delivery: ['collect-guard', 'release-guard', 'return-guard', 'strand-guard', 'ghost-guard', 'escalation-guard', 'runner-boundary', 'reverser-pattern-t'],
-  money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t', 'x2-referral-ack', 'payout-failure-gate', 'money-move-sites', 'stripe-error-class', 'payout-fast-fail', 'connect-url', 'transfer-linkage', 'vendor-fee-coupling', 'payout-failure-marker', 'transfer-existence', 'pollution-cohort', 'sweep-run-record', 'earnings-invariant', 'payout-safety', 'fees-stage4', 'tax', 'refunds-stage5'],
+  money:    ['c1-admin-money-control', 'b2-runner-payout', 'b3-organizer-batch', 'b4-tip-refund', 'payout-split', 'double-pay-guard', 'stuck-money-reader', 'accrual-exclusion', 'reverser-pattern-t', 'x2-referral-ack', 'payout-failure-gate', 'money-move-sites', 'stripe-error-class', 'payout-fast-fail', 'connect-url', 'transfer-linkage', 'vendor-fee-coupling', 'payout-failure-marker', 'transfer-existence', 'pollution-cohort', 'sweep-run-record', 'earnings-invariant', 'payout-safety', 'fees-stage4', 'tax', 'refunds-stage5', 'payout-gap'],
   reconcile:['backstop-warning', 'payout-safety', 'reverser-pattern-t', 'sweep-summary', 'stuck-money-reader', 'health-guard', 'worker-throttle', 'incoming-divergence', 'x2-referral-ack'],
   vendor:   ['vendor-online-gate', 'vendor-online-persist', 'vendor-vos-advance', 'vendor-order-pagination', 'vendor-doc-privacy', 'vendor-public-leak', 'incoming-divergence', 'vendor-operator-grandfather', 'vendor-operator-admittance', 'vendor-operator-gate'],
   // Runner stats surfaces (runner-facing earnings + admin roster): the custody-for-counts /

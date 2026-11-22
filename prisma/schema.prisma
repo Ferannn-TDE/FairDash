@@ -741,6 +741,9 @@ model Order {
 
   // Uncollected (timeout after READY)
   uncollectedAt DateTime?
+  // Payout gap fix (2026-11-22): when the order was marked UNDELIVERABLE — its END TIME for the delayed vendor payout and
+  // reconciler Patterns C/S (like uncollectedAt for UNCOLLECTED). Forward-only: null on orders marked before it shipped.
+  undeliverableAt DateTime?
 
   // Async payout status (set by process-vendor-payout worker)
   payoutStatus PayoutStatus?

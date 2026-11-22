@@ -37,6 +37,8 @@ import { enqueueOrderPayout } from './order-side-effects'
 import { refundVendorPortion } from './process-refund'
 import { retryChargebackClawback } from './process-chargeback'
 import { splitRunnerFee } from './payout-split'
+import { payoutGapEventScope } from './payout-exclusions'
+import { isPortionPayable, refundedVendorIds } from './process-payout'
 import { FEE_MODEL_EXHIBIT_A } from './fees/exhibit-a'
 import { alertPartnerEarningMissing } from './partner-earning-alert'
 import { reconcileRunnerPayouts } from './runner-payout'
@@ -597,25 +599,31 @@ export async function selectPatternCCandidates(o: { windowStart: Date; now: Date
   const windowClosedBefore = new Date(o.now.getTime() - REFUND_WINDOW_MS)
   const orders = await db.order.findMany({
     where: {
-      status: { in: COMPLETE_STATES },
-      completedAt: { gte: o.windowStart, lt: windowClosedBefore },
       voidedAt: null,
+      // Each state keys on ITS OWN end time (payout gap Q3): COMPLETED/DELIVERED on completedAt (unchanged), UNCOLLECTED
+      // on uncollectedAt, UNDELIVERABLE on undeliverableAt (forward-only). The two new states skip protected events
+      // (the shared check, lib/payout-exclusions.ts).
+      OR: [
+        { status: { in: COMPLETE_STATES }, completedAt: { gte: o.windowStart, lt: windowClosedBefore } },
+        { status: OrderStatus.UNCOLLECTED, uncollectedAt: { gte: o.windowStart, lt: windowClosedBefore }, ...payoutGapEventScope() },
+        { status: OrderStatus.UNDELIVERABLE, undeliverableAt: { gte: o.windowStart, lt: windowClosedBefore }, ...payoutGapEventScope() },
+      ],
     },
     select: {
-      id: true, eventId: true,
+      id: true, eventId: true, status: true,
       total: true, fairSynqFee: true, deliveryFee: true, serviceCharge: true, tip: true, taxCents: true,
       orderItems: { select: { vendorId: true, subtotal: true } },
       payouts: { select: { vendorId: true } },
       payoutHolds: { select: { vendorId: true } },
-      refunds: { select: { vendorId: true } },
-      vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      refunds: { select: { vendorId: true, status: true } },
+      vendorOrderStatuses: { select: { vendorId: true, status: true, acceptedAt: true } },
       // C1: admin-gated slices. An admin hold writes NO PayoutHold row (that table is
       // the "pay me when I connect" waiting room that Pattern D drains), so without
       // this the gap check below would see a held vendor as an unpaid gap and
       // re-enqueue the payout on EVERY sweep.
       vendorEarnings: { select: { vendorId: true, status: true } },
     },
-    orderBy: { completedAt: 'asc' },
+    orderBy: [{ completedAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
 
@@ -625,9 +633,13 @@ export async function selectPatternCCandidates(o: { windowStart: Date; now: Date
     const paid = new Set(ord.payouts.map(p => p.vendorId))
     const held = new Set(ord.payoutHolds.map(h => h.vendorId))
     const refunded = new Set(ord.refunds.map(r => r.vendorId))
+    // Not a gap: any portion the ONE payable rule says isn't owed (DECLINED / REFUNDED, and a CANCELLED portion unless it
+    // is a worked one on an UNDELIVERABLE / UNCOLLECTED order). Using the shared rule keeps C from re-queueing a payout
+    // the executor will always skip.
+    const refundedDone = refundedVendorIds(ord.refunds)
     const declined = new Set(
       ord.vendorOrderStatuses
-        .filter(s => s.status === 'DECLINED' || s.status === 'REFUNDED')
+        .filter(s => !isPortionPayable(s, { orderStatus: ord.status, vendorRefunded: refundedDone.has(s.vendorId) }))
         .map(s => s.vendorId),
     )
     // C1 — admin-blocked vendors. NOT a gap: the money is deliberately parked in the
@@ -1061,7 +1073,9 @@ async function patternY(sum: SweepSummary, o: { maxPerPattern: number }) {
 export async function selectPartnerEarningMissing(o: { maxPerPattern: number }) {
   return db.order.findMany({
     where: {
-      status: OrderStatus.DELIVERED,
+      // DELIVERED and (payout gap, PG-9) UNCOLLECTED: the run happened, so the partner keeps its share. NEVER UNDELIVERABLE
+      // — that order has no PartnerEarning by design (owed-back refunds the curbside fee + tip; payout gap Q4).
+      status: { in: [OrderStatus.DELIVERED, OrderStatus.UNCOLLECTED] },
       feeModel: FEE_MODEL_EXHIBIT_A,
       OR: [{ deliveryFee: { gt: 0 } }, { tip: { gt: 0 } }],
       orderFeeSplit: { isNot: null },
@@ -1145,7 +1159,7 @@ async function patternL(
   const partnerMissing = await selectPartnerEarningMissing(o)
   for (const ord of partnerMissing) {
     sum.details.L.push(ord.id)
-    sum.alerted.push(`Pattern L: feeModel 2 order ${ord.id} DELIVERED with a ${Math.round((ord.deliveryFee ?? 0) * 100)}¢ curbside fee and ${Math.round((ord.tip ?? 0) * 100)}¢ tip has a fee split but NO PartnerEarning — partner money unrecorded`)
+    sum.alerted.push(`Pattern L: feeModel 2 order ${ord.id} DELIVERED/UNCOLLECTED with a ${Math.round((ord.deliveryFee ?? 0) * 100)}¢ curbside fee and ${Math.round((ord.tip ?? 0) * 100)}¢ tip has a fee split but NO PartnerEarning — partner money unrecorded`)
   }
   // Slack at most once per order per 24 h (Redis key per order; sent anyway if Redis is down).
   if (partnerMissing.length) await alertPartnerEarningMissing(partnerMissing.map(x => x.id))
@@ -1427,15 +1441,20 @@ async function patternR(
 export async function selectPatternSCandidates(o: { windowStart: Date; maxPerPattern: number }): Promise<{ orderId: string; missingVendorIds: string[] }[]> {
   const orders = await db.order.findMany({
     where: {
-      status: { in: COMPLETE_STATES },
-      completedAt: { gte: o.windowStart },
       voidedAt: null,
+      // Same per-state end times as Pattern C (payout gap Q3); the two new states skip protected events.
+      OR: [
+        { status: { in: COMPLETE_STATES }, completedAt: { gte: o.windowStart } },
+        { status: OrderStatus.UNCOLLECTED, uncollectedAt: { gte: o.windowStart }, ...payoutGapEventScope() },
+        { status: OrderStatus.UNDELIVERABLE, undeliverableAt: { gte: o.windowStart }, ...payoutGapEventScope() },
+      ],
     },
     select: {
-      id: true,
+      id: true, status: true,
       orderItems: { select: { vendorId: true } },
       vendorEarnings: { select: { vendorId: true } },
-      vendorOrderStatuses: { select: { vendorId: true, status: true } },
+      vendorOrderStatuses: { select: { vendorId: true, status: true, acceptedAt: true } },
+      refunds: { select: { vendorId: true, status: true } },
     },
     orderBy: { completedAt: 'asc' },
     take: o.maxPerPattern,
@@ -1447,7 +1466,7 @@ export async function selectPatternSCandidates(o: { windowStart: Date; maxPerPat
     // ONE payable definition, shared with accrueVendorEarnings: a REFUNDED/DECLINED/
     // CANCELLED portion is owed NOTHING — counting it here made S write phantom
     // 'accrued' rows for refunded money (and would alert forever once accrual refused).
-    const payable = payableVendorIds(ord.orderItems, ord.vendorOrderStatuses)
+    const payable = payableVendorIds(ord.orderItems, ord.vendorOrderStatuses, { orderStatus: ord.status, refunds: ord.refunds })
     const accrued = new Set(ord.vendorEarnings.map(e => e.vendorId))
     const missing = [...payable].filter(v => !accrued.has(v))
     if (missing.length > 0) out.push({ orderId: ord.id, missingVendorIds: missing })
@@ -1498,10 +1517,9 @@ async function patternS(
 // so its debut reports the set + WOULD-cancel total without touching the ledger until reviewed.
 // NOT time-windowed: phantom accruals are permanent until reversed (the residual is months old),
 // so it scans all non-payable-portion accruals, bounded by maxPerPattern.
-async function patternT(
-  sum: SweepSummary,
-  o: { maxPerPattern: number; dryRun: boolean; patternTEnabled: boolean },
-) {
+/** Pattern T's selection, exported so it can be proven in isolation (payout gap fix): accrued earnings whose own
+ *  portion the ONE shared payable rule says is NOT owed. Pure read; no other pattern, no Stripe. */
+export async function selectPatternTPhantoms(o: { maxPerPattern: number }) {
   // Accrued rows whose OWN vendor portion is non-payable. Query mirrors the reverser's predicate.
   const NON_PAYABLE = ['REFUNDED', 'DECLINED', 'CANCELLED']
   const candidates = await db.vendorEarning.findMany({
@@ -1511,15 +1529,27 @@ async function patternT(
     },
     select: {
       orderId: true, vendorId: true, subtotalCents: true,
-      order: { select: { vendorOrderStatuses: { select: { vendorId: true, status: true } } } },
+      order: { select: { status: true, vendorOrderStatuses: { select: { vendorId: true, status: true, acceptedAt: true } }, refunds: { select: { vendorId: true, status: true } } } },
     },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: o.maxPerPattern,
   })
 
-  // Filter to the vendor's OWN portion being non-payable (the `some` above is order-level).
-  const phantoms = candidates.filter(e =>
-    NON_PAYABLE.includes(e.order.vendorOrderStatuses.find(v => v.vendorId === e.vendorId)?.status ?? ''))
+  // Filter to the vendor's OWN portion being non-payable by the ONE shared rule (the `some` above is order-level and
+  // over-selects; a worked CANCELLED portion on an UNDELIVERABLE / UNCOLLECTED order is payable and is NOT a phantom).
+  const { isPortionPayable, refundedVendorIds } = await import('./process-payout')
+  return candidates.filter(e => {
+    const portion = e.order.vendorOrderStatuses.find(v => v.vendorId === e.vendorId)
+    return !!portion && !isPortionPayable(portion, { orderStatus: e.order.status, vendorRefunded: refundedVendorIds(e.order.refunds).has(e.vendorId) })
+  })
+
+}
+
+async function patternT(
+  sum: SweepSummary,
+  o: { maxPerPattern: number; dryRun: boolean; patternTEnabled: boolean },
+) {
+  const phantoms = await selectPatternTPhantoms(o)
 
   if (phantoms.length === 0) return
 
@@ -1842,7 +1872,9 @@ export async function patternX(
     const reasons: string[] = []
     if (ord.voidedAt) reasons.push(
       `order VOIDED ${ord.voidedAt.toISOString().slice(0, 10)} — Pattern S filters voidedAt:null CORRECTLY, so no window width heals this`)
-    if (!COMPLETE_STATES.includes(ord.status)) reasons.push(`status ${ord.status} is not COMPLETED/DELIVERED`)
+    if (!COMPLETE_STATES.includes(ord.status) && ord.status !== OrderStatus.UNCOLLECTED && ord.status !== OrderStatus.UNDELIVERABLE) {
+      reasons.push(`status ${ord.status} is not COMPLETED/DELIVERED/UNCOLLECTED/UNDELIVERABLE`)
+    }
     if (ord.completedAt == null) reasons.push('completedAt is NULL — never matches S\'s gte')
     else if (ord.completedAt < o.windowStart) reasons.push(
       `completed ${((Date.now() - ord.completedAt.getTime()) / 86_400_000).toFixed(0)}d ago — outside Pattern S's 24h window`)

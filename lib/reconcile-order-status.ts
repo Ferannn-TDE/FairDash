@@ -50,6 +50,7 @@ import {
   type FulfillmentType,
   type Divergence,
 } from './order-derive'
+import { isExcludedFromPayoutGapFix } from './payout-exclusions'
 
 export {
   deriveMasterStatus,
@@ -275,7 +276,9 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
   : target === 'DELIVERED'   ? { completedAt: new Date() }
   : target === 'UNCOLLECTED' ? { uncollectedAt: new Date() }
   : target === 'CANCELLED'   ? { cancelledAt: new Date(), cancelledBy: cancelBy, ...(cancelReason ? { cancellationReason: cancelReason } : {}) }
-  :                            {} // RUNNER_COLLECTED (dispatchedAt set by the claim), UNDELIVERABLE
+  // Payout gap fix (2026-11-22): UNDELIVERABLE now stamps its end time too (the vendor payout delay + Patterns C/S key on it).
+  : target === 'UNDELIVERABLE' ? { undeliverableAt: new Date() }
+  :                            {} // RUNNER_COLLECTED (dispatchedAt set by the claim)
 
   // Monotonic, race-safe flip: only a still-eligible row matches.
   const res = await db.order.updateMany({
@@ -426,6 +429,35 @@ export async function reconcileMasterStatus(orderId: string, opts?: ReconcileOpt
         logger.error('[reconcileMasterStatus] vendor lane close failed (non-fatal; the order stays in the vendor queue and keeps quoting pending take-home until repaired)',
           { orderId: order.id, target, from, to, error: String(err) })
       }
+    }
+  }
+
+  // ── PAYOUT GAP FIX (BATCH-1 §19, Q2): an order that died AFTER the food was made still pays its vendors ─────────
+  // UNDELIVERABLE (the runner couldn't hand it over) and UNCOLLECTED (the customer never came): the vendor did the work.
+  // Same two steps as completion — record the vendors' earnings (the ONE payable rule now counts a worked CANCELLED
+  // portion here), then queue the payout behind REFUND_WINDOW_MS counted from this end time (stamped just now). No
+  // runner / organizer earnings (no run was completed); owed-back returns an UNDELIVERABLE curbside fee + tip inline.
+  // Runs AFTER the lane close above, so it sees the final CANCELLED portions. The protected-event check is shared with
+  // the reconciler catch-up (lib/payout-exclusions.ts). Fail-soft like completion: the catch-up repairs a miss.
+  if ((target === 'UNDELIVERABLE' || target === 'UNCOLLECTED') && !isExcludedFromPayoutGapFix(order.eventId)) {
+    try {
+      const { accrueVendorEarnings } = await import('./process-payout')
+      await accrueVendorEarnings(order.id)
+    } catch (err) {
+      const { logger } = await import('./logger')
+      logger.error('[reconcileMasterStatus] vendor accrual failed on an UNDELIVERABLE/UNCOLLECTED order (Pattern S re-accrues)', { orderId: order.id, target, error: String(err) })
+    }
+    try {
+      const { enqueueOrderPayout } = await import('./order-side-effects')
+      const { REFUND_WINDOW_MS } = await import('./constants')
+      const ok = await enqueueOrderPayout({ orderId: order.id, eventId: order.eventId, delayMs: REFUND_WINDOW_MS })
+      if (!ok) {
+        const { logger } = await import('./logger')
+        logger.error('[reconcileMasterStatus] CRITICAL: delayed payout enqueue dropped on an UNDELIVERABLE/UNCOLLECTED order', { orderId: order.id, target })
+      }
+    } catch (err) {
+      const { logger } = await import('./logger')
+      logger.error('[reconcileMasterStatus] CRITICAL: payout enqueue threw on an UNDELIVERABLE/UNCOLLECTED order', { orderId: order.id, target, error: String(err) })
     }
   }
 

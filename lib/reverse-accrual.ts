@@ -1,5 +1,5 @@
 import { db } from './db'
-import { NON_PAYABLE_VENDOR_STATUSES } from './process-payout'
+import { isPortionPayable, refundedVendorIds } from './process-payout'
 import { writeMoneyAudit, type MoneyActor } from './admin-money'
 import { logger } from './logger'
 
@@ -41,7 +41,7 @@ export async function reverseAccrualForRefundedPortion(input: ReverseAccrualInpu
     where: { orderId, vendorId },
     select: {
       id: true, eventId: true, status: true, subtotalCents: true,
-      order: { select: { vendorOrderStatuses: { where: { vendorId }, select: { status: true } } } },
+      order: { select: { status: true, vendorOrderStatuses: { where: { vendorId }, select: { status: true, acceptedAt: true } }, refunds: { select: { vendorId: true, status: true } } } },
     },
   })
   if (!earning) return { reversed: false, skipped: 'no-earning', cents: 0 }
@@ -52,8 +52,11 @@ export async function reverseAccrualForRefundedPortion(input: ReverseAccrualInpu
   }
 
   // SAFETY: never cancel a payable portion. The portion's OWN status must be non-payable.
-  const vos = earning.order.vendorOrderStatuses[0]?.status
-  if (!vos || !NON_PAYABLE_VENDOR_STATUSES.has(vos)) {
+  // The ONE shared payable rule (lib/process-payout isPortionPayable): a worked CANCELLED portion on an UNDELIVERABLE /
+  // UNCOLLECTED order is payable, so it is never reversed here.
+  const portion = earning.order.vendorOrderStatuses[0]
+  const vos = portion?.status
+  if (!portion || isPortionPayable(portion, { orderStatus: earning.order.status, vendorRefunded: refundedVendorIds(earning.order.refunds).has(vendorId) })) {
     logger.warn('[reverseAccrual] REFUSED — portion is still payable', { orderId, vendorId, vos: vos ?? '(none)' })
     return { reversed: false, skipped: 'portion-still-payable', status: earning.status, cents: earning.subtotalCents }
   }
