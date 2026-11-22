@@ -213,7 +213,7 @@ async function main() {
   // ── [8] templates ──────────────────────────────────────────────────────────────────────
   console.log('\n[8] Wording')
   const rej = N.renderEmail('decision_rejected', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana', reason: 'Missing insurance' })
-  assert(rej.subject === 'Your FairSynq application' && rej.text === "Hi Ana, we're not able to approve Taco Stand right now. Reason: Missing insurance. If you have questions, contact contact@fairsynq.com.",
+  assert(rej.subject === 'Your FairSynq application' && rej.text === "Hi Ana, we're not able to approve Taco Stand right now. Reason: Missing insurance. If you have questions, contact support@fairsynq.com.",
     'not-approved email: agreed wording, contact line, no "reply to this email"')
   const apv = N.renderEmail('decision_approved', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana' })
   assert(apv.text === 'Hi Ana, Taco Stand is approved. Sign in to finish your setup (payouts and menu): https://www.fairsynq.com/sign-in/vendor', 'vendor approved email: agreed wording')

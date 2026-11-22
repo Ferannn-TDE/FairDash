@@ -24,17 +24,15 @@
  * form this replaced — a card with three real facts beats a card with five where
  * two are fiction.
  *
- * ── SCOPE NOTE: `support@` IS NOT ROUTED THROUGH HERE (yet) ──────────────────
- * The in-app support surfaces (OrganizerGateScreen, VendorOperatorGateScreen,
- * vendor/page, SupportModal) send to `support@fairsynq.com`, a DIFFERENT mailbox
- * from the customer/marketing `contact@` below. That split looks deliberate —
- * operator support tickets routed apart from general inquiries — so it has NOT
- * been collapsed. Consolidate only after confirming `support@` is not separately
- * monitored; rewriting it blind would reroute real support mail.
+ * ── ONE ADDRESS: support@ (C-27, client decision 2026-11-22) ────────────────
+ * The site used contact@ for customer/marketing mail and support@ on the in-app
+ * support surfaces (OrganizerGateScreen, VendorOperatorGateScreen, vendor/page,
+ * SupportModal). The client chose support@fairsynq.com everywhere, matching his
+ * legal draft. Those four surfaces still write the literal support@ address.
  */
 
-/** The customer/marketing inbox. NOT the in-app operator `support@` (see above). */
-export const CONTACT_EMAIL = 'contact@fairsynq.com'
+/** The one public contact inbox (C-27). */
+export const CONTACT_EMAIL = 'support@fairsynq.com'
 
 /** The public Facebook page — a real, already-published support channel. */
 export const FACEBOOK_URL = 'https://facebook.com/fairsynq'
