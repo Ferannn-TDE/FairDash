@@ -46,7 +46,8 @@ import { priceNeedsApproval } from '../menu/price-gate'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '../menu/price-audit'
 import { recordMenuDeleted, recordPriceChangePending } from '../menu-notify/record'
 import { findRemovedNameMatch } from './re-add'
-import { supersedePendingPriceChanges } from './supersede'
+import { supersedePendingPriceChanges, closeOrphanedNewSizes } from './supersede'
+import { liveSizeGroupWhere } from './size-groups'
 import {
   assertNeverRequestType,
   buildMenuRequestData,
@@ -71,12 +72,18 @@ export interface FiledItem {
    * the item answers with its PENDING price row, while the rename went live.
    */
   menuChanged: boolean
+  /**
+   * Any OTHER request rows this item wrote, besides `row`: the APPROVED companion row of an EDIT
+   * that raises the price and changes other fields at once. The caller writes one activity-log
+   * entry per row, so these must not be dropped. Empty for every other item.
+   */
+  alsoWritten: MenuRequest[]
 }
 
 const itemNotFound = () => new ApiError('Menu item not found', 404, 'NOT_FOUND')
 
 /** A row is "applied now" exactly when it was written APPROVED. */
-const filed = (row: MenuRequest): FiledItem => ({ row, menuChanged: row.status === 'APPROVED' })
+const filed = (row: MenuRequest): FiledItem => ({ row, menuChanged: row.status === 'APPROVED', alsoWritten: [] })
 
 /** The non-name fields a request may set on an existing item; null means "leave as is". */
 function carriedFields(data: RowData) {
@@ -109,7 +116,7 @@ export async function fileMenuRequestItem(
     // A new SIZE of an item that is already live waits for the approver at any price (F4).
     if (data.variantGroup !== null) {
       const liveSibling = await tx.menuItem.findFirst({
-        where: { vendorId: data.vendorId, variantGroup: data.variantGroup, removedAt: null },
+        where: liveSizeGroupWhere(data.vendorId, data.variantGroup),
         select: { id: true },
       })
       if (liveSibling) return filed(await fileNewSize(tx, data))
@@ -126,7 +133,7 @@ async function applyDelete(tx: Prisma.TransactionClient, data: RowData, now: Dat
   const menuItemId = data.menuItemId as string
   const item = await tx.menuItem.findFirst({
     where: { id: menuItemId, vendorId: data.vendorId },
-    select: { name: true, price: true },
+    select: { name: true, price: true, variantGroup: true },
   })
   if (!item) throw itemNotFound()
 
@@ -139,6 +146,9 @@ async function applyDelete(tx: Prisma.TransactionClient, data: RowData, now: Dat
   // A price increase still waiting for this item (F2) can never apply now: close it, so the
   // approver isn't left a request for an item that is gone.
   await supersedePendingPriceChanges(tx, { menuItemId, vendorId: data.vendorId, replacedBy: data.requestedBy, now })
+  // And if this was the last live row of its size group, the group's waiting new sizes (F4) have
+  // nothing left to be added to: close them too (supersede.ts).
+  await closeOrphanedNewSizes(tx, { vendorId: data.vendorId, variantGroup: item.variantGroup, closedBy: data.requestedBy, now })
 
   const row = await tx.menuRequest.create({
     data: { ...data, status: 'APPROVED', reviewedBy: data.requestedBy, reviewedAt: now, reviewNote: REMOVED_NOTE },
@@ -178,7 +188,7 @@ async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date)
     const otherFields = { ...data, price: null }
     const hasOtherFields = otherFields.name !== null || otherFields.variantLabel !== null
       || Object.keys(carriedFields(otherFields)).length > 0
-    if (hasOtherFields) await applyLiveFields(tx, otherFields, now)
+    const liveRow = hasOtherFields ? await applyLiveFields(tx, otherFields, now) : null
     const pending = await tx.menuRequest.create({
       data: {
         vendorId: data.vendorId, requestedBy: data.requestedBy, batchId: data.batchId,
@@ -187,12 +197,12 @@ async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date)
         variantGroup: null, variantLabel: null,
       },
     })
-    const current = await tx.menuItem.findUniqueOrThrow({ where: { id: menuItemId }, select: { name: true } })
     await recordPriceChangePending(tx, {
       vendorId: data.vendorId, menuItemId, menuRequestId: pending.id, batchId: data.batchId,
-      name: current.name, previousPrice: before.price, requestedPrice, reason: 'LIVE_INCREASE',
+      // The item's name as it now is: renamed by this same EDIT, or as it was.
+      name: data.name ?? before.name, previousPrice: before.price, requestedPrice, reason: 'LIVE_INCREASE',
     })
-    return { row: pending, menuChanged: hasOtherFields }
+    return { row: pending, menuChanged: hasOtherFields, alsoWritten: liveRow ? [liveRow] : [] }
   }
 
   // The same, a lower, or no price: every field sent goes live now.
@@ -204,7 +214,7 @@ async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date)
       previousPrice: before.price, newPrice: after.price, source: 'REQUEST_APPLIED_EDIT', requestId: row.id,
     })
   }
-  return { row, menuChanged: true }
+  return { row, menuChanged: true, alsoWritten: [] }
 }
 
 /**

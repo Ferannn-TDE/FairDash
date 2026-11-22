@@ -12,6 +12,16 @@ import { db } from '../db'
 
 const key = (vendorId: string, variantGroup: string) => `${vendorId}::${variantGroup}`
 
+/**
+ * THE ONE DEFINITION of "this vendor's size group has a live item" (F4): a MenuItem of the vendor
+ * in that variantGroup that is still on the menu. Filing (file-item.ts), deciding
+ * (apply-decision.ts) and the review cards (below) all classify "new size of a live item" through
+ * this, so they cannot drift apart.
+ */
+export function liveSizeGroupWhere(vendorId: string, variantGroup: string) {
+  return { vendorId, variantGroup, removedAt: null }
+}
+
 export interface PendingSizeGroups {
   /** Count of PENDING ADD sizes per (vendor, variantGroup). */
   counts: Map<string, number>
@@ -28,10 +38,7 @@ export async function pendingSizeCounts(scope: Prisma.MenuRequestWhereInput): Pr
   })
   const counts = new Map(rows.map(r => [key(r.vendorId, r.variantGroup as string), r._count._all]))
   const liveItems = rows.length === 0 ? [] : await db.menuItem.findMany({
-    where: {
-      removedAt: null,
-      OR: rows.map(r => ({ vendorId: r.vendorId, variantGroup: r.variantGroup as string })),
-    },
+    where: { OR: rows.map(r => liveSizeGroupWhere(r.vendorId, r.variantGroup as string)) },
     select: { vendorId: true, variantGroup: true },
   })
   const live = new Set(liveItems.map(i => key(i.vendorId, i.variantGroup as string)))

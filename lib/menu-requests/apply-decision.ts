@@ -24,7 +24,13 @@ import { menuRequestTargetsOwnItem } from './item-ownership'
 import { parseInPersonPrice } from '../menu/price'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '../menu/price-audit'
 import { recordMenuDeleted } from '../menu-notify/record'
+import { CHANGE_KIND } from '../menu-notify/constants'
 import { parseReviewReason } from './review-reason'
+import { liveSizeGroupWhere } from './size-groups'
+import { closeOrphanedNewSizes } from './supersede'
+
+export const ORPHANED_NEW_SIZE_MESSAGE =
+  "This new size's item is no longer on the menu, so it can't be added. Reject this request."
 
 export type MenuApprover =
   | { kind: 'organizer'; organizerId: string }
@@ -93,11 +99,24 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
   // variantGroup; deciding one decides them all, in this one transaction. A new size of an item
   // that is already LIVE (F4, Nov 13) is decided on its own: approving "Large" must not also approve
   // an "XL" the vendor filed separately. Every other request is decided on its own.
-  const isNewSizeOfLiveItem = requestType === 'ADD' && menuRequest.variantGroup !== null
-    && (await db.menuItem.count({
-      where: { vendorId, variantGroup: menuRequest.variantGroup, removedAt: null },
-    })) > 0
-  const group = requestType === 'ADD' && menuRequest.variantGroup !== null && !isNewSizeOfLiveItem
+  const sizedAdd = requestType === 'ADD' && menuRequest.variantGroup !== null
+  const isNewSizeOfLiveItem = sizedAdd
+    && (await db.menuItem.count({ where: liveSizeGroupWhere(vendorId, menuRequest.variantGroup as string) })) > 0
+  // WAS IT FILED AS A NEW SIZE? Filing a new size of a live item records a PRICE_PENDING notice
+  // with reason NEW_SIZE naming this request, in the same transaction (file-item.ts fileNewSize);
+  // a brand-new item's sizes record none. Those notice rows are never deleted (only with the vendor).
+  const filedAsNewSize = sizedAdd && (await db.menuChangeEvent.findFirst({
+    where: { menuRequestId: requestId, kind: CHANGE_KIND.PRICE_PENDING, payload: { path: ['reason'], equals: 'NEW_SIZE' } },
+    select: { id: true },
+  })) !== null
+  // SAFETY NET (ultrareview finding 1, 2026-11-21). Removing the last live row of a group closes its
+  // waiting new sizes (supersede.ts closeOrphanedNewSizes). Should one still be PENDING, it must
+  // not be approved as if it were a brand-new item: refused here, before anything is written, so it
+  // stays PENDING for the approver to reject.
+  if (action === 'APPROVE' && filedAsNewSize && !isNewSizeOfLiveItem) {
+    throw new ApiError(ORPHANED_NEW_SIZE_MESSAGE, 409, 'CONFLICT')
+  }
+  const group = sizedAdd && !isNewSizeOfLiveItem && !filedAsNewSize
     ? await db.menuRequest.findMany({
       where: { vendorId, type: 'ADD', status: 'PENDING', variantGroup: menuRequest.variantGroup },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -213,7 +232,7 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
         // once and is written already APPROVED. REMOVED, not deleted: OrderItem's FK to MenuItem
         // is RESTRICT, and a hard delete would SET NULL the request trail.
         const item = await tx.menuItem.findUniqueOrThrow({
-          where: { id: menuItemId as string }, select: { name: true, price: true, removedAt: true },
+          where: { id: menuItemId as string }, select: { name: true, price: true, removedAt: true, variantGroup: true },
         })
         if (item.removedAt !== null) {
           throw new ApiError('This item is already removed from the menu. Reject this request.', 409, 'CONFLICT')
@@ -222,6 +241,8 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
           where: { id: menuItemId as string },
           data: { removedAt: now },
         })
+        // The last live row of its size group gone: the group's waiting new sizes close (F4).
+        await closeOrphanedNewSizes(tx, { vendorId, variantGroup: item.variantGroup, closedBy: reviewerUserId, now })
         await recordMenuItemRemoved(tx, {
           vendorId, userId: reviewerUserId, menuItemId: menuItemId as string,
           name: item.name, price: item.price, requestId,

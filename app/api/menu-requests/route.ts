@@ -141,8 +141,10 @@ export async function POST(req: NextRequest) {
 
     // ONE AUDIT ENTRY PER ROW — never one per submission. The audit log is the per-decision
     // record: collapsing a batch of 8 into a single entry would lose seven of them, and the
-    // batchId in the metadata is what lets a reader reassemble the submission afterwards.
-    for (const row of rows) {
+    // batchId in the metadata is what lets a reader reassemble the submission afterwards. "Every
+    // row" includes the rows an item wrote besides its answer: the live part of an EDIT that also
+    // raised the price (FiledItem.alsoWritten).
+    for (const row of filedItems.flatMap(f => [f.row, ...f.alsoWritten])) {
       logVendorAction(vendorId, dbUser.id, AUDIT_ACTIONS.MENU_CHANGE_REQUESTED, {
         requestType: row.type,
         menuItemId:  row.menuItemId,
