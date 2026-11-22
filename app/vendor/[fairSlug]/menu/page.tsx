@@ -773,9 +773,10 @@ export default function VendorMenuPage() {
         loadMenu()
         toast.success(`$${waitingPrice.toFixed(2)} withdrawn — the price stays $${item.price.toFixed(2)}.`)
       } else if (json.error?.code === 'INCREASE_NOT_PENDING') {
-        // Decided or replaced while this page was open: say so, and show the menu and the waiting
-        // requests as they now are (loadMenu reloads both).
-        toast.error(json.error.message)
+        // Decided or replaced while this page was open: say so in fixed words (never the server's
+        // text; scripts/toast-leak-guard.ts), and show the menu and the waiting requests as they now
+        // are (loadMenu reloads both).
+        toast.error('This increase was already decided or replaced by a newer one. The menu now shows the current price.')
         loadMenu()
       } else {
         toast.error(json.error?.message ?? 'Failed to withdraw the increase')

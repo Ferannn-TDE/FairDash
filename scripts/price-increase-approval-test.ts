@@ -783,7 +783,7 @@ async function main() {
     const PROP = /pendingPrice=\{pendingIncreaseByItem\.get\(editingItem\.id\)\?\.price \?\? null\}/
     const SENDS_LIVE = /async function handleWithdrawIncrease\(id: string\)[\s\S]{0,900}?body: JSON\.stringify\(\{ vendorId, type: 'EDIT', menuItemId: id, price: item\.price, withdrawsRequestId: waiting\.id \}\)/
     const TOAST = /\$\{waitingPrice\.toFixed\(2\)\} withdrawn — the price stays \$\$\{item\.price\.toFixed\(2\)\}\./
-    const WITHDRAW_409 = /else if \(json\.error\?\.code === 'INCREASE_NOT_PENDING'\) \{[\s\S]{0,400}?toast\.error\(json\.error\.message\)\s*loadMenu\(\)/
+    const WITHDRAW_409 = /else if \(json\.error\?\.code === 'INCREASE_NOT_PENDING'\) \{[\s\S]{0,400}?toast\.error\('This increase was already decided or replaced by a newer one\. The menu now shows the current price\.'\)\s*loadMenu\(\)/
     const OLD_HINT = /Save \$\{item\.price\.toFixed\(2\)\} to keep the current price and withdraw it/
     const OLD_SEND = /updates\.price = form\.price/
     // The save's "send only what changed" lines, as written in handleSaveEdit: price is one of the
@@ -796,14 +796,15 @@ async function main() {
     assert(BUTTON.test(page) && CALLS.test(page) && WIRED.test(page) && PROP.test(page),
       'the edit form gets the waiting price and has "Withdraw the $X increase (keep $Y)", which calls the withdraw handler and closes the form')
     assert(SENDS_LIVE.test(page) && TOAST.test(page), 'the withdraw handler sends an EDIT at the live price naming the waiting increase (withdrawsRequestId) and says "$X withdrawn — the price stays $Y."')
-    assert(WITHDRAW_409.test(page), 'on 409 INCREASE_NOT_PENDING the withdraw shows the server\'s message and reloads the menu and requests (Step 12 finding 4)')
+    assert(WITHDRAW_409.test(page), 'on 409 INCREASE_NOT_PENDING the withdraw shows fixed text (never the server\'s) and reloads the menu and requests (Step 12 finding 4)')
     const OLD_BODY = "async function handleWithdrawIncrease(id: string) {\n      body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price }),"
     const ID_ONLY = "async function handleWithdrawIncrease(id: string) {\n      body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, withdrawsRequestId: waiting.id }),"
     const NEW_BODY = "async function handleWithdrawIncrease(id: string) {\n      body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price, withdrawsRequestId: waiting.id }),"
     assert(SENDS_LIVE.test(NEW_BODY) && !SENDS_LIVE.test(OLD_BODY) && !SENDS_LIVE.test(ID_ONLY)
-      && WITHDRAW_409.test("} else if (json.error?.code === 'INCREASE_NOT_PENDING') {\n        toast.error(json.error.message)\n        loadMenu()")
+      && WITHDRAW_409.test("} else if (json.error?.code === 'INCREASE_NOT_PENDING') {\n        toast.error('This increase was already decided or replaced by a newer one. The menu now shows the current price.')\n        loadMenu()")
+      && !WITHDRAW_409.test("} else if (json.error?.code === 'INCREASE_NOT_PENDING') {\n        toast.error(json.error.message)\n        loadMenu()")
       && !WITHDRAW_409.test("} else {\n        toast.error(json.error?.message ?? 'Failed to withdraw the increase')"),
-    '[0] control: SENDS_LIVE accepts the body with the live price and the id, and rejects the old body without withdrawsRequestId and a body without the price; the 409 scan rejects a plain error toast')
+    '[0] control: SENDS_LIVE accepts the body with the live price and the id, and rejects the old body without withdrawsRequestId and a body without the price; the 409 scan rejects a plain error toast and rejects the server\'s raw message')
     assert(SENDS_CHANGED(save), 'handleSaveEdit sends the price when it differs from the live price (price is compared with the live item and sent in the body)')
     assert(save.length > 0 && !OLD_SEND.test(save) && !/waitingPrice/.test(save) && !OLD_HINT.test(page),
       'handleSaveEdit no longer adds an unchanged price when an increase waits, and the old hint line is gone')
