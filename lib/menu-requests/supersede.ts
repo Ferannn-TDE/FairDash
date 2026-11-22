@@ -10,7 +10,7 @@
 // price, or a RESTORE with a price. A name-only EDIT is not one, and is left alone.
 
 import type { Prisma } from '@prisma/client'
-import { liveSizeGroupWhere } from './size-groups'
+import { liveSizeGroupWhere, filedAsNewSize } from './size-groups'
 
 export const REPLACED_NOTE = 'Replaced by newer request'
 export const ITEM_REMOVED_NOTE = 'Closed: the item was removed from the menu'
@@ -48,7 +48,8 @@ export async function supersedePendingPriceChanges(
  * removed, those sizes have nothing to be added to, and approving one would otherwise create the
  * sizes as if they were a brand-new item. So every removal path calls this, inside its
  * transaction, right after the item is removed: if no live row of the group is left, every
- * PENDING ADD of the group is closed as REJECTED with the note below. A removal that leaves
+ * PENDING ADD of the group that was FILED AS A NEW SIZE (size-groups.ts filedAsNewSize) is closed
+ * as REJECTED with the note below; a brand-new item's sizes sharing the name are left alone. A removal that leaves
  * another size live closes nothing. Re-adding the item later restores it (re-add.ts) and does
  * NOT reopen these; the vendor files the sizes again. Returns how many were closed.
  *
@@ -62,8 +63,16 @@ export async function closeOrphanedNewSizes(
   if (args.variantGroup === null) return 0
   const stillLive = await tx.menuItem.count({ where: liveSizeGroupWhere(args.vendorId, args.variantGroup) })
   if (stillLive > 0) return 0
-  const { count } = await tx.menuRequest.updateMany({
+  // Only requests FILED AS NEW SIZES of this group: a brand-new item's waiting sizes that merely
+  // share the group name are not this item's, and stay PENDING (ultrareview P7 finding 9).
+  const candidates = await tx.menuRequest.findMany({
     where: { vendorId: args.vendorId, variantGroup: args.variantGroup, type: 'ADD', status: 'PENDING' },
+    select: { id: true },
+  })
+  const newSizes = await filedAsNewSize(tx, candidates.map(c => c.id))
+  if (newSizes.size === 0) return 0
+  const { count } = await tx.menuRequest.updateMany({
+    where: { id: { in: [...newSizes] }, status: 'PENDING' },
     data: { status: 'REJECTED', reviewNote: ITEM_REMOVED_NOTE, reviewedBy: args.closedBy, reviewedAt: args.now },
   })
   return count

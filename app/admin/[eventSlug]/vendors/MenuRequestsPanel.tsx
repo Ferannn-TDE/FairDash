@@ -24,6 +24,8 @@ interface PendingMenuRequest {
   sizesInGroup: number | null
   /** F4: the live item this pending size is added to (decided on its own); null otherwise. */
   newSizeOf: string | null
+  /** True when that item is no longer on the menu: the new size can only be rejected. */
+  newSizeOrphaned: boolean
   createdAt: string
   vendor: { id: string; name: string }
 }
@@ -109,7 +111,11 @@ export default function MenuRequestsPanel({ eventSlug }: { eventSlug: string }) 
                   </p>
                 )}
                 {r.newSizeOf && (
-                  <p className="text-[11px] text-amber-300/80 font-inter">New size of {r.newSizeOf}, which is already on the menu</p>
+                  <p className="text-[11px] text-amber-300/80 font-inter">
+                    {r.newSizeOrphaned
+                      ? `New size of ${r.newSizeOf}, which is no longer on the menu. Reject it.`
+                      : `New size of ${r.newSizeOf}, which is already on the menu`}
+                  </p>
                 )}
                 <p className="text-xs text-[#666] font-inter truncate">
                   {r.vendor.name}

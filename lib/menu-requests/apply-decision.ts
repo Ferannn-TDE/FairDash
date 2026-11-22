@@ -23,10 +23,10 @@ import { assertNeverRequestType, type MenuRequestTypeInput } from './validate-it
 import { menuRequestTargetsOwnItem } from './item-ownership'
 import { parseInPersonPrice } from '../menu/price'
 import { priceChanged, recordMenuPriceChange, recordMenuItemRemoved } from '../menu/price-audit'
+import type { MenuRequest } from '@prisma/client'
 import { recordMenuDeleted } from '../menu-notify/record'
-import { CHANGE_KIND } from '../menu-notify/constants'
 import { parseReviewReason } from './review-reason'
-import { liveSizeGroupWhere } from './size-groups'
+import { liveSizeGroupWhere, filedAsNewSize, lockVendorMenu } from './size-groups'
 import { closeOrphanedNewSizes } from './supersede'
 
 export const ORPHANED_NEW_SIZE_MESSAGE =
@@ -102,26 +102,29 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
   const sizedAdd = requestType === 'ADD' && menuRequest.variantGroup !== null
   const isNewSizeOfLiveItem = sizedAdd
     && (await db.menuItem.count({ where: liveSizeGroupWhere(vendorId, menuRequest.variantGroup as string) })) > 0
-  // WAS IT FILED AS A NEW SIZE? Filing a new size of a live item records a PRICE_PENDING notice
-  // with reason NEW_SIZE naming this request, in the same transaction (file-item.ts fileNewSize);
-  // a brand-new item's sizes record none. Those notice rows are never deleted (only with the vendor).
-  const filedAsNewSize = sizedAdd && (await db.menuChangeEvent.findFirst({
-    where: { menuRequestId: requestId, kind: CHANGE_KIND.PRICE_PENDING, payload: { path: ['reason'], equals: 'NEW_SIZE' } },
-    select: { id: true },
-  })) !== null
+  // WAS IT FILED AS A NEW SIZE? (size-groups.ts filedAsNewSize.) Asked only when the answer can
+  // matter (ultrareview P7 finding 7): a sized ADD whose group has NO live row. In a live group the
+  // request is a new size anyway and is decided on its own.
+  const orphanedNewSize = sizedAdd && !isNewSizeOfLiveItem
+    && (await filedAsNewSize(db, [requestId])).has(requestId)
   // SAFETY NET (ultrareview finding 1, 2026-11-21). Removing the last live row of a group closes its
   // waiting new sizes (supersede.ts closeOrphanedNewSizes). Should one still be PENDING, it must
   // not be approved as if it were a brand-new item: refused here, before anything is written, so it
   // stays PENDING for the approver to reject.
-  if (action === 'APPROVE' && filedAsNewSize && !isNewSizeOfLiveItem) {
+  if (action === 'APPROVE' && orphanedNewSize) {
     throw new ApiError(ORPHANED_NEW_SIZE_MESSAGE, 409, 'CONFLICT')
   }
-  const group = sizedAdd && !isNewSizeOfLiveItem && !filedAsNewSize
-    ? await db.menuRequest.findMany({
+  let group: MenuRequest[] = [menuRequest]
+  if (sizedAdd && !isNewSizeOfLiveItem && !orphanedNewSize) {
+    // A brand-new item: all its pending sizes are decided together. Requests filed as new sizes of
+    // a removed item that share the group name are never swept in (ultrareview P7 finding 5).
+    const pending = await db.menuRequest.findMany({
       where: { vendorId, type: 'ADD', status: 'PENDING', variantGroup: menuRequest.variantGroup },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     })
-    : [menuRequest]
+    const orphans = await filedAsNewSize(db, pending.map(r => r.id))
+    group = pending.filter(r => !orphans.has(r.id))
+  }
   const groupIds = group.map(r => r.id)
 
   // ── Checks before anything is written ──────────────────────────────────────────────────
@@ -165,6 +168,8 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
 
   // ── One transaction: the menu change, its audit rows, and the review ──────────────────
   const updated = await db.$transaction(async tx => {
+    // One vendor's menu changes run one at a time (size-groups.ts lockVendorMenu; P7 finding 4).
+    await lockVendorMenu(tx, vendorId)
     const now = new Date()
     if (action === 'APPROVE') {
       // EXHAUSTIVE BY CONSTRUCTION: a fifth MenuRequestType fails `tsc` at assertNeverRequestType

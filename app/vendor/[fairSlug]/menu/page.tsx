@@ -391,12 +391,14 @@ function ItemRow({ item, hasPendingRequest, pendingPrice, onToggle, onEdit, onDe
 
 // ─── Edit modal ───────────────────────────────────────────────────────────────
 
-function EditItemModal({ item, categories, pendingPrice, onSubmit, onClose }: {
+function EditItemModal({ item, categories, pendingPrice, onSubmit, onWithdraw, onClose }: {
   item: MenuItem
   categories: string[]
   /** F2: a higher price waiting for approval for this item, or null. */
   pendingPrice: number | null
   onSubmit: (id: string, updates: Partial<MenuItem>) => void
+  /** Withdraw the waiting increase and keep the live price (the vendor's explicit choice). */
+  onWithdraw: (id: string) => void
   onClose: () => void
 }) {
   const [form, setForm] = useState({
@@ -431,9 +433,10 @@ function EditItemModal({ item, categories, pendingPrice, onSubmit, onClose }: {
               <input required type="number" min="1.00" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className={inputCls} />
               <OnlinePriceHint inPersonPrice={form.price} />
               {pendingPrice !== null && (
-                <p className="text-amber-400 text-[0.6875rem] mt-1">
-                  ${pendingPrice.toFixed(2)} is waiting for approval. Save ${item.price.toFixed(2)} to keep the current price and withdraw it.
-                </p>
+                <button type="button" onClick={() => { onWithdraw(item.id); onClose() }}
+                  className="mt-1.5 w-full px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-[0.6875rem] font-semibold hover:bg-amber-500/20 transition-colors cursor-pointer">
+                  Withdraw the ${pendingPrice.toFixed(2)} increase (keep ${item.price.toFixed(2)})
+                </button>
               )}
             </div>
             <div>
@@ -703,12 +706,8 @@ export default function VendorMenuPage() {
     for (const key of ['name', 'description', 'price', 'prepTime', 'category', 'imageUrl'] as const) {
       if (form[key] !== undefined && form[key] !== item?.[key]) (updates as Record<string, unknown>)[key] = form[key]
     }
-    // WITHDRAWING A WAITING INCREASE (F2). With a higher price waiting, saving the live price must
-    // still reach the server: a same-price EDIT replaces the waiting one (supersede.ts) and keeps
-    // the current price. Without this, the unchanged price above would not be sent at all.
-    const waitingPrice = pendingRequests.find(r => r.type === 'EDIT' && r.menuItemId === id && r.price != null)?.price ?? null
-    if (waitingPrice !== null && form.price !== undefined && form.price !== waitingPrice) updates.price = form.price
-    const withdrawing = waitingPrice !== null && item !== undefined && updates.price === item.price
+    // An unchanged price is never sent, so a description or photo save leaves a waiting increase
+    // alone. Withdrawing it is the edit form's own button (handleWithdrawIncrease).
     if (Object.keys(updates).length === 0) { toast('No changes to save'); return }
     try {
       const res = await fetch('/api/menu-requests', {
@@ -740,16 +739,38 @@ export default function VendorMenuPage() {
           setPendingRequests(prev => prev.filter(r => !(r.type === 'EDIT' && r.menuItemId === id)))
         }
         loadMenu()
-        if (withdrawing && waitingPrice !== null && item) {
-          toast.success(`$${waitingPrice.toFixed(2)} withdrawn — the price stays $${item.price.toFixed(2)}.`)
-        } else {
-          toast.success(`${updates.name ?? item?.name ?? 'Item'} updated`)
-        }
+        toast.success(`${updates.name ?? item?.name ?? 'Item'} updated`)
       } else {
         toast.error(json.error?.message ?? 'Failed to submit request')
       }
     } catch {
       toast.error('Failed to submit request')
+    }
+  }
+
+  // WITHDRAW A WAITING INCREASE (F2) — only on the vendor's explicit choice (the button in the edit
+  // form). Sends an EDIT at the live price: the server replaces the waiting increase with it.
+  async function handleWithdrawIncrease(id: string) {
+    if (!vendorId) return
+    const item = items.find(i => i.id === id)
+    const waitingPrice = pendingPriceByItem.get(id) ?? null
+    if (!item || waitingPrice === null) return
+    try {
+      const res = await fetch('/api/menu-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price }),
+      })
+      const json = await res.json()
+      if (json.success && json.data.status === 'APPROVED') {
+        setPendingRequests(prev => prev.filter(r => !(r.type === 'EDIT' && r.menuItemId === id)))
+        loadMenu()
+        toast.success(`$${waitingPrice.toFixed(2)} withdrawn — the price stays $${item.price.toFixed(2)}.`)
+      } else {
+        toast.error(json.error?.message ?? 'Failed to withdraw the increase')
+      }
+    } catch {
+      toast.error('Failed to withdraw the increase')
     }
   }
 
@@ -1077,6 +1098,7 @@ export default function VendorMenuPage() {
           categories={categories}
           pendingPrice={pendingPriceByItem.get(editingItem.id) ?? null}
           onSubmit={handleSaveEdit}
+          onWithdraw={handleWithdrawIncrease}
           onClose={() => setEditingId(null)}
         />
       )}

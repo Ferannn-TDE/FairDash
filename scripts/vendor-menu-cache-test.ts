@@ -42,12 +42,8 @@ process.env.REDIS_URL = ''
 process.env.UPSTASH_REDIS_REST_URL = ''
 process.env.UPSTASH_REDIS_REST_TOKEN = ''
 
-import { createRequire, register } from 'node:module'
+import { register } from 'node:module'
 register('./_route-loader.mjs', import.meta.url)
-// TEST-ONLY SHIM, as in scripts/menu-immediate-delete-test.ts: app/api/menu/route.ts imports
-// lib/menu/getGroupedMenuItems.ts, which uses a bare `require('next/cache')` that does not exist in
-// an ES-module script.
-;(globalThis as unknown as { require?: NodeRequire }).require = createRequire(import.meta.url)
 
 import { NextRequest } from 'next/server'
 

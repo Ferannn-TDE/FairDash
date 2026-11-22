@@ -6,7 +6,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireOrganizerAuth } from '@/lib/auth'
 import { MenuRequestStatus } from '@prisma/client'
 import { reviewPriceChange } from '@/lib/menu-requests/review-price'
-import { pendingSizeCounts, sizeCountFor, newSizeOf } from '@/lib/menu-requests/size-groups'
+import { pendingSizeCounts, sizeCountFor, newSizeOf, newSizeOrphaned } from '@/lib/menu-requests/size-groups'
 
 const ALL_STATUSES: MenuRequestStatus[] = ['PENDING', 'APPROVED', 'REJECTED']
 
@@ -106,6 +106,7 @@ export async function GET(
       variantLabel: r.variantLabel,
       sizesInGroup: sizeCountFor(sizesInGroup, r),
       newSizeOf: newSizeOf(sizesInGroup, r),
+      newSizeOrphaned: newSizeOrphaned(sizesInGroup, r),
       // Linked item (current state for diff)
       menuItemId: r.menuItemId,
       currentItem: r.menuItem ?? null,

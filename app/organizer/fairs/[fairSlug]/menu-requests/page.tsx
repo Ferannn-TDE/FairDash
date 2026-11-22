@@ -50,6 +50,8 @@ interface MenuRequest {
   sizesInGroup?: number | null
   /** F4: the live item this pending size is added to (decided on its own); null otherwise. */
   newSizeOf?: string | null
+  /** True when that item is no longer on the menu: the new size can only be rejected. */
+  newSizeOrphaned?: boolean
   reviewNote: string | null
   createdAt: string
   vendor: { id: string; name: string }
@@ -203,7 +205,9 @@ function RequestCard({
               )}
               {req.newSizeOf && (
                 <p className="text-amber-300/80 text-[0.6875rem] font-inter mt-0.5">
-                  New size of {req.newSizeOf}, which is already on the menu
+                  {req.newSizeOrphaned
+                    ? `New size of ${req.newSizeOf}, which is no longer on the menu. Reject it.`
+                    : `New size of ${req.newSizeOf}, which is already on the menu`}
                 </p>
               )}
               <p className="text-white/40 text-xs font-inter mt-0.5">

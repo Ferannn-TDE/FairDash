@@ -14,6 +14,7 @@ import {
 } from '@/lib/menu-requests/validate-item'
 import { checkMenuRequestItemOwnership } from '@/lib/menu-requests/item-ownership'
 import { fileMenuRequestItem, type FiledItem } from '@/lib/menu-requests/file-item'
+import { lockVendorMenu } from '@/lib/menu-requests/size-groups'
 import { menuApproverLabel, type MenuApproverLabel } from '@/lib/menu-requests/approver-label'
 import { randomUUID } from 'node:crypto'
 
@@ -123,11 +124,22 @@ export async function POST(req: NextRequest) {
     // cannot diverge; if any write or audit row fails, the whole submission rolls back.
     const filedItems = await db.$transaction(
       async tx => {
+        // One vendor's menu changes run one at a time (size-groups.ts lockVendorMenu; P7 finding 4).
+        await lockVendorMenu(tx, vendorId)
         const written: FiledItem[] = []
         for (const item of inputs) {
           written.push(await fileMenuRequestItem(tx, item, { vendorId, requestedBy: dbUser.id, batchId }))
         }
-        return written
+        // FINAL STATUS (P7 finding 3): a later item in this same submission can change an earlier
+        // row (removing an item's last live row closes its waiting new sizes). Re-read every row
+        // written, so the answer and the activity log say what the database now holds.
+        const ids = written.flatMap(f => [f.row.id, ...f.alsoWritten.map(r => r.id)])
+        const fresh = new Map((await tx.menuRequest.findMany({ where: { id: { in: ids } } })).map(r => [r.id, r]))
+        return written.map(f => ({
+          ...f,
+          row: fresh.get(f.row.id) ?? f.row,
+          alsoWritten: f.alsoWritten.map(r => fresh.get(r.id) ?? r),
+        }))
       },
       // A 50-item batch is a few hundred statements; the default 5 s would cut it off on a slow
       // connection. The cap on batch size (MAX_BATCH_ITEMS) is what bounds this.

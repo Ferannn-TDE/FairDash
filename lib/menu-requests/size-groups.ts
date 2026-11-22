@@ -5,10 +5,13 @@
 // admin panel show each size as its own card, so each card says how many sizes the decision covers.
 //
 // A new size of an item that is already LIVE (F4) is decided on its own, so its card gets no count;
-// it is marked as a new size of that item instead.
+// it is marked as a new size of that item instead. So is a new size whose item has since been
+// removed (an orphaned new size): it can only be rejected (apply-decision.ts refuses to approve it).
 
 import type { Prisma } from '@prisma/client'
 import { db } from '../db'
+import { ON_MENU } from '../menu/on-menu'
+import { CHANGE_KIND } from '../menu-notify/constants'
 
 const key = (vendorId: string, variantGroup: string) => `${vendorId}::${variantGroup}`
 
@@ -19,45 +22,94 @@ const key = (vendorId: string, variantGroup: string) => `${vendorId}::${variantG
  * this, so they cannot drift apart.
  */
 export function liveSizeGroupWhere(vendorId: string, variantGroup: string) {
-  return { vendorId, variantGroup, removedAt: null }
+  return { vendorId, variantGroup, ...ON_MENU }
+}
+
+/**
+ * ONE VENDOR'S MENU CHANGES RUN ONE AT A TIME (ultrareview P7 finding 4, 2026-11-21). Call first
+ * thing inside the transaction of every menu-request filing (app/api/menu-requests/route.ts) and
+ * every approval (apply-decision.ts). pg_advisory_xact_lock is TRANSACTION-scoped: Postgres
+ * releases it when that transaction ends, on COMMIT and on ROLLBACK alike (an error included),
+ * so there is no unlock to forget. Never use the session-level pg_advisory_lock here. One lock per
+ * transaction, always the same key shape, so two transactions cannot deadlock on it.
+ *
+ * $executeRaw, not $queryRaw: pg_advisory_xact_lock returns void, which a query result can't map.
+ */
+export async function lockVendorMenu(tx: Prisma.TransactionClient, vendorId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`menu:${vendorId}`}))`
+}
+
+/**
+ * WHICH OF THESE REQUESTS WERE FILED AS A NEW SIZE (F4)? Filing a new size of a live item records
+ * a PRICE_PENDING notice with reason NEW_SIZE naming the request, in the same transaction
+ * (file-item.ts fileNewSize); a brand-new item's sizes record none. The one test the removal
+ * close, the group approval and the review cards all use. Callers ask only about sized ADDs whose
+ * group has NO live row: in a live group every pending sized ADD is a new size anyway.
+ */
+export async function filedAsNewSize(
+  client: Pick<Prisma.TransactionClient, 'menuChangeEvent'>,
+  requestIds: string[],
+): Promise<Set<string>> {
+  if (requestIds.length === 0) return new Set()
+  const rows = await client.menuChangeEvent.findMany({
+    where: { menuRequestId: { in: requestIds }, kind: CHANGE_KIND.PRICE_PENDING, payload: { path: ['reason'], equals: 'NEW_SIZE' } },
+    select: { menuRequestId: true },
+  })
+  return new Set(rows.map(r => r.menuRequestId).filter((id): id is string => id !== null))
 }
 
 export interface PendingSizeGroups {
-  /** Count of PENDING ADD sizes per (vendor, variantGroup). */
+  /** Count of PENDING ADD sizes per (vendor, variantGroup), not counting rows filed as new sizes. */
   counts: Map<string, number>
   /** The (vendor, variantGroup) pairs that already have a live item: their pending sizes are new sizes. */
   live: Set<string>
+  /** Pending rows filed as a new size whose group has no live item left (orphaned new sizes). */
+  orphanedNewSizes: Set<string>
 }
 
 /** Pending ADD sizes per (vendor, variantGroup) within `scope` (e.g. one fair), and which groups are live. */
 export async function pendingSizeCounts(scope: Prisma.MenuRequestWhereInput): Promise<PendingSizeGroups> {
-  const rows = await db.menuRequest.groupBy({
-    by: ['vendorId', 'variantGroup'],
+  const rows = await db.menuRequest.findMany({
     where: { ...scope, type: 'ADD', status: 'PENDING', variantGroup: { not: null } },
-    _count: { _all: true },
+    select: { id: true, vendorId: true, variantGroup: true },
   })
-  const counts = new Map(rows.map(r => [key(r.vendorId, r.variantGroup as string), r._count._all]))
-  const liveItems = rows.length === 0 ? [] : await db.menuItem.findMany({
-    where: { OR: rows.map(r => liveSizeGroupWhere(r.vendorId, r.variantGroup as string)) },
+  const groups = [...new Map(rows.map(r => [key(r.vendorId, r.variantGroup as string), r])).values()]
+  const liveItems = groups.length === 0 ? [] : await db.menuItem.findMany({
+    where: { OR: groups.map(r => liveSizeGroupWhere(r.vendorId, r.variantGroup as string)) },
     select: { vendorId: true, variantGroup: true },
   })
   const live = new Set(liveItems.map(i => key(i.vendorId, i.variantGroup as string)))
-  return { counts, live }
+  // Only rows in a group with no live item can be either a brand-new item's size or an orphaned
+  // new size; only those need the marker lookup.
+  const orphanedNewSizes = await filedAsNewSize(db,
+    rows.filter(r => !live.has(key(r.vendorId, r.variantGroup as string))).map(r => r.id))
+  const counts = new Map<string, number>()
+  for (const r of rows) {
+    if (orphanedNewSizes.has(r.id)) continue
+    const k = key(r.vendorId, r.variantGroup as string)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  return { counts, live, orphanedNewSizes }
 }
 
-type SizeRow = { type: string; status: string; vendorId: string; variantGroup: string | null }
+type SizeRow = { id: string; type: string; status: string; vendorId: string; variantGroup: string | null }
 
 const isPendingSize = (r: SizeRow): r is SizeRow & { variantGroup: string } =>
   r.type === 'ADD' && r.status === 'PENDING' && r.variantGroup !== null
 
 /** How many sizes deciding this row decides, or null when it is not a pending size of a new item. */
 export function sizeCountFor(groups: PendingSizeGroups, r: SizeRow): number | null {
-  if (!isPendingSize(r) || groups.live.has(key(r.vendorId, r.variantGroup))) return null
+  if (!isPendingSize(r) || groups.live.has(key(r.vendorId, r.variantGroup)) || groups.orphanedNewSizes.has(r.id)) return null
   return groups.counts.get(key(r.vendorId, r.variantGroup)) ?? null
 }
 
-/** The live item (its size group's name) this pending row adds a size to, or null (F4). */
+/** The item (its size group's name) this pending row adds a size to, or null (F4). */
 export function newSizeOf(groups: PendingSizeGroups, r: SizeRow): string | null {
-  if (!isPendingSize(r) || !groups.live.has(key(r.vendorId, r.variantGroup))) return null
-  return r.variantGroup
+  if (!isPendingSize(r)) return null
+  return groups.live.has(key(r.vendorId, r.variantGroup)) || groups.orphanedNewSizes.has(r.id) ? r.variantGroup : null
+}
+
+/** True for a new size whose item is no longer on the menu: it can only be rejected. */
+export function newSizeOrphaned(groups: PendingSizeGroups, r: SizeRow): boolean {
+  return isPendingSize(r) && groups.orphanedNewSizes.has(r.id)
 }

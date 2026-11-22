@@ -51,8 +51,21 @@
  *   [9f] the old pending-DELETE approval closes them too
  *   [9g] safety net: a new size whose item is gone is refused at approval (409, stays PENDING);
  *        control: a real brand-new item reusing a removed group's name is approved as new
- *   [15] vendor page: the withdraw path is sent and explained (source)
- *   [16] one definition of "this size group has a live item" (source)
+ *   [15] vendor page: withdrawing is an explicit button; a normal save sends only what changed (source)
+ *   [16] one definition of "this size group has a live item", built on ON_MENU; both transactions
+ *        take the vendor lock first (source)
+ *
+ *   Ultrareview P7 findings (Step 11, 2026-11-21):
+ *   [18] vendor page: one waiting-price lookup (source)
+ *   [3c] a withdrawn increase leaves the organizer's queue; approving it afterwards → 409
+ *   [4d] a description-only edit leaves a waiting increase PENDING
+ *   [9h] orphaned new sizes on the review cards; rejecting one rejects only that one
+ *   [9i] approving a brand-new item leaves an orphaned new size of the same group alone
+ *   [9j] a removal closes real new sizes, not a brand-new item's sizes in the same group
+ *   [9k] a batch answers and logs each row's final status
+ *   [9l] two simultaneous removals still close the waiting new size (5 rounds)
+ *   [9m] the vendor lock: released after a failure and a refused approval; blocks the same
+ *        vendor only; transaction-scoped (source)
  *
  * Real route handlers on the test DB; Clerk identity and next/cache are mocked
  * (scripts/_route-loader.mjs).
@@ -746,25 +759,44 @@ async function main() {
       `control: a brand-new item reusing a removed group's name (no NEW_SIZE notice) is approved and created as a new item (got ${ok.status}, ${log[0]?.meta.source})`)
   })
 
-  // ── [15] the vendor page: saving the live price withdraws, and says so (finding 3, page) ───
-  console.log('\n[15] vendor page: the withdraw path is sent and explained')
+  const mkShop = async () => { const f = await mkFair(orgA.org.id); const v = await mkVendor(f.id); return { f, v } }
+  const queue = (slug: string) => asOrgA(async () => ((await bodyOf(await orgLIST(
+    jsonReq(`/api/organizer/fairs/${slug}/menu-requests?status=PENDING&take=100`, 'GET'), { params: Promise.resolve({ fairSlug: slug }) }))).data?.requests ?? []) as Array<Record<string, unknown>>)
+
+  // ── [15] the vendor page: withdrawing is an explicit button; a normal save sends only what changed (P7 finding 1)
+  console.log('\n[15] vendor page: the withdraw button, and a normal save sends only what changed')
   await section(async () => {
     const page = readFileSync('app/vendor/[fairSlug]/menu/page.tsx', 'utf8').replace(/\r\n/g, '\n')
-    const SEND = /if \(waitingPrice !== null && form\.price !== undefined && form\.price !== waitingPrice\) updates\.price = form\.price/
-    const FIND = /const waitingPrice = pendingRequests\.find\(r => r\.type === 'EDIT' && r\.menuItemId === id && r\.price != null\)\?\.price \?\? null/
-    const LINE = /is waiting for approval\. Save \$\{item\.price\.toFixed\(2\)\} to keep the current price and withdraw it\./
-    const TOAST = /\$\{waitingPrice\.toFixed\(2\)\} withdrawn — the price stays \$\$\{item\.price\.toFixed\(2\)\}\./
+    const BUTTON = /Withdraw the \$\{pendingPrice\.toFixed\(2\)\} increase \(keep \$\{item\.price\.toFixed\(2\)\}\)/
+    const CALLS = /onClick=\{\(\) => \{ onWithdraw\(item\.id\); onClose\(\) \}\}/
+    const WIRED = /onWithdraw=\{handleWithdrawIncrease\}/
     const PROP = /pendingPrice=\{pendingPriceByItem\.get\(editingItem\.id\) \?\? null\}/
-    assert(FIND.test(page) && SEND.test(page), 'handleSaveEdit finds the waiting increase and sends the price when it differs from it (even if it equals the live price)')
-    assert(LINE.test(page) && PROP.test(page), 'the edit form gets the waiting price and shows "… is waiting for approval. Save $X to keep the current price and withdraw it."')
-    assert(TOAST.test(page), 'after the save the toast says "$X withdrawn — the price stays $Y."')
-    const oldShape = "if (form[key] !== undefined && form[key] !== item?.[key]) (updates as Record<string, unknown>)[key] = form[key]"
-    assert(!SEND.test(oldShape) && SEND.test('if (waitingPrice !== null && form.price !== undefined && form.price !== waitingPrice) updates.price = form.price'),
-      '[0] control: the scan finds a planted withdraw line and does not mistake the old "only what changed" loop for it')
+    const SENDS_LIVE = /async function handleWithdrawIncrease\(id: string\)[\s\S]{0,800}?body: JSON\.stringify\(\{ vendorId, type: 'EDIT', menuItemId: id, price: item\.price \}\)/
+    const TOAST = /\$\{waitingPrice\.toFixed\(2\)\} withdrawn — the price stays \$\$\{item\.price\.toFixed\(2\)\}\./
+    const OLD_HINT = /Save \$\{item\.price\.toFixed\(2\)\} to keep the current price and withdraw it/
+    const OLD_SEND = /updates\.price = form\.price/
+    // The save's "send only what changed" lines, as written in handleSaveEdit: price is one of the
+    // keys compared with the live item, and the body carries what changed.
+    const SENDS_CHANGED = (s: string) =>
+      /for \(const key of \['name', 'description', 'price', 'prepTime', 'category', 'imageUrl'\] as const\) \{/.test(s)
+      && /if \(form\[key\] !== undefined && form\[key\] !== item\?\.\[key\]\) \(updates as Record<string, unknown>\)\[key\] = form\[key\]/.test(s)
+      && /body: JSON\.stringify\(\{ vendorId, type: 'EDIT', menuItemId: id, \.\.\.updates \}\)/.test(s)
+    const save = page.match(/async function handleSaveEdit[\s\S]*?\n  \}\n/)?.[0] ?? ''
+    assert(BUTTON.test(page) && CALLS.test(page) && WIRED.test(page) && PROP.test(page),
+      'the edit form gets the waiting price and has "Withdraw the $X increase (keep $Y)", which calls the withdraw handler and closes the form')
+    assert(SENDS_LIVE.test(page) && TOAST.test(page), 'the withdraw handler sends an EDIT at the live price and says "$X withdrawn — the price stays $Y."')
+    assert(SENDS_CHANGED(save), 'handleSaveEdit sends the price when it differs from the live price (price is compared with the live item and sent in the body)')
+    assert(save.length > 0 && !OLD_SEND.test(save) && !/waitingPrice/.test(save) && !OLD_HINT.test(page),
+      'handleSaveEdit no longer adds an unchanged price when an increase waits, and the old hint line is gone')
+    const savedWithoutPrice = "for (const key of ['name', 'description', 'prepTime', 'category', 'imageUrl'] as const) {\n      if (form[key] !== undefined && form[key] !== item?.[key]) (updates as Record<string, unknown>)[key] = form[key]\n        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, ...updates }),"
+    assert(OLD_SEND.test('if (waitingPrice !== null && form.price !== undefined && form.price !== waitingPrice) updates.price = form.price')
+      && BUTTON.test('Withdraw the ${pendingPrice.toFixed(2)} increase (keep ${item.price.toFixed(2)})')
+      && !SENDS_CHANGED(savedWithoutPrice),
+    '[0] control: the scans find a planted Step 10 send line and a planted button, and reject a save that never sends a price')
   })
 
-  // ── [16] one definition of "this size group has a live item" (finding 4) ───────────────────
-  console.log('\n[16] filing, deciding, the review cards and the removal close all use liveSizeGroupWhere')
+  // ── [16] one live-group definition (built on ON_MENU), and the vendor lock in both transactions
+  console.log('\n[16] filing, deciding, the cards and the removal close use liveSizeGroupWhere (built on ON_MENU); both transactions take the vendor lock')
   await section(async () => {
     const strip = (s: string) => s.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     const INLINE = /variantGroup[^\n;]{0,80}removedAt:\s*null|removedAt:\s*null[^\n;]{0,80}variantGroup/
@@ -776,6 +808,206 @@ async function main() {
     }
     assert(INLINE.test("where: { vendorId, variantGroup: g, removedAt: null }") && !INLINE.test('where: liveSizeGroupWhere(vendorId, g)'),
       '[0] control: the scan catches a planted inline filter and passes the helper call')
+    const sg = strip(readFileSync('lib/menu-requests/size-groups.ts', 'utf8'))
+    assert(/export function liveSizeGroupWhere[^{]*\{\s*return \{ vendorId, variantGroup, \.\.\.ON_MENU \}/.test(sg) && /import \{ ON_MENU \} from '\.\.\/menu\/on-menu'/.test(sg),
+      'liveSizeGroupWhere spreads ON_MENU (lib/menu/on-menu.ts), the single definition of "not removed" (P7 finding 8)')
+    const route = strip(readFileSync('app/api/menu-requests/route.ts', 'utf8'))
+    const decide = strip(readFileSync('lib/menu-requests/apply-decision.ts', 'utf8'))
+    const LOCK_FIRST = /db\.\$transaction\(\s*async tx => \{\s*await lockVendorMenu\(tx, vendorId\)/
+    assert(LOCK_FIRST.test(route) && LOCK_FIRST.test(decide), 'the filing route and the approval each take the vendor lock as the first thing in their transaction (P7 finding 4)')
+    assert(!LOCK_FIRST.test('db.$transaction(async tx => {\n  const now = new Date()\n  await lockVendorMenu(tx, vendorId)'),
+      '[0] control: the scan rejects a lock that is not the first thing in the transaction')
+  })
+
+  // ── [18] one waiting-price lookup on the vendor page (P7 finding 6)
+  console.log('\n[18] vendor page: the waiting price comes from pendingPriceByItem only')
+  await section(async () => {
+    const page = readFileSync('app/vendor/[fairSlug]/menu/page.tsx', 'utf8').replace(/\r\n/g, '\n')
+    const SECOND = /pendingRequests\.find\([^)]*r\.price/
+    assert(/const waitingPrice = pendingPriceByItem\.get\(id\) \?\? null/.test(page) && !SECOND.test(page),
+      'the withdraw handler reads pendingPriceByItem; no second pendingRequests.find(… price …) lookup exists')
+    assert(SECOND.test("pendingRequests.find(r => r.type === 'EDIT' && r.price != null)"), '[0] control: the scan finds a planted second lookup')
+  })
+
+  // ── [3c] a withdrawn increase leaves the organizer's queue; approving it afterwards → 409 (Jordan's addition 1)
+  console.log('\n[3c] a withdrawn increase leaves the organizer\'s queue; approving it afterwards → 409')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    const item = await mkItem(v.vendor.id, `${PFX}withdrawn-q`, 10)
+    const up = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: item.id, price: 12 })
+    const before = (await queue(f.urlSlug)).some(r => r.id === up.data?.id)
+    login(v.user.clerkId)
+    const keep = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: item.id, price: 10 }) // what the button sends
+    const after = (await queue(f.urlSlug)).some(r => r.id === up.data?.id)
+    const ap = await asOrgA(() => orgDecide(f.urlSlug, up.data?.id as string))
+    const apb = await bodyOf(ap)
+    assert(up.data?.status === 'PENDING' && keep.data?.status === 'APPROVED' && before && !after,
+      `[0] the increase is in the organizer's pending queue; after the withdraw it is not (before ${before}, after ${after})`)
+    assert(ap.status === 409 && /already reviewed/i.test(apb.error?.message ?? '') && (await itemOf(item.id)).price === 10 && (await priceLog(item.id)).length === 0,
+      `approving the withdrawn request → 409 "Request already reviewed"; price still 10; no price-log row (got ${ap.status}: ${apb.error?.message})`)
+  })
+
+  // ── [4d] a description-only edit leaves a waiting increase alone (P7 finding 1, server side)
+  console.log('\n[4d] a description-only edit leaves a waiting increase PENDING')
+  await section(async () => {
+    login(A.user.clerkId)
+    const item = await mkItem(A.vendor.id, `${PFX}desc-only`, 10)
+    const up = await fileBody(A.vendor.id, { type: 'EDIT', menuItemId: item.id, price: 12 })
+    const desc = await fileBody(A.vendor.id, { type: 'EDIT', menuItemId: item.id, description: 'New words' })
+    const after = await itemOf(item.id)
+    assert(desc.data?.status === 'APPROVED' && after.description === 'New words' && after.price === 10 && (await reqOf(up.data?.id as string)).status === 'PENDING',
+      `the description is live; the $12 increase is still PENDING and the price still 10 (got ${(await reqOf(up.data?.id as string)).status}, ${after.price})`)
+  })
+
+  // ── [9h] the cards show orphaned new sizes as new sizes; rejecting one rejects only that one (P7 finding 2)
+  console.log('\n[9h] orphaned new sizes on the review cards; rejecting one rejects only that one')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Falafel`
+    const reg = await mkItem(v.vendor.id, `${group} Regular`, 8, { variantGroup: group, variantLabel: 'Regular' })
+    const ids: string[] = []
+    for (const label of ['Large', 'XL']) {
+      ids.push((await fileBody(v.vendor.id, { type: 'ADD', name: `${group} ${label}`, price: 10, category: 'Mains', variantGroup: group, variantLabel: label })).data?.id as string)
+    }
+    await prisma.menuItem.update({ where: { id: reg.id }, data: { removedAt: new Date() } }) // outside the removal paths: both stay PENDING
+    const cards = (await queue(f.urlSlug)).filter(r => ids.includes(r.id as string))
+    assert(cards.length === 2 && cards.every(c => c.newSizeOf === group && c.newSizeOrphaned === true && c.sizesInGroup === null),
+      `both cards: new size of ${group}, newSizeOrphaned, no "decides all" count (got ${JSON.stringify(cards.map(c => [c.newSizeOf, c.newSizeOrphaned, c.sizesInGroup]))})`)
+    const rj = await asOrgA(() => orgDecide(f.urlSlug, ids[0], 'REJECT'))
+    assert(rj.status === 200 && (await reqOf(ids[0])).status === 'REJECTED' && (await reqOf(ids[1])).status === 'PENDING',
+      `rejecting Large rejects only Large; XL stays PENDING (got ${rj.status}, ${(await reqOf(ids[1])).status})`)
+  })
+
+  // ── [9i] approving a brand-new item never creates an orphaned new size sharing its group (P7 finding 5)
+  console.log('\n[9i] approving a brand-new item leaves an orphaned new size of the same group alone')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Kebab`
+    const classic = await mkItem(v.vendor.id, `${group} Classic`, 9, { variantGroup: group, variantLabel: 'Classic' })
+    const xl = await fileBody(v.vendor.id, { type: 'ADD', name: `${group} XL`, price: 12, category: 'Mains', variantGroup: group, variantLabel: 'XL' })
+    await prisma.menuItem.update({ where: { id: classic.id }, data: { removedAt: new Date() } }) // XL is now an orphaned new size
+    const sub = await fileBody(v.vendor.id, { items: [
+      { type: 'ADD', name: `${group} Small`, price: 7, category: 'Mains', variantGroup: group, variantLabel: 'Small' },
+      { type: 'ADD', name: `${group} Large`, price: 10, category: 'Mains', variantGroup: group, variantLabel: 'Large' },
+    ] })
+    const brandNew = ((sub.data?.requests ?? []) as Array<{ id: string; status: string }>)
+    const ap = await asOrgA(() => orgDecide(f.urlSlug, brandNew[0]?.id as string))
+    const labels = (await prisma.menuItem.findMany({ where: { vendorId: v.vendor.id, variantGroup: group, removedAt: null } })).map(i => i.variantLabel).sort()
+    assert(brandNew.length === 2 && ap.status === 200 && labels.join(',') === 'Large,Small' && (await reqOf(xl.data?.id as string)).status === 'PENDING',
+      `approving Small creates Small and Large only; XL stays PENDING and is not created (got ${ap.status}, live: ${labels.join(',')})`)
+  })
+
+  // ── [9j] a removal closes only real new sizes, not a brand-new item's sizes sharing the group (P7 finding 9)
+  console.log('\n[9j] removing the last live row closes its new sizes but not a brand-new item\'s sizes in the same group')
+  await section(async () => {
+    const { v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Bowl`
+    const classic = await prisma.menuItem.create({ data: { vendorId: v.vendor.id, name: `${group} Classic`, price: 9, category: 'Mains', variantGroup: group, variantLabel: 'Classic', removedAt: new Date() } })
+    const sub = await fileBody(v.vendor.id, { items: [
+      { type: 'ADD', name: `${group} Small`, price: 7, category: 'Mains', variantGroup: group, variantLabel: 'Small' },
+      { type: 'ADD', name: `${group} Large`, price: 11, category: 'Mains', variantGroup: group, variantLabel: 'Large' },
+    ] })
+    const brandNewIds = ((sub.data?.requests ?? []) as Array<{ id: string }>).map(r => r.id)
+    const restored = await fileBody(v.vendor.id, { type: 'RESTORE', menuItemId: classic.id }) // the group is live again
+    const m = await fileBody(v.vendor.id, { type: 'ADD', name: `${group} Medium`, price: 10, category: 'Mains', variantGroup: group, variantLabel: 'Medium' })
+    const del = await fileBody(v.vendor.id, { type: 'DELETE', menuItemId: classic.id })
+    assert(restored.data?.status === 'APPROVED' && del.data?.status === 'APPROVED' && (await itemOf(classic.id)).removedAt !== null,
+      `[0] Classic is restored, then removed again by the vendor's DELETE (got restore ${String(restored.data?.status)}, delete ${String(del.data?.status)})`)
+    const mRow = await reqOf(m.data?.id as string)
+    const brandNew = await prisma.menuRequest.findMany({ where: { id: { in: brandNewIds } } })
+    assert(mRow.status === 'REJECTED' && mRow.reviewNote === 'Closed: the item was removed from the menu',
+      `the new size Medium is closed when Classic is removed again (got ${mRow.status})`)
+    assert(brandNew.length === 2 && brandNew.every(r => r.status === 'PENDING'),
+      `the brand-new item's Small and Large stay PENDING (got ${brandNew.map(r => r.status).join('/')})`)
+  })
+
+  // ── [9k] a batch answers, and logs, each row's final status (P7 finding 3)
+  console.log('\n[9k] add a size and remove the last row in one batch: the size is answered and logged REJECTED')
+  await section(async () => {
+    const { v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Wings`
+    const regular = await mkItem(v.vendor.id, `${group} Regular`, 9, { variantGroup: group, variantLabel: 'Regular' })
+    const sub = await fileBody(v.vendor.id, { items: [
+      { type: 'ADD', name: `${group} Large`, price: 12, category: 'Mains', variantGroup: group, variantLabel: 'Large' },
+      { type: 'DELETE', menuItemId: regular.id },
+    ] })
+    const rows = (sub.data?.requests ?? []) as Array<{ id: string; status: string; reviewNote: string | null }>
+    let entry: { status?: string } | undefined
+    for (let i = 0; i < 30 && !entry; i++) {
+      entry = (await prisma.vendorAuditLog.findMany({ where: { vendorId: v.vendor.id, action: 'MENU_CHANGE_REQUESTED' } }))
+        .map(r => r.metadata as { requestId?: string; status?: string }).find(m => m.requestId === rows[0]?.id)
+      if (!entry) await new Promise(r => setTimeout(r, 100))
+    }
+    assert(rows.length === 2 && rows[0].status === 'REJECTED' && rows[0].reviewNote === 'Closed: the item was removed from the menu' && (await reqOf(rows[0].id)).status === 'REJECTED',
+      `the answer's Large row says REJECTED "Closed: the item was removed from the menu", as stored (got ${rows[0]?.status})`)
+    assert(entry?.status === 'REJECTED', `its activity-log entry says REJECTED (got ${entry?.status})`)
+  })
+
+  // ── [9l] two simultaneous removals of a group's last two rows still close its new sizes (P7 finding 4)
+  console.log('\n[9l] two simultaneous removals: the waiting new size is closed every time (5 rounds)')
+  await section(async () => {
+    const { v } = await mkShop()
+    login(v.user.clerkId)
+    const closedEachRound: string[] = []
+    for (let round = 1; round <= 5; round++) {
+      const group = `${PFX}Race${round}`
+      const s = await mkItem(v.vendor.id, `${group} Small`, 4, { variantGroup: group, variantLabel: 'Small' })
+      const mdm = await mkItem(v.vendor.id, `${group} Medium`, 5, { variantGroup: group, variantLabel: 'Medium' })
+      const l = await fileBody(v.vendor.id, { type: 'ADD', name: `${group} Large`, price: 6, category: 'Drinks', variantGroup: group, variantLabel: 'Large' })
+      const [d1, d2] = await Promise.all([file(v.vendor.id, { type: 'DELETE', menuItemId: s.id }), file(v.vendor.id, { type: 'DELETE', menuItemId: mdm.id })])
+      closedEachRound.push(`${d1.status}/${d2.status}:${(await reqOf(l.data?.id as string)).status}`)
+    }
+    assert(closedEachRound.every(x => x === '201/201:REJECTED'), `both removals succeed and Large is closed in every round (got ${closedEachRound.join(', ')})`)
+  })
+
+  // ── [9m] the lock: transaction-scoped, released on error, and it really blocks (Jordan's addition 2)
+  console.log('\n[9m] the vendor lock: released after a failed request and a refused approval; it blocks the same vendor only')
+  await section(async () => {
+    const { lockVendorMenu } = await import('../lib/menu-requests/size-groups')
+    const { f, v } = await mkShop()
+    const w = await mkVendor(f.id)
+    login(v.user.clerkId)
+    const timed = async <T>(run: () => Promise<T>) => { const t0 = Date.now(); const r = await run(); return { r, ms: Date.now() - t0 } }
+    // (a) a request that fails INSIDE its transaction, then a normal one at once
+    const x = await mkItem(v.vendor.id, `${PFX}lock-x`, 10)
+    const y = await mkItem(v.vendor.id, `${PFX}lock-y`, 5)
+    const failed = await file(v.vendor.id, { items: [{ type: 'EDIT', menuItemId: x.id, price: 20 }, { type: 'DELETE', menuItemId: y.id }, { type: 'DELETE', menuItemId: y.id }] })
+    const next = await timed(() => file(v.vendor.id, { type: 'EDIT', menuItemId: x.id, description: 'after a failure' }))
+    assert(failed.status === 409 && next.r.status === 201 && next.ms < 5000, `after a request fails inside its transaction (409), the next one completes at once: 201 in ${next.ms} ms`)
+    // (b) an approval refused INSIDE its transaction, after the lock (apply-decision.ts: a pre-2g DELETE
+    // of an item already removed is refused within the transaction), then a filing at once
+    const gone = await prisma.menuItem.create({ data: { vendorId: v.vendor.id, name: `${PFX}lock-gone`, price: 6, category: 'Mains', removedAt: new Date() } })
+    const legacy = await prisma.menuRequest.create({ data: { vendorId: v.vendor.id, requestedBy: v.user.id, type: 'DELETE', menuItemId: gone.id } })
+    const refused = await asOrgA(() => orgDecide(f.urlSlug, legacy.id))
+    login(v.user.clerkId)
+    const next2 = await timed(() => file(v.vendor.id, { type: 'EDIT', menuItemId: x.id, description: 'after a refused approval' }))
+    assert(refused.status === 409 && next2.r.status === 201 && next2.ms < 5000, `after an approval is refused inside its transaction (409), the next filing completes at once: 201 in ${next2.ms} ms`)
+    // (c) while the vendor's lock is held, a filing for that vendor waits; another vendor's does not
+    // Each holder's outcome is captured as soon as it starts (null = ran without error), so a broken
+    // lock shows as one failed check below instead of an unhandled rejection that ends the whole run.
+    const hold = (vendorId: string): Promise<unknown> => prisma.$transaction(async tx => { await lockVendorMenu(tx, vendorId); await new Promise(r => setTimeout(r, 1500)) }, { timeout: 10_000 })
+      .then(() => null, (e: unknown) => e)
+    const h1 = hold(v.vendor.id); await new Promise(r => setTimeout(r, 200))
+    const blocked = await timed(() => file(v.vendor.id, { type: 'EDIT', menuItemId: x.id, description: 'waited' }))
+    const h1Error = await h1
+    const wItem = await mkItem(w.vendor.id, `${PFX}lock-w`, 10)
+    const h2 = hold(v.vendor.id); await new Promise(r => setTimeout(r, 200))
+    login(w.user.clerkId)
+    const free = await timed(() => file(w.vendor.id, { type: 'EDIT', menuItemId: wItem.id, description: 'not blocked' }))
+    const h2Error = await h2
+    assert(h1Error === null && h2Error === null, `the lock holder ran without error both times (got ${String(h1Error ?? h2Error)})`)
+    assert(blocked.r.status === 201 && blocked.ms >= 1000, `a filing for the locked vendor waits for the holder: 201 after ${blocked.ms} ms (≥ 1000)`)
+    assert(free.r.status === 201 && free.ms < 1000, `[0] control: another vendor's filing is not blocked: 201 in ${free.ms} ms (< 1000)`)
+    // source: transaction-scoped only
+    const libSrc = ['lib/menu-requests/size-groups.ts', 'lib/menu-requests/apply-decision.ts', 'app/api/menu-requests/route.ts'].map(p => readFileSync(p, 'utf8')).join('\n')
+    const SESSION = /pg_advisory_lock\s*\(/
+    assert(/pg_advisory_xact_lock\(/.test(libSrc) && !SESSION.test(libSrc), 'the lock is pg_advisory_xact_lock (released at COMMIT or ROLLBACK); the session-level pg_advisory_lock is never used')
+    assert(SESSION.test('SELECT pg_advisory_lock(42)') && !SESSION.test('SELECT pg_advisory_xact_lock(42)'), '[0] control: the scan tells the two apart')
   })
 
   // Organizer B's fair is only there so "another organizer" has a fair of its own.

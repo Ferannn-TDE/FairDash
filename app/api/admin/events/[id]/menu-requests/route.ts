@@ -4,7 +4,7 @@ import { success } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAdminMenuApprover } from '@/lib/menu-requests/admin-approver'
 import { reviewPriceChange } from '@/lib/menu-requests/review-price'
-import { pendingSizeCounts, sizeCountFor, newSizeOf } from '@/lib/menu-requests/size-groups'
+import { pendingSizeCounts, sizeCountFor, newSizeOf, newSizeOrphaned } from '@/lib/menu-requests/size-groups'
 
 // GET /api/admin/events/[id]/menu-requests
 // The PENDING menu requests of a fair that has NO organizer, for a strict platform admin to
@@ -55,6 +55,7 @@ export async function GET(
         variantLabel: r.variantLabel,
         sizesInGroup: sizeCountFor(sizesInGroup, r),
         newSizeOf: newSizeOf(sizesInGroup, r),
+        newSizeOrphaned: newSizeOrphaned(sizesInGroup, r),
         menuItemId: r.menuItemId,
         currentItem: r.menuItem ?? null,
         priceChange: reviewPriceChange(r),
