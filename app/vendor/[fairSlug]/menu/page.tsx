@@ -577,10 +577,13 @@ export default function VendorMenuPage() {
       .map(r => r.menuItemId)
       .filter((id): id is string => !!id)
   )
-  const pendingPriceByItem = new Map(
+  // The waiting price increase per item (F2): its request id and price, from this one lookup (P7
+  // finding 6). The id goes with a withdraw, so the server can refuse it when that increase is no
+  // longer the one waiting (Step 12 finding 4).
+  const pendingIncreaseByItem = new Map(
     pendingRequests
       .filter(r => r.type === 'EDIT' && r.menuItemId && r.price != null)
-      .map(r => [r.menuItemId as string, r.price as number]),
+      .map(r => [r.menuItemId as string, { id: r.id, price: r.price as number }]),
   )
 
   async function handleToggleAvailability(item: MenuItem) {
@@ -749,23 +752,31 @@ export default function VendorMenuPage() {
   }
 
   // WITHDRAW A WAITING INCREASE (F2) — only on the vendor's explicit choice (the button in the edit
-  // form). Sends an EDIT at the live price: the server replaces the waiting increase with it.
+  // form). Sends an EDIT at the live price naming the increase it withdraws: the server replaces
+  // that increase with it, or refuses (409 INCREASE_NOT_PENDING) when it was already decided or
+  // replaced while this page was open (Step 12 finding 4).
   async function handleWithdrawIncrease(id: string) {
     if (!vendorId) return
     const item = items.find(i => i.id === id)
-    const waitingPrice = pendingPriceByItem.get(id) ?? null
-    if (!item || waitingPrice === null) return
+    const waiting = pendingIncreaseByItem.get(id) ?? null
+    if (!item || waiting === null) return
+    const waitingPrice = waiting.price
     try {
       const res = await fetch('/api/menu-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price }),
+        body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price, withdrawsRequestId: waiting.id }),
       })
       const json = await res.json()
       if (json.success && json.data.status === 'APPROVED') {
         setPendingRequests(prev => prev.filter(r => !(r.type === 'EDIT' && r.menuItemId === id)))
         loadMenu()
         toast.success(`$${waitingPrice.toFixed(2)} withdrawn — the price stays $${item.price.toFixed(2)}.`)
+      } else if (json.error?.code === 'INCREASE_NOT_PENDING') {
+        // Decided or replaced while this page was open: say so, and show the menu and the waiting
+        // requests as they now are (loadMenu reloads both).
+        toast.error(json.error.message)
+        loadMenu()
       } else {
         toast.error(json.error?.message ?? 'Failed to withdraw the increase')
       }
@@ -1077,7 +1088,7 @@ export default function VendorMenuPage() {
                     key={item.id}
                     item={item}
                     hasPendingRequest={pendingItemIds.has(item.id)}
-                    pendingPrice={pendingPriceByItem.get(item.id) ?? null}
+                    pendingPrice={pendingIncreaseByItem.get(item.id)?.price ?? null}
                     onToggle={handleAvailabilityClick}
                     onEdit={setEditingId}
                     onDelete={id => {
@@ -1096,7 +1107,7 @@ export default function VendorMenuPage() {
         <EditItemModal
           item={editingItem}
           categories={categories}
-          pendingPrice={pendingPriceByItem.get(editingItem.id) ?? null}
+          pendingPrice={pendingIncreaseByItem.get(editingItem.id)?.price ?? null}
           onSubmit={handleSaveEdit}
           onWithdraw={handleWithdrawIncrease}
           onClose={() => setEditingId(null)}

@@ -18,6 +18,11 @@ import { lockVendorMenu } from '@/lib/menu-requests/size-groups'
 import { menuApproverLabel, type MenuApproverLabel } from '@/lib/menu-requests/approver-label'
 import { randomUUID } from 'node:crypto'
 
+// PLATFORM TIME LIMIT (Step 12 finding 2, 2026-11-22): long enough for the vendor lock's 8 s wait
+// plus the 20 s transaction (lib/menu-requests/size-groups.ts lockVendorMenu), so a busy menu ends
+// in a named 503, never a platform 504. A plain number: Next reads it at build time.
+export const maxDuration = 30
+
 /** Who this vendor's pending requests wait for: the fair's organizer, or FairSynq if it has none. */
 async function vendorApprover(vendorId: string): Promise<MenuApproverLabel> {
   const v = await db.vendor.findUnique({ where: { id: vendorId }, select: { event: { select: { organizerId: true } } } })

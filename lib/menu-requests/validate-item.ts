@@ -65,6 +65,11 @@ export interface MenuRequestItemInput {
   /** Sizes (H5 Fix B): rows sharing a variantGroup are one dish; variantLabel names the size. */
   variantGroup?: unknown
   variantLabel?: unknown
+  /**
+   * Withdrawing a waiting price increase (Step 12 finding 4): the id of the PENDING increase the
+   * vendor saw. Checked here and in file-item.ts applyEdit; never stored on the request row.
+   */
+  withdrawsRequestId?: unknown
 }
 
 export const MAX_VARIANT_GROUP = 120
@@ -115,6 +120,20 @@ export function validateMenuRequestItem(item: MenuRequestItemInput): ItemRejecti
   // EDIT, DELETE and RESTORE all name an EXISTING item; only ADD invents one.
   if (type !== 'ADD' && !menuItemId) {
     return reject(`menuItemId is required for ${type}`)
+  }
+
+  // WITHDRAWING A WAITING INCREASE (Step 12 finding 4, 2026-11-22). Optional. When sent it must name
+  // the increase (non-empty text) and ride on an EDIT that carries a price: the withdraw button sends
+  // the live price with it. Whether that increase is still the one waiting is checked under the
+  // vendor lock in file-item.ts applyEdit (409 INCREASE_NOT_PENDING).
+  const { withdrawsRequestId } = item
+  if (withdrawsRequestId !== undefined) {
+    if (typeof withdrawsRequestId !== 'string' || withdrawsRequestId.trim() === '') {
+      return reject('The increase to withdraw is missing — reload the page and try again')
+    }
+    if (type !== 'EDIT' || price === undefined || price === null) {
+      return reject('Only a price edit can withdraw a waiting increase')
+    }
   }
 
   // SIZES (H5 Fix B). An ADD may carry both a group and a size label, or neither. An EDIT may

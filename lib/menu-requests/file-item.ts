@@ -59,6 +59,8 @@ export const REMOVED_NOTE = 'Removed immediately by vendor'
 export const RESTORED_NOTE = 'Restored immediately by vendor'
 export const EDITED_NOTE = 'Applied immediately by vendor'
 export const EDIT_REMOVED_MESSAGE = 'This item is removed from the menu. Restore it first, then edit it.'
+export const INCREASE_NOT_PENDING_MESSAGE =
+  'This increase was already decided or replaced by a newer one. Reload to see the current price.'
 
 type RowData = ReturnType<typeof buildMenuRequestData>
 
@@ -107,7 +109,8 @@ export async function fileMenuRequestItem(
   case 'DELETE':
     return filed(await applyDelete(tx, data, now))
   case 'EDIT':
-    return applyEdit(tx, data, now)
+    // The increase a withdraw names (validated in validate-item.ts) is passed alongside, never stored.
+    return applyEdit(tx, data, now, typeof item.withdrawsRequestId === 'string' ? item.withdrawsRequestId : null)
   case 'RESTORE':
     return filed(await fileRestore(tx, data, data.menuItemId as string, now))
   case 'ADD': {
@@ -166,9 +169,12 @@ async function applyDelete(tx: Prisma.TransactionClient, data: RowData, now: Dat
 
 /**
  * An EDIT of a LIVE item. A higher price waits (F2); everything else in it applies now. An EDIT of
- * a removed item is refused.
+ * a removed item is refused. A withdraw (`withdrawsRequestId`) applies only while the increase it
+ * names is still the one waiting.
  */
-async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date): Promise<FiledItem> {
+async function applyEdit(
+  tx: Prisma.TransactionClient, data: RowData, now: Date, withdrawsRequestId: string | null,
+): Promise<FiledItem> {
   const menuItemId = data.menuItemId as string
   const before = await tx.menuItem.findFirst({
     where: { id: menuItemId, vendorId: data.vendorId },
@@ -176,6 +182,22 @@ async function applyEdit(tx: Prisma.TransactionClient, data: RowData, now: Date)
   })
   if (!before) throw itemNotFound()
   if (before.removedAt !== null) throw new ApiError(EDIT_REMOVED_MESSAGE, 409, 'CONFLICT')
+
+  // WITHDRAW ONLY THE INCREASE THE VENDOR SAW (Step 12 finding 4, 2026-11-22). The withdraw button
+  // names the waiting increase. If it has since been approved, rejected or replaced by a newer one,
+  // the same-price EDIT would quietly undo a decision the vendor never saw: refused, before anything
+  // is superseded or written. This runs inside the filing transaction after the vendor lock
+  // (app/api/menu-requests/route.ts), so no approval can land between this check and the write.
+  if (withdrawsRequestId !== null) {
+    const stillWaiting = await tx.menuRequest.findFirst({
+      where: {
+        id: withdrawsRequestId, vendorId: data.vendorId, menuItemId,
+        type: 'EDIT', status: 'PENDING', price: { not: null },
+      },
+      select: { id: true },
+    })
+    if (!stillWaiting) throw new ApiError(INCREASE_NOT_PENDING_MESSAGE, 409, 'INCREASE_NOT_PENDING')
+  }
 
   if (data.price !== null) {
     await supersedePendingPriceChanges(tx, { menuItemId, vendorId: data.vendorId, replacedBy: data.requestedBy, now })

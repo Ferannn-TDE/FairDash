@@ -62,6 +62,20 @@ export function handleApiError(err: unknown) {
     )
   }
 
+  // An interactive transaction that ran past its time limit, or was used after it closed (Prisma
+  // P2028), is the same kind of LOAD condition (Step 12 finding 2, 2026-11-22): Prisma has already
+  // rolled it back, so nothing was written and retrying is correct. The menu transactions are sized
+  // so the vendor lock's own 503 MENU_BUSY comes first (lib/menu-requests/size-groups.ts
+  // lockVendorMenu); this is the safety net, never an anonymous 500.
+  if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2028') {
+    console.error('[API Error] Transaction timeout (P2028) — interactive transaction closed under load')
+    return apiError(
+      'Server is busy — please try again in a moment',
+      503,
+      'TX_TIMEOUT',
+    )
+  }
+
   // Unique-constraint violation (Prisma P2002). Named, with the colliding column, because the
   // anonymous version cost a live debugging session: /onboarding died on a P2002 for `email`
   // and surfaced as an opaque 500 + digest, with the one fact that identified the bug — WHICH

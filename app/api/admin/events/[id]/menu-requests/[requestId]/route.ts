@@ -4,6 +4,11 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAdminMenuApprover } from '@/lib/menu-requests/admin-approver'
 import { applyMenuRequestDecision } from '@/lib/menu-requests/apply-decision'
 
+// PLATFORM TIME LIMIT (Step 12 finding 2, 2026-11-22): long enough for the vendor lock's 8 s wait
+// plus the 20 s transaction (lib/menu-requests/size-groups.ts lockVendorMenu), so a busy menu ends
+// in a named 503, never a platform 504. A plain number: Next reads it at build time.
+export const maxDuration = 30
+
 // PATCH /api/admin/events/[id]/menu-requests/[requestId]
 // { action: 'APPROVE' | 'REJECT', reason?: string }
 //

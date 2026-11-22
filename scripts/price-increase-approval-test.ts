@@ -67,6 +67,16 @@
  *   [9m] the vendor lock: released after a failure and a refused approval; blocks the same
  *        vendor only; transaction-scoped (source)
  *
+ *   Ultrareview of Step 11 (Step 12, 2026-11-22):
+ *   [9n] the lock wait: within 8 s it completes; past 8 s a named 503 MENU_BUSY, approval and filing;
+ *        P2028 → 503 TX_TIMEOUT
+ *   [3d] a withdraw names its increase: 409 INCREASE_NOT_PENDING once decided or replaced; 400s
+ *   [9o] the approval reads the size group under the lock
+ *   [9p] the "no longer on the menu" refusal is decided under the lock
+ *   [9q] two approvals of one brand-new item at once: one 200, one 409
+ *   [16b] no unsafe raw SQL in lib/menu-requests (source)
+ *   [16c] the lock-taking routes set maxDuration = 30 (source)
+ *
  * Real route handlers on the test DB; Clerk identity and next/cache are mocked
  * (scripts/_route-loader.mjs).
  *
@@ -97,7 +107,7 @@ const realRequire = createRequire(import.meta.url)
   Object.assign((id: string) => (id === 'next/cache' ? nextCacheMock : realRequire(id)), realRequire)
 
 import { NextRequest } from 'next/server'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 const prisma = testPrisma()
 const PFX = 'pia-'
@@ -770,9 +780,10 @@ async function main() {
     const BUTTON = /Withdraw the \$\{pendingPrice\.toFixed\(2\)\} increase \(keep \$\{item\.price\.toFixed\(2\)\}\)/
     const CALLS = /onClick=\{\(\) => \{ onWithdraw\(item\.id\); onClose\(\) \}\}/
     const WIRED = /onWithdraw=\{handleWithdrawIncrease\}/
-    const PROP = /pendingPrice=\{pendingPriceByItem\.get\(editingItem\.id\) \?\? null\}/
-    const SENDS_LIVE = /async function handleWithdrawIncrease\(id: string\)[\s\S]{0,800}?body: JSON\.stringify\(\{ vendorId, type: 'EDIT', menuItemId: id, price: item\.price \}\)/
+    const PROP = /pendingPrice=\{pendingIncreaseByItem\.get\(editingItem\.id\)\?\.price \?\? null\}/
+    const SENDS_LIVE = /async function handleWithdrawIncrease\(id: string\)[\s\S]{0,900}?body: JSON\.stringify\(\{ vendorId, type: 'EDIT', menuItemId: id, price: item\.price, withdrawsRequestId: waiting\.id \}\)/
     const TOAST = /\$\{waitingPrice\.toFixed\(2\)\} withdrawn — the price stays \$\$\{item\.price\.toFixed\(2\)\}\./
+    const WITHDRAW_409 = /else if \(json\.error\?\.code === 'INCREASE_NOT_PENDING'\) \{[\s\S]{0,400}?toast\.error\(json\.error\.message\)\s*loadMenu\(\)/
     const OLD_HINT = /Save \$\{item\.price\.toFixed\(2\)\} to keep the current price and withdraw it/
     const OLD_SEND = /updates\.price = form\.price/
     // The save's "send only what changed" lines, as written in handleSaveEdit: price is one of the
@@ -784,7 +795,15 @@ async function main() {
     const save = page.match(/async function handleSaveEdit[\s\S]*?\n  \}\n/)?.[0] ?? ''
     assert(BUTTON.test(page) && CALLS.test(page) && WIRED.test(page) && PROP.test(page),
       'the edit form gets the waiting price and has "Withdraw the $X increase (keep $Y)", which calls the withdraw handler and closes the form')
-    assert(SENDS_LIVE.test(page) && TOAST.test(page), 'the withdraw handler sends an EDIT at the live price and says "$X withdrawn — the price stays $Y."')
+    assert(SENDS_LIVE.test(page) && TOAST.test(page), 'the withdraw handler sends an EDIT at the live price naming the waiting increase (withdrawsRequestId) and says "$X withdrawn — the price stays $Y."')
+    assert(WITHDRAW_409.test(page), 'on 409 INCREASE_NOT_PENDING the withdraw shows the server\'s message and reloads the menu and requests (Step 12 finding 4)')
+    const OLD_BODY = "async function handleWithdrawIncrease(id: string) {\n      body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price }),"
+    const ID_ONLY = "async function handleWithdrawIncrease(id: string) {\n      body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, withdrawsRequestId: waiting.id }),"
+    const NEW_BODY = "async function handleWithdrawIncrease(id: string) {\n      body: JSON.stringify({ vendorId, type: 'EDIT', menuItemId: id, price: item.price, withdrawsRequestId: waiting.id }),"
+    assert(SENDS_LIVE.test(NEW_BODY) && !SENDS_LIVE.test(OLD_BODY) && !SENDS_LIVE.test(ID_ONLY)
+      && WITHDRAW_409.test("} else if (json.error?.code === 'INCREASE_NOT_PENDING') {\n        toast.error(json.error.message)\n        loadMenu()")
+      && !WITHDRAW_409.test("} else {\n        toast.error(json.error?.message ?? 'Failed to withdraw the increase')"),
+    '[0] control: SENDS_LIVE accepts the body with the live price and the id, and rejects the old body without withdrawsRequestId and a body without the price; the 409 scan rejects a plain error toast')
     assert(SENDS_CHANGED(save), 'handleSaveEdit sends the price when it differs from the live price (price is compared with the live item and sent in the body)')
     assert(save.length > 0 && !OLD_SEND.test(save) && !/waitingPrice/.test(save) && !OLD_HINT.test(page),
       'handleSaveEdit no longer adds an unchanged price when an increase waits, and the old hint line is gone')
@@ -817,15 +836,30 @@ async function main() {
     assert(LOCK_FIRST.test(route) && LOCK_FIRST.test(decide), 'the filing route and the approval each take the vendor lock as the first thing in their transaction (P7 finding 4)')
     assert(!LOCK_FIRST.test('db.$transaction(async tx => {\n  const now = new Date()\n  await lockVendorMenu(tx, vendorId)'),
       '[0] control: the scan rejects a lock that is not the first thing in the transaction')
+    // Step 12 (findings 2 and 5): the decision's reads come after the lock, through tx; the approval
+    // allows 20 s; the lock wait is capped with the tagged set_config form.
+    const AFTER = ['tx.menuItem.count({ where: liveSizeGroupWhere(', 'filedAsNewSize(tx, [requestId])', 'filedAsNewSize(tx, pending.map(', 'throw new ApiError(ORPHANED_NEW_SIZE_MESSAGE']
+    const afterLock = (s: string) => { const at = s.indexOf('await lockVendorMenu(tx, vendorId)'); return at >= 0 && AFTER.every(x => s.indexOf(x) > at) }
+    assert(afterLock(decide) && !/filedAsNewSize\(db\b/.test(decide) && !/db\.menuItem\.count\(/.test(decide) && !/db\.menuRequest\.findMany\(/.test(decide),
+      'apply-decision.ts: the live-group count, both new-size lookups and the orphan 409 run after lockVendorMenu, through tx; none through db (Step 12 finding 5)')
+    assert(!afterLock("await tx.menuItem.count({ where: liveSizeGroupWhere(v, g) })\nawait lockVendorMenu(tx, vendorId)\nfiledAsNewSize(tx, [requestId]) filedAsNewSize(tx, pending.map( throw new ApiError(ORPHANED_NEW_SIZE_MESSAGE"),
+      '[0] control: the scan rejects a group read placed before the lock')
+    assert(/\}, \{ timeout: 20_000 \}\)/.test(decide), 'the approval transaction allows 20 s (Step 12 finding 2)')
+    const SET = /await tx\.\$executeRaw`SELECT set_config\('lock_timeout', '8s', true\)`\s*try \{\s*await tx\.\$executeRaw`SELECT pg_advisory_xact_lock\(/
+    assert(SET.test(sg), "lockVendorMenu caps the wait with tx.$executeRaw`SELECT set_config('lock_timeout', '8s', true)` right before the advisory lock (Step 12 finding 2)")
+    assert(!SET.test("await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '8s'`)\n  try {\n    await tx.$executeRaw`SELECT pg_advisory_xact_lock(")
+      && !SET.test("await tx.$executeRaw`SELECT set_config('lock_timeout', '8s', false)`\n  try {\n    await tx.$executeRaw`SELECT pg_advisory_xact_lock("),
+      '[0] control: the scan rejects the unsafe form and a session-wide (false) setting')
   })
 
   // ── [18] one waiting-price lookup on the vendor page (P7 finding 6)
-  console.log('\n[18] vendor page: the waiting price comes from pendingPriceByItem only')
+  console.log('\n[18] vendor page: the waiting increase comes from pendingIncreaseByItem only')
   await section(async () => {
     const page = readFileSync('app/vendor/[fairSlug]/menu/page.tsx', 'utf8').replace(/\r\n/g, '\n')
     const SECOND = /pendingRequests\.find\([^)]*r\.price/
-    assert(/const waitingPrice = pendingPriceByItem\.get\(id\) \?\? null/.test(page) && !SECOND.test(page),
-      'the withdraw handler reads pendingPriceByItem; no second pendingRequests.find(… price …) lookup exists')
+    assert(/const waiting = pendingIncreaseByItem\.get\(id\) \?\? null/.test(page) && !SECOND.test(page) && !/pendingPriceByItem/.test(page)
+      && (page.match(/\.filter\(r => r\.type === 'EDIT' && r\.menuItemId && r\.price != null\)/g) ?? []).length === 1,
+    'the withdraw handler reads pendingIncreaseByItem, built by the one waiting-increase filter; the old map is gone; no second pendingRequests.find(… price …) lookup exists')
     assert(SECOND.test("pendingRequests.find(r => r.type === 'EDIT' && r.price != null)"), '[0] control: the scan finds a planted second lookup')
   })
 
@@ -1008,6 +1042,230 @@ async function main() {
     const SESSION = /pg_advisory_lock\s*\(/
     assert(/pg_advisory_xact_lock\(/.test(libSrc) && !SESSION.test(libSrc), 'the lock is pg_advisory_xact_lock (released at COMMIT or ROLLBACK); the session-level pg_advisory_lock is never used')
     assert(SESSION.test('SELECT pg_advisory_lock(42)') && !SESSION.test('SELECT pg_advisory_xact_lock(42)'), '[0] control: the scan tells the two apart')
+  })
+
+  // ══ Step 12: ultrareview of 748bf2f, findings 2, 4 and 5 (Jordan, 2026-11-22) ══════════════════
+  const { lockVendorMenu } = await import('../lib/menu-requests/size-groups')
+  type TxClient = Parameters<typeof lockVendorMenu>[0]
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+  const timedRun = async <T>(run: () => Promise<T>) => { const t0 = Date.now(); const r = await run(); return { r, ms: Date.now() - t0 } }
+  /** Hold a vendor's menu lock for `ms`, then (if given) make a change in the same transaction and
+   *  commit. The outcome is captured at once (null = ran without error), as in [9m], so a failure on
+   *  old code is one failed check, never an unhandled rejection that ends the run. */
+  const holdLock = (vendorId: string, ms: number, then?: (tx: TxClient) => Promise<unknown>): Promise<unknown> =>
+    prisma.$transaction(async tx => { await lockVendorMenu(tx, vendorId); await sleep(ms); if (then) await then(tx) }, { timeout: ms + 10_000 })
+      .then(() => null, (e: unknown) => e)
+
+  // ── [9n] the lock wait, both directions (finding 2)
+  console.log('\n[9n] the lock wait: completes within 8 s; past 8 s a named 503 MENU_BUSY, for an approval and a filing')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    // (a) held 6 s: beyond Prisma's default 5 s transaction limit, within the 8 s lock wait
+    const a1 = await mkItem(v.vendor.id, `${PFX}wait-a`, 10)
+    const up1 = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: a1.id, price: 12 })
+    let h = holdLock(v.vendor.id, 6000); await sleep(200)
+    const ap = await asOrgA(() => timedRun(() => orgDecide(f.urlSlug, up1.data?.id as string)))
+    let hErr = await h
+    assert(hErr === null && ap.r.status === 200 && ap.ms >= 5000 && (await itemOf(a1.id)).price === 12,
+      `(a) an approval that waits ~6 s for the lock completes: 200 after ${ap.ms} ms, price 12 (got ${ap.r.status})`)
+    login(v.user.clerkId)
+    h = holdLock(v.vendor.id, 6000); await sleep(200)
+    const fl = await timedRun(() => file(v.vendor.id, { type: 'EDIT', menuItemId: a1.id, description: 'waited 6 s' }))
+    hErr = await h
+    assert(hErr === null && fl.r.status === 201 && fl.ms >= 5000, `(a) a filing that waits ~6 s completes: 201 after ${fl.ms} ms (got ${fl.r.status})`)
+    // (b) held 10 s: beyond the 8 s lock wait
+    const b1 = await mkItem(v.vendor.id, `${PFX}wait-b`, 10)
+    const up2 = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: b1.id, price: 12 })
+    h = holdLock(v.vendor.id, 10_000); await sleep(200)
+    const busy = await asOrgA(async () => { const t = await timedRun(() => orgDecide(f.urlSlug, up2.data?.id as string)); return { ...t, b: await bodyOf(t.r) } })
+    hErr = await h
+    assert(hErr === null && busy.r.status === 503 && busy.b.error?.code === 'MENU_BUSY' && /busy right now/.test(busy.b.error?.message ?? '')
+      && (await reqOf(up2.data?.id as string)).status === 'PENDING' && (await itemOf(b1.id)).price === 10 && (await priceLog(b1.id)).length === 0,
+    `(b) an approval still waiting after 8 s → 503 MENU_BUSY "busy right now"; still PENDING, price 10, no price-log row (got ${busy.r.status} ${busy.b.error?.code} after ${busy.ms} ms)`)
+    login(v.user.clerkId)
+    const rowsBefore = await prisma.menuRequest.count({ where: { vendorId: v.vendor.id } })
+    h = holdLock(v.vendor.id, 10_000); await sleep(200)
+    const fbusy = await timedRun(() => file(v.vendor.id, { type: 'EDIT', menuItemId: b1.id, description: 'should not land' }))
+    const fb = await bodyOf(fbusy.r)
+    hErr = await h
+    assert(hErr === null && fbusy.r.status === 503 && fb.error?.code === 'MENU_BUSY'
+      && await prisma.menuRequest.count({ where: { vendorId: v.vendor.id } }) === rowsBefore && (await itemOf(b1.id)).description !== 'should not land',
+    `(b) a filing still waiting after 8 s → 503 MENU_BUSY; no request row, nothing applied (got ${fbusy.r.status} ${fb.error?.code} after ${fbusy.ms} ms)`)
+    // (c) the safety net in handleApiError
+    const { handleApiError } = await import('../lib/api-error')
+    const timedOut = handleApiError({ code: 'P2028' })
+    const timedOutBody = await bodyOf(timedOut)
+    assert(timedOut.status === 503 && timedOutBody.error?.code === 'TX_TIMEOUT', `(c) a Prisma transaction timeout (P2028) → 503 TX_TIMEOUT, not 500 (got ${timedOut.status} ${timedOutBody.error?.code})`)
+    assert(handleApiError({ code: 'P9999' }).status === 500, '[0] control: any other error code (P9999) is still 500')
+  })
+
+  // ── [3d] a withdraw only withdraws the increase the vendor saw (finding 4)
+  console.log('\n[3d] the withdraw names its increase: refused (409) once that increase was decided or replaced')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    const w = await mkVendor(f.id)
+    login(v.user.clerkId)
+    const withdraw = async (itemId: string, price: unknown, withdrawsRequestId: unknown) => {
+      const r = await file(v.vendor.id, { type: 'EDIT', menuItemId: itemId, price, withdrawsRequestId })
+      return { status: r.status, b: await bodyOf(r) }
+    }
+    const rowsOf = (itemId: string) => prisma.menuRequest.count({ where: { menuItemId: itemId } })
+    // still waiting → the withdraw works
+    const i1 = await mkItem(v.vendor.id, `${PFX}wd-waiting`, 10)
+    const up1 = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: i1.id, price: 12 })
+    const ok = await withdraw(i1.id, 10, up1.data?.id)
+    const old1 = await reqOf(up1.data?.id as string)
+    assert(ok.status === 201 && ok.b.data?.status === 'APPROVED' && old1.status === 'REJECTED' && old1.reviewNote === 'Replaced by newer request' && (await itemOf(i1.id)).price === 10,
+      `still waiting: the withdraw naming it is applied; the $12 is REJECTED "Replaced by newer request"; price 10 (got ${ok.status} ${String(ok.b.data?.status)}, ${old1.status})`)
+    // already approved → 409, the approved price stays
+    const i2 = await mkItem(v.vendor.id, `${PFX}wd-approved`, 10)
+    const up2 = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: i2.id, price: 12 })
+    const ap2 = await asOrgA(() => orgDecide(f.urlSlug, up2.data?.id as string))
+    login(v.user.clerkId)
+    const rows2 = await rowsOf(i2.id)
+    const late = await withdraw(i2.id, 10, up2.data?.id)
+    assert(ap2.status === 200 && late.status === 409 && late.b.error?.code === 'INCREASE_NOT_PENDING' && /already decided or replaced/.test(late.b.error?.message ?? '')
+      && (await itemOf(i2.id)).price === 12 && await rowsOf(i2.id) === rows2,
+    `already approved at $12: the withdraw → 409 INCREASE_NOT_PENDING; price stays 12; no new row (got ${late.status} ${late.b.error?.code}, price ${(await itemOf(i2.id)).price})`)
+    // replaced by a newer increase → 409, the newer one stays
+    const i3 = await mkItem(v.vendor.id, `${PFX}wd-replaced`, 10)
+    const a = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: i3.id, price: 12 })
+    const b = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: i3.id, price: 13 })
+    const stale = await withdraw(i3.id, 10, a.data?.id)
+    assert(stale.status === 409 && stale.b.error?.code === 'INCREASE_NOT_PENDING' && (await reqOf(b.data?.id as string)).status === 'PENDING' && (await itemOf(i3.id)).price === 10,
+      `replaced by a newer $13: the withdraw naming the $12 → 409; the $13 stays PENDING; price 10 (got ${stale.status}, ${(await reqOf(b.data?.id as string)).status})`)
+    // another vendor's increase → 409, nothing changes
+    const i4 = await mkItem(v.vendor.id, `${PFX}wd-mine`, 10)
+    const mine = await fileBody(v.vendor.id, { type: 'EDIT', menuItemId: i4.id, price: 12 })
+    login(w.user.clerkId)
+    const wi = await mkItem(w.vendor.id, `${PFX}wd-theirs`, 10)
+    const theirs = await fileBody(w.vendor.id, { type: 'EDIT', menuItemId: wi.id, price: 12 })
+    login(v.user.clerkId)
+    const foreign = await withdraw(i4.id, 10, theirs.data?.id)
+    assert(foreign.status === 409 && foreign.b.error?.code === 'INCREASE_NOT_PENDING' && (await reqOf(mine.data?.id as string)).status === 'PENDING'
+      && (await reqOf(theirs.data?.id as string)).status === 'PENDING' && (await itemOf(i4.id)).price === 10,
+    `naming another vendor's increase → 409; both increases stay PENDING; price 10 (got ${foreign.status})`)
+    // the 400s: nothing written
+    const rowsV = () => prisma.menuRequest.count({ where: { vendorId: v.vendor.id } })
+    const n0 = await rowsV()
+    const onAdd = await file(v.vendor.id, { type: 'ADD', name: `${PFX}wd-add`, price: 5, category: 'Mains', withdrawsRequestId: mine.data?.id })
+    const noPrice = await file(v.vendor.id, { type: 'EDIT', menuItemId: i4.id, description: 'x', withdrawsRequestId: mine.data?.id })
+    const nullPrice = await file(v.vendor.id, { type: 'EDIT', menuItemId: i4.id, price: null, withdrawsRequestId: mine.data?.id })
+    const blank = await file(v.vendor.id, { type: 'EDIT', menuItemId: i4.id, price: 10, withdrawsRequestId: '  ' })
+    assert(onAdd.status === 400 && noPrice.status === 400 && nullPrice.status === 400 && blank.status === 400
+      && await rowsV() === n0 && (await reqOf(mine.data?.id as string)).status === 'PENDING',
+    `withdrawsRequestId on an ADD, on an EDIT without a price, with price null, or blank → 400 each; no row written; the increase stays PENDING (got ${onAdd.status}/${noPrice.status}/${nullPrice.status}/${blank.status})`)
+  })
+
+  // ── [9o] the approval reads the size group under the lock (finding 5)
+  console.log('\n[9o] the approval reads the size group under the lock: a group that came back while it waited is seen')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Pho`
+    const classic = await prisma.menuItem.create({ data: { vendorId: v.vendor.id, name: `${group} Classic`, price: 9, category: 'Mains', variantGroup: group, variantLabel: 'Classic', removedAt: new Date() } })
+    const sub = await fileBody(v.vendor.id, { items: [
+      { type: 'ADD', name: `${group} Small`, price: 7, category: 'Mains', variantGroup: group, variantLabel: 'Small' },
+      { type: 'ADD', name: `${group} Large`, price: 11, category: 'Mains', variantGroup: group, variantLabel: 'Large' },
+    ] })
+    const [sA, sB] = ((sub.data?.requests ?? []) as Array<{ id: string }>).map(r => r.id)
+    // The holder takes the lock, waits 1.5 s (the approval starts meanwhile), then brings Classic back and commits.
+    const h = holdLock(v.vendor.id, 1500, tx => tx.menuItem.update({ where: { id: classic.id }, data: { removedAt: null } }))
+    await sleep(200)
+    const ap = await asOrgA(() => orgDecide(f.urlSlug, sA))
+    const hErr = await h
+    const live = (await prisma.menuItem.findMany({ where: { vendorId: v.vendor.id, variantGroup: group, removedAt: null } })).map(i => i.variantLabel).sort()
+    const small = await prisma.menuItem.findFirst({ where: { vendorId: v.vendor.id, variantGroup: group, variantLabel: 'Small' } })
+    const log = small ? await priceLog(small.id) : []
+    assert(hErr === null && ap.status === 200 && live.join(',') === 'Classic,Small' && log[0]?.meta.source === 'REQUEST_APPROVED_SIZE' && (await reqOf(sB)).status === 'PENDING',
+      `approving Small while Classic came back: only Small is created (REQUEST_APPROVED_SIZE), Large stays PENDING (got ${ap.status}, live: ${live.join(',')}, ${String(log[0]?.meta.source)}, Large ${(await reqOf(sB)).status})`)
+  })
+
+  // ── [9p] the orphan 409 is decided under the lock (finding 5)
+  console.log('\n[9p] the "no longer on the menu" refusal is decided under the lock')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Ramen`
+    const reg = await mkItem(v.vendor.id, `${group} Regular`, 9, { variantGroup: group, variantLabel: 'Regular' })
+    const large = await fileBody(v.vendor.id, { type: 'ADD', name: `${group} Large`, price: 12, category: 'Mains', variantGroup: group, variantLabel: 'Large' })
+    // The holder takes the lock, waits 1.5 s, then removes Regular directly (bypassing the close) and commits.
+    const h = holdLock(v.vendor.id, 1500, tx => tx.menuItem.update({ where: { id: reg.id }, data: { removedAt: new Date() } }))
+    await sleep(200)
+    const ap = await asOrgA(() => orgDecide(f.urlSlug, large.data?.id as string))
+    const apb = await bodyOf(ap)
+    const hErr = await h
+    assert(hErr === null && large.data?.status === 'PENDING' && ap.status === 409 && /no longer on the menu/.test(apb.error?.message ?? '')
+      && (await reqOf(large.data?.id as string)).status === 'PENDING'
+      && await prisma.menuItem.count({ where: { vendorId: v.vendor.id, variantGroup: group, variantLabel: 'Large' } }) === 0,
+    `Regular removed while the approval waited → 409 "no longer on the menu"; Large still PENDING, not created (got ${ap.status}: ${apb.error?.message})`)
+  })
+
+  // ── [9q] two approvals of one brand-new item at once (Jordan, 2026-11-22)
+  console.log('\n[9q] two approvals of one brand-new item at once: one decides it, the other is told it was already reviewed')
+  await section(async () => {
+    const { f, v } = await mkShop()
+    login(v.user.clerkId)
+    const group = `${PFX}Curry`
+    const sub = await fileBody(v.vendor.id, { items: [
+      { type: 'ADD', name: `${group} Small`, price: 8, category: 'Mains', variantGroup: group, variantLabel: 'Small' },
+      { type: 'ADD', name: `${group} Large`, price: 12, category: 'Mains', variantGroup: group, variantLabel: 'Large' },
+    ] })
+    const ids = ((sub.data?.requests ?? []) as Array<{ id: string }>).map(r => r.id)
+    const answers = await asOrgA(() => Promise.all(ids.map(id => orgDecide(f.urlSlug, id))))
+    const bodies = await Promise.all(answers.map(bodyOf))
+    const statuses = answers.map(r => r.status).sort()
+    const refused = bodies.find((_, i) => answers[i].status === 409)
+    assert(ids.length === 2 && statuses.join(',') === '200,409' && /already reviewed/i.test(refused?.error?.message ?? ''),
+      `exactly one 200 and one 409 "Request already reviewed" (got ${statuses.join(',')}: ${refused?.error?.message})`)
+    const items = await prisma.menuItem.findMany({ where: { vendorId: v.vendor.id, variantGroup: group } })
+    const logs = await Promise.all(items.map(i => priceLog(i.id)))
+    assert(items.length === 2 && items.map(i => i.variantLabel).sort().join(',') === 'Large,Small'
+      && logs.every(l => l.length === 1 && l[0].meta.source === 'REQUEST_APPROVED_ADD')
+      && (await prisma.menuRequest.findMany({ where: { id: { in: ids } } })).every(r => r.status === 'APPROVED'),
+    `one item per size (Small, Large), each with one REQUEST_APPROVED_ADD row; both requests APPROVED (got ${items.length} items, ${logs.map(l => l.length).join('/')} rows)`)
+    // One MENU_CHANGE_REVIEWED entry per size. Written in the background: wait up to 3 s, then 0.5 s more for a wrong extra one.
+    const reviewed = async () => (await prisma.vendorAuditLog.findMany({ where: { vendorId: v.vendor.id, action: 'MENU_CHANGE_REVIEWED' } }))
+      .map(r => (r.metadata as { requestId?: string }).requestId).filter((id): id is string => !!id && ids.includes(id))
+    for (let i = 0; i < 30 && (await reviewed()).length < 2; i++) await sleep(100)
+    await sleep(500)
+    const entries = await reviewed()
+    assert(entries.length === 2 && ids.every(id => entries.filter(e => e === id).length === 1),
+      `one MENU_CHANGE_REVIEWED entry per size, none extra (got ${entries.length})`)
+    // source: the guard
+    const decideSrc = readFileSync('lib/menu-requests/apply-decision.ts', 'utf8').replace(/\r\n/g, '\n').replace(/^\s*\/\/.*$/gm, '')
+    const GUARD = /const groupIds = group\.map\(r => r\.id\)\s*if \(!groupIds\.includes\(requestId\)\) throw new ApiError\('Request already reviewed', 409, 'CONFLICT'\)/
+    const guardAt = decideSrc.search(GUARD)
+    assert(guardAt >= 0 && decideSrc.indexOf("case 'ADD':") > guardAt,
+      'apply-decision.ts: right after groupIds, a request that is not in it → 409 "Request already reviewed", before the ADD apply (source)')
+    assert(GUARD.test("const groupIds = group.map(r => r.id)\n    if (!groupIds.includes(requestId)) throw new ApiError('Request already reviewed', 409, 'CONFLICT')")
+      && !GUARD.test("const groupIds = group.map(r => r.id)\n\n    let approvedPrice: number | null = null"),
+    '[0] control: the scan finds a planted guard and rejects code without it')
+  })
+
+  // ── [16b] no unsafe raw SQL in lib/menu-requests (Jordan): the raw text, comments included
+  console.log('\n[16b] no $executeRawUnsafe or $queryRawUnsafe anywhere in lib/menu-requests (raw text)')
+  await section(async () => {
+    const UNSAFE = /\$(executeRawUnsafe|queryRawUnsafe)\b/
+    const dir = 'lib/menu-requests'
+    const files = readdirSync(dir).filter(n => n.endsWith('.ts'))
+    const hits = files.filter(n => UNSAFE.test(readFileSync(`${dir}/${n}`, 'utf8')))
+    assert(files.length >= 10 && hits.length === 0, `none of the ${files.length} files in ${dir} contains $executeRawUnsafe or $queryRawUnsafe (found in: ${hits.join(', ') || 'none'})`)
+    assert(UNSAFE.test("await tx.$executeRawUnsafe(`SET lock_timeout = '8s'`)") && UNSAFE.test('await db.$queryRawUnsafe(sql)')
+      && !UNSAFE.test("await tx.$executeRaw`SELECT set_config('lock_timeout', '8s', true)`"),
+    '[0] control: the scan finds a planted $executeRawUnsafe( and $queryRawUnsafe(, and passes the tagged $executeRaw` form')
+  })
+
+  // ── [16c] the platform time limit on the lock-taking routes (Jordan)
+  console.log('\n[16c] the three routes that take the vendor lock set maxDuration = 30')
+  await section(async () => {
+    const MAX = /^export const maxDuration = 30$/m
+    const routes = ['app/api/menu-requests/route.ts', 'app/api/organizer/fairs/[fairSlug]/menu-requests/[id]/route.ts', 'app/api/admin/events/[id]/menu-requests/[requestId]/route.ts']
+    const missing = routes.filter(p => !MAX.test(readFileSync(p, 'utf8').replace(/\r\n/g, '\n')))
+    assert(missing.length === 0, `each lock-taking route exports maxDuration = 30 (missing in: ${missing.join(', ') || 'none'})`)
+    assert(MAX.test("import x from 'y'\n\nexport const maxDuration = 30\n") && !MAX.test("import x from 'y'\n") && !MAX.test('export const maxDuration = 10\n'),
+      '[0] control: the scan finds a planted maxDuration = 30 and rejects a file without one and one set to 10')
   })
 
   // Organizer B's fair is only there so "another organizer" has a fair of its own.

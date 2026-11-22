@@ -95,55 +95,85 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
   const requestType: MenuRequestTypeInput = menuRequest.type
   const menuItemId = menuRequest.menuItemId
 
-  // SIZES ARE PART OF THE ITEM (Nov 12). A brand-new item's sizes are PENDING ADDs sharing a
-  // variantGroup; deciding one decides them all, in this one transaction. A new size of an item
-  // that is already LIVE (F4, Nov 13) is decided on its own: approving "Large" must not also approve
-  // an "XL" the vendor filed separately. Every other request is decided on its own.
-  const sizedAdd = requestType === 'ADD' && menuRequest.variantGroup !== null
-  const isNewSizeOfLiveItem = sizedAdd
-    && (await db.menuItem.count({ where: liveSizeGroupWhere(vendorId, menuRequest.variantGroup as string) })) > 0
-  // WAS IT FILED AS A NEW SIZE? (size-groups.ts filedAsNewSize.) Asked only when the answer can
-  // matter (ultrareview P7 finding 7): a sized ADD whose group has NO live row. In a live group the
-  // request is a new size anyway and is decided on its own.
-  const orphanedNewSize = sizedAdd && !isNewSizeOfLiveItem
-    && (await filedAsNewSize(db, [requestId])).has(requestId)
-  // SAFETY NET (ultrareview finding 1, 2026-11-21). Removing the last live row of a group closes its
-  // waiting new sizes (supersede.ts closeOrphanedNewSizes). Should one still be PENDING, it must
-  // not be approved as if it were a brand-new item: refused here, before anything is written, so it
-  // stays PENDING for the approver to reject.
-  if (action === 'APPROVE' && orphanedNewSize) {
-    throw new ApiError(ORPHANED_NEW_SIZE_MESSAGE, 409, 'CONFLICT')
-  }
-  let group: MenuRequest[] = [menuRequest]
-  if (sizedAdd && !isNewSizeOfLiveItem && !orphanedNewSize) {
-    // A brand-new item: all its pending sizes are decided together. Requests filed as new sizes of
-    // a removed item that share the group name are never swept in (ultrareview P7 finding 5).
-    const pending = await db.menuRequest.findMany({
-      where: { vendorId, type: 'ADD', status: 'PENDING', variantGroup: menuRequest.variantGroup },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    })
-    const orphans = await filedAsNewSize(db, pending.map(r => r.id))
-    group = pending.filter(r => !orphans.has(r.id))
-  }
-  const groupIds = group.map(r => r.id)
-
-  // ── Checks before anything is written ──────────────────────────────────────────────────
-  // Each refusal leaves the request PENDING, so the approver can reject it. All return 422, except
-  // a request naming another vendor's item: 409 ITEM_VENDOR_MISMATCH, the code and wording
-  // scripts/menu-ownership-boundary-proof.ts [4] pins (merge decision D3, 2026-11-21).
-  let approvedPrice: number | null = null
-  /** ADD only: each size's price after the rule check, by request id. */
-  const addPrices = new Map<string, number>()
-  if (action === 'APPROVE') {
-    // OWNERSHIP RE-CHECK (audit H4, defence in depth). Filing now refuses another vendor's item,
-    // but a row written before that check existed could still name one.
-    if (requestType !== 'ADD') {
-      if (!menuItemId) throw unprocessable(`${requestType} request missing menuItemId`)
-      if (!(await menuRequestTargetsOwnItem(menuItemId, vendorId))) {
-        throw new ApiError("This change no longer matches the vendor's menu and can't be applied.", 409, 'ITEM_VENDOR_MISMATCH')
-      }
+  // OWNERSHIP RE-CHECK (audit H4, defence in depth). Filing now refuses another vendor's item, but a
+  // row written before that check existed could still name one. Refused with 409
+  // ITEM_VENDOR_MISMATCH, the code and wording scripts/menu-ownership-boundary-proof.ts [4] pins
+  // (merge decision D3, 2026-11-21); the request stays PENDING. Read-only, and an item's vendor never
+  // changes, so it stays before the lock.
+  if (action === 'APPROVE' && requestType !== 'ADD') {
+    if (!menuItemId) throw unprocessable(`${requestType} request missing menuItemId`)
+    if (!(await menuRequestTargetsOwnItem(menuItemId, vendorId))) {
+      throw new ApiError("This change no longer matches the vendor's menu and can't be applied.", 409, 'ITEM_VENDOR_MISMATCH')
     }
-    if (requestType === 'ADD') {
+  }
+  const sizedAdd = requestType === 'ADD' && menuRequest.variantGroup !== null
+  // PRICE RE-CHECK (audit H5, 2f). A request filed before the $1.00–$10,000 rule (2a) can carry a
+  // price the rule now refuses. A RESTORE carries a price since 2g, so it is checked too. It reads
+  // only the request's own price, so it stays before the transaction (scripts/menu-price-audit-test.ts
+  // pins that); a refusal is a 422 and the request stays PENDING.
+  let approvedPrice: number | null = null
+  if (action === 'APPROVE' && requestType !== 'DELETE' && menuRequest.price !== null) {
+    const parsed = parseInPersonPrice(menuRequest.price)
+    if (!parsed.ok) {
+      throw unprocessable(`This request's price can't be approved: ${parsed.message}. Reject it and ask the vendor to resubmit.`)
+    }
+    approvedPrice = parsed.value
+  }
+
+  // ── One transaction: the decision, the menu change, its audit rows, and the review ────────
+  // THE WHOLE DECISION HAPPENS UNDER THE LOCK (Step 12 finding 5, 2026-11-22). Every read that
+  // depends on the vendor's menu as it is now (is the size group live? was this filed as a new
+  // size? which sizes are decided together?) and every refusal built on it runs after
+  // lockVendorMenu, through `tx`, so no filing or approval for the same vendor can change the answer
+  // between the read and the write. A refusal thrown here rolls back and leaves the request PENDING.
+  //
+  // timeout 20 s (Step 12 finding 2): longer than the lock's 8 s wait plus this work, so a long wait
+  // ends in 503 MENU_BUSY, never in Prisma's default 5 s transaction timeout.
+  const { updated, group } = await db.$transaction(async tx => {
+    // One vendor's menu changes run one at a time (size-groups.ts lockVendorMenu; P7 finding 4).
+    await lockVendorMenu(tx, vendorId)
+
+    // SIZES ARE PART OF THE ITEM (Nov 12). A brand-new item's sizes are PENDING ADDs sharing a
+    // variantGroup; deciding one decides them all, in this one transaction. A new size of an item
+    // that is already LIVE (F4, Nov 13) is decided on its own: approving "Large" must not also
+    // approve an "XL" the vendor filed separately. Every other request is decided on its own.
+    const isNewSizeOfLiveItem = sizedAdd
+      && (await tx.menuItem.count({ where: liveSizeGroupWhere(vendorId, menuRequest.variantGroup as string) })) > 0
+    // WAS IT FILED AS A NEW SIZE? (size-groups.ts filedAsNewSize.) Asked only when the answer can
+    // matter (ultrareview P7 finding 7): a sized ADD whose group has NO live row. In a live group the
+    // request is a new size anyway and is decided on its own.
+    const orphanedNewSize = sizedAdd && !isNewSizeOfLiveItem
+      && (await filedAsNewSize(tx, [requestId])).has(requestId)
+    // SAFETY NET (ultrareview finding 1, 2026-11-21). Removing the last live row of a group closes
+    // its waiting new sizes (supersede.ts closeOrphanedNewSizes). Should one still be PENDING, it must
+    // not be approved as if it were a brand-new item: refused here, before anything is written, so
+    // it stays PENDING for the approver to reject.
+    if (action === 'APPROVE' && orphanedNewSize) {
+      throw new ApiError(ORPHANED_NEW_SIZE_MESSAGE, 409, 'CONFLICT')
+    }
+    let group: MenuRequest[] = [menuRequest]
+    if (sizedAdd && !isNewSizeOfLiveItem && !orphanedNewSize) {
+      // A brand-new item: all its pending sizes are decided together. Requests filed as new sizes of
+      // a removed item that share the group name are never swept in (ultrareview P7 finding 5).
+      const pending = await tx.menuRequest.findMany({
+        where: { vendorId, type: 'ADD', status: 'PENDING', variantGroup: menuRequest.variantGroup },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      })
+      const orphans = await filedAsNewSize(tx, pending.map(r => r.id))
+      group = pending.filter(r => !orphans.has(r.id))
+    }
+    const groupIds = group.map(r => r.id)
+    // DECIDED WHILE THIS ONE WAITED (Step 12, Jordan, 2026-11-22). Two approvals of a brand-new
+    // item's sizes at once: the second waits on the lock, then finds none of the sizes PENDING, so the
+    // group is empty and the flip below would pass 0 === 0, answering success having decided nothing.
+    // This request must be one of the rows this transaction decides.
+    if (!groupIds.includes(requestId)) throw new ApiError('Request already reviewed', 409, 'CONFLICT')
+
+    // ── Checks before anything is written ────────────────────────────────────────────────
+    // Each refusal leaves the request PENDING, so the approver can reject it. All return 422.
+    /** ADD only: each size's price after the rule check, by request id. */
+    const addPrices = new Map<string, number>()
+    if (action === 'APPROVE' && requestType === 'ADD') {
       // Every size of the item must be well-formed and within the price rule, or none is applied.
       for (const r of group) {
         if (!r.name || r.price === null || !r.category) throw unprocessable('Malformed ADD request — missing required fields')
@@ -155,21 +185,7 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
         addPrices.set(r.id, parsed.value)
       }
     }
-    // PRICE RE-CHECK (audit H5, 2f). A request filed before the $1.00–$10,000 rule (2a) can carry
-    // a price the rule now refuses. A RESTORE carries a price since 2g, so it is checked too.
-    if (requestType !== 'DELETE' && menuRequest.price !== null) {
-      const parsed = parseInPersonPrice(menuRequest.price)
-      if (!parsed.ok) {
-        throw unprocessable(`This request's price can't be approved: ${parsed.message}. Reject it and ask the vendor to resubmit.`)
-      }
-      approvedPrice = parsed.value
-    }
-  }
 
-  // ── One transaction: the menu change, its audit rows, and the review ──────────────────
-  const updated = await db.$transaction(async tx => {
-    // One vendor's menu changes run one at a time (size-groups.ts lockVendorMenu; P7 finding 4).
-    await lockVendorMenu(tx, vendorId)
     const now = new Date()
     if (action === 'APPROVE') {
       // EXHAUSTIVE BY CONSTRUCTION: a fifth MenuRequestType fails `tsc` at assertNeverRequestType
@@ -306,11 +322,13 @@ export async function applyMenuRequestDecision(input: MenuRequestDecisionInput):
       data: { status: newStatus, reviewedBy: reviewerUserId, reviewedAt: now, reviewNote: reason },
     })
     if (flipped.count !== groupIds.length) throw new ApiError('Request already reviewed', 409, 'CONFLICT')
-    return tx.menuRequest.findUniqueOrThrow({
+    const updated = await tx.menuRequest.findUniqueOrThrow({
       where: { id: requestId },
       select: { id: true, status: true, reviewNote: true, reviewedAt: true },
     })
-  })
+    // The decided group goes out with the answer, for the activity-log entries after the commit.
+    return { updated, group }
+  }, { timeout: 20_000 })
 
   // Cache busts only after the commit, so they never advertise a change that rolled back.
   if (action === 'APPROVE') expireVendorMenu(vendorId)

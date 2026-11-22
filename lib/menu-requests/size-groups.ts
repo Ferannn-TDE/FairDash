@@ -12,6 +12,7 @@ import type { Prisma } from '@prisma/client'
 import { db } from '../db'
 import { ON_MENU } from '../menu/on-menu'
 import { CHANGE_KIND } from '../menu-notify/constants'
+import { ApiError } from '../api-error'
 
 const key = (vendorId: string, variantGroup: string) => `${vendorId}::${variantGroup}`
 
@@ -25,6 +26,15 @@ export function liveSizeGroupWhere(vendorId: string, variantGroup: string) {
   return { vendorId, variantGroup, ...ON_MENU }
 }
 
+/** Postgres "lock_not_available" (55P03): the lock_timeout set in lockVendorMenu ran out. Prisma
+ *  wraps a failed raw query, carrying the Postgres code in `meta.code` or in its message. */
+function isLockTimeout(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  if ((err as { meta?: { code?: unknown } }).meta?.code === '55P03') return true
+  const message = (err as { message?: unknown }).message
+  return typeof message === 'string' && message.includes('55P03')
+}
+
 /**
  * ONE VENDOR'S MENU CHANGES RUN ONE AT A TIME (ultrareview P7 finding 4, 2026-11-21). Call first
  * thing inside the transaction of every menu-request filing (app/api/menu-requests/route.ts) and
@@ -33,10 +43,25 @@ export function liveSizeGroupWhere(vendorId: string, variantGroup: string) {
  * so there is no unlock to forget. Never use the session-level pg_advisory_lock here. One lock per
  * transaction, always the same key shape, so two transactions cannot deadlock on it.
  *
- * $executeRaw, not $queryRaw: pg_advisory_xact_lock returns void, which a query result can't map.
+ * A BOUNDED WAIT (Step 12 finding 2, 2026-11-22). The wait for the lock is capped at 8 s with
+ * lock_timeout; `true` makes the setting last only until this transaction ends. Past 8 s Postgres
+ * cancels the wait (55P03) and the caller gets a named, retryable 503 MENU_BUSY instead of an
+ * anonymous 500; the transaction rolls back and nothing is written. Both transactions that call
+ * this allow 20 s (and their routes maxDuration 30), so this answer always comes first. The cap
+ * covers every lock wait in the transaction, which is harmless: holding the vendor lock, no other
+ * menu change of this vendor can be holding its rows.
+ *
+ * Tagged $executeRaw only, never the Unsafe raw variants (Jordan; test row [16b]). $executeRaw, not
+ * $queryRaw: pg_advisory_xact_lock returns void, which a query result can't map.
  */
 export async function lockVendorMenu(tx: Prisma.TransactionClient, vendorId: string): Promise<void> {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`menu:${vendorId}`}))`
+  await tx.$executeRaw`SELECT set_config('lock_timeout', '8s', true)`
+  try {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`menu:${vendorId}`}))`
+  } catch (err) {
+    if (isLockTimeout(err)) throw new ApiError('This menu is busy right now — please try again in a moment.', 503, 'MENU_BUSY')
+    throw err
+  }
 }
 
 /**
