@@ -319,15 +319,16 @@ async function main() {
   const faq = read('app/_components/faq-content.ts')
   // The client's wording (2026-11-24, 84b108b), also pinned word for word by scripts/faq-fees-copy-test.ts.
   assert(faq.includes("a: 'A service fee, shown at checkout before you pay, plus a curbside fee if you choose curbside.'"), 'FAQ "What fees will I pay?" approved text')
-  assert(faq.includes("we'll refund your food — the service fee isn't refunded. Once a vendor has accepted"), 'FAQ "Can I cancel an order?" approved text')
+  // Updated 2026-11-22 (item 10 stage 5): the cancel answer, the vendor decline message and the cancel dialog are now the
+  // stage 5 wording from lib/refund-copy.ts (pinned word for word in scripts/refunds-stage5-test.ts [S5-7]).
+  assert(/a: CANCEL_ANSWER \}/.test(faq), 'FAQ "Can I cancel an order?" reads the stage 5 approved answer (lib/refund-copy.ts)')
   assert(faq.includes("No commission. Our only revenue is the customer's service fee. You do cover your share of Stripe's processing fee, the same as any card payment."), 'FAQ "What does FairSynq take?" approved text')
   assert(read('app/admin/[eventSlug]/reports/page.tsx').includes('sub="FairSynq revenue (service fees)"'), 'admin reports: "FairSynq revenue (service fees)"')
   assert((read('app/organizer/fairs/[fairSlug]/orders/page.tsx').match(/`The service fee is NOT refunded\.`/g) ?? []).length === 2, 'organizer refund prompt (×2): "The service fee is NOT refunded."')
-  assert(/refunded for the food automatically\. The service\s+fee isn&apos;t refunded\./.test(read('app/vendor/[fairSlug]/dashboard/page.tsx')), 'vendor decline message approved text')
+  assert(/\{VENDOR_DECLINE_DIALOG\}/.test(read('app/vendor/[fairSlug]/dashboard/page.tsx')), 'vendor decline message reads the stage 5 approved text (lib/refund-copy.ts)')
   assert(read('lib/process-refund.ts').includes("'kept (service fee not refunded)'"), 'internal refund-log note approved text')
   // Added 2026-11-21: the customer cancel dialog said "The 10% service fee isn't refunded" (missed by stage 3).
-  assert(/refund what you paid for the food\. The service\s+fee isn&apos;t refunded\. Refunds usually appear within 5–10 business days\./.test(read('components/order/OrderComponents.tsx')),
-    'customer cancel dialog: "The service fee isn\'t refunded." (no fee number)')
+  assert(/\{CUSTOMER_CANCEL_DIALOG\}/.test(read('components/order/OrderComponents.tsx')), 'customer cancel dialog reads the stage 5 approved text (lib/refund-copy.ts)')
   // OrderComponents also holds CSS progress widths like '10%', so this file is checked for a fee PERCENT in prose only.
   assert(!/\b\d+ ?%\s+service fee/i.test(noComments(read('components/order/OrderComponents.tsx'))), 'no "<n>% service fee" left in the customer order components')
   assert(/\b\d+ ?%\s+service fee/i.test('The 10% service fee isn\'t refunded.'), '[0] control: the fee-percent probe catches the old wording')
@@ -337,7 +338,8 @@ async function main() {
   const PROMISE = /\b(refund(s|ed)?|get back)\b[^.'"`]{0,40}\bservice fee\b(?![^.'"`]{0,20}\b(isn|is not|NOT|not)\b)|\bservice fee\b[^.'"`]{0,15}\b(is|will be|gets?) refunded/i
   assert(PROMISE.test('We refund the service fee if your order is cancelled.') && !PROMISE.test("the service fee isn't refunded"), '[0] control: the promise scanner catches a planted promise and passes a refusal')
   const promising = [...walk(join(process.cwd(), 'app')), ...walk(join(process.cwd(), 'components'))].map(f => relative(process.cwd(), f).split(sep).join('/')).filter(f => PROMISE.test(noComments(read(f))))
-  assert(promising.length === 0, `no page promises a service-fee refund (found: ${promising.join(', ') || 'none'})`)
+  // Stage 5: the only approved service-fee promises live in lib/refund-copy.ts (scanned and allowed in refunds-stage5-test).
+  assert(promising.length === 0, `no page in app/ or components/ writes its own service-fee promise (found: ${promising.join(', ') || 'none'})`)
 
   // ── [8] ───────────────────────────────────────────────────────────────────────────────────
   console.log('\n[8] settings cards')

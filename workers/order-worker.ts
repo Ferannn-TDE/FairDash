@@ -47,6 +47,7 @@ import { processOrderPayout, PayoutReconciliationError, PayoutTerminalError } fr
 import { processRunnerPayout } from '../lib/runner-payout'
 import { processEventOrganizerPayout } from '../lib/organizer-payout'
 import { refundVendorPortion } from '../lib/process-refund'
+import { owedBackAfterTerminal } from '../lib/tip-refund'
 import { reconcileMasterStatus } from '../lib/reconcile-order-status'
 import { recordPayoutFailure as recordPayoutFailureShared, describeFailureCause } from '../lib/payout-failure-marker'
 import { payoutFailureFinality } from '../lib/payout-failure-finality'
@@ -162,6 +163,8 @@ async function handleMarkUnaccepted(job: Job<JobData>) {
   await reconcileMasterStatus(orderId, {
     timeout: { status: 'CANCELLED', by: 'system', reason: VENDOR_DID_NOT_ACCEPT_REASON },
   })
+  // Stage 5: nobody accepted → owed-back now (service fee + curbside fee + tip for feeModel 2). Best-effort.
+  await owedBackAfterTerminal(orderId, 'accept_timeout')
 
   await prisma.$transaction([
     prisma.cancellation.upsert({
@@ -253,6 +256,8 @@ async function handleMarkUndeliverable(job: Job<JobData>) {
   // Status via the aggregator (asserted timeout override, behind canAdvance).
   // Reconcile first so a retry's top guard (status === READY) short-circuits.
   await reconcileMasterStatus(orderId, { timeout: { status: 'UNDELIVERABLE' } })
+  // Stage 5: a feeModel 2 curbside order never handed over → curbside fee + tip go back now. Best-effort.
+  await owedBackAfterTerminal(orderId, 'undeliverable')
 
   await prisma.orderEvent.create({
     data: {

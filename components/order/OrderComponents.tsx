@@ -27,6 +27,7 @@ import { getStatusConfig } from '@/lib/order-status-config'
 import { isCompleted as isCompletedStatus, isFailed as isFailedStatus } from '@/lib/order-status'
 import type { OrderView, VendorLaneView } from '@/lib/order-view'
 import { formatCents, type OrderItemization } from '@/lib/order-itemization'
+import { CUSTOMER_CANCEL_DIALOG } from '@/lib/refund-copy'
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
@@ -695,8 +696,7 @@ export function CancelModal({
           </p>
         ) : (
           <p className="text-[#A1A1A1] text-sm mb-6">
-            Your order will be cancelled and we&apos;ll refund what you paid for the food. The service
-            fee isn&apos;t refunded. Refunds usually appear within 5–10 business days.
+            {CUSTOMER_CANCEL_DIALOG}
           </p>
         )}
         <div className="flex gap-3">

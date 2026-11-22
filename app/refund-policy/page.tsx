@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { EnvelopeIcon } from '@heroicons/react/24/outline'
 import MarketplaceNavbar from '../_components/MarketplaceNavbar'
 import { CONTACT_EMAIL, RESPONSE_TIME_LONG, contactMailto } from '@/lib/contact-info'
+import { CANCELLED_ORDERS_POLICY } from '@/lib/refund-copy'
 
 export const metadata = {
   title: 'Refund Policy — FairSynq',
@@ -24,7 +25,7 @@ const POLICY_SECTIONS = [
   },
   {
     heading: 'Cancelled Orders',
-    body: 'If a vendor cancels your order, or it is cancelled before a vendor accepts it, you get back the price of the food from that vendor. If the whole order is cancelled before a runner delivers it, you also get back the delivery or curbside fee and any tip. When only part of an order from several vendors is cancelled, the delivery fee and tip stay with the delivery. The FairSynq service fee is not refunded. Refunds go back to the card you paid with and usually take 5–10 business days to appear.',
+    body: CANCELLED_ORDERS_POLICY,
   },
   {
     heading: 'How To Request Help',

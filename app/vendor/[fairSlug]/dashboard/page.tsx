@@ -25,6 +25,7 @@ import { deriveOnlineState } from '@/lib/vendor-online-state'
 
 import type { VendorActiveOrder, VendorActiveOrderItem, VendorFulfillmentType } from '@/lib/vendor-active-order'
 import { formatDeliveryAddress, toDeliveryAddress as addr } from '@/lib/delivery-address'
+import { VENDOR_DECLINE_DIALOG } from '@/lib/refund-copy'
 
 export type VendorOrder = VendorActiveOrder
 export type OrderItem = VendorActiveOrderItem
@@ -1236,8 +1237,7 @@ export default function VendorDashboardPage() {
               </div>
             </div>
             <p className="text-white/60 text-sm mb-6">
-              The customer will be notified and refunded for the food automatically. The service
-              fee isn&apos;t refunded.
+              {VENDOR_DECLINE_DIALOG}
             </p>
             <div className="flex gap-3">
               <button

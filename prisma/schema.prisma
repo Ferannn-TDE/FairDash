@@ -755,6 +755,11 @@ model Order {
   // tipRefundId stays the ONE "owed-back settled" marker (expand/contract: no rename); this is the
   // fee part of what went back, for the receipt and order page. Null on tip-only legacy refunds.
   deliveryFeeRefundCents Int?
+  // Item 10 stage 5: the SERVICE FEE part owed back (feeModel 2 orders cancelled before any vendor accepted; C-2).
+  // Null = not refunded. serviceFeeRefundId is the Stripe refund that carried it: the same refund as tipRefundId
+  // when everything went back together, or a later top-up for an order whose tip + fee went back before stage 5.
+  serviceFeeRefundCents  Int?
+  serviceFeeRefundId     String?
 
   // Out-of-model exclusion marker. NOT a terminal status (these orders may be
   // COMPLETED/CANCELLED/PLACED in their own right) — a distinct flag meaning

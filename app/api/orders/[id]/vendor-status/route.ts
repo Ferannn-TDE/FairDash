@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { runAfterResponse } from '@/lib/after-response'
 import { revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { fireAndForgetFirebaseUpdate } from '@/lib/firebase-sync'
 import { reconcileMasterStatus } from '@/lib/reconcile-order-status'
 import { isRunnerFulfilled } from '@/lib/order-status'
 import { refundVendorPortion } from '@/lib/process-refund'
+import { owedBackAfterTerminal } from '@/lib/tip-refund'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
@@ -251,6 +253,8 @@ export async function PATCH(
     } catch (err) {
       logger.error('[VendorStatus] master reconcile failed — reconciler/next transition will retry', { orderId, error: String(err) })
     }
+    // Stage 5: a decline that ended the order (nobody accepted) triggers owed-back now. Best-effort; the sweep backstops.
+    if (newStatus === 'DECLINED') await owedBackAfterTerminal(orderId, 'vendor_decline')
 
     // Always update both RTDB paths on every vendor status transition.
     // Vendor path: lightweight payload — id + status + version only.
@@ -259,7 +263,8 @@ export async function PATCH(
     // Customer path: used by the customer order tracking page — must fire on
     //   every transition so the customer sees ACCEPTED/PREPARING/READY in real time.
     const now = Date.now()
-    after(() => {
+    // runAfterResponse = Next's after() with a test seam (lib/after-response.ts, stage 2), so tests see the real response.
+    runAfterResponse(async () => {
       fireAndForgetFirebaseUpdate(
         `fairs/${order.eventId}/orders/${vendorId}/${orderId}`,
         { id: orderId, status: newStatus, updatedAt: now, version: updated.version },
@@ -289,7 +294,7 @@ export async function PATCH(
     // `todayOrders` IS rendered (dashboard/page.tsx:946) — it stays, and its IN_MODEL_ORDERS
     // filter stays with it: a voided order keeps its status, so without the filter struck test
     // orders inflate the vendor's own live count.
-    after(async () => {
+    runAfterResponse(async () => {
       try {
         const startOfToday = new Date()
         startOfToday.setHours(0, 0, 0, 0)

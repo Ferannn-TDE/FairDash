@@ -8,6 +8,7 @@ import { enforceRateLimit } from '@/lib/ratelimit'
 import { refundVendorPortion } from '@/lib/process-refund'
 import { logger } from '@/lib/logger'
 import { resolveOrder } from '@/lib/resolve-order'
+import { owedBackAfterTerminal } from '@/lib/tip-refund'
 
 // PATCH /api/orders/:id/cancel   body: { vendorId?: string, reason?: string }
 //
@@ -121,6 +122,10 @@ export async function PATCH(
         update: { reason },
       })
     }
+
+    // Stage 5: if that ended the order (and nobody ever accepted), the owed-back refund goes out now — service fee +
+    // curbside fee + tip together for feeModel 2. Best-effort; the reconciler sweep is the backstop.
+    if (rec.wrote) await owedBackAfterTerminal(orderId, 'customer_cancel')
 
     return success({
       orderId,

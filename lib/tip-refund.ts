@@ -30,6 +30,16 @@
  *
  * HALTS are durable (OwedBackHalt), shown on the admin money page until an admin resolves them
  * with a note, and re-checked every sweep meanwhile. Resolving never refunds.
+ *
+ * ITEM 10 STAGE 5 (BATCH-1 §19, decided 2026-11-21) — feeModel 2 orders ONLY; legacy orders keep everything above.
+ *   FULL CANCEL BEFORE ACCEPTANCE: the order is CANCELLED, every vendor portion ended DECLINED or REFUNDED, and no
+ *     portion has VendorOrderStatus.acceptedAt (Order.acceptedAt is never written — don't use it). Then the SERVICE
+ *     FEE goes back too, in the same single refund as the tip + curbside fee (C-2).
+ *   UNDELIVERABLE: the curbside fee + tip go back; the service fee and the food (the vendor made it) are kept.
+ *   UNCOLLECTED: nothing (the client's policy).
+ *   An order whose tip + fee went back BEFORE stage 5 shipped is topped up with just the service fee: the earlier
+ *   owed-back refund is subtracted by label as always, and the top-up uses its own key (an idempotency key can't be
+ *   reused with a different amount). Markers: serviceFeeRefundCents + serviceFeeRefundId.
  */
 
 import type { Prisma } from '@prisma/client'
@@ -37,6 +47,7 @@ import { db } from './db'
 import { stripe } from './stripe'
 import { logger } from './logger'
 import { writeMoneyAudit } from './admin-money'
+import { FEE_MODEL_EXHIBIT_A } from './fees/exhibit-a'
 
 /**
  * NO RETROACTIVE FEE REFUNDS (decision 2). Before 1.2 the scan only looked at tipped orders, so
@@ -64,14 +75,33 @@ const cents = (v: number | null | undefined) => Math.round((v ?? 0) * 100)
  */
 export function owedBackCandidateWhere(): Prisma.OrderWhereInput {
   return {
-    status: 'CANCELLED',
-    OR: [{ tip: { gt: 0 } }, { deliveryFee: { gt: 0 }, cancelledAt: { gte: OWED_BACK_FEE_FROM } }],
     runnerEarning: { is: null },
     partnerEarning: { is: null }, // item 10 stage 4: a held PartnerEarning means the partner earned it
-    tipRefundId: null,
     voidedAt: null,
     NOT: { owedBackHalt: { is: { resolvedAt: { not: null } } } },
+    OR: [
+      // Today's rule (every fee model): a cancelled order with a tip or fee still to send back.
+      { status: 'CANCELLED', tipRefundId: null, OR: [{ tip: { gt: 0 } }, { deliveryFee: { gt: 0 }, cancelledAt: { gte: OWED_BACK_FEE_FROM } }] },
+      // Stage 5: a feeModel 2 full cancel before acceptance whose service fee hasn't gone back yet (also tops up an
+      // order whose tip + fee went back before stage 5 shipped).
+      { feeModel: FEE_MODEL_EXHIBIT_A, ...FULL_CANCEL_BEFORE_ACCEPTANCE, fairSynqFee: { gt: 0 }, serviceFeeRefundCents: null },
+      // Stage 5: a feeModel 2 curbside order never handed over — curbside fee + tip go back.
+      { feeModel: FEE_MODEL_EXHIBIT_A, status: 'UNDELIVERABLE', tipRefundId: null, OR: [{ tip: { gt: 0 } }, { deliveryFee: { gt: 0 } }] },
+    ],
   }
+}
+
+/** Stage 5's "nobody ever accepted" rule, as a where (the plan applies the same three conditions in code). */
+const FULL_CANCEL_BEFORE_ACCEPTANCE = {
+  status: 'CANCELLED',
+  vendorOrderStatuses: { some: {}, every: { status: { in: ['DECLINED', 'REFUNDED'] }, acceptedAt: null } },
+} satisfies Prisma.OrderWhereInput
+
+/** The same rule over loaded rows: CANCELLED, every portion DECLINED/REFUNDED, none ever stamped accepted. */
+export function qualifiesForFullCancelRefund(o: { status: string; vendorOrderStatuses: { status: string; acceptedAt: Date | null }[] }): boolean {
+  return o.status === 'CANCELLED'
+    && o.vendorOrderStatuses.length > 0
+    && o.vendorOrderStatuses.every(v => (v.status === 'DECLINED' || v.status === 'REFUNDED') && v.acceptedAt === null)
 }
 
 // ─── The plan (pure read) ─────────────────────────────────────────────────────
@@ -89,6 +119,8 @@ export interface TipRefundPlan {
   tipCents: number
   /** The fee part owed back: the order's fee, or 0 when it was cancelled before OWED_BACK_FEE_FROM. */
   deliveryFeeCents: number
+  /** Stage 5: the service fee part owed back (feeModel 2 full cancel before acceptance), else 0. */
+  serviceFeeCents: number
   /** tip + fee when outcome 'refund', else 0. Earlier owed-back refunds are subtracted at execute. */
   owedBackCents: number
   chargeId: string | null
@@ -101,31 +133,41 @@ export async function planTipRefund(orderId: string): Promise<TipRefundPlan> {
     where: { id: orderId },
     select: {
       id: true, status: true, tip: true, deliveryFee: true, stripeChargeId: true, tipRefundId: true, cancelledAt: true,
+      feeModel: true, fairSynqFee: true, serviceFeeRefundCents: true,
+      vendorOrderStatuses: { select: { status: true, acceptedAt: true } },
       runnerEarning: { select: { id: true } },
       partnerEarning: { select: { id: true } },
     },
   })
   if (!order) throw new Error(`planTipRefund: order ${orderId} not found`)
 
+  const stage5 = order.feeModel === FEE_MODEL_EXHIBIT_A
+  const undeliverable = stage5 && order.status === 'UNDELIVERABLE'
+  const fullCancel = stage5 && qualifiesForFullCancelRefund(order)
   const tipCents = cents(order.tip)
-  const feeOwed = !!order.cancelledAt && order.cancelledAt >= OWED_BACK_FEE_FROM
+  // feeModel 2 orders all post-date OWED_BACK_FEE_FROM, and an UNDELIVERABLE order has no cancelledAt.
+  const feeOwed = stage5 || (!!order.cancelledAt && order.cancelledAt >= OWED_BACK_FEE_FROM)
   const deliveryFeeCents = feeOwed ? cents(order.deliveryFee) : 0
+  const serviceFeeCents = fullCancel ? cents(order.fairSynqFee) : 0
+  // Settled = the tip/fee marker is set AND no service fee is still owed (a pre-stage-5 owed-back gets topped up).
+  const serviceFeeOutstanding = serviceFeeCents > 0 && order.serviceFeeRefundCents === null
   const base = {
     orderId: order.id,
     tipCents,
     deliveryFeeCents,
+    serviceFeeCents,
     chargeId: order.stripeChargeId ?? null,
     // A held PartnerEarning (item 10 stage 4, feeModel 2) counts as earned, same as a RunnerEarning.
     hasRunnerEarning: !!order.runnerEarning || !!order.partnerEarning,
-    alreadyRefunded: !!order.tipRefundId,
+    alreadyRefunded: !!order.tipRefundId && !serviceFeeOutstanding,
   }
 
-  if (tipCents + deliveryFeeCents <= 0) return { ...base, outcome: 'nothing_owed', owedBackCents: 0 }
+  if (tipCents + deliveryFeeCents + serviceFeeCents <= 0) return { ...base, outcome: 'nothing_owed', owedBackCents: 0 }
   if (base.alreadyRefunded) return { ...base, outcome: 'already_refunded', owedBackCents: 0 }
   // POLICY BOUNDARY — checked BEFORE the cancelled gate so earned money can never slip through.
   if (base.hasRunnerEarning) return { ...base, outcome: 'excluded_runner_earned', owedBackCents: 0 }
-  if (order.status !== 'CANCELLED') return { ...base, outcome: 'not_terminal', owedBackCents: 0 }
-  return { ...base, outcome: 'refund', owedBackCents: tipCents + deliveryFeeCents }
+  if (order.status !== 'CANCELLED' && !undeliverable) return { ...base, outcome: 'not_terminal', owedBackCents: 0 }
+  return { ...base, outcome: 'refund', owedBackCents: tipCents + deliveryFeeCents + serviceFeeCents }
 }
 
 // ─── The ceiling (pure) ───────────────────────────────────────────────────────
@@ -270,6 +312,7 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
     where: { id: orderId },
     select: {
       id: true, eventId: true, fairSynqFee: true, serviceCharge: true, stripePaymentIntentId: true,
+      status: true, feeModel: true, subtotal: true, taxCents: true, tipRefundId: true, serviceFeeRefundCents: true,
       organizerEarning: { select: { id: true } },
       owedBackHalt: { select: { resolvedAt: true } },
     },
@@ -315,11 +358,18 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
   }
   const refunds = await readChargeRefunds(chargeId)
 
+  // What the customer never gets back on this charge. Stage 5: on a full cancel the service fee is owed, so it isn't
+  // kept; on an UNDELIVERABLE order the vendor keeps the food (and its tax), so only the curbside fee + tip are room.
+  const keptCents =
+    plan.serviceFeeCents > 0 ? cents(order.serviceCharge)
+    : order.feeModel === FEE_MODEL_EXHIBIT_A && order.status === 'UNDELIVERABLE'
+      ? cents(order.fairSynqFee) + cents(order.serviceCharge) + cents(order.subtotal) + order.taxCents
+      : cents(order.fairSynqFee) + cents(order.serviceCharge)
   const decision = decideOwedBack({
     orderId,
     owedCents: plan.owedBackCents,
     chargeAmountCents: charge.amount,
-    keptCents: cents(order.fairSynqFee) + cents(order.serviceCharge),
+    keptCents,
     refunds,
   })
 
@@ -327,7 +377,7 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
 
   if (dryRun) {
     if (decision.kind === 'covered') return { orderId, outcome: 'covered', amountCents: 0, refundId: decision.adoptRefundId, dryRun, detail: `earlier owed-back ${decision.priorOwedBackCents}¢` }
-    return { orderId, outcome: 'refunded', amountCents: decision.amountCents, dryRun, detail: `tip ${plan.tipCents}¢ + fee ${plan.deliveryFeeCents}¢ − earlier ${decision.priorOwedBackCents}¢; room ${decision.roomCents}¢` }
+    return { orderId, outcome: 'refunded', amountCents: decision.amountCents, dryRun, detail: `tip ${plan.tipCents}¢ + fee ${plan.deliveryFeeCents}¢${plan.serviceFeeCents ? ` + service fee ${plan.serviceFeeCents}¢` : ''} − earlier ${decision.priorOwedBackCents}¢; room ${decision.roomCents}¢` }
   }
 
   if (decision.kind === 'covered') {
@@ -335,7 +385,10 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
       where: { id: orderId, tipRefundId: null },
       data: { tipRefundId: decision.adoptRefundId, tipRefundedAt: new Date(), deliveryFeeRefundCents: plan.deliveryFeeCents },
     })
-    if (w.count === 1) {
+    const ws = plan.serviceFeeCents > 0
+      ? await db.order.updateMany({ where: { id: orderId, serviceFeeRefundCents: null }, data: { serviceFeeRefundCents: plan.serviceFeeCents, serviceFeeRefundId: decision.adoptRefundId } })
+      : { count: 0 }
+    if (w.count === 1 || ws.count === 1) {
       await writeMoneyAudit({ id: 'reconciler:owed-back', type: 'reconciler' }, order.eventId, {
         action: 'OWED_BACK_COVERED', payeeType: 'customer', payeeId: orderId, orderId,
         amountCents: decision.priorOwedBackCents,
@@ -348,6 +401,10 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
     return { orderId, outcome: 'covered', amountCents: 0, refundId: decision.adoptRefundId }
   }
 
+  // One key per refund. A stage 5 top-up (an earlier owed-back already on the charge) can't reuse the first key with
+  // a different amount, so it gets its own.
+  const idempotencyKey = decision.priorOwedBackCents > 0 && plan.serviceFeeCents > 0
+    ? `${owedBackIdempotencyKey(orderId)}_svc` : owedBackIdempotencyKey(orderId)
   const refund = await stripe.refunds.create(
     {
       charge: chargeId,
@@ -355,23 +412,48 @@ export async function processTipRefund(orderId: string, opts?: { dryRun?: boolea
       metadata: {
         orderId, kind: 'owed_back',
         tipCents: String(plan.tipCents), deliveryFeeCents: String(plan.deliveryFeeCents),
+        // Only when a service fee goes back, so a legacy owed-back refund's metadata is byte-identical to before.
+        ...(plan.serviceFeeCents > 0 ? { serviceFeeCents: String(plan.serviceFeeCents) } : {}),
         priorOwedBackCents: String(decision.priorOwedBackCents),
       },
     },
-    { idempotencyKey: owedBackIdempotencyKey(orderId) },
+    { idempotencyKey },
   )
 
   await db.order.updateMany({
     where: { id: orderId, tipRefundId: null },
     data: { tipRefundId: refund.id, tipRefundedAt: new Date(), deliveryFeeRefundCents: plan.deliveryFeeCents },
   })
+  if (plan.serviceFeeCents > 0) {
+    await db.order.updateMany({ where: { id: orderId, serviceFeeRefundCents: null }, data: { serviceFeeRefundCents: plan.serviceFeeCents, serviceFeeRefundId: refund.id } })
+  }
   await closeOpenHalt(orderId, `refunded ${decision.amountCents}¢ on a later sweep (${refund.id})`)
 
   logger.money('[OwedBack] tip + fee refunded to customer', {
-    orderId, amountCents: decision.amountCents, tipCents: plan.tipCents, deliveryFeeCents: plan.deliveryFeeCents,
+    orderId, amountCents: decision.amountCents, tipCents: plan.tipCents, deliveryFeeCents: plan.deliveryFeeCents, serviceFeeCents: plan.serviceFeeCents,
     priorOwedBackCents: decision.priorOwedBackCents, refundId: refund.id,
   })
   return { orderId, outcome: 'refunded', amountCents: decision.amountCents, refundId: refund.id }
+}
+
+// ─── Inline trigger (stage 5): run right after an order reaches a terminal state ─────────
+
+/**
+ * Best-effort owed-back right after an order ends (customer cancel, vendor decline, accept timeout, undeliverable).
+ * Never throws: the cancel / decline / job that called it must not fail because of it. The reconciler sweep runs
+ * the same processTipRefund as the backstop, so a failure here only delays the refund by one sweep.
+ * Test seam: globalThis.__OWED_BACK_INLINE_FAIL makes this call fail on purpose (scripts/refunds-stage5-test.ts).
+ */
+export async function owedBackAfterTerminal(orderId: string, source: 'customer_cancel' | 'vendor_decline' | 'accept_timeout' | 'undeliverable'): Promise<TipRefundResult | null> {
+  try {
+    if ((globalThis as { __OWED_BACK_INLINE_FAIL?: boolean }).__OWED_BACK_INLINE_FAIL) throw new Error('planted inline owed-back failure (test)')
+    const r = await processTipRefund(orderId)
+    if (r.outcome === 'refunded' || r.outcome === 'halted') logger.warn('[OwedBack] inline after terminal state', { orderId, source, outcome: r.outcome, amountCents: r.amountCents })
+    return r
+  } catch (err) {
+    logger.error('[OwedBack] inline owed-back failed — the reconciler sweep will retry', { orderId, source, error: String(err) })
+    return null
+  }
 }
 
 // ─── Reconciler: the trigger (Pattern R delegates here) ───────────────────────

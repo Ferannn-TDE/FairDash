@@ -179,8 +179,10 @@ const importers = ['app', 'lib', 'workers'].flatMap(d => walk(join(process.cwd()
   .filter(f => IMPORT.test(readFileSync(f, 'utf8')))
   .map(f => relative(process.cwd(), f).split(sep).join('/'))
 for (const i of importers) console.log(`     ↳ imports it: ${i}`)
-assert(JSON.stringify(importers.sort()) === JSON.stringify(['app/api/orders/route.ts', 'lib/checkout-total.ts', 'lib/fee-split.ts', 'lib/process-payout.ts', 'lib/reconciler.ts', 'lib/vendor-earnings.ts']),
-  'importers are exactly the price side + the payout side (fee-split, process-payout, vendor-earnings, reconciler); no refund module')
+// Updated 2026-11-22 (item 10 stage 5): owed-back (lib/tip-refund.ts) reads FEE_MODEL_EXHIBIT_A to apply the stage 5
+// rules to feeModel 2 orders only. The per-vendor refund engine (lib/process-refund.ts) still doesn't import it.
+assert(JSON.stringify(importers.sort()) === JSON.stringify(['app/api/orders/route.ts', 'lib/checkout-total.ts', 'lib/fee-split.ts', 'lib/process-payout.ts', 'lib/reconciler.ts', 'lib/tip-refund.ts', 'lib/vendor-earnings.ts']),
+  'importers are exactly the price side + the payout side + owed-back (stage 5); the refund engine is not one')
 const constants = readFileSync('lib/constants.ts', 'utf8')
 assert(/export const SERVICE_FEE_RATE = 0\.10/.test(constants), 'the legacy 10% constant is still there (legacy orders keep their stored 10%)')
 

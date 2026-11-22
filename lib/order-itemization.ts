@@ -37,6 +37,8 @@ export interface ItemizationInput {
   refunds: { vendorId: string; status: string; amountCents: number; salesTaxCents?: number | null; localTaxCents?: number | null }[]
   tipRefundId?: string | null
   deliveryFeeRefundCents?: number | null
+  /** Item 10 stage 5: the service fee sent back by owed-back (feeModel 2 full cancel before acceptance). */
+  serviceFeeRefundCents?: number | null
 }
 
 export type ChargeKey = 'subtotal' | 'delivery_fee' | 'tip' | 'service_charge' | 'service_fee' | 'tax'
@@ -155,12 +157,16 @@ export function itemizeOrder(o: ItemizationInput): OrderItemization {
     }
   }
 
+  // Stage 5: the service fee owed back on a full cancel before acceptance (its own landed line).
+  const ownedBackFee = o.serviceFeeRefundCents ?? 0
+  if (ownedBackFee > 0) refunds.push({ key: 'service_fee', label: 'Service fee', cents: ownedBackFee, status: 'REFUNDED' })
+
   // Full cancel = every vendor's food refunded IN FULL (landed or processing). A partial
   // amount on any vendor, or a vendor with no refund, makes it a partial cancel.
   const foodBack = new Map<string, number>()
   for (const r of refunds) if (r.key === 'food') foodBack.set(r.vendorId, (foodBack.get(r.vendorId) ?? 0) + r.cents)
   const fullCancel = vendorOrder.length > 0 && vendorOrder.every(v => (foodBack.get(v) ?? 0) >= (sliceCents.get(v) ?? 0))
-  const keptCents = serviceFeeCents - waived.REFUNDED - waived.PROCESSING
+  const keptCents = serviceFeeCents - waived.REFUNDED - waived.PROCESSING - ownedBackFee
 
   const refundedCents = refunds.filter(r => r.status === 'REFUNDED').reduce((s, r) => s + r.cents, 0)
   const processingCents = refunds.filter(r => r.status === 'PROCESSING').reduce((s, r) => s + r.cents, 0)

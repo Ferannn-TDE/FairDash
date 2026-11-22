@@ -1,0 +1,213 @@
+{
+  "note": "Today's owed-back for old (feeModel null) orders, recorded BEFORE item 10 stage 5 code. Never re-record to make a run pass.",
+  "recordedAt": "2026-11-21T07:59:15.940Z",
+  "results": {
+    "tip + fee owed back (live)": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 399,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "refund",
+        "owedBackCents": 599
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "refunded",
+        "amountCents": 599,
+        "dryRun": true,
+        "detail": "tip 200¢ + fee 399¢ − earlier 0¢; room 599¢"
+      },
+      "inScan": true,
+      "live": {
+        "res": {
+          "orderId": "ORDER",
+          "outcome": "refunded",
+          "amountCents": 599,
+          "refundId": "RE_NEW"
+        },
+        "stripe": [
+          {
+            "params": {
+              "charge": "CHARGE",
+              "amount": 599,
+              "metadata": {
+                "orderId": "ORDER",
+                "kind": "owed_back",
+                "tipCents": "200",
+                "deliveryFeeCents": "399",
+                "priorOwedBackCents": "0"
+              }
+            },
+            "idempotencyKey": "owed_back_ORDER"
+          }
+        ],
+        "marker": {
+          "tipRefundId": "RE_NEW",
+          "deliveryFeeRefundCents": 399
+        }
+      }
+    },
+    "tip only, cancelled before the fee cutoff": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 150,
+        "deliveryFeeCents": 0,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "refund",
+        "owedBackCents": 150
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "refunded",
+        "amountCents": 150,
+        "dryRun": true,
+        "detail": "tip 150¢ + fee 0¢ − earlier 0¢; room 549¢"
+      },
+      "inScan": true,
+      "live": null
+    },
+    "runner earned it": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 399,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": true,
+        "alreadyRefunded": false,
+        "outcome": "excluded_runner_earned",
+        "owedBackCents": 0
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "excluded_runner_earned"
+      },
+      "inScan": false,
+      "live": null
+    },
+    "already refunded": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 399,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": true,
+        "outcome": "already_refunded",
+        "owedBackCents": 0
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "already_refunded"
+      },
+      "inScan": false,
+      "live": null
+    },
+    "not cancelled": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 0,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "not_terminal",
+        "owedBackCents": 0
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "not_terminal"
+      },
+      "inScan": false,
+      "live": null
+    },
+    "nothing owed": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 0,
+        "deliveryFeeCents": 0,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "nothing_owed",
+        "owedBackCents": 0
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "nothing_owed"
+      },
+      "inScan": false,
+      "live": null
+    },
+    "organizer share without a runner (halt)": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 399,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "refund",
+        "owedBackCents": 599
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "halted",
+        "haltReason": "ORGANIZER_SHARE_WITHOUT_RUNNER",
+        "amountCents": 599,
+        "detail": "OrganizerEarning exists with no RunnerEarning — the fee may already be owed to the organizer.",
+        "dryRun": true
+      },
+      "inScan": true,
+      "live": null
+    },
+    "unaccounted refunds on the charge (halt)": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 399,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "refund",
+        "owedBackCents": 599
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "halted",
+        "haltReason": "REFUND_ROOM_SHORT",
+        "amountCents": 599,
+        "detail": "Owed back 599¢ (tip + fee 599¢ − earlier owed-back 0¢), but Stripe shows only -1¢ refundable (charge 6349¢ − kept fees 750¢ − refunds 5600¢ across 2). Refunds on the charge we can't account for — check Stripe before acting.",
+        "dryRun": true
+      },
+      "inScan": true,
+      "live": null
+    },
+    "earlier owed-back on the charge (covered)": {
+      "plan": {
+        "orderId": "ORDER",
+        "tipCents": 200,
+        "deliveryFeeCents": 399,
+        "chargeId": "CHARGE",
+        "hasRunnerEarning": false,
+        "alreadyRefunded": false,
+        "outcome": "refund",
+        "owedBackCents": 599
+      },
+      "dry": {
+        "orderId": "ORDER",
+        "outcome": "covered",
+        "amountCents": 0,
+        "refundId": "RE_PRIOR",
+        "dryRun": true,
+        "detail": "earlier owed-back 599¢"
+      },
+      "inScan": true,
+      "live": null
+    }
+  }
+}

@@ -386,7 +386,13 @@ async function main() {
   const liveReaders = all.filter(f => !LIVE_ALLOWED.has(f) && /getMoneySettings\(/.test(code(f)))
   assert(liveReaders.length === 0, `only the price side reads the live money settings (others found: ${liveReaders.join(', ') || 'none'})`)
   const NOT_YET = all.filter(f => /^workers\//.test(f) || /(refund|chargeback)/i.test(f.split('/').pop()!))
-  const refundReaders = NOT_YET.filter(f => READ.test(code(f)))
+  // Updated 2026-11-22 (item 10 stage 5): owed-back (lib/tip-refund.ts) reads the order's STORED feeModel to apply the
+  // stage 5 rules — the snapshot, never the live settings. Only that one column, only in that one file; everything
+  // else (getMoneySettings, the other snapshot columns) stays forbidden there too.
+  const STAGE5_FORBIDDEN = /getMoneySettings\(|(?<!fees\.)\b(serviceFeeBps|serviceFeeFlatCents|cardFeesPaidBy)\b/
+  const refundReaders = NOT_YET.filter(f => (f === 'lib/tip-refund.ts' ? STAGE5_FORBIDDEN : READ).test(code(f)))
+  assert(STAGE5_FORBIDDEN.test(code('lib/tip-refund.ts') + '\nconst x = order.cardFeesPaidBy') && !STAGE5_FORBIDDEN.test('if (order.feeModel === FEE_MODEL_EXHIBIT_A) {}'),
+    '[0] control: in owed-back a planted cardFeesPaidBy read is caught; the stored feeModel is allowed')
   assert(NOT_YET.length >= 5 && NOT_YET.includes('lib/process-refund.ts') && NOT_YET.includes('lib/tip-refund.ts'), `[0] control: the refund/worker set is found (${NOT_YET.length} files)`)
   assert(refundReaders.length === 0, `refunds, chargebacks and the worker read neither the money settings nor the snapshot columns (found: ${refundReaders.join(', ') || 'none'})`)
 }
