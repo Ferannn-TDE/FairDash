@@ -28,6 +28,8 @@ import {
   type RequiredVendorDoc,
 } from '@/lib/vendor-documents'
 import { VENDOR_AGREEMENT_TEXT, VENDOR_AGREEMENT_PATH } from '@/lib/legal/vendor-agreement'
+import { PRIVACY_POLICY_PATH } from '@/lib/legal/privacy-policy'
+import { WEBSITE_TERMS_PATH } from '@/lib/legal/website-terms'
 import LegalDocument from '@/app/_components/LegalDocument'
 import PitchVideo from '@/app/_components/PitchVideo'
 import type { VideoSource } from '@/lib/videos'
@@ -428,7 +430,9 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
         )}
       </div>
 
-      {/* Item 8 (B1.10): explicit agreement, enforced by the server as well. */}
+      {/* Item 8 (B1.10): explicit agreement, enforced by the server as well. Item 11: the box covers
+          all three documents, as the agreement itself says ("By checking the box at sign-up, you
+          agree to this Agreement, our Privacy Policy and our Website Terms of Service"). */}
       <label className="flex items-start gap-3 cursor-pointer">
         <input
           type="checkbox"
@@ -437,9 +441,17 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
           className="mt-0.5 w-5 h-5 shrink-0 accent-[#FF0077] cursor-pointer"
         />
         <span className="text-sm text-text-gray leading-relaxed">
-          I agree to the{' '}
+          I agree to the FairSynq{' '}
           <a href={VENDOR_AGREEMENT_PATH} target="_blank" rel="noopener noreferrer" className="text-neon-pink font-semibold hover:underline">
-            FairSynq Vendor Agreement
+            Vendor Agreement
+          </a>
+          ,{' '}
+          <a href={PRIVACY_POLICY_PATH} target="_blank" rel="noopener noreferrer" className="text-neon-pink font-semibold hover:underline">
+            Privacy Policy
+          </a>
+          {' '}and{' '}
+          <a href={WEBSITE_TERMS_PATH} target="_blank" rel="noopener noreferrer" className="text-neon-pink font-semibold hover:underline">
+            Website Terms of Service
           </a>
         </span>
       </label>

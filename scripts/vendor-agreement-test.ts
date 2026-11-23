@@ -9,7 +9,9 @@
  *   [3] POST /api/vendors: no agreement flag → 400 CONSENT_REQUIRED and no vendor; with it → 201;
  *       a forged termsVersion is ignored (the server's version, exactly '2026-11-23', is stored);
  *       the typed name stays required
- *   [4] The wizard can't submit step 4 without the box AND the name; the link opens /vendor-agreement
+ *   [4] The wizard can't submit step 4 without the box AND the name; the box's label links the
+ *       Vendor Agreement, Privacy Policy and Website Terms of Service (/vendor-agreement, /privacy,
+ *       /terms), each in a new tab, in that order (item 11; positive-controlled)
  *   [5] The pitch: approved copy verbatim; no payout-timing wording (scanner positive-controlled)
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/vendor-agreement-test.ts
@@ -141,8 +143,27 @@ async function main() {
   console.log('\n[4] The wizard step 4 gate')
   assert(/case 4: return data\.legalName\.trim\(\)\.length >= 3 && data\.agreedToVendorAgreement/.test(wizard), 'Submit needs the name AND the ticked box')
   assert(/agreedToVendorAgreement: data\.agreedToVendorAgreement,/.test(wizard), 'the wizard sends the box to the server')
-  assert(/href=\{VENDOR_AGREEMENT_PATH\} target="_blank"[\s\S]{0,200}FairSynq Vendor Agreement/.test(wizard) && agreement.VENDOR_AGREEMENT_PATH === '/vendor-agreement',
-    '"I agree to the FairSynq Vendor Agreement" links to /vendor-agreement in a new tab')
+  // Item 11: one box, three documents. Read from the Step6 component only.
+  const wizardLf = wizard.replace(/\r\n/g, '\n') // a Windows checkout has CRLF
+  const step6Start = wizardLf.indexOf('function Step6(')
+  const step6End = wizardLf.indexOf('\n}\n', step6Start)
+  const step6 = step6Start >= 0 && step6End > step6Start ? wizardLf.slice(step6Start, step6End) : ''
+  const LINK = /<a href=\{(\w+)\} target="_blank" rel="noopener noreferrer"[^>]*>\s*([^<]+?)\s*<\/a>/g
+  const linksIn = (s: string) => [...s.matchAll(LINK)].map(m => [m[1], m[2]])
+  const WANT_LINKS = [['VENDOR_AGREEMENT_PATH', 'Vendor Agreement'], ['PRIVACY_POLICY_PATH', 'Privacy Policy'], ['WEBSITE_TERMS_PATH', 'Website Terms of Service']]
+  const SENTENCE = /I agree to the FairSynq\{' '\}\s*<a href=\{VENDOR_AGREEMENT_PATH\}[\s\S]*?<\/a>\s*,\{' '\}\s*<a href=\{PRIVACY_POLICY_PATH\}[\s\S]*?<\/a>\s*\{' '\}and\{' '\}\s*<a href=\{WEBSITE_TERMS_PATH\}[\s\S]*?<\/a>\s*<\/span>/
+  const oldLabel = `I agree to the{' '}\n<a href={VENDOR_AGREEMENT_PATH} target="_blank" rel="noopener noreferrer" className="x">\nFairSynq Vendor Agreement\n</a>\n</span>`
+  assert(JSON.stringify(linksIn(oldLabel)) !== JSON.stringify(WANT_LINKS) && !SENTENCE.test(oldLabel),
+    '[0] positive control: the old one-link label fails both checks')
+  assert(step6.length > 0 && JSON.stringify(linksIn(step6)) === JSON.stringify(WANT_LINKS),
+    `step 4 has exactly three links, in order, each opening in a new tab: ${linksIn(step6).map(l => l[1]).join(' | ')}`)
+  assert(SENTENCE.test(step6), 'the label reads "I agree to the FairSynq Vendor Agreement, Privacy Policy and Website Terms of Service"')
+  assert(/from '@\/lib\/legal\/privacy-policy'/.test(wizard) && /from '@\/lib\/legal\/website-terms'/.test(wizard), 'the paths come from the legal modules, not typed again')
+  const { PRIVACY_POLICY_PATH } = await import('../lib/legal/privacy-policy')
+  const { WEBSITE_TERMS_PATH } = await import('../lib/legal/website-terms')
+  assert(agreement.VENDOR_AGREEMENT_PATH === '/vendor-agreement' && PRIVACY_POLICY_PATH === '/privacy' && WEBSITE_TERMS_PATH === '/terms'
+    && ['app/vendor-agreement/page.tsx', 'app/privacy/page.tsx', 'app/terms/page.tsx'].every(p => readFileSync(p, 'utf8').includes('<LegalDocument')),
+    'they go to /vendor-agreement, /privacy and /terms, and each page exists')
 
   // ── [5] the pitch ─────────────────────────────────────────────────────────────────────
   console.log('\n[5] The vendor pitch')
