@@ -2,10 +2,13 @@
  * VENDOR AGREEMENT CHECKBOX + VENDOR PITCH (Batch 1 item 8: B1.10 + B1.9) — real route, test DB.
  *
  *   [1] The agreement module never holds placeholder terms, and its version matches its own
- *       "Last Updated" line (each check positive-controlled)
- *   [2] One source: the wizard, /vendor-agreement and the server all read lib/legal/vendor-agreement.ts
+ *       "Effective" line; the archived 2026-01-01 text likewise, against its "Last Updated" line
+ *       (each check positive-controlled). Item 11 (2026-11-23) replaced the text.
+ *   [2] One source: the wizard, /vendor-agreement and the server all read lib/legal/vendor-agreement.ts;
+ *       the page shows no separate version line; nothing under app/ imports the 2026-01-01 archive
  *   [3] POST /api/vendors: no agreement flag → 400 CONSENT_REQUIRED and no vendor; with it → 201;
- *       a forged termsVersion is ignored (the server's version is stored); the typed name stays required
+ *       a forged termsVersion is ignored (the server's version, exactly '2026-11-23', is stored);
+ *       the typed name stays required
  *   [4] The wizard can't submit step 4 without the box AND the name; the link opens /vendor-agreement
  *   [5] The pitch: approved copy verbatim; no payout-timing wording (scanner positive-controlled)
  *
@@ -20,7 +23,7 @@ delete process.env.RATE_LIMIT_TEST
 import { register } from 'node:module'
 register('./_route-loader.mjs', import.meta.url)
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { NextRequest } from 'next/server'
 import { EventStatus } from '@prisma/client'
 
@@ -50,16 +53,20 @@ async function cleanup() {
 
 const PLACEHOLDER = /\bTODO\b|\bTBD\b|PLACEHOLDER|lorem ipsum|\[[^\]\n]{0,40}\]|\bXX+\b/i
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-function versionMatchesLastUpdated(version: string, text: string): boolean {
-  const m = text.match(/Last Updated: ([A-Z][a-z]+) (\d{1,2}), (\d{4})/)
+// The ISO date written on a line that starts with `lead` ("Last Updated:" or "Effective").
+function versionMatchesDateLine(version: string, text: string, lead: string): boolean {
+  const m = text.match(new RegExp(`^${lead} ([A-Z][a-z]+) (\\d{1,2}), (\\d{4})$`, 'm'))
   if (!m) return false
   const iso = `${m[3]}-${String(MONTHS.indexOf(m[1]) + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`
   return iso === version
 }
+const versionMatchesLastUpdated = (version: string, text: string) => versionMatchesDateLine(version, text, 'Last Updated:')
+const versionMatchesEffective = (version: string, text: string) => versionMatchesDateLine(version, text, 'Effective')
 
 async function main() {
   await cleanup()
   const agreement = await import('../lib/legal/vendor-agreement')
+  const archive = await import('../lib/legal/vendor-agreement-2026-01-01')
 
   // ── [1] no placeholder terms, version honest ───────────────────────────────────────────
   console.log('\n[1] The agreement module')
@@ -67,20 +74,34 @@ async function main() {
     '[0] positive control: the scanner flags TBD, [bracketed blanks] and lorem ipsum')
   assert(!PLACEHOLDER.test('Disputes shall be resolved by binding arbitration.'), '[0] baseline: real terms are not flagged')
   assert(!PLACEHOLDER.test(agreement.VENDOR_AGREEMENT_TEXT), 'the agreement text holds no placeholder markers')
-  assert(!versionMatchesLastUpdated('2026-02-01', agreement.VENDOR_AGREEMENT_TEXT), '[0] positive control: a version that disagrees with "Last Updated" is caught')
-  assert(versionMatchesLastUpdated(agreement.VENDOR_AGREEMENT_VERSION, agreement.VENDOR_AGREEMENT_TEXT),
-    `the version (${agreement.VENDOR_AGREEMENT_VERSION}) matches the text's "Last Updated" line`)
-  assert(agreement.VENDOR_AGREEMENT_TEXT.startsWith('FAIRSYNQ VENDOR AGREEMENT') && agreement.VENDOR_AGREEMENT_TEXT.length > 2000,
-    'it is the full agreement, not a stub')
+  assert(!PLACEHOLDER.test(archive.VENDOR_AGREEMENT_2026_01_01_TEXT), 'the archived 2026-01-01 text holds no placeholder markers')
+  assert(!versionMatchesEffective('2026-02-01', agreement.VENDOR_AGREEMENT_TEXT), '[0] positive control: a version that disagrees with "Effective" is caught')
+  assert(versionMatchesEffective(agreement.VENDOR_AGREEMENT_VERSION, agreement.VENDOR_AGREEMENT_TEXT),
+    `the version (${agreement.VENDOR_AGREEMENT_VERSION}) matches the text's "Effective" line`)
+  assert(!versionMatchesLastUpdated('2026-02-01', archive.VENDOR_AGREEMENT_2026_01_01_TEXT), '[0] positive control: a version that disagrees with "Last Updated" is caught')
+  assert(versionMatchesLastUpdated(archive.VENDOR_AGREEMENT_2026_01_01_VERSION, archive.VENDOR_AGREEMENT_2026_01_01_TEXT),
+    `the archived version (${archive.VENDOR_AGREEMENT_2026_01_01_VERSION}) matches its "Last Updated" line`)
+  assert(agreement.VENDOR_AGREEMENT_VERSION === '2026-11-23' && archive.VENDOR_AGREEMENT_2026_01_01_VERSION === '2026-01-01',
+    'current version 2026-11-23; the archive keeps 2026-01-01')
+  assert(agreement.VENDOR_AGREEMENT_TEXT.startsWith('# Vendor Agreement\n\nEffective November 23, 2026\n')
+    && agreement.VENDOR_AGREEMENT_TEXT.length >= archive.VENDOR_AGREEMENT_2026_01_01_TEXT.length,
+    'it is the full new agreement, not a stub (at least as long as the old one)')
+  assert(archive.VENDOR_AGREEMENT_2026_01_01_TEXT.startsWith('FAIRSYNQ VENDOR AGREEMENT') && archive.VENDOR_AGREEMENT_2026_01_01_TEXT.length > 2000,
+    'the archive holds the full old agreement')
 
   // ── [2] one source ────────────────────────────────────────────────────────────────────
   console.log('\n[2] Wizard, page and server read the same module')
   const wizard = readFileSync('app/become-vendor/VendorOnboarding.tsx', 'utf8')
   const page = readFileSync('app/vendor-agreement/page.tsx', 'utf8')
   const route = readFileSync('app/api/vendors/route.ts', 'utf8')
-  assert(/from '@\/lib\/legal\/vendor-agreement'/.test(wizard) && /\{VENDOR_AGREEMENT_TEXT\}/.test(wizard), 'the wizard shows VENDOR_AGREEMENT_TEXT')
+  assert(/from '@\/lib\/legal\/vendor-agreement'/.test(wizard) && /<LegalDocument text=\{VENDOR_AGREEMENT_TEXT\} compact \/>/.test(wizard), 'the wizard shows VENDOR_AGREEMENT_TEXT (through LegalDocument)')
   assert(!/FAIRSYNQ VENDOR AGREEMENT|VENDOR_TERMS\b|termsVersion/.test(wizard), 'the wizard has no inline agreement and sends no version')
-  assert(/VENDOR_AGREEMENT_TEXT/.test(page) && /VENDOR_AGREEMENT_VERSION/.test(page), '/vendor-agreement publishes the same text and version')
+  assert(/from '@\/lib\/legal\/vendor-agreement'/.test(page) && /<LegalDocument text=\{VENDOR_AGREEMENT_TEXT\} \/>/.test(page), '/vendor-agreement publishes the same text (through LegalDocument)')
+  assert(!/VENDOR_AGREEMENT_VERSION|Version \{/.test(page), '/vendor-agreement shows no separate version line (Jordan, 2026-11-23)')
+  const appFiles = (readdirSync('app', { recursive: true }) as string[]).filter(f => /\.(ts|tsx)$/.test(f))
+  const archiveReaders = appFiles.filter(f => readFileSync(`app/${f}`, 'utf8').includes('vendor-agreement-2026-01-01'))
+  assert(appFiles.length > 50 && appFiles.some(f => f.replace(/\\/g, '/') === 'vendor-agreement/page.tsx'), '[0] control: the app/ walk sees the pages')
+  assert(archiveReaders.length === 0, `nothing under app/ imports the 2026-01-01 archive, so it is never shown${archiveReaders.length ? ` — ${archiveReaders.join(', ')}` : ''}`)
   assert(/termsVersion:\s+VENDOR_AGREEMENT_VERSION/.test(route) && !/termsVersion \?\?/.test(route) && !/const \{[^}]*termsVersion[^}]*\} = body/.test(route),
     'the server stores VENDOR_AGREEMENT_VERSION and never reads a version from the body')
 
@@ -113,6 +134,7 @@ async function main() {
   assert(ok.status === 201, `[0] control: with the box ticked and a name → 201 (got ${ok.status} ${ok.code})`)
   const stored = await prisma.vendor.findFirst({ where: { eventId: event.id }, orderBy: { createdAt: 'desc' }, select: { termsVersion: true, termsAcceptedName: true, termsAcceptedAt: true } })
   assert(stored?.termsVersion === agreement.VENDOR_AGREEMENT_VERSION, `a forged termsVersion is ignored: stored ${stored?.termsVersion}`)
+  assert(stored?.termsVersion === '2026-11-23', `a new vendor's signature stores the new version string 2026-11-23 (stored ${stored?.termsVersion})`)
   assert(stored?.termsAcceptedName === 'Jane Smith' && !!stored?.termsAcceptedAt, 'the typed name and acceptance time are recorded')
 
   // ── [4] wizard gate ───────────────────────────────────────────────────────────────────

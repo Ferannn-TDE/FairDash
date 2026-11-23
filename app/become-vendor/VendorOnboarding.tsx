@@ -28,6 +28,7 @@ import {
   type RequiredVendorDoc,
 } from '@/lib/vendor-documents'
 import { VENDOR_AGREEMENT_TEXT, VENDOR_AGREEMENT_PATH } from '@/lib/legal/vendor-agreement'
+import LegalDocument from '@/app/_components/LegalDocument'
 import PitchVideo from '@/app/_components/PitchVideo'
 import type { VideoSource } from '@/lib/videos'
 
@@ -407,8 +408,8 @@ function Step6({ data, update }: { data: FormData; update: (p: Partial<FormData>
       </div>
 
       {/* Agreement text */}
-      <div className="h-52 overflow-y-auto bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-text-gray text-[0.8125rem] leading-relaxed whitespace-pre-line">
-        {VENDOR_AGREEMENT_TEXT}
+      <div className="h-52 overflow-y-auto bg-bg-dark border border-white/10 rounded-xl px-4 py-3">
+        <LegalDocument text={VENDOR_AGREEMENT_TEXT} compact />
       </div>
 
       {/* Signature */}
