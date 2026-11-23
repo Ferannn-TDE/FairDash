@@ -78,7 +78,7 @@ const APPROVED = {
   canDo: { heading: 'What you can do', points: [
     "Set up your fair. Name, dates, venue, hours and accent color. Save it as a draft, then publish when it's ready.",
     'See and manage your vendors. Booth details, menu and required documents. Pause or reactivate a vendor.',
-    'Review menu changes before they go live.',
+    'Review price increases and new items before they go live.',
     'Watch orders as they come in, booth by booth, with sales for the day.',
     "Handle customer issues, including refunding an order or one vendor's part.",
     'Run several fairs from one account.',
