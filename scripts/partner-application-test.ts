@@ -147,7 +147,16 @@ async function main() {
   assert(!/Deliver with FairSynq|cta: 'Runner sign-in'|Runner sign-in/.test(homeAll), 'the runner card is gone, and no "Runner sign-in" anywhere on the homepage')
   const navbar = readFileSync('app/_components/MarketplaceNavbar.tsx', 'utf8')
   assert(!/PARTNER_TOP_LINK/.test(homeAll), 'the top link is not on the homepage (hero, header or menu)')
-  assert(!home.HOME_HEADER.menu.some(m => (m.href as string) === PARTNERS_PATH) && !/PARTNERS_PATH|GROUP_PATH|\/partners/.test(homeHeader),
+  // Code only: comments may name /partners (HomeHeader's top comment lists the pages that keep the
+  // shared navbar). Block comments (incl. JSX {/* */}) and whole-line // comments are removed first.
+  const codeOnly = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+  const PARTNER_LINK = /PARTNERS_PATH|GROUP_PATH|\/partners/
+  const headerHasPartnerLink = (s: string) => PARTNER_LINK.test(codeOnly(s))
+  assert(headerHasPartnerLink(`<nav>\n  <Link href="/partners">Partner with us</Link>\n</nav>`),
+    '[0] positive control: a planted /partners link in header code is caught')
+  assert(!headerHasPartnerLink(`// other pages (/partners) keep the navbar\n<nav>\n  {/* see /partners */}\n  <Link href="/contact">Contact</Link>\n</nav>`),
+    '[0] baseline: the same /partners text inside comments is not counted')
+  assert(!home.HOME_HEADER.menu.some(m => (m.href as string) === PARTNERS_PATH) && !headerHasPartnerLink(homeHeader),
     'the homepage header menu has no partner link (the top link stays removed pending the client\'s OK)')
   assert(!/PARTNER_TOP_LINK|PARTNERS_PATH|aria-label="Menu"/.test(navbar), 'the top link (and its mobile menu) is not in the navbar: removed pending the client\'s OK')
   assert(/NOT SHOWN: removed from the site on 2026-11-05 pending the client's OK/.test(copy), 'the wording stays on record, marked as not shown')
