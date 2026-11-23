@@ -11,17 +11,26 @@
  *       page text equals the source words exactly, in order; title "Vendor Agreement" and
  *       "Effective November 23, 2026" shown; none of the old terms (10%, "match or be lower",
  *       $1,000,000, star ratings, the 2026-01-01 headings)
+ *   [2] Privacy Policy (/privacy): byte for byte (SHA-256 locked); word for word on the page; title
+ *       and effective date; 10 section headings; the "Information we collect" table, 5 rows; the
+ *       page renders exactly this text
+ *   [3] Website Terms of Service (/terms): the same checks; 14 section headings
+ *   [4] /privacy and /terms are public: no protected pattern in proxy.ts catches them (positive
+ *       control: the vendor portal still is protected, and the old /vendor(.*) pattern would catch
+ *       /vendor-agreement)
  *
  * Run:  npx tsx scripts/legal-pages-test.ts
  */
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import LegalDocument from '../app/_components/LegalDocument'
 import { parseLegalMarkdown, LegalMarkdownError } from '../lib/legal/markdown'
 import { VENDOR_AGREEMENT_TEXT, VENDOR_AGREEMENT_PATH } from '../lib/legal/vendor-agreement'
 import { VENDOR_AGREEMENT_2026_01_01_TEXT } from '../lib/legal/vendor-agreement-2026-01-01'
+import { PRIVACY_POLICY_TEXT, PRIVACY_POLICY_PATH } from '../lib/legal/privacy-policy'
+import { WEBSITE_TERMS_TEXT, WEBSITE_TERMS_PATH } from '../lib/legal/website-terms'
 
 let pass = 0, fail = 0
 const assert = (ok: boolean, label: string) => {
@@ -34,6 +43,8 @@ const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex
 // in the published text changes the hash.
 const SOURCE_SHA256 = {
   vendorAgreement: 'AADBC2D33BC18FFB1A6EE98F0782352687C9748411F938A6A46670FE8D2B30AE',
+  privacyPolicy: '9B0F365CA1821FCEE1D2026D8D559A5FE73A6E999285C4287DCBF46C1ADDB62A',
+  websiteTerms: '4136A654D16FC4D8F565AA36873939F526CB714D3AE98B1231787EBA0735B592',
 } as const
 
 const render = (text: string) => renderToStaticMarkup(createElement(LegalDocument, { text }))
@@ -98,6 +109,53 @@ assert((vaHtml.match(/<h2[^>]*>/g) ?? []).length === 15, 'all 15 numbered sectio
 assert(/<strong[^>]*>You are the seller of everything you list\.<\/strong>/.test(vaHtml), 'bold text stays bold')
 assert(!OLD_TERMS.test(pageWords(vaHtml)), 'none of the old terms: no 10%, "match or be lower", $1,000,000, star ratings or the 2026-01-01 headings')
 assert(VENDOR_AGREEMENT_PATH === '/vendor-agreement' && existsSync('app/vendor-agreement/page.tsx'), '/vendor-agreement has its page')
+
+// The same checks for each new document and its page.
+function checkDocument(o: { label: string; text: string; hash: string; title: string; path: string; pathConst: string; textConst: string; page: string; headings: number }) {
+  assert(sha256(o.text) === o.hash, `the text is byte for byte its source file (SHA-256 locked)`)
+  const html = render(o.text)
+  assert(pageWords(html) === sourceWords(o.text), 'rendered, the page shows every word of the source, in order, and nothing else')
+  assert(new RegExp(`<h1[^>]*>${o.title}</h1>`).test(html), `title "${o.title}" shown as the page heading`)
+  assert(/<p[^>]*>Effective November 23, 2026<\/p>/.test(html), '"Effective November 23, 2026" shown, exactly as written')
+  assert((html.match(/<h2[^>]*>/g) ?? []).length === o.headings, `all ${o.headings} section headings are headings`)
+  const pageSrc = existsSync(o.page) ? readFileSync(o.page, 'utf8') : ''
+  assert(pageSrc !== '' && new RegExp(`<LegalDocument text=\\{${o.textConst}\\} />`).test(pageSrc) && pageSrc.includes('<MarketplaceNavbar />'),
+    `${o.path} has its page (${o.page}), with the navbar, rendering ${o.textConst}`)
+  assert(pageSrc.includes(`canonical: ${o.pathConst}`), `${o.path} declares itself as its canonical address`)
+  return html
+}
+
+console.log('[2] Privacy Policy (/privacy)')
+assert(PRIVACY_POLICY_PATH === '/privacy', 'the path is /privacy')
+const ppHtml = checkDocument({ label: 'Privacy Policy', text: PRIVACY_POLICY_TEXT, hash: SOURCE_SHA256.privacyPolicy, title: 'Privacy Policy',
+  path: '/privacy', pathConst: 'PRIVACY_POLICY_PATH', textConst: 'PRIVACY_POLICY_TEXT', page: 'app/privacy/page.tsx', headings: 10 })
+const ppTable = ppHtml.match(/<table[\s\S]*?<\/table>/g) ?? []
+assert(ppTable.length === 1 && (ppTable[0].match(/<tbody>[\s\S]*<\/tbody>/)?.[0].match(/<tr>/g) ?? []).length === 5
+  && /<th[^>]*>Who<\/th>/.test(ppTable[0]) && /<th[^>]*>What we collect<\/th>/.test(ppTable[0]),
+  'one table, headed "Who" / "What we collect", with 5 rows')
+assert(/<strong[^>]*>We do not sell your personal information\.<\/strong>/.test(ppHtml), 'bold text stays bold')
+
+console.log('[3] Website Terms of Service (/terms)')
+assert(WEBSITE_TERMS_PATH === '/terms', 'the path is /terms')
+const wtHtml = checkDocument({ label: 'Website Terms', text: WEBSITE_TERMS_TEXT, hash: SOURCE_SHA256.websiteTerms, title: 'Website Terms of Service',
+  path: '/terms', pathConst: 'WEBSITE_TERMS_PATH', textConst: 'WEBSITE_TERMS_TEXT', page: 'app/terms/page.tsx', headings: 14 })
+assert((wtHtml.match(/<li>/g) ?? []).length === 7, 'the "You agree not to" list has all 7 items')
+assert(wtHtml.includes('support@fairsynq.com · FairSynq LLC'), 'the contact line keeps its "·" exactly')
+
+console.log('[4] /privacy and /terms are public')
+// Same reading of proxy.ts as scripts/vendor-agreement-test.ts [5].
+const proxy = readFileSync('proxy.ts', 'utf8')
+const protectedStart = proxy.indexOf('isProtectedRoute = createRouteMatcher([')
+const protectedBlock = proxy.slice(protectedStart, proxy.indexOf('])', protectedStart))
+const patterns = [...protectedBlock.matchAll(/^\s*'([^']+)',/gm)].map(m => m[1])
+const toRe = (p: string) => new RegExp('^' + p.replace(/\(\.\*\)/g, '.*') + '$')
+const isProtected = (path: string) => patterns.some(p => toRe(p).test(path))
+assert(protectedStart >= 0 && patterns.length > 0 && isProtected('/vendor/springfield/dashboard') && isProtected('/vendor'),
+  '[0] control: the protected list is read, and the vendor portal is still protected')
+assert(toRe('/vendor(.*)').test('/vendor-agreement'), '[0] positive control: a too-wide pattern like /vendor(.*) WOULD catch a public page')
+for (const p of [PRIVACY_POLICY_PATH, WEBSITE_TERMS_PATH, VENDOR_AGREEMENT_PATH]) {
+  assert(!isProtected(p), `${p} is public (no protected pattern catches it)`)
+}
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} legal pages: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
