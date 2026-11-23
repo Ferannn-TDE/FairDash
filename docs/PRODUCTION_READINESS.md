@@ -17,7 +17,7 @@
 | 7. Organizer core + earnings card | Jan 11 – Jan 24 | 0/11 |
 | R. Cutover rehearsal | Jan 18 – Jan 24 | 0/4 |
 | 8. Runner portal + onboarding | Jan 25 – Jan 31 | 0/9 |
-| 9. Live cutover | Feb 1 – Feb 5 | 0/22 |
+| 9. Live cutover | Feb 1 – Feb 5 | 0/23 |
 | Buffer | Feb 6 – Feb 12 | — |
 
 ## Capacity
@@ -419,6 +419,7 @@ Today's production becomes **staging** (test keys, test Clerk, all history kept)
 
 ### 9.2 Keys and providers
 - [ ] Stripe live keys on Vercel Production and Railway.
+- [ ] Demo booths hidden: with the live keys set, confirm no `Vendor.isDemo` booth shows on any customer page and checkout refuses one (409 `VENDOR_DEMO`, lib/demo-vendor.ts).
 - [ ] Fresh live webhook endpoints (platform + Connect) on www with new `whsec_` secrets.
 - [ ] Test-mode webhooks re-pointed to staging.fairsynq.com.
 - [ ] Clerk production instance, with its DNS records (clerk./accounts. CNAMEs, email DKIM), app name and logo, email From name.
