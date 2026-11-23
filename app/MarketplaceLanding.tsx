@@ -51,12 +51,6 @@ function Hero() {
         <span className="text-neon-pink">{HOME_HERO.headingLine2}</span>
       </h1>
       <p className="m-0 text-[17px] leading-normal text-[#B3B3B3] max-w-2xl">{HOME_HERO.subhead}</p>
-      <AudienceLink
-        audience="vendor"
-        className="self-start inline-flex items-center min-h-[44px] px-[18px] rounded-full bg-[#2A0014] border border-neon-pink text-[#FF3D94] no-underline text-[15px] font-bold hover:bg-[#3A001C] transition-colors"
-      >
-        {HOME_HERO.vendorButton}
-      </AudienceLink>
 
       <p className="mt-2.5 mb-0 text-[13px] font-bold tracking-[2px] text-white">{WHO_ARE_YOU}</p>
       {/* Two across on phones, four across from laptop width. */}

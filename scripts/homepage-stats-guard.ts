@@ -12,11 +12,14 @@
  *   [2] the stats card is gone: no STAT_TILES, no "Last season", 213, "23 vendors", $45,
  *       "average order" or "FREE for vendors" (was: the "Last season" caption)
  *   [3] the old figures are gone: no 288, $16K, "nearly" or "first two seasons" (unchanged)
- *   [4] every design string, word for word, and each one rendered by the page
+ *   [4] every design string, word for word, and each one rendered by the page, except the hero
+ *       vendor sign-up banner: its wording stays locked, and the page must NOT render it until the
+ *       legal pages are live (Jordan, 2026-11-23; was: the page renders it)
  *   [5] negative checks on every homepage file and on the rendered copy: no 10% / 15%, no sold
  *       out, no deliver/delivery words, no competitor names, no "Get Started"
- *   [6] links: every path's destination; the vendor sign-up path; header choices; no legal links
- *       until the legal pages are rewritten (Jordan, 2026-11-23)
+ *   [6] links: every path's destination; the vendor sign-up path; tiles and path links through
+ *       AudienceLink with no hero vendor button (was: hero button, tiles and path links); header
+ *       choices; no legal links until the legal pages are rewritten (Jordan, 2026-11-23)
  *
  * Run:  npx tsx scripts/homepage-stats-guard.ts
  */
@@ -192,11 +195,13 @@ assert(same(copy.HOME_FOOTER, { supportEmail: 'support@fairsynq.com', questionsL
 assert(copy.HOME_HEADER.signIn === 'Sign in', 'header button says "Sign in"')
 
 // Each field rendered, page in design order.
-for (const f of ['HOME_HERO.eyebrow', 'HOME_HERO.headingLine1', 'HOME_HERO.headingLine2', 'HOME_HERO.subhead', 'HOME_HERO.vendorButton',
+for (const f of ['HOME_HERO.eyebrow', 'HOME_HERO.headingLine1', 'HOME_HERO.headingLine2', 'HOME_HERO.subhead',
   '{WHO_ARE_YOU}', 'HOME_TILES.map(', 'PICK_YOUR_PATH.heading', 'PICK_YOUR_PATH.headingAccent', 'PICK_YOUR_PATH.links.map(',
   'HOME_FOOTER.questionsLead', 'HOME_FOOTER.supportEmail', 'HOME_FOOTER.copyright']) {
   assert(src.landing.includes(f), `page renders ${f}`)
 }
+assert(!src.landing.includes('HOME_HERO.vendorButton') && !src.landing.includes('sign-up is open'),
+  'the hero vendor sign-up banner is not shown (hidden until the legal pages are live, 2026-11-23)')
 for (const f of ['HOW_IT_WORKS.eyebrow', 'HOW_IT_WORKS.heading', 'HOW_IT_WORKS.headingAccent', 'audience.steps.map(', 'audience.cta',
   'AUDIENCES[key].name', 'FAQ_HEADER.eyebrow', 'FAQ_HEADER.heading', 'FAQ_HEADER.headingAccent', 'FAQ_HEADER.showingFor',
   'FAQ_HEADER.pickAnother', 'audience.faqs.map(', 'AUDIENCE_ORDER.map(']) {
@@ -224,7 +229,7 @@ assert(authDestinations('vendor', null, '/vendor').afterSignUp === '/onboarding?
 assert(/vendor: '\/become-vendor'/.test(readFileSync('app/onboarding/page.tsx', 'utf8')), '/onboarding?role=vendor → /become-vendor')
 assert(/isLoaded && isSignedIn === true \? VENDOR_SIGNUP_SIGNED_IN : VENDOR_SIGNUP_SIGNED_OUT/.test(src.sections), 'the vendor link picks its path only once Clerk has loaded')
 const audienceLinks = (src.landing.match(/<AudienceLink\b/g) ?? []).length
-assert(audienceLinks === 3 && /audience="vendor"/.test(src.landing) && /audience=\{key\}/.test(src.landing), 'hero button, tiles and path links all go through AudienceLink')
+assert(audienceLinks === 2 && !/audience="vendor"/.test(src.landing) && /audience=\{key\}/.test(src.landing), 'tiles and path links go through AudienceLink; no hero vendor button')
 assert(/<AudienceLink\s+audience=\{selected\}/.test(src.sections), 'each tab button goes through AudienceLink for its audience')
 assert(!/<Link\b|href=/.test(src.landing.replace(/href=\{`mailto:\$\{HOME_FOOTER\.supportEmail\}`\}/, '')), 'the page has no other links besides the support email')
 assert(same(copy.HOME_HEADER.signInChoices, [
