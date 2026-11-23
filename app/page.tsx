@@ -1,27 +1,16 @@
-import { getAllFairsCached } from '@/lib/fairs'
-import { toPublicFairCard, type PublicFairCard } from '@/lib/fair-view'
 import MarketplaceLanding from './MarketplaceLanding'
 import type { Metadata } from 'next'
 
-// Server component: fetch the public fair list here (same source as /fairs) so the
-// landing page's first paint already contains the real fairs. The client component
-// receives them as a prop and never re-fetches — this is what kills the
-// empty→populated flicker on "Happening Now & Soon".
+// Homepage v2. No fair list on the homepage any more ("I want food" goes to /fairs), so no
+// database read here.
 export const metadata: Metadata = {
-  // The client's exact strings (Platform Changes doc, SEO section). Absolute: no template appends.
+  // Title: the client's exact string (Platform Changes doc, SEO section). Description: Jordan,
+  // 2026-11-23 (homepage v2). Absolute: no template appends.
   title: { absolute: 'FairSynq | Skip-the-Line Ordering for Fairs & Festivals' },
-  description: 'Order fair food from your phone and pick it up at the booth or curbside. Free for vendors.',
+  description: 'Order ahead and skip the line at fairs and festivals. Launching in 2027. Vendors, sign up free.',
   alternates: { canonical: '/' },
 }
 
-export default async function Page() {
-  let initialFairs: PublicFairCard[] = []
-  try {
-    initialFairs = (await getAllFairsCached()).map(toPublicFairCard)
-  } catch {
-    // DB unavailable — render the landing with no fairs rather than crashing.
-    initialFairs = []
-  }
-
-  return <MarketplaceLanding initialFairs={initialFairs} />
+export default function Page() {
+  return <MarketplaceLanding />
 }

@@ -1,502 +1,161 @@
 'use client'
 
-import Link from 'next/link'
-import { motion } from 'framer-motion'
-import { EnvelopeIcon, ArrowRightIcon, CheckIcon } from '@heroicons/react/24/outline'
-import { Store, CalendarDays, HeartHandshake } from 'lucide-react'
-import { EASE, TIMING, Reveal, Stagger, StaggerItem } from '@/components/animations/motion'
-import MarketplaceNavbar from './_components/MarketplaceNavbar'
-import FairCard from './_components/FairCard'
-import HowItWorksSection from './_components/HowItWorksSection'
-import FAQSection from './_components/FAQSection'
-import ContactSection from './_components/ContactSection'
-import { FacebookIcon } from '@/components/icons/FacebookIcon'
-import { FACEBOOK_URL, contactMailto } from '@/lib/contact-info'
-import { partitionFairCards, type PublicFairCard } from '@/lib/fair-view'
-import { useUser } from '@clerk/clerk-react'
-import { useRole } from './_contexts/RoleContext'
-import { PARTNER_CARD, PARTNERS_PATH } from '@/lib/partner-copy'
-import { ORGANIZER_APPLY_PATH } from '@/lib/organizer-copy'
+import type { ReactNode } from 'react'
+import HomeHeader from './_components/HomeHeader'
+import HomeAudienceSections, { AudienceLink } from './_components/HomeAudienceSections'
+import {
+  HOME_FOOTER,
+  HOME_HERO,
+  HOME_STRIP,
+  HOME_TILES,
+  PICK_YOUR_PATH,
+  WHO_ARE_YOU,
+  type AudienceKey,
+} from '@/lib/homepage-copy'
 
-// ── Role cards section ────────────────────────────────────────────────────────
+// Homepage v2 (design approved 2026-11-22: homepage-v2-design.html). All wording and links come
+// from lib/homepage-copy.ts; scripts/homepage-stats-guard.ts locks them.
 
-// Operator paths only — the customer is the hero above (browse free, no login
-// wall). Mono-pink across the board. Vendors and organizers route to their login page; partner
-// organizations to the public /partners application (item 7: the runner card was retired).
-const OPERATOR_CARDS: Array<{ icon: typeof Store; title: string; desc: string; points?: readonly string[]; href: string; cta: string }> = [
-  // Points approved 2026-11-05: only what works today; no payout timing, no "one menu for every
-  // event" (Batch 2), and no reach claims (those live in the stats tiles only).
-  {
-    icon: Store,
-    title: 'Become a Vendor',
-    desc: 'List your booth and take orders ahead from fairgoers. Free to join.',
-    points: [
-      'No commission on your sales',
-      'Orders arrive on your phone or tablet at the booth',
-      'Customers pay by card before you start cooking',
-      'Mark items sold out anytime from your menu',
-    ],
-    href: '/sign-in/vendor',
-    cta: 'Vendor sign-in',
-  },
-  {
-    icon: CalendarDays,
-    title: 'Host an Event',
-    desc: 'Run your fair end to end from one dashboard.',
-    points: [
-      "Save your fair as a draft and publish when it's ready",
-      'See and manage the vendors at your fair',
-      'Watch orders as they come in, booth by booth',
-      'Run several fairs from one account',
-    ],
-    // Straight to organizer sign-up (BATCH-1 §21, changed 2026-11-17 from /organizers "Learn more").
-    // The footer keeps the direct sign-in link.
-    href: ORGANIZER_APPLY_PATH,
-    cta: 'Get started',
-  },
-  {
-    icon: HeartHandshake,
-    title: PARTNER_CARD.heading,
-    desc: PARTNER_CARD.text,
-    points: PARTNER_CARD.points,
-    href: PARTNERS_PATH,
-    cta: PARTNER_CARD.button,
-  },
-]
+// ── Icons (from the design) ───────────────────────────────────────────────────────────────────
 
-function RoleSection() {
-  const { isLoaded, isSignedIn } = useUser()
-  if (isLoaded && isSignedIn) return null
-
-  // Auth unknown until Clerk loads (and always on the server). Don't guess "signed out" and
-  // show the cards to someone who is signed in: render the section invisible so it holds its
-  // exact footprint at every width, then reveal it once Clerk says signed out
-  // (flicker-class-guard [J]).
+function Icon({ children, pink = true }: { children: ReactNode; pink?: boolean }) {
   return (
-    <section
-      aria-hidden={!isLoaded}
-      className={`max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-20${isLoaded ? '' : ' invisible'}`}
-    >
-      <Reveal className="text-center mb-10">
-        <p className="text-[11px] text-neon-pink font-inter font-semibold uppercase tracking-[0.2em] mb-3">
-          Work with FairSynq
-        </p>
-        <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
-          Run the <span className="text-neon-pink">other side</span> of the fair
-        </h2>
-        <p className="mt-3 text-text-gray text-sm sm:text-base max-w-xl mx-auto">
-          Vendors, organizers and partner organizations power FairSynq. Pick your path.
-        </p>
-      </Reveal>
-
-      <Stagger className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 max-w-5xl mx-auto">
-        {OPERATOR_CARDS.map(({ icon: Icon, title, desc, points, href, cta }) => (
-          <StaggerItem key={href} className="h-full">
-            <Link
-              href={href}
-              className="group flex flex-col h-full p-6 bg-white/[0.03] border border-white/[0.08] rounded-2xl hover:border-neon-pink/30 hover:bg-white/[0.05] hover:shadow-[0_8px_32px_rgba(255,0,119,0.12)] motion-safe:hover:-translate-y-0.5 transition-all duration-300 no-underline"
-            >
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 shrink-0 bg-neon-pink/10 border border-neon-pink/20">
-                <Icon className="w-5 h-5 text-neon-pink" />
-              </div>
-              <p className="font-bebas text-2xl tracking-wide text-white mb-1.5">{title}</p>
-              <p className={`text-text-gray text-xs leading-relaxed ${points ? '' : 'flex-1'}`}>{desc}</p>
-              {points && (
-                <ul className="mt-3 space-y-1.5 flex-1">
-                  {points.map(pt => (
-                    <li key={pt} className="flex items-start gap-2 text-text-gray text-xs leading-relaxed">
-                      <CheckIcon className="w-3.5 h-3.5 text-neon-pink shrink-0 mt-0.5" />
-                      <span>{pt}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex items-center gap-1.5 mt-5 text-xs font-semibold text-neon-pink">
-                {cta}
-                <ArrowRightIcon className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" />
-              </div>
-            </Link>
-          </StaggerItem>
-        ))}
-      </Stagger>
-    </section>
+    <svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={pink ? '#FF0077' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
   )
 }
 
-// ── Quick actions for authenticated users ─────────────────────────────────────
+const TILE_ICONS: Record<AudienceKey, ReactNode> = {
+  food: <><path d="M6 8h12l-1 12H7L6 8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></>,
+  vendor: <><path d="M4 9l1.5-5h13L20 9" /><path d="M4 9h16v2a3 3 0 0 1-5.3 2A3 3 0 0 1 12 14a3 3 0 0 1-2.7-1A3 3 0 0 1 4 11V9z" /><path d="M5 14v6h14v-6" /></>,
+  organizer: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4" /></>,
+  group: <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />,
+}
 
-const FAIR_SLUG = 'springfield-state-fair-2026'
+const STRIP_ICONS: ReactNode[] = [
+  <><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M3 3l18 18" /></>,
+  <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M11 17h2" /></>,
+  <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z" /><path d="M9 8h6M9 12h6" /></>,
+]
 
-const QUICK_ACTIONS_BY_ROLE = {
-  vendor: [
-    { label: 'My Dashboard', href: `/vendor/${FAIR_SLUG}/dashboard` },
-    { label: 'Menu Manager', href: `/vendor/${FAIR_SLUG}/menu` },
-    { label: 'Analytics',    href: `/vendor/${FAIR_SLUG}/analytics` },
-  ],
-  organizer: [
-    { label: 'My Events',  href: '/organizer' },
-    { label: 'All Fairs',  href: '/organizer/fairs' },
-    { label: 'Settings',   href: '/organizer/settings' },
-  ],
-  runner: [
-    { label: 'Go Online', href: `/runner/${FAIR_SLUG}/dashboard` },
-    { label: 'Earnings',  href: `/runner/${FAIR_SLUG}/earnings` },
-    { label: 'Settings',  href: `/runner/${FAIR_SLUG}/settings` },
-  ],
-  customer: [
-    { label: 'Find a Fair', href: '/fairs' },
-    { label: 'My Orders',   href: '/account/orders' },
-    { label: 'Favorites',   href: '/account/favorites' },
-  ],
-} as const
+// ── Hero + "Who are you?" tiles ───────────────────────────────────────────────────────────────
 
-function QuickActionsSection() {
-  const { isSignedIn, user } = useUser()
-  const { isVendor, isOrganizer, isRunner } = useRole()
-
-  if (!isSignedIn) return null
-
-  const firstName = user?.firstName ?? 'there'
-  const actions =
-    isVendor    ? QUICK_ACTIONS_BY_ROLE.vendor :
-    isOrganizer ? QUICK_ACTIONS_BY_ROLE.organizer :
-    isRunner    ? QUICK_ACTIONS_BY_ROLE.runner :
-    QUICK_ACTIONS_BY_ROLE.customer
-
+function Hero() {
   return (
-    <section className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 pb-4">
-      <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl px-5 sm:px-7 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="flex-1 min-w-0">
-          <p className="text-white font-semibold text-sm">Welcome back, {firstName}</p>
-          <p className="text-text-gray text-xs mt-0.5">Jump back in</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {actions.map(({ label, href }) => (
-            <Link
-              key={href}
-              href={href}
-              className="inline-flex items-center px-3.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs font-medium hover:bg-neon-pink/10 hover:border-neon-pink/30 hover:text-neon-pink transition-colors no-underline"
+    <section className="max-w-[1040px] mx-auto px-5 pt-9 pb-7 flex flex-col gap-[18px]">
+      <p className="m-0 text-xs font-bold tracking-[2.5px] text-[#FF3D94]">{HOME_HERO.eyebrow}</p>
+      <h1 className="m-0 font-bebas font-normal text-[68px] lg:text-[96px] leading-[0.92] tracking-[0.5px]">
+        {HOME_HERO.headingLine1}
+        <br />
+        <span className="text-neon-pink">{HOME_HERO.headingLine2}</span>
+      </h1>
+      <p className="m-0 text-[17px] leading-normal text-[#B3B3B3] max-w-2xl">{HOME_HERO.subhead}</p>
+      <AudienceLink
+        audience="vendor"
+        className="self-start inline-flex items-center min-h-[44px] px-[18px] rounded-full bg-[#2A0014] border border-neon-pink text-[#FF3D94] no-underline text-[15px] font-bold hover:bg-[#3A001C] transition-colors"
+      >
+        {HOME_HERO.vendorButton}
+      </AudienceLink>
+
+      <p className="mt-2.5 mb-0 text-[13px] font-bold tracking-[2px] text-white">{WHO_ARE_YOU}</p>
+      {/* Two across on phones, four across from laptop width. */}
+      <div id="paths" className="grid grid-cols-2 lg:grid-cols-4 gap-3 scroll-mt-20">
+        {HOME_TILES.map(({ key, title, line }) => {
+          const food = key === 'food'
+          return (
+            <AudienceLink
+              key={key}
+              audience={key}
+              className={`flex flex-col gap-2.5 p-4 min-h-[150px] rounded-[18px] no-underline text-white transition-colors ${
+                food ? 'bg-neon-pink hover:bg-[#e0006b]' : 'bg-bg-card border border-[#2E2E2E] hover:border-neon-pink'
+              }`}
             >
-              {label}
-            </Link>
-          ))}
-        </div>
+              <Icon pink={!food}>{TILE_ICONS[key]}</Icon>
+              <span className="font-bebas text-[26px] leading-none">{title}</span>
+              <span className={`text-sm leading-[1.35] ${food ? 'text-white font-semibold' : 'text-[#B3B3B3]'}`}>{line}</span>
+            </AudienceLink>
+          )
+        })}
       </div>
     </section>
   )
 }
 
-// ── Stats ─────────────────────────────────────────────────────────────────────
+// ── Three-item strip ──────────────────────────────────────────────────────────────────────────
 
-// Real results, client-supplied copy (Batch 1 task 1.7). Hard-coded until the Batch 3
-// content editor makes it editable. "Nearly" keeps the sales claim exact.
-function ProofSection() {
+function Strip() {
   return (
-    <section className="py-16 sm:py-20 px-5">
-      <div className="max-w-5xl mx-auto">
-        <StatsTiles />
+    <section className="max-w-[1040px] mx-auto px-5 pt-2 pb-9">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-[18px] px-4 py-[22px] border border-[#2E2E2E] rounded-[18px] bg-[#151515] text-center">
+        {HOME_STRIP.map(({ title, line }, i) => (
+          <div key={title} className="flex flex-col items-center gap-1.5">
+            <Icon>{STRIP_ICONS[i]}</Icon>
+            <span className="font-bebas text-[30px] leading-none text-white">{title}</span>
+            <span className="text-sm text-[#B3B3B3]">{line}</span>
+          </div>
+        ))}
       </div>
     </section>
   )
 }
 
-// Four equal tiles and one caption. The figures match the vendor pitch video (213 / 23 / $45,
-// "Last season"), by Feran's decision on 2026-11-13, pending the client's confirmation. This
-// replaces the signed 1.7 line ("288 orders and nearly $16k in sales over our first two seasons");
-// see docs/BATCH-1.md B1.7. scripts/homepage-stats-guard.ts locks the copy.
-const STAT_TILES = [
-  { value: '213',  label: 'orders' },
-  { value: '23',   label: 'vendors' },
-  { value: '$45',  label: 'average order' },
-  { value: 'FREE', label: 'for vendors' },
-]
+// ── Ready? Pick your path ─────────────────────────────────────────────────────────────────────
 
-function StatsTiles() {
+function PickYourPath() {
+  const last = PICK_YOUR_PATH.links.length - 1
   return (
-    <div className="bg-white/[0.02] rounded-2xl border border-white/[0.04] px-4 py-8 sm:p-10">
-      {/* Two by two on phones (four across can't fit "average order" at 375px), one row from sm. */}
-      <Stagger slow className="grid grid-cols-2 gap-y-8 sm:grid-cols-4 sm:gap-y-0 sm:divide-x sm:divide-white/[0.08]">
-        {STAT_TILES.map(({ value, label }) => (
-          <StaggerItem key={label} className="text-center px-2">
-            <p className="font-bebas text-4xl sm:text-5xl text-neon-pink tracking-wide leading-none whitespace-nowrap">
-              {value}
-            </p>
-            <p className="mt-2 text-xs sm:text-sm text-text-gray font-inter">{label}</p>
-          </StaggerItem>
-        ))}
-      </Stagger>
-      <p className="mt-6 text-center text-[11px] sm:text-xs text-text-gray/80 font-inter">
-        Last season
-      </p>
-    </div>
-  )
-}
-
-// ── Final CTA Banner ──────────────────────────────────────────────────────────
-
-function FinalCTABanner() {
-  return (
-    <section className="relative py-20 sm:py-28 px-5 overflow-hidden">
-      {/* Background glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] rounded-full bg-[#FF0077]/8 blur-[120px] pointer-events-none" />
-
-      {/* Grid texture */}
-      <div
-        className="absolute inset-0 opacity-[0.02]"
-        style={{
-          backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
-                             linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
-          backgroundSize: '40px 40px',
-        }}
-      />
-
-      <Reveal className="relative z-10 max-w-2xl mx-auto text-center">
-        <h2 className="font-bebas text-4xl sm:text-5xl lg:text-6xl text-white uppercase leading-tight tracking-wide">
-          Ready to Skip<br />
-          <span className="text-neon-pink">the Line?</span>
+    <section className="max-w-[720px] mx-auto px-5 pt-8 pb-10">
+      <div className="flex flex-col gap-3.5 px-5 py-6 border border-neon-pink rounded-[20px] bg-[#160009]">
+        <h2 className="m-0 font-bebas font-normal text-[40px] leading-[0.95]">
+          {PICK_YOUR_PATH.heading} <span className="text-neon-pink">{PICK_YOUR_PATH.headingAccent}</span>
         </h2>
-        <p className="mt-4 text-text-gray font-inter text-sm sm:text-base max-w-md mx-auto leading-relaxed">
-          Join thousands of fair-goers ordering ahead. No waiting, no hassle — just great food.
-        </p>
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <motion.div
-            whileHover={{ scale: 1.04, transition: { duration: 0.2, ease: EASE.smooth } }}
-            whileTap={{ scale: 0.97 }}
-            className="w-full sm:w-auto"
+        {PICK_YOUR_PATH.links.map(({ key, label }, i) => (
+          <AudienceLink
+            key={key}
+            audience={key}
+            className={`flex items-center justify-between min-h-[52px] px-1 text-white no-underline text-[17px] font-semibold hover:text-[#FF3D94] transition-colors ${
+              i < last ? 'border-b border-[#2E2E2E]' : ''
+            }`}
           >
-            <Link
-              href="/fairs"
-              className="flex items-center justify-center w-full px-8 py-3.5 text-sm font-inter font-semibold rounded-xl shadow-[0_4px_20px_rgba(255,0,119,0.3)] btn-primary"
-            >
-              Browse Fairs Near You
-            </Link>
-          </motion.div>
-        </div>
-      </Reveal>
+            {label} <span aria-hidden="true" className="text-neon-pink">→</span>
+          </AudienceLink>
+        ))}
+      </div>
     </section>
   )
 }
 
-// ── Footer ────────────────────────────────────────────────────────────────────
+// ── Footer ────────────────────────────────────────────────────────────────────────────────────
 
-function SiteFooter() {
+function HomeFooter() {
   return (
-    <footer className="border-t border-white/[0.04] bg-[#0a0a0a]">
-      <div className="max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-16">
-
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-10">
-
-          {/* Left: Brand */}
-          <div className="max-w-sm">
-            <Link href="/" className="group inline-flex items-center">
-              <span className="font-bebas text-2xl tracking-widest text-white transition-colors duration-200 group-hover:text-neon-pink leading-none">FAIR</span>
-              <span className="font-bebas text-2xl tracking-widest text-neon-pink transition-colors duration-200 group-hover:text-white leading-none">SYNQ</span>
-            </Link>
-            <p className="mt-3 text-sm text-text-gray font-inter leading-relaxed">
-              The multi-fair food marketplace. Order ahead, skip the line, enjoy the fair.
-            </p>
-            <div className="mt-5 flex items-center gap-2.5">
-              <a
-                href={contactMailto()}
-                aria-label="Email us"
-                className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-neon-pink/10 hover:border-neon-pink/20 transition-all duration-200 group/icon"
-              >
-                <EnvelopeIcon className="w-4 h-4 text-gray-500 group-hover/icon:text-neon-pink transition-colors" />
-              </a>
-              <a
-                href={FACEBOOK_URL}
-                aria-label="Facebook"
-                className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-neon-pink/10 hover:border-neon-pink/20 transition-all duration-200 group/icon"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <FacebookIcon className="w-4 h-4 text-gray-500 group-hover/icon:text-neon-pink transition-colors" />
-              </a>
-            </div>
-          </div>
-
-          {/* Right: Link columns */}
-          <div className="flex gap-12 sm:gap-16">
-            <div>
-              <p className="text-[10px] font-inter text-gray-600 uppercase tracking-[0.15em] mb-4">Platform</p>
-              <div className="flex flex-col gap-2.5">
-                <Link href="/fairs" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Discover Fairs</Link>
-                <Link href="/sign-in/vendor" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Vendor sign-in</Link>
-                <Link href="/organizer/login" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Organizer sign-in</Link>
-                <Link href={PARTNERS_PATH} className="text-sm text-text-gray hover:text-white transition-colors font-inter">Partner organizations</Link>
-              </div>
-            </div>
-            <div>
-              <p className="text-[10px] font-inter text-gray-600 uppercase tracking-[0.15em] mb-4">Company</p>
-              <div className="flex flex-col gap-2.5">
-                <Link href="/faq" className="text-sm text-text-gray hover:text-white transition-colors font-inter">FAQ</Link>
-                <Link href="/contact" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Contact</Link>
-                <Link href="/refund-policy" className="text-sm text-text-gray hover:text-white transition-colors font-inter">Refund Policy</Link>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom bar */}
-        <div className="mt-12 pt-6 border-t border-white/[0.04] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <p className="text-[10px] text-gray-700 font-inter">
-            © {new Date().getFullYear()} FairSynq. All rights reserved.
-          </p>
-          <div className="flex items-center gap-4">
-            <p className="text-[10px] text-gray-700 font-inter">Made with 🩷 for fair food lovers.</p>
-            {/* Discreet, internal-only admin entry */}
-            <Link href="/admin/login" className="text-[10px] text-gray-700 hover:text-gray-400 transition-colors font-inter">
-              Admin
-            </Link>
-          </div>
-        </div>
-
-      </div>
+    <footer className="max-w-[720px] mx-auto px-5 pt-7 pb-10 border-t border-[#1F1F1F] flex flex-col gap-3">
+      <span className="font-bebas text-[26px] tracking-[2px]">
+        FAIR<span className="text-neon-pink">SYNQ</span>
+      </span>
+      <p className="m-0 text-sm text-[#B3B3B3]">
+        {HOME_FOOTER.questionsLead}{' '}
+        <a href={`mailto:${HOME_FOOTER.supportEmail}`} className="text-[#FF3D94] hover:text-[#FF73B0]">{HOME_FOOTER.supportEmail}</a>
+      </p>
+      <p className="m-0 text-[13px] text-[#8C8C8C]">{HOME_FOOTER.copyright}</p>
     </footer>
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────────────────────
 
-export default function MarketplaceLanding({ initialFairs }: { initialFairs: PublicFairCard[] }) {
-  // Fairs are fetched on the server and passed in, so the very first paint already
-  // has the real list — no client re-fetch, no flash of the empty "Upcoming Fairs"
-  // state. Renders once, stable.
-  const allFairs    = initialFairs
-  // Live and upcoming by DATE — an ACTIVE fair whose run has ended is not "happening".
-  const activeFairs = partitionFairCards(allFairs).current
-
+export default function MarketplaceLanding() {
   return (
-    <>
-      <MarketplaceNavbar />
-      <div className="bg-bg-dark text-white">
-
-        {/* ── Hero ── */}
-        <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden px-5 sm:px-[6%] lg:px-8 pt-16">
-          <div className="hero-glow" />
-
-          <div className="relative z-10 text-center max-w-4xl mx-auto w-full">
-            <motion.p
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: TIMING.fast, ease: EASE.decelerate, delay: 0.1 }}
-              className="text-text-gray text-xs sm:text-sm font-semibold uppercase tracking-widest mb-5"
-            >
-              For fairs &amp; festivals
-            </motion.p>
-
-            <motion.h1
-              initial={{ opacity: 0, y: 40 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, ease: EASE.decelerate, delay: 0.2 }}
-              className="font-bebas text-5xl sm:text-6xl md:text-7xl lg:text-[7rem] text-white tracking-wide leading-none mb-6"
-            >
-              Long lines are
-              <br />
-              <span className="text-neon-pink">lost sales.</span>
-            </motion.h1>
-
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: EASE.decelerate, delay: 0.5 }}
-              className="text-text-gray text-base sm:text-lg md:text-xl max-w-2xl mx-auto mb-10"
-            >
-              Mobile ordering and vendor management in one platform. Fairgoers skip
-              the line, vendors sell more, and organizers run it all from one dashboard.
-            </motion.p>
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: TIMING.normal, ease: EASE.bounce, delay: 0.8 }}
-              className="flex items-center justify-center gap-3 sm:gap-4 flex-wrap"
-            >
-              <motion.div
-                whileHover={{ scale: 1.05, transition: { duration: 0.2, ease: EASE.smooth } }}
-                whileTap={{ scale: 0.97 }}
-              >
-                <Link
-                  href="/fairs"
-                  className="inline-flex items-center px-7 sm:px-8 py-3.5 rounded-xl bg-neon-pink text-white font-semibold hover:bg-[#e0006b] shadow-[0_4px_20px_rgba(255,0,119,0.35)] transition-colors"
-                >
-                  Find a Fair
-                </Link>
-              </motion.div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.4, duration: 0.6 }}
-              className="mt-20 flex justify-center"
-            >
-              <motion.div
-                animate={{ y: [0, 8, 0] }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                className="w-5 h-8 rounded-full border border-white/20 flex items-start justify-center pt-1.5"
-              >
-                <div className="w-1 h-2 rounded-full bg-white/40" />
-              </motion.div>
-            </motion.div>
-          </div>
-        </section>
-
-        {/* ── Active / upcoming fairs, or "Coming in 2027" when there are none ── */}
-        <section className="max-w-[87.5rem] mx-auto px-5 sm:px-[6%] lg:px-8 py-12 sm:py-20">
-          {activeFairs.length > 0 ? (
-            <>
-              <Reveal className="flex items-center justify-between mb-8 sm:mb-10">
-                <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
-                  Happening <span className="text-neon-pink">Now</span> &amp; Soon
-                </h2>
-                <Link href="/fairs" className="text-neon-pink text-sm font-semibold hover:underline shrink-0 ml-4">
-                  View all →
-                </Link>
-              </Reveal>
-              <Stagger className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-                {activeFairs.map((fair) => (
-                  <StaggerItem key={fair.id} className="h-full">
-                    <FairCard fair={fair} />
-                  </StaggerItem>
-                ))}
-              </Stagger>
-            </>
-          ) : (
-            <Reveal className="max-w-2xl mx-auto text-center bg-white/[0.03] border border-white/[0.08] rounded-2xl px-6 py-10 sm:py-12">
-              <h2 className="font-bebas text-3xl sm:text-4xl md:text-5xl text-white tracking-wide">
-                Coming in <span className="text-neon-pink">2027</span>
-              </h2>
-              <p className="mt-3 text-text-gray text-sm sm:text-base leading-relaxed">
-                Coming to fairs and festivals in 2027. Events announced soon. Vendors, organizers
-                and partner organizations can sign up now.
-              </p>
-            </Reveal>
-          )}
-        </section>
-
-        {/* ── Role cards — how will you FairSynq? ── */}
-        <RoleSection />
-
-        {/* ── How It Works ── */}
-        <HowItWorksSection />
-
-        {/* ── Stats ── */}
-        <ProofSection />
-
-        {/* ── FAQ ── */}
-        <FAQSection />
-
-        {/* ── Contact — same "need help?" family as the FAQ, so it sits with it ── */}
-        <ContactSection />
-
-        {/* ── Final CTA ── */}
-        <FinalCTABanner />
-
-        {/* ── Footer ── */}
-        <SiteFooter />
-
-      </div>
-    </>
+    <div className="min-h-screen bg-bg-dark text-white font-inter">
+      <HomeHeader />
+      <main>
+        <Hero />
+        <Strip />
+        <HomeAudienceSections />
+        <PickYourPath />
+      </main>
+      <HomeFooter />
+    </div>
   )
 }

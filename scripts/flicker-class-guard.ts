@@ -300,32 +300,45 @@ assert(/aria-hidden="true" className="w-\[7\.5rem\] h-9"/.test(navSrc),
 assert(/Get Started/.test(navSrc),
   'the signed-out CTA still exists (the fix delays it, it does not delete it)')
 
-// ── [J] the homepage role cards do not guess the auth state (11th instance) ───────────────
+// ── [J] the homepage does not guess the auth state (11th instance) ────────────────────────
 // RoleSection ("Work with FairSynq") returned null only when `isSignedIn` was true. Before Clerk
 // loads it is undefined, so the server HTML and first frames rendered the cards for everyone and
 // a signed-in user watched them vanish. Same plausible-but-wrong default as [I], same fix: hold
-// the footprint (invisible) until isLoaded, then decide.
-console.log('\n[J] RoleSection waits for Clerk before showing the signed-out cards')
-const landingSrc = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
-const roleSrc = landingSrc.slice(landingSrc.indexOf('function RoleSection()'), landingSrc.indexOf('// ── Quick actions'))
+// the footprint until isLoaded, then decide.
+// Homepage v2 (2026-11-23) removed RoleSection: the tiles are the same for everyone. The checks now
+// cover every homepage component; the only auth-dependent pieces are the header's account slot and
+// the vendor sign-up link, and both wait for isLoaded.
+console.log('\n[J] the homepage waits for Clerk before choosing anything signed-in vs signed-out')
+const HOME_FILES = ['app/MarketplaceLanding.tsx', 'app/_components/HomeHeader.tsx', 'app/_components/HomeAudienceSections.tsx']
+const homeSrc = Object.fromEntries(HOME_FILES.map(f => [f, readFileSync(f, 'utf8')]))
+const headerSrc = homeSrc['app/_components/HomeHeader.tsx']
+const sectionsSrc = homeSrc['app/_components/HomeAudienceSections.tsx']
+const landingSrc = homeSrc['app/MarketplaceLanding.tsx']
 
-// The smell: an early return on isSignedIn alone, so undefined falls through to the cards.
+// The smells: an early return on isSignedIn alone, or a JSX branch that opens on it.
 const HIDES_ON_SIGNED_IN_ONLY = /if \(\s*isSignedIn\s*\) return null/
 assert(HIDES_ON_SIGNED_IN_ONLY.test('  const { isSignedIn } = useUser()\n  if (isSignedIn) return null'),
   '[0] positive control: the scanner DOES flag `if (isSignedIn) return null` (the exact shape that shipped)')
 assert(!HIDES_ON_SIGNED_IN_ONLY.test('  if (isLoaded && isSignedIn) return null'),
   '[0] baseline: it does NOT flag the gated `if (isLoaded && isSignedIn) return null`')
-assert(roleSrc.length > 0 && roleSrc.includes('Work with FairSynq'),
-  '[0] the RoleSection slice was found (the checks below are not reading an empty string)')
+const accountSlot = headerSrc.slice(headerSrc.indexOf('{!isLoaded ? ('), headerSrc.indexOf('aria-label={HOME_HEADER.menuLabel}'))
+assert(accountSlot.length > 0 && accountSlot.includes('HOME_HEADER.signIn') && accountSlot.includes('HOME_HEADER.account'),
+  '[0] the header account-slot slice was found (the checks below are not reading an empty string)')
 
-assert(/const \{ isLoaded, isSignedIn \} = useUser\(\)/.test(roleSrc),
-  'RoleSection reads isLoaded from useUser')
-assert(!HIDES_ON_SIGNED_IN_ONLY.test(roleSrc),
-  'RoleSection does not decide on isSignedIn alone')
-assert(/if \(isLoaded && isSignedIn\) return null/.test(roleSrc),
-  'signed-in users still get no cards once Clerk has loaded (the fix does not show them the cards)')
-assert(/isLoaded \? '' : ' invisible'/.test(roleSrc) && /aria-hidden=\{!isLoaded\}/.test(roleSrc),
-  'while auth is unknown the section is invisible and hidden from assistive tech, holding its exact footprint')
+assert(/const \{ isLoaded, isSignedIn \} = useUser\(\)/.test(headerSrc) && /const \{ isLoaded, isSignedIn \} = useUser\(\)/.test(sectionsSrc),
+  'the header and the vendor sign-up link read isLoaded from useUser')
+for (const f of HOME_FILES) {
+  assert(!HIDES_ON_SIGNED_IN_ONLY.test(homeSrc[f]) && !GUESSES_AUTH.test(homeSrc[f]),
+    `${f}: nothing decides on isSignedIn alone (no early return, no \`{isSignedIn ?\` branch)`)
+}
+assert(!/useUser\(/.test(landingSrc),
+  'the tiles and page sections do not depend on sign-in (no useUser on the page itself)')
+assert(/\{!isLoaded \? \([\s\S]{0,200}?\) : isSignedIn === true \? \(/.test(accountSlot),
+  'the header shows "My account" to signed-in users only after Clerk has loaded, then chooses')
+assert(/\{!isLoaded \? \(\s*<div aria-hidden="true" className="w-\[5\.5rem\] h-11" \/>/.test(accountSlot),
+  'while auth is unknown the header slot is an empty placeholder, hidden from assistive tech, with a fixed footprint')
+assert(/isLoaded && isSignedIn === true \? VENDOR_SIGNUP_SIGNED_IN : VENDOR_SIGNUP_SIGNED_OUT/.test(sectionsSrc),
+  'the vendor sign-up link uses the signed-in path only once Clerk has loaded')
 
 console.log(`\n${'─'.repeat(64)}`)
 if (fail === 0) console.log(`  ${pass} passed, 0 failed`)

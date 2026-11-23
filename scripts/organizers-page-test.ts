@@ -7,8 +7,9 @@
  *       the tabs switch both ways (2026-11-17: tabs replaced the toggle links, sign-in redesign).
  *       Plus RoleAuthCard's wiring of the same function.
  *   [3] page copy (Q5): the approved text word for word, every field rendered, in order
- *   [4] homepage (changed 2026-11-17, deviation from Q3): Host an Event card → /organizer/login?mode=apply
- *       "Get started", rest unchanged; footer "Organizer sign-in" still → /organizer/login
+ *   [4] homepage v2 (2026-11-23): "I run an event" tile, Organizers tab button and "Bring FairSynq to
+ *       your event" path → /organizer/login?mode=apply; organizer copy exact; header chooser
+ *       "Organizer sign-in" → /organizer/login; no homepage link to /organizers
  *   [4b] /organizers is parked: a temporary redirect to /organizer/login; nothing in the app links to it
  *   [5] /organizer/login: the old blurb is removed (sign-in redesign Q7b); no "approve vendors"
  *   [6] title, noindex, not in the sitemap (even with indexing on)
@@ -22,6 +23,7 @@ import { initialAuthMode } from '../lib/auth-mode'
 import { SIGNIN_COPY } from '../lib/signin-copy'
 import { ORGANIZERS_PAGE, ORGANIZERS_PATH, ORGANIZER_APPLY_PATH } from '../lib/organizer-copy'
 import { robotsFor, sitemapEntries, SITE_URL } from '../lib/seo'
+import { AUDIENCES, AUDIENCE_HREF, HOME_TILES, PICK_YOUR_PATH, HOME_HEADER } from '../lib/homepage-copy'
 
 let pass = 0, fail = 0
 const assert = (ok: boolean, label: string) => {
@@ -107,22 +109,39 @@ assert(/<ol[\s\S]{0,80}P\.steps\.points\.map/.test(page), 'the steps are a numbe
 assert(!/contact|mailto|support@/i.test(page), 'no contact line (waits for C-20)')
 
 // ── [4] homepage ──────────────────────────────────────────────────────────────────────────
-console.log('\n[4] homepage card and footer')
+// Homepage v2 (2026-11-23, design approved 2026-11-22) replaced the "Host an Event" card and the old
+// footer. Each old check has a replacement: the organizer tile, tab button and path link go to
+// organizer sign-up; the organizer copy is exact; organizer sign-in moved to the header chooser.
+console.log('\n[4] homepage organizer paths and header sign-in')
+const homeCopySrc = readFileSync('lib/homepage-copy.ts', 'utf8')
 const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
-const host = landing.slice(landing.indexOf("title: 'Host an Event'"), landing.indexOf('},', landing.indexOf("title: 'Host an Event'")))
-// Updated 2026-11-17 (BATCH-1 §21, deviation from Q3): the card goes straight to organizer sign-up.
-assert(host.length > 0 && /href: ORGANIZER_APPLY_PATH,/.test(host) && /cta: 'Get started',/.test(host) && ORGANIZER_APPLY_PATH === '/organizer/login?mode=apply',
-  'Host an Event → /organizer/login?mode=apply, button "Get started"')
+const homeHeader = readFileSync('app/_components/HomeHeader.tsx', 'utf8')
+const homeSections = readFileSync('app/_components/HomeAudienceSections.tsx', 'utf8')
+assert(AUDIENCE_HREF.organizer === ORGANIZER_APPLY_PATH && ORGANIZER_APPLY_PATH === '/organizer/login?mode=apply'
+  && /organizer: ORGANIZER_SIGNUP_PATH,/.test(homeCopySrc) && /export const ORGANIZER_SIGNUP_PATH = ORGANIZER_APPLY_PATH/.test(homeCopySrc),
+  'organizer paths → /organizer/login?mode=apply')
+assert(HOME_TILES.some(t => t.key === 'organizer' && t.title === 'I run an event' && t.line === 'Run it from one dashboard')
+  && /HOME_TILES\.map\(\(\{ key, title, line \}\)[\s\S]{0,200}?<AudienceLink\s+key=\{key\}\s+audience=\{key\}/.test(landing),
+  '"I run an event" tile ("Run it from one dashboard") links through the organizer path')
+assert(AUDIENCES.organizer.cta === 'Bring FairSynq to your event' && /<AudienceLink\s+audience=\{selected\}/.test(homeSections),
+  'Organizers tab button "Bring FairSynq to your event" → the organizer path')
+assert(PICK_YOUR_PATH.links.some(l => l.key === 'organizer' && l.label === 'Bring FairSynq to your event') && /PICK_YOUR_PATH\.links\.map\([\s\S]{0,120}<AudienceLink[\s\S]{0,40}audience=\{key\}/.test(landing),
+  '"Pick your path" "Bring FairSynq to your event" → the organizer path')
 assert(initialAuthMode(new URLSearchParams(ORGANIZER_APPLY_PATH.split('?')[1]).get('mode'), true) === 'sign-up', 'that link opens the "Apply to host" tab')
-assert(host.includes("desc: 'Run your fair end to end from one dashboard.'")
-  && host.includes(`"Save your fair as a draft and publish when it's ready",`)
-  && host.includes("'See and manage the vendors at your fair',")
-  && host.includes("'Watch orders as they come in, booth by booth',")
-  && host.includes("'Run several fairs from one account',"), 'title, description and the four points are unchanged')
-const footer = landing.slice(landing.indexOf('<footer'))
-assert(landing.indexOf('<footer') > 0 && /<Link href="\/organizer\/login"[^>]*>Organizer sign-in<\/Link>/.test(footer), 'footer "Organizer sign-in" still → /organizer/login')
-assert(!/\/organizers|ORGANIZERS_PATH/.test(footer), 'no footer link to /organizers')
-assert(!/ORGANIZERS_PATH|'\/organizers'/.test(landing), 'the homepage no longer links to /organizers')
+assert(JSON.stringify(AUDIENCES.organizer.steps) === JSON.stringify([
+  ['Create your event', "Save it as a draft and publish when you're ready."],
+  ['Bring in your vendors', 'Invite them, or approve the ones who request to join.'],
+  ['Watch it run', 'See orders come in booth by booth, all from one dashboard.'],
+]) && JSON.stringify(AUDIENCES.organizer.faqs) === JSON.stringify([
+  ['How do vendors join my event?', 'Send them your invite link, or approve vendors who request to join.'],
+  ['Can I run more than one event?', 'Yes. Run several events from one account.'],
+  ['Who runs curbside pickup?', "A local partner group brings its own volunteers, so you don't need extra staff."],
+]), 'the organizer steps and FAQs are the approved text, word for word')
+assert(HOME_HEADER.signInChoices.some(c => c.label === 'Organizer sign-in' && c.href === '/organizer/login') && /HOME_HEADER\.signInChoices\.map\(/.test(homeHeader),
+  'header sign-in chooser "Organizer sign-in" → /organizer/login')
+for (const [name, s] of [['lib/homepage-copy.ts', homeCopySrc], ['app/MarketplaceLanding.tsx', landing], ['app/_components/HomeHeader.tsx', homeHeader], ['app/_components/HomeAudienceSections.tsx', homeSections]] as const) {
+  assert(!/ORGANIZERS_PATH|'\/organizers'|"\/organizers"|\/organizers\b/.test(stripLineComments(s)), `${name}: no link to /organizers`)
+}
 
 // ── [4b] /organizers parked ───────────────────────────────────────────────────────────────
 console.log('\n[4b] /organizers redirects to /organizer/login')

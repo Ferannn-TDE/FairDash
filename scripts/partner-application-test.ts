@@ -128,14 +128,34 @@ async function main() {
     "button: 'Partner with us'",
   ]
   for (const s of EXACT) assert(copy.includes(s), `client copy verbatim: ${s.slice(0, 60)}`)
+  // Homepage v2 (2026-11-23, design approved 2026-11-22): the partner card became the "We're a
+  // group" tile with the design's wording; the PARTNER_CARD copy is still checked on /partners below.
   const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
-  assert(/title: PARTNER_CARD\.heading[\s\S]{0,120}points: PARTNER_CARD\.points[\s\S]{0,60}href: PARTNERS_PATH/.test(landing), 'the homepage card uses that copy and links to /partners')
-  assert(!/Deliver with FairSynq|cta: 'Runner sign-in'/.test(landing), 'the runner card is gone')
+  const homeHeader = readFileSync('app/_components/HomeHeader.tsx', 'utf8')
+  const homeSections = readFileSync('app/_components/HomeAudienceSections.tsx', 'utf8')
+  const homeCopySrc = readFileSync('lib/homepage-copy.ts', 'utf8')
+  const homeAll = [landing, homeHeader, homeSections, homeCopySrc].join('\n')
+  const home = await import('../lib/homepage-copy')
+  const { PARTNERS_PATH } = await import('../lib/partner-copy')
+  assert(PARTNERS_PATH === '/partners', '[0] PARTNERS_PATH is /partners (the checks below compare against it)')
+  assert(home.AUDIENCE_HREF.group === PARTNERS_PATH && /export const GROUP_PATH = PARTNERS_PATH/.test(homeCopySrc) && /group: GROUP_PATH,/.test(homeCopySrc),
+    'the homepage group path links to /partners')
+  assert(home.HOME_TILES.some(t => t.key === 'group' && t.title === "We're a group" && t.line === 'Raise money running curbside')
+    && /HOME_TILES\.map\(\(\{ key, title, line \}\)[\s\S]{0,200}?<AudienceLink\s+key=\{key\}\s+audience=\{key\}/.test(landing),
+    '"We\'re a group" tile ("Raise money running curbside") → /partners')
+  assert(home.AUDIENCES.group.cta === 'Partner with us' && /<AudienceLink\s+audience=\{selected\}/.test(homeSections), 'Groups tab button "Partner with us" → /partners')
+  assert(!/Deliver with FairSynq|cta: 'Runner sign-in'|Runner sign-in/.test(homeAll), 'the runner card is gone, and no "Runner sign-in" anywhere on the homepage')
   const navbar = readFileSync('app/_components/MarketplaceNavbar.tsx', 'utf8')
-  assert(!/PARTNER_TOP_LINK/.test(landing), 'the top link is no longer in the hero')
+  assert(!/PARTNER_TOP_LINK/.test(homeAll), 'the top link is not on the homepage (hero, header or menu)')
+  assert(!home.HOME_HEADER.menu.some(m => (m.href as string) === PARTNERS_PATH) && !/PARTNERS_PATH|GROUP_PATH|\/partners/.test(homeHeader),
+    'the homepage header menu has no partner link (the top link stays removed pending the client\'s OK)')
   assert(!/PARTNER_TOP_LINK|PARTNERS_PATH|aria-label="Menu"/.test(navbar), 'the top link (and its mobile menu) is not in the navbar: removed pending the client\'s OK')
   assert(/NOT SHOWN: removed from the site on 2026-11-05 pending the client's OK/.test(copy), 'the wording stays on record, marked as not shown')
-  assert(/href=\{PARTNERS_PATH\}[^>]*>Partner organizations<\/Link>/.test(landing) && !/>Runner sign-in<\/Link>/.test(landing), 'the footer says "Partner organizations", not "Runner sign-in"')
+  // Was: the old footer's "Partner organizations" link. Homepage v2's footer has no links; the
+  // "Pick your path" list carries the partner link instead.
+  assert(home.PICK_YOUR_PATH.links.some(l => l.key === 'group' && l.label === 'Partner with us')
+    && /PICK_YOUR_PATH\.links\.map\([\s\S]{0,120}<AudienceLink[\s\S]{0,40}audience=\{key\}/.test(landing),
+    '"Pick your path" "Partner with us" → /partners')
   const page = readFileSync('app/partners/page.tsx', 'utf8')
   const form = readFileSync('app/partners/PartnerApplicationForm.tsx', 'utf8')
   assert(form.includes('label="Which fairs or events would your group like to work?"') && !/<select[^>]*p-interests/.test(form),

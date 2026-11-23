@@ -289,8 +289,9 @@ async function main() {
   for (const u of unexpected) console.log(`     ↳ ${u}`)
   assert(unexpected.length === 0, 'every customer-visible delivery word is on the allowlist, at its exact count')
   const meta = readFileSync('app/page.tsx', 'utf8')
-  assert(meta.includes("'FairSynq | Skip-the-Line Ordering for Fairs & Festivals'") && meta.includes("'Order fair food from your phone and pick it up at the booth or curbside. Free for vendors.'"),
-    'homepage metadata uses the client\'s exact title and description')
+  // Description changed by Jordan 2026-11-23 (homepage v2); the title is still the client's.
+  assert(meta.includes("'FairSynq | Skip-the-Line Ordering for Fairs & Festivals'") && meta.includes("'Order ahead and skip the line at fairs and festivals. Launching in 2027. Vendors, sign up free.'"),
+    'homepage metadata uses the exact title and description')
 }
 
 main()

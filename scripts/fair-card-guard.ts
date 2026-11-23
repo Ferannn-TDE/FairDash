@@ -67,8 +67,14 @@ assert(/line-clamp-2/.test(src) && /\bh-10\b/.test(src) && /fair\.tagline \?\? '
 assert(/mt-auto/.test(src), 'CTA pinned to the bottom (mt-auto)')
 assert(/state === 'live' \? 'Order now →' : 'View fair →'/.test(src) && /fairCardState\(fair\)/.test(src), 'only a live fair says "Order now"; others say "View fair"')
 assert(/vendorCountLabel\(/.test(src) && !/vendorCount\} vendors/.test(src), 'vendor count goes through vendorCountLabel')
+// Homepage v2 (2026-11-23, design approved 2026-11-22) has no fair list: "I want food" goes to /fairs.
+// Replaces "landing shows current fairs only, grid items stretch": the list must stay gone, and the
+// homepage must not fetch fairs it no longer shows.
 const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
-assert(/partitionFairCards\(allFairs\)\.current/.test(landing) && /<StaggerItem key=\{fair\.id\} className="h-full">/.test(landing), 'landing shows current fairs only, grid items stretch')
+const homePage = readFileSync('app/page.tsx', 'utf8')
+assert(!/FairCard|partitionFairCards|PublicFairCard|initialFairs/.test(landing) && !/getAllFairsCached|toPublicFairCard|initialFairs/.test(homePage),
+  'homepage shows no fair list and fetches no fairs (landing and app/page.tsx)')
+assert(/FOOD_PATH = '\/fairs'/.test(readFileSync('lib/homepage-copy.ts', 'utf8')), 'homepage "I want food" goes to /fairs, where the fair cards are')
 const fairs = readFileSync('app/fairs/page.tsx', 'utf8')
 // Ended fairs are not listed on /fairs (Batch 1, T-3): current events only, with the
 // "Events coming soon" message when there are none.
@@ -85,7 +91,9 @@ const offenders = files.filter(f => !f.endsWith('_components/FairCard.tsx') && O
 assert(files.length > 100, `scanned ${files.length} files`)
 assert(offenders.length === 0, `no fair-card "Order now" CTA outside FairCard${offenders.length ? ` — ${offenders.join(', ')}` : ''}`)
 const users = files.filter(f => /from '(\.\.?\/)*_components\/FairCard'|from '\.\/_components\/FairCard'/.test(readFileSync(f, 'utf8')))
-assert(users.some(f => f.endsWith('MarketplaceLanding.tsx')) && users.some(f => f.endsWith('fairs/page.tsx')), 'landing and /fairs both import the shared FairCard')
+// Was "landing and /fairs both import the shared FairCard"; homepage v2 has no fair cards.
+const userPaths = users.map(f => f.replace(/\\/g, '/')) // Windows walk() returns backslashes
+assert(userPaths.some(f => f.endsWith('app/fairs/page.tsx')) && !userPaths.some(f => f.endsWith('MarketplaceLanding.tsx')), '/fairs imports the shared FairCard; the homepage does not')
 
 console.log('[5] scanner control')
 assert(ORDER_NOW.test(`<span>Order now →</span>`) && ORDER_NOW.test(`label: 'Order now'`), 'catches a planted "Order now" CTA')
