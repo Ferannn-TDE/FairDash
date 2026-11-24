@@ -31,6 +31,7 @@ register('./_route-loader.mjs', import.meta.url)
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { NextRequest } from 'next/server'
 
 const prisma = testPrisma()
@@ -174,7 +175,7 @@ async function main() {
     if (rel.startsWith(APPROVALS)) {
       const params: Record<string, string> = {}
       for (const m of rel.matchAll(/\[([^\]]+)\]/g)) params[m[1]] = m[1] === 'kind' ? 'vendor' : `${PFX}nope`
-      const mod: Record<string, any> = await import(file)
+      const mod: Record<string, any> = await import(pathToFileURL(file).href)
       for (const method of METHODS) {
         if (typeof mod[method] !== 'function') continue
         approvalsProbed++
@@ -193,7 +194,7 @@ async function main() {
     const params: Record<string, string> = {}
     for (const m of rel.matchAll(/\[([^\]]+)\]/g)) params[m[1]] = `${PFX}nope`
     const url = '/api/admin/' + rel.replace(/route\.ts$/, '').replace(/\[([^\]]+)\]/g, `${PFX}nope`)
-    const mod: Record<string, any> = await import(file)
+    const mod: Record<string, any> = await import(pathToFileURL(file).href)
     for (const method of METHODS) {
       if (typeof mod[method] !== 'function') continue
       const byDesign404 = NOT_FOUND_BY_DESIGN.has(`${method} ${rel}`)
