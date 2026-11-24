@@ -25,6 +25,7 @@ import type { SettingsRole } from '@/lib/roles'
 import { dollarsToCents, percentToBps, formatBps, formatCents } from '@/lib/money-input'
 import { notifyMoneySettingChanged, type MoneySettingChange } from '@/lib/notify'
 import type { AfterTask } from '@/lib/after-response'
+import { parseBannerText, BANNER_DEFAULT_TEXT, BANNER_MAX_CHARS } from '@/lib/homepage-copy-rules'
 
 export type SettingClass = 'ops' | 'content' | 'money'
 type Parsed<T> = { ok: true; value: T | null } | { ok: false; error: string }
@@ -245,6 +246,26 @@ export const SETTINGS = {
   'video.organizerPitch.posterUrl': posterUrl('Organizer pitch'),
   'video.organizerPitch.phoneUrl': phoneVideoUrl('Organizer pitch'),
   'video.organizerPitch.phonePosterUrl': phonePosterUrl('Organizer pitch'),
+  // Homepage hero vendor sign-up banner (Jordan, 2026-11-23). OFF by default: it stays hidden until
+  // an admin turns it on. Read by lib/homepage-banner.ts; the link is always the vendor sign-up
+  // path (AudienceLink), only the words change. The text rules live in lib/homepage-copy-rules.ts,
+  // shared with scripts/homepage-stats-guard.ts.
+  'homepage.vendorBanner.enabled': {
+    label: 'Homepage: vendor sign-up banner',
+    help: 'Shows the pink "sign up" banner under the homepage heading. It links to vendor sign-up. The "I\'m a vendor" tile and the other sign-up links are always shown.',
+    class: 'content',
+    default: false,
+    parse: parseBoolean,
+    format: (v: boolean) => (v ? 'On' : 'Off'),
+  } satisfies SettingDef<boolean>,
+  'homepage.vendorBanner.text': {
+    label: 'Homepage: vendor sign-up banner text',
+    help: `The words on the pink banner under the homepage heading. Plain text, up to ${BANNER_MAX_CHARS} characters. The link always goes to vendor sign-up. Empty uses the default.`,
+    class: 'content',
+    default: BANNER_DEFAULT_TEXT,
+    parse: parseBannerText,
+    format: (v: string) => v,
+  } satisfies SettingDef<string>,
 } as const
 
 export type SettingKey = keyof typeof SETTINGS

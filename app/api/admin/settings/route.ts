@@ -6,6 +6,7 @@ import { listSettings, saveSetting, SettingError } from '@/lib/settings'
 import { listEventsWithDeliveryOn } from '@/lib/delivery'
 import { revalidateTag } from 'next/cache'
 import { VIDEOS_CACHE_TAG } from '@/lib/videos'
+import { HOMEPAGE_BANNER_CACHE_TAG } from '@/lib/homepage-banner'
 import { runAfterResponse } from '@/lib/after-response'
 
 // GET   /api/admin/settings  → every registry setting (value, version, note) + the latest 50 changes
@@ -48,6 +49,8 @@ export async function PATCH(req: NextRequest) {
       if (body.key === 'delivery.enabled' && result.outcome !== 'unchanged') revalidateTag('fair', 'default')
       // Pages with a video slot cache the link; refresh them when one changes.
       if (typeof body.key === 'string' && body.key.startsWith('video.') && result.outcome !== 'unchanged') revalidateTag(VIDEOS_CACHE_TAG, 'default')
+      // The homepage caches the vendor sign-up banner; refresh it when either banner setting changes.
+      if (typeof body.key === 'string' && body.key.startsWith('homepage.') && result.outcome !== 'unchanged') revalidateTag(HOMEPAGE_BANNER_CACHE_TAG, 'default')
       return success(result)
     } catch (err) {
       if (err instanceof SettingError) {

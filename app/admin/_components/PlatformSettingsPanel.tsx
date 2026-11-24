@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { History } from 'lucide-react'
 import { bpsToText, centsToText } from '@/lib/money-input'
+import { BANNER_MAX_CHARS } from '@/lib/homepage-copy-rules'
 
 // /admin/settings panel (Batch 1 item 5). One card per setting with its own Save and an optional
 // reason; the change log underneath. Loading renders skeletons, never placeholder values
@@ -58,6 +59,10 @@ function SettingCard({ setting, onSaved, deliveryEventsOn, viewerRole }: { setti
   const isSwitch = typeof setting.value === 'boolean'
   const isMoney = setting.class === 'money'
   const isChoice = setting.key === 'fees.cardFeesPaidBy'
+  // Only the delivery switch asks before turning on (it lists the events that start offering
+  // delivery). Every other switch, e.g. the homepage banner, saves straight away.
+  const confirmBeforeOn = setting.key === 'delivery.enabled'
+  const maxLength = setting.key === 'homepage.vendorBanner.text' ? BANNER_MAX_CHARS : undefined
   // The server refuses platform_manager on money keys (403); the card says so up front.
   const readOnly = isMoney && viewerRole !== 'admin' && viewerRole !== 'super_admin'
   const asInput = (v: unknown) => (isMoney ? moneyToInput(setting.key, v) : toInput(v))
@@ -143,7 +148,7 @@ function SettingCard({ setting, onSaved, deliveryEventsOn, viewerRole }: { setti
             role="switch"
             aria-checked={setting.value === true}
             disabled={saving}
-            onClick={() => (setting.value ? save(false) : setConfirmingOn(true))}
+            onClick={() => (setting.value ? save(false) : confirmBeforeOn ? setConfirmingOn(true) : save(true))}
             className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer border-0 shrink-0 disabled:opacity-50 ${setting.value ? 'bg-neon-pink' : 'bg-white/10'}`}
           >
             <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${setting.value ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -174,6 +179,7 @@ function SettingCard({ setting, onSaved, deliveryEventsOn, viewerRole }: { setti
             onChange={(e) => setDraft(e.target.value)}
             disabled={saving || readOnly}
             inputMode={isMoney ? 'decimal' : undefined}
+            maxLength={maxLength}
             placeholder={isMoney ? '' : 'Not set'}
             aria-invalid={!!fieldError}
             className={`${inputCls} ${fieldError ? 'border-red-500/70 focus:border-red-500' : ''}`}
@@ -182,7 +188,7 @@ function SettingCard({ setting, onSaved, deliveryEventsOn, viewerRole }: { setti
       )}
       {fieldError && <p className="mt-1.5 text-xs text-red-400">{fieldError}</p>}
 
-      {isSwitch && confirmingOn && (
+      {isSwitch && confirmBeforeOn && confirmingOn && (
         <div role="alert" className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs text-amber-100 leading-relaxed">
           {deliveryEventsOn.length === 0 ? (
             <p>No event has home delivery switched on, so nothing changes for customers until an event turns it on.</p>

@@ -41,7 +41,10 @@ const STRIP_ICONS: ReactNode[] = [
 
 // ── Hero + "Who are you?" tiles ───────────────────────────────────────────────────────────────
 
-function Hero() {
+// banner: the hero vendor sign-up banner's words, or null for none (app/page.tsx reads the
+// "Homepage: vendor sign-up banner" settings; Off by default). Only the words change: the link is
+// always the vendor sign-up AudienceLink.
+function Hero({ banner }: { banner: string | null }) {
   return (
     <section className="max-w-[1040px] mx-auto px-5 pt-9 pb-7 flex flex-col gap-[18px]">
       <p className="m-0 text-xs font-bold tracking-[2.5px] text-[#FF3D94]">{HOME_HERO.eyebrow}</p>
@@ -51,6 +54,14 @@ function Hero() {
         <span className="text-neon-pink">{HOME_HERO.headingLine2}</span>
       </h1>
       <p className="m-0 text-[17px] leading-normal text-[#B3B3B3] max-w-2xl">{HOME_HERO.subhead}</p>
+      {banner && (
+        <AudienceLink
+          audience="vendor"
+          className="self-start inline-flex items-center min-h-[44px] px-[18px] rounded-full bg-[#2A0014] border border-neon-pink text-[#FF3D94] no-underline text-[15px] font-bold hover:bg-[#3A001C] transition-colors"
+        >
+          {banner}
+        </AudienceLink>
+      )}
 
       <p className="mt-2.5 mb-0 text-[13px] font-bold tracking-[2px] text-white">{WHO_ARE_YOU}</p>
       {/* Two across on phones, four across from laptop width. */}
@@ -144,12 +155,12 @@ function HomeFooter() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────────────────────
 
-export default function MarketplaceLanding() {
+export default function MarketplaceLanding({ banner }: { banner: string | null }) {
   return (
     <div className="min-h-screen bg-bg-dark text-white font-inter">
       <HomeHeader />
       <main>
-        <Hero />
+        <Hero banner={banner} />
         <Strip />
         <HomeAudienceSections />
         <PickYourPath />

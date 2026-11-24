@@ -16,6 +16,12 @@
  *   [5] Concurrency: stale version → 409 and nothing changes; two simultaneous first saves →
  *       exactly one wins.
  *   [6] Registry: unknown key refused at runtime (and a type error).
+ *   [6c] Homepage vendor sign-up banner (Jordan, 2026-11-23): Off by default; a banned word is
+ *       refused on save (400, plain message, nothing written); a good text saves with a log row;
+ *       back to the default (empty, or the default words typed in full) still logs text → default,
+ *       and nothing is logged when it already was the default; the switch logs default → On → Off;
+ *       the homepage reader shows nothing / the default / the saved words; each change refreshes
+ *       the homepage-banner cache.
  *   [7] "Not in effect yet" notes exist exactly while nothing reads the key.
  *   [8] Role sync + the hourly reconcile keep platform_manager; grant/revoke scripts handle it.
  *
@@ -374,8 +380,9 @@ async function main() {
     'delivery.enabled', 'alerts.email', 'alerts.phone',
     'video.vendorPitch.url', 'video.vendorPitch.posterUrl', 'video.vendorPitch.phoneUrl', 'video.vendorPitch.phonePosterUrl',
     'video.partnerPitch.url', 'video.partnerPitch.posterUrl',
-    'video.organizerPitch.url', 'video.organizerPitch.posterUrl', 'video.organizerPitch.phoneUrl', 'video.organizerPitch.phonePosterUrl']),
-    'the registry holds the four fee keys (item 10), delivery.enabled (item 6), the two alert contacts and the three video slots, vendor and organizer with a phone cut (no SMS key)')
+    'video.organizerPitch.url', 'video.organizerPitch.posterUrl', 'video.organizerPitch.phoneUrl', 'video.organizerPitch.phonePosterUrl',
+    'homepage.vendorBanner.enabled', 'homepage.vendorBanner.text']),
+    'the registry holds the four fee keys (item 10), delivery.enabled (item 6), the two alert contacts, the three video slots, vendor and organizer with a phone cut (no SMS key), and the two homepage banner settings')
   assert(settingsLib.SETTING_KEYS.filter(k => settingsLib.SETTINGS[k].class === 'money').join() === 'fees.serviceFee.percentBps,fees.serviceFee.flatCents,fees.curbsideRunnerFeeCents,fees.cardFeesPaidBy',
     'exactly the four fees.* keys are money settings')
   // Phone cut cards (BATCH-1 §21 Q6): optional, same link rules as the main video and poster.
@@ -420,6 +427,96 @@ async function main() {
   assert(['https://example.com/p.mp4', 'https://example.com/p.gif', 'http://example.com/p.jpg'].every(x => !settingsLib.parsePosterUrl(x).ok), 'poster: a video, a gif or plain http is refused')
   const vRes = await PATCH({ key: 'video.vendorPitch.url', value: 'https://example.com/v.mov', expectedVersion: 'unset' })
   assert(vRes.status === 400 && !(await prisma.platformSetting.findUnique({ where: { key: 'video.vendorPitch.url' } })), 'the API refuses a bad video link (400) and writes nothing')
+
+  // ── [6c] homepage vendor sign-up banner (Jordan, 2026-11-23) ───────────────────────────
+  console.log('\n[6c] Homepage vendor sign-up banner')
+  { // own scope: [6c]'s names don't touch the rest of main()
+  const rules = await import('../lib/homepage-copy-rules')
+  const { getHomepageBanner } = await import('../lib/homepage-banner')
+  const cacheMock = await import('next/cache') as unknown as { revalidatedWith: { tag: string; profile: unknown }[] }
+  const ON = 'homepage.vendorBanner.enabled', TEXT = 'homepage.vendorBanner.text'
+  const CUSTOM = 'Vendor spots open for 2027 →'
+  const DEFAULT_WORDS = 'Vendors: sign-up is open now →'
+  const logOf = (key: string) => prisma.platformSettingChange.findMany({ where: { key }, orderBy: { createdAt: 'asc' } })
+  const lastView = async (key: string) => (await settingsLib.listSettings()).changes.find(c => c.key === key)
+  const bannerRefreshes = () => cacheMock.revalidatedWith.filter(c => c.tag === 'homepage-banner').length
+  const outcomeOf = async (r: Response) => ((await r.json()) as { data?: { outcome?: string } }).data?.outcome
+
+  assert(settingsLib.SETTINGS[ON].label === 'Homepage: vendor sign-up banner' && settingsLib.SETTINGS[ON].class === 'content' && settingsLib.SETTINGS[ON].default === false,
+    'the switch: "Homepage: vendor sign-up banner", a content setting, Off by default')
+  assert(settingsLib.SETTINGS[TEXT].label === 'Homepage: vendor sign-up banner text' && settingsLib.SETTINGS[TEXT].class === 'content'
+    && settingsLib.SETTINGS[TEXT].parse === rules.parseBannerText && settingsLib.SETTINGS[TEXT].default === DEFAULT_WORDS,
+    'the text: "Homepage: vendor sign-up banner text", parsed by the shared parseBannerText, default "Vendors: sign-up is open now →"')
+  assert((await getHomepageBanner()) === null, 'nothing saved: the homepage shows no banner (Off by default)')
+
+  as('admin')
+  // A banned word is refused on save: 400 with the plain sentence under the field, nothing written.
+  const refusedLogBefore = await changeCount()
+  const refused = await PATCH({ key: TEXT, value: 'Free delivery →', expectedVersion: 'unset' })
+  const refusedBody = (await refused.json()) as { error?: { details?: { fieldErrors?: Record<string, string> } } }
+  assert(refused.status === 400 && refusedBody.error?.details?.fieldErrors?.[TEXT] === 'Leave out delivery wording.',
+    `a banned word is refused on save: 400 "Leave out delivery wording." (got ${refused.status} ${JSON.stringify(refusedBody.error?.details?.fieldErrors ?? null)})`)
+  const tooLong = await PATCH({ key: TEXT, value: 'A'.repeat(61), expectedVersion: 'unset' })
+  assert(tooLong.status === 400, 'a 61-character text is refused on save (400)')
+  assert(!(await prisma.platformSetting.findUnique({ where: { key: TEXT } })) && (await changeCount()) === refusedLogBefore,
+    'and nothing is written: no setting row, no log row')
+
+  // A good text saves, with one log row.
+  const refreshes0 = bannerRefreshes()
+  const saved = await PATCH({ key: TEXT, value: `  ${CUSTOM}  `, expectedVersion: 'unset', reason: 'banner test' })
+  assert(saved.status === 200 && (await outcomeOf(saved)) === 'saved', 'a good text saves (trimmed)')
+  let log = await logOf(TEXT)
+  assert(log.length === 1 && log[0].oldValue === null && log[0].newValue === CUSTOM && log[0].reason === 'banner test' && log[0].actorId === ROLE_USERS.admin.clerkId,
+    'one log row: no value (the default) → the text, with the reason and who saved it')
+  let view = await lastView(TEXT)
+  assert(view?.from === 'default' && view?.to === CUSTOM, `the change log shows "default" → "${CUSTOM}"`)
+  assert(bannerRefreshes() === refreshes0 + 1, 'the save refreshes the homepage-banner cache')
+
+  // Back to the default by saving EMPTY: no row kept, and the log still records text → default.
+  const cleared = await PATCH({ key: TEXT, value: '', expectedVersion: (await current(TEXT)).version, reason: 'back to default' })
+  assert(cleared.status === 200 && (await outcomeOf(cleared)) === 'cleared', 'saving it empty goes back to the default')
+  log = await logOf(TEXT)
+  assert(!(await prisma.platformSetting.findUnique({ where: { key: TEXT } })), 'no setting row is kept')
+  assert(log.length === 2 && log[1].oldValue === CUSTOM && log[1].newValue === null && log[1].reason === 'back to default',
+    'a log row is still written: the text → no value (the default)')
+  view = await lastView(TEXT)
+  assert(view?.from === CUSTOM && view?.to === 'default', `the change log shows "${CUSTOM}" → "default"`)
+
+  // Back to the default by typing the DEFAULT WORDS in full: the same.
+  await PATCH({ key: TEXT, value: CUSTOM, expectedVersion: 'unset' })
+  const typedDefault = await PATCH({ key: TEXT, value: DEFAULT_WORDS, expectedVersion: (await current(TEXT)).version })
+  assert(typedDefault.status === 200 && (await outcomeOf(typedDefault)) === 'cleared', 'saving the default words typed in full also goes back to the default')
+  log = await logOf(TEXT)
+  assert(!(await prisma.platformSetting.findUnique({ where: { key: TEXT } })) && log.length === 4 && log[3].oldValue === CUSTOM && log[3].newValue === null,
+    'no setting row is kept, and a log row records the text → the default')
+  view = await lastView(TEXT)
+  assert(view?.from === CUSTOM && view?.to === 'default', `the change log shows "${CUSTOM}" → "default" again`)
+
+  // Control: when it already is the default, saving empty or the default words writes nothing.
+  const quietBefore = await changeCount()
+  const emptyAgain = await PATCH({ key: TEXT, value: '', expectedVersion: 'unset' })
+  const defaultAgain = await PATCH({ key: TEXT, value: DEFAULT_WORDS, expectedVersion: 'unset' })
+  assert((await outcomeOf(emptyAgain)) === 'unchanged' && (await outcomeOf(defaultAgain)) === 'unchanged' && (await changeCount()) === quietBefore,
+    '[0] control: already the default → "unchanged", no log row')
+
+  // The switch: default → On → Off, each change logged.
+  const onRes = await PATCH({ key: ON, value: true, expectedVersion: 'unset', reason: 'legal pages live' })
+  assert(onRes.status === 200 && (await outcomeOf(onRes)) === 'saved', 'the switch turns On')
+  let onLog = await logOf(ON)
+  view = await lastView(ON)
+  assert(onLog.length === 1 && onLog[0].oldValue === null && onLog[0].newValue === true && onLog[0].reason === 'legal pages live' && view?.from === 'default' && view?.to === 'On',
+    'logged: "default" (Off) → "On", with the reason')
+  assert((await getHomepageBanner()) === DEFAULT_WORDS, 'On with no text saved: the homepage shows the default words')
+  await PATCH({ key: TEXT, value: CUSTOM, expectedVersion: 'unset' })
+  assert((await getHomepageBanner()) === CUSTOM, 'On with saved words: the homepage shows those words')
+  const offRes = await PATCH({ key: ON, value: false, expectedVersion: (await current(ON)).version })
+  assert(offRes.status === 200 && (await outcomeOf(offRes)) === 'saved', 'the switch turns Off')
+  onLog = await logOf(ON)
+  view = await lastView(ON)
+  assert(onLog.length === 2 && onLog[1].oldValue === true && onLog[1].newValue === false && view?.from === 'On' && view?.to === 'Off', 'logged: "On" → "Off"')
+  assert((await getHomepageBanner()) === null, 'Off: the homepage shows no banner, even with saved words')
+  assert(bannerRefreshes() === refreshes0 + 7, 'every banner change (5 text changes, On, Off) refreshed the homepage-banner cache; refusals and no-ops did not')
+  } // end [6c]
 
   // ── [7] "not in effect yet" notes ──────────────────────────────────────────────────────
   console.log('\n[7] "Not in effect yet" notes match reality')

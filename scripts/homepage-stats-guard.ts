@@ -7,18 +7,23 @@
  *
  *   [0] parser and scanner controls: the strip parser reads a planted list and finds nothing where
  *       there is none (was: the same two controls for the tile parser); every negative scanner
- *       catches a planted bad string and passes clean text
+ *       catches a planted bad string and passes clean text; the banner-text rules
+ *       (lib/homepage-copy-rules.ts, shared with the save route): a clean text passes, 60
+ *       characters pass and 61 are refused, each banned kind is refused with its plain sentence
  *   [1] the three-item strip, exact and in order (was: the four stat tiles, exact)
  *   [2] the stats card is gone: no STAT_TILES, no "Last season", 213, "23 vendors", $45,
  *       "average order" or "FREE for vendors" (was: the "Last season" caption)
  *   [3] the old figures are gone: no 288, $16K, "nearly" or "first two seasons" (unchanged)
- *   [4] every design string, word for word, and each one rendered by the page, except the hero
- *       vendor sign-up banner: its wording stays locked, and the page must NOT render it until the
- *       legal pages are live (Jordan, 2026-11-23; was: the page renders it)
+ *   [4] every design string, word for word, and each one rendered by the page. The hero vendor
+ *       sign-up banner is an admin setting, Off by default (Jordan, 2026-11-23; was: never
+ *       rendered, before that: always rendered): Off → not rendered; On with no text → the default
+ *       words (HOME_HERO.vendorButton, locked); On with saved words → those words; a banned word is
+ *       refused on save, by the same parseBannerText the setting uses
  *   [5] negative checks on every homepage file and on the rendered copy: no 10% / 15%, no sold
  *       out, no deliver/delivery words, no competitor names, no "Get Started"
- *   [6] links: every path's destination; the vendor sign-up path; tiles and path links through
- *       AudienceLink with no hero vendor button (was: hero button, tiles and path links); header
+ *   [6] links: every path's destination; the vendor sign-up path; tiles, path links and the hero
+ *       banner through AudienceLink, the banner being the one vendor link, inside its On condition
+ *       (was: no hero vendor button; before that: hero button, tiles and path links); header
  *       choices; the footer's three legal links, exact and in order (Vendor Agreement, Privacy
  *       Policy, Terms), each equal to its lib/legal/ path and going to a page that exists, legal
  *       wording nowhere else on the homepage, and still no refund-policy link (item 11, Jordan
@@ -34,6 +39,10 @@ import { initialAuthMode } from '../lib/auth-mode'
 import { VENDOR_AGREEMENT_PATH } from '../lib/legal/vendor-agreement'
 import { PRIVACY_POLICY_PATH } from '../lib/legal/privacy-policy'
 import { WEBSITE_TERMS_PATH } from '../lib/legal/website-terms'
+import {
+  PCT, SOLD_OUT, DELIVER, COMPETITOR, TOAST, GET_STARTED, ANY_PCT,
+  BANNER_DEFAULT_TEXT, bannerTextProblem, parseBannerText, heroBannerText,
+} from '../lib/homepage-copy-rules'
 
 let pass = 0, fail = 0
 const assert = (ok: boolean, label: string) => {
@@ -70,12 +79,8 @@ function stripItems(s: string): { title: string; line: string }[] {
   return [...block[1].matchAll(/\{\s*title:\s*'([^']*)',\s*line:\s*'([^']*)'\s*\}/g)].map(m => ({ title: m[1], line: m[2] }))
 }
 
-const PCT = /\b1[05]\s*(%|percent\b)/i
-const SOLD_OUT = /\bsold[\s-]*out\b/i
-const DELIVER = /\b(deliver|delivers|delivered|delivering|delivery|deliveries)\b/i
-const COMPETITOR = /\b(DoorDash|Uber|Uber\s*Eats|Grubhub|Postmates|Square|Clover|Shopify|Eventbrite|Waitwhile)\b/i
-const TOAST = /\bToast\b/ // capital T only: "toast" is also the app's notification word
-const GET_STARTED = /get started/i
+// PCT, SOLD_OUT, DELIVER, COMPETITOR, TOAST and GET_STARTED come from lib/homepage-copy-rules.ts
+// (moved there 2026-11-23, unchanged), so the banner save route checks the same words.
 const LEGAL = /\/(vendor-agreement|refund-policy|privacy|terms)\b|Vendor Agreement|Refund policy|>\s*Privacy\s*<|>\s*Terms\s*<|'Privacy'|'Terms'/i
 const REFUND = /\/refund-policy\b|refund policy/i
 
@@ -93,6 +98,23 @@ for (const [re, bad, ok] of [
   [REFUND, "href: '/refund-policy'", "href: '/privacy'"], [REFUND, 'our Refund Policy', 'a full refund'],
 ] as const) {
   assert(re.test(bad) && !re.test(ok), `[0] ${re.source.slice(0, 28)}… catches "${bad}", passes "${ok}"`)
+}
+// The banner-text rules (shared with the "Homepage: vendor sign-up banner text" setting).
+const PLAIN_ONLY = 'Use plain text only: no line breaks or < > signs.'
+const BANNED: [string, string][] = [
+  ['Save 10% today', 'Leave out percentages.'], ['50 percent off your first fair', 'Leave out percentages.'],
+  ['Free delivery for vendors', 'Leave out delivery wording.'], ['Better than DoorDash', "Leave out other companies' names."],
+  ['Switch from Toast', "Leave out other companies' names."], ['Never sold out', 'Leave out "sold out".'],
+  ['Get Started now', 'Leave out "Get Started".'], ['Line one\nline two', PLAIN_ONLY], ['<b>Sign up</b>', PLAIN_ONLY],
+  [`Sign up${String.fromCharCode(0x2028)}now`, PLAIN_ONLY],
+]
+assert(ANY_PCT.test('Save 50%') && ANY_PCT.test('100 percent') && !ANY_PCT.test('Sign up for 2027'), '[0] banner: any number with % or "percent" is caught; a plain number is not')
+assert(bannerTextProblem('Vendor spots open for 2027 →') === null, '[0] banner: a clean text passes')
+const sixty = 'A'.repeat(59) + '→'
+assert([...sixty].length === 60 && bannerTextProblem(sixty) === null && bannerTextProblem(sixty + 'x') === 'Keep the banner to 60 characters or fewer.',
+  '[0] banner: 60 characters pass ("→" counts as one), 61 are refused')
+for (const [text, sentence] of BANNED) {
+  assert(bannerTextProblem(text) === sentence, `[0] banner: ${JSON.stringify(text)} is refused: ${sentence}`)
 }
 
 console.log('[1] three-item strip')
@@ -215,8 +237,45 @@ for (const f of ['HOME_HERO.eyebrow', 'HOME_HERO.headingLine1', 'HOME_HERO.headi
   'HOME_FOOTER.questionsLead', 'HOME_FOOTER.supportEmail', 'HOME_FOOTER.legalLinks.map(', 'HOME_FOOTER.copyright']) {
   assert(src.landing.includes(f), `page renders ${f}`)
 }
+// The hero vendor sign-up banner: admin settings, Off by default (Jordan, 2026-11-23).
+assert(heroBannerText(false, 'Vendor spots open for 2027 →') === null && heroBannerText(undefined, null) === null && heroBannerText('true', null) === null,
+  'banner Off (or anything but exactly On): not rendered')
+assert(heroBannerText(true, null) === 'Vendors: sign-up is open now →' && heroBannerText(true, '') === BANNER_DEFAULT_TEXT && heroBannerText(true, '   ') === BANNER_DEFAULT_TEXT,
+  'banner On with no text saved: the default words "Vendors: sign-up is open now →"')
+assert(heroBannerText(true, 'Vendor spots open for 2027 →') === 'Vendor spots open for 2027 →', 'banner On with saved words: those words')
+assert(heroBannerText(true, 'Free delivery for vendors') === BANNER_DEFAULT_TEXT, 'a stored text that breaks a rule falls back to the default words')
+assert(BANNER_DEFAULT_TEXT === copy.HOME_HERO.vendorButton, 'the default words are HOME_HERO.vendorButton (locked word for word above)')
+assert(/\{banner && \(\s*<AudienceLink\s+audience="vendor"[^>]*>\s*\{banner\}\s*<\/AudienceLink>\s*\)\}/.test(src.landing),
+  'the page renders the banner only through {banner && <AudienceLink audience="vendor">{banner}</AudienceLink>}')
+assert(/export default function MarketplaceLanding\(\{ banner \}: \{ banner: string \| null \}\)/.test(src.landing) && /<Hero banner=\{banner\} \/>/.test(src.landing),
+  'the page hands its banner to the hero')
+assert(/<MarketplaceLanding banner=\{await getHomepageBanner\(\)\} \/>/.test(src.page) && /from '@\/lib\/homepage-banner'/.test(src.page),
+  'app/page.tsx passes getHomepageBanner()')
+const bannerReader = code(readFileSync('lib/homepage-banner.ts', 'utf8'))
+assert(/getSetting\('homepage\.vendorBanner\.enabled'\)/.test(bannerReader) && /getSetting\('homepage\.vendorBanner\.text'\)/.test(bannerReader)
+  && /return heroBannerText\(enabled, text\)/.test(bannerReader) && /catch[\s\S]*return null/.test(bannerReader),
+  'lib/homepage-banner.ts reads both settings through heroBannerText; a failed read shows no banner')
 assert(!src.landing.includes('HOME_HERO.vendorButton') && !src.landing.includes('sign-up is open'),
-  'the hero vendor sign-up banner is not shown (hidden until the legal pages are live, 2026-11-23)')
+  'the page never hard-codes the banner words (they come from the setting, or its default)')
+// Refused on save: the setting's parser IS parseBannerText (the guard has no database, so it tests
+// the function; scripts/platform-settings-test.ts drives the real save route).
+for (const [text, sentence] of BANNED) {
+  const r = parseBannerText(text)
+  assert(!r.ok && r.error === sentence, `refused on save: ${JSON.stringify(text)} → "${sentence}"`)
+}
+assert(same(parseBannerText('  Vendor spots open for 2027 →  '), { ok: true, value: 'Vendor spots open for 2027 →' }), 'a clean text is saved, trimmed')
+assert(same(parseBannerText(''), { ok: true, value: null }) && same(parseBannerText(null), { ok: true, value: null })
+  && same(parseBannerText(` ${BANNER_DEFAULT_TEXT} `), { ok: true, value: null }), 'empty, or the default words, saves as "use the default" (no row kept)')
+const settingsSrc = readFileSync('lib/settings.ts', 'utf8')
+const settingBlock = (key: string) => {
+  const i = settingsSrc.indexOf(`'${key}': {`)
+  const j = settingsSrc.indexOf('} satisfies SettingDef', i)
+  return i >= 0 && j > i ? settingsSrc.slice(i, j) : ''
+}
+assert(/parse: parseBannerText,/.test(settingBlock('homepage.vendorBanner.text')) && /default: BANNER_DEFAULT_TEXT,/.test(settingBlock('homepage.vendorBanner.text')),
+  'the save route uses these same rules: lib/settings.ts parses the banner text with parseBannerText, default = the default words')
+assert(/default: false,/.test(settingBlock('homepage.vendorBanner.enabled')) && /parse: parseBoolean,/.test(settingBlock('homepage.vendorBanner.enabled')),
+  'the banner switch defaults to Off')
 for (const f of ['HOW_IT_WORKS.eyebrow', 'HOW_IT_WORKS.heading', 'HOW_IT_WORKS.headingAccent', 'audience.steps.map(', 'audience.cta',
   'AUDIENCES[key].name', 'FAQ_HEADER.eyebrow', 'FAQ_HEADER.heading', 'FAQ_HEADER.headingAccent', 'FAQ_HEADER.showingFor',
   'FAQ_HEADER.pickAnother', 'audience.faqs.map(', 'AUDIENCE_ORDER.map(']) {
@@ -225,7 +284,7 @@ for (const f of ['HOW_IT_WORKS.eyebrow', 'HOW_IT_WORKS.heading', 'HOW_IT_WORKS.h
 for (const f of ['HOME_HEADER.signIn', 'HOME_HEADER.signInChoices.map(', 'HOME_HEADER.menu.map(', 'HOME_HEADER.menuLabel']) {
   assert(src.header.includes(f), `header renders ${f}`)
 }
-const order = ['<HomeHeader />', '<Hero />', '<Strip />', '<HomeAudienceSections />', '<PickYourPath />', '<HomeFooter />'].map(s => src.landing.indexOf(s))
+const order = ['<HomeHeader />', '<Hero banner={banner} />', '<Strip />', '<HomeAudienceSections />', '<PickYourPath />', '<HomeFooter />'].map(s => src.landing.indexOf(s))
 assert(order.every(i => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'sections in design order: header, hero + tiles, strip, how it works + FAQ, pick your path, footer')
 assert(/grid-cols-2 lg:grid-cols-4/.test(src.landing), 'tiles: two across on phones, four across on wide screens')
 
@@ -244,7 +303,10 @@ assert(authDestinations('vendor', null, '/vendor').afterSignUp === '/onboarding?
 assert(/vendor: '\/become-vendor'/.test(readFileSync('app/onboarding/page.tsx', 'utf8')), '/onboarding?role=vendor → /become-vendor')
 assert(/isLoaded && isSignedIn === true \? VENDOR_SIGNUP_SIGNED_IN : VENDOR_SIGNUP_SIGNED_OUT/.test(src.sections), 'the vendor link picks its path only once Clerk has loaded')
 const audienceLinks = (src.landing.match(/<AudienceLink\b/g) ?? []).length
-assert(audienceLinks === 2 && !/audience="vendor"/.test(src.landing) && /audience=\{key\}/.test(src.landing), 'tiles and path links go through AudienceLink; no hero vendor button')
+const vendorLinks = (src.landing.match(/audience="vendor"/g) ?? []).length
+const bannerBlock = src.landing.match(/\{banner && \(([\s\S]*?)\)\}/)?.[1] ?? ''
+assert(audienceLinks === 3 && vendorLinks === 1 && /audience="vendor"/.test(bannerBlock) && /audience=\{key\}/.test(src.landing),
+  'tiles, path links and the hero banner go through AudienceLink; the banner is the one vendor link, inside {banner && …}')
 assert(/<AudienceLink\s+audience=\{selected\}/.test(src.sections), 'each tab button goes through AudienceLink for its audience')
 const FOOTER_LEGAL_LINK = /HOME_FOOTER\.legalLinks\.map\(\(\{ label, href \}\) => \(\s*<a key=\{href\} href=\{href\}/
 assert(FOOTER_LEGAL_LINK.test(src.landing), 'the footer renders each legal link as a plain link to its href')

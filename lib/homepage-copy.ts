@@ -49,8 +49,10 @@ export const HOME_HERO = {
   headingLine1: 'LONG LINES ARE',
   headingLine2: 'LOST SALES.',
   subhead: 'Fairgoers order ahead and skip the line. Vendors sell more. Organizers run it all from one dashboard.',
-  // Kept but not shown: the hero sign-up banner is hidden until the legal pages are live (Jordan,
-  // 2026-11-23). The tile, How it works and Pick your path still lead to vendor sign-up.
+  // The hero sign-up banner's DEFAULT words (Jordan, 2026-11-23). The banner is shown only when an
+  // admin turns on "Homepage: vendor sign-up banner" (off by default); the admin may also replace
+  // these words (lib/homepage-copy-rules.ts, lib/homepage-banner.ts). The tile, How it works and
+  // Pick your path always lead to vendor sign-up.
   vendorButton: 'Vendors: sign-up is open now →',
 } as const
 
