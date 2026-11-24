@@ -18,6 +18,9 @@
  *   [4] /privacy and /terms are public: no protected pattern in proxy.ts catches them (positive
  *       control: the vendor portal still is protected, and the old /vendor(.*) pattern would catch
  *       /vendor-agreement)
+ *   [5] Clerk's sign-in/sign-up screens: the "Terms" link goes to /terms and the "Privacy" link to
+ *       /privacy (lib/clerk-appearance.ts; were both /refund-policy), equal to the lib/legal/ paths,
+ *       each page exists (positive control: the old values fail)
  *
  * Run:  npx tsx scripts/legal-pages-test.ts
  */
@@ -31,6 +34,7 @@ import { VENDOR_AGREEMENT_TEXT, VENDOR_AGREEMENT_PATH } from '../lib/legal/vendo
 import { VENDOR_AGREEMENT_2026_01_01_TEXT } from '../lib/legal/vendor-agreement-2026-01-01'
 import { PRIVACY_POLICY_TEXT, PRIVACY_POLICY_PATH } from '../lib/legal/privacy-policy'
 import { WEBSITE_TERMS_TEXT, WEBSITE_TERMS_PATH } from '../lib/legal/website-terms'
+import { clerkAppearance } from '../lib/clerk-appearance'
 
 let pass = 0, fail = 0
 const assert = (ok: boolean, label: string) => {
@@ -156,6 +160,16 @@ assert(toRe('/vendor(.*)').test('/vendor-agreement'), '[0] positive control: a t
 for (const p of [PRIVACY_POLICY_PATH, WEBSITE_TERMS_PATH, VENDOR_AGREEMENT_PATH]) {
   assert(!isProtected(p), `${p} is public (no protected pattern catches it)`)
 }
+
+console.log('[5] Clerk "Terms" and "Privacy" links')
+const clerkLinksOk = (layout: { termsPageUrl?: string; privacyPageUrl?: string }) =>
+  layout.termsPageUrl === WEBSITE_TERMS_PATH && layout.privacyPageUrl === PRIVACY_POLICY_PATH
+assert(!clerkLinksOk({ termsPageUrl: '/refund-policy', privacyPageUrl: '/refund-policy' }) && !clerkLinksOk({ termsPageUrl: '/privacy', privacyPageUrl: '/terms' }),
+  '[0] positive control: the old /refund-policy values, or the two swapped, fail the check')
+const layout = clerkAppearance.layout as { termsPageUrl?: string; privacyPageUrl?: string }
+assert(clerkLinksOk(layout), `Clerk's terms link is ${layout.termsPageUrl} and its privacy link is ${layout.privacyPageUrl} (the lib/legal/ paths /terms and /privacy)`)
+assert(layout.termsPageUrl !== '/refund-policy' && layout.privacyPageUrl !== '/refund-policy', 'neither goes to /refund-policy any more')
+assert(existsSync('app/terms/page.tsx') && existsSync('app/privacy/page.tsx'), 'both pages exist')
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} legal pages: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

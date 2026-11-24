@@ -100,8 +100,11 @@ export const clerkAppearance = {
     showOptionalFields: false,
     animations: true,
     shimmer: false,
-    termsPageUrl: '/refund-policy',
-    privacyPageUrl: '/refund-policy',
+    // Item 11 (2026-11-23): the Website Terms and the Privacy Policy (were both /refund-policy).
+    // Written out, not imported from lib/legal/, so the browser code never includes their text;
+    // scripts/legal-pages-test.ts [5] checks they equal WEBSITE_TERMS_PATH and PRIVACY_POLICY_PATH.
+    termsPageUrl: '/terms',
+    privacyPageUrl: '/privacy',
   },
 
   elements: {
