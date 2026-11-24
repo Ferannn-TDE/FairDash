@@ -118,6 +118,8 @@ const SUITES: Suite[] = [
   { group: 'money',       name: 'fees-exhibit-a',         file: 'scripts/fees-exhibit-a-test.ts' },
   { group: 'money',       name: 'money-settings',         file: 'scripts/money-settings-test.ts' },
   { group: 'money',       name: 'fees-stage3',            file: 'scripts/fees-stage3-test.ts' },
+  // The client's Vendor Agreement (v2026-11-23) against the seeded fee settings (no fee numbers, VENDOR card fees).
+  { group: 'money',       name: 'vendor-agreement-fees',  file: 'scripts/vendor-agreement-fees-test.ts' },
   { group: 'money',       name: 'fees-stage4',            file: 'scripts/fees-stage4-test.ts' },
   { group: 'correctness', name: 'admin-reports',          file: 'scripts/admin-reports-test.ts' },
   { group: 'money',       name: 'earnings-invariant',     file: 'scripts/earnings-invariant-guard.ts' },
