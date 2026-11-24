@@ -15,6 +15,8 @@
  *   S5-6 interactions: tax never in owed-back (it comes back with the food); partly accepted keeps the service fee
  *   S5-7 copy: five approved strings word for word, read by their surfaces; promise text only in lib/refund-copy.ts
  *        (planted promise elsewhere caught); "10 minutes" = VENDOR_ACCEPT_TIMEOUT_MS
+ *        (two exact exemptions in the client's Vendor Agreement §7: a known false-today promise pending the client, and a
+ *        refusal the scanner misreads; apostrophes inside words no longer hide a promise)
  *   S5-8 receipt: "Service fee refunded" line from the marker; nothing shown as kept
  *   GUARD every accept path stamps VendorOrderStatus.acceptedAt; declining / operator-cancelling never clears it
  *
@@ -272,10 +274,37 @@ async function main() {
   const mins = Number(/within (\d+) minutes/.exec(copy.VENDOR_TIMEOUT_ANSWER)?.[1])
   assert(mins === VENDOR_ACCEPT_TIMEOUT_MS / 60_000 && Number(/within (\d+) minutes/.exec(copy.VENDOR_TIMEOUT_ANSWER.replace('10', '15'))?.[1]) !== VENDOR_ACCEPT_TIMEOUT_MS / 60_000,
     `row 2's "${mins} minutes" equals VENDOR_ACCEPT_TIMEOUT_MS (a planted mismatch would be caught)`)
-  const PROMISE = /(everything back|get back|refund(s|ed)?)\b[^.'"`]{0,60}\bservice fee\b(?![^.'"`]{0,20}\b(isn|is not|NOT|not|is kept|stays)\b)|\bservice fee back\b/i
+  // Tightened 2026-11-24: an apostrophe BETWEEN two letters (straight or curly: "FairSynq's", "we'll", "FairSynq’s")
+  // no longer ends the scan, so a possessive can't hide a promise. A quote that ends a code string still does.
+  const GAP = String.raw`(?:[^.'"\`’]|(?<=\w)['’](?=\w))`
+  const PROMISE = new RegExp(String.raw`(everything back|get back|refund(s|ed)?)\b${GAP}{0,60}\bservice fee\b(?!${GAP}{0,20}\b(isn|is not|NOT|not|is kept|stays)\b)|\bservice fee back\b`, 'i')
+  const OLD_PROMISE = /(everything back|get back|refund(s|ed)?)\b[^.'"`]{0,60}\bservice fee\b(?![^.'"`]{0,20}\b(isn|is not|NOT|not|is kept|stays)\b)|\bservice fee back\b/i
   const walk = (d: string, out: string[] = []): string[] => { for (const n of readdirSync(d)) { const q = join(d, n); statSync(q).isDirectory() ? (n !== 'node_modules' && walk(q, out)) : /\.(tsx?)$/.test(n) && out.push(q) } return out }
   const strip = (s: string) => s.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
-  const promisers = ['app', 'components', 'lib'].flatMap(d => walk(join(process.cwd(), d))).map(f => relative(process.cwd(), f).split(sep).join('/')).filter(f => PROMISE.test(strip(readFileSync(f, 'utf8'))))
+  // The client's Vendor Agreement v2026-11-23 §7 (final client text, SHA-locked by legal-pages-test). Exactly two
+  // sentences are exempted, in that one file only (BATCH-1, 2026-11-24):
+  //   (1) a KNOWN FALSE-TODAY promise, pending the client (legal fix list §7): the service fee is refunded only when no
+  //       vendor accepted the order, not whenever a vendor fails a whole order;
+  //   (2) a refusal the scanner misreads as a promise ("FairSynq keeps its service fee").
+  // If §7 is rewritten, a sentence stops matching, its exemption does nothing, and the checks below fail again.
+  const CLIENT_S7_FILE = 'lib/legal/vendor-agreement.ts'
+  const CLIENT_S7 = [
+    "If a whole order fails because of you, the customer gets a full refund, including FairSynq's service fee.",
+    "If only some items are affected, the customer is refunded for those items and their tax, and FairSynq keeps its service fee.",
+  ]
+  const exempt = (src: string) => CLIENT_S7.reduce((t, sentence) => t.split(sentence).join(''), src)
+  const scanned = (f: string) => { const src = strip(readFileSync(f, 'utf8')); return f === CLIENT_S7_FILE ? exempt(src) : src }
+  const promisers = ['app', 'components', 'lib'].flatMap(d => walk(join(process.cwd(), d))).map(f => relative(process.cwd(), f).split(sep).join('/')).filter(f => PROMISE.test(scanned(f)))
+  const s7 = strip(readFileSync(CLIENT_S7_FILE, 'utf8'))
+  for (const [i, sentence] of CLIENT_S7.entries()) {
+    assert(s7.split(sentence).length === 2, `§7 exemption (${i + 1}) matches the client's sentence exactly once in ${CLIENT_S7_FILE} (if §7 changed, remove it)`)
+    assert(PROMISE.test(sentence), `[0] control: the scanner flags exempted sentence (${i + 1}), so the exemption is needed`)
+  }
+  assert(!OLD_PROMISE.test(CLIENT_S7[0]) && PROMISE.test("You'll get a full refund, including FairSynq’s service fee.") && PROMISE.test("We refund FairSynq's service fee."),
+    '[0] control: the old scanner missed the possessive in sentence (1); the tightened one catches straight and curly apostrophes')
+  assert(!PROMISE.test(exempt(s7)) && PROMISE.test(exempt(s7) + " We'll refund FairSynq's service fee too."),
+    '[0] control: with only the two sentences removed the agreement has no promise, and a planted promise in the same file is still caught')
+  assert(!PROMISE.test("The service fee isn't refunded.") && !PROMISE.test("FairSynq's service fee isn't refunded."), '[0] control: refusals still pass, with or without a possessive')
   assert(PROMISE.test("Cancel now and we'll refund the service fee too.") && !PROMISE.test("The service fee isn't refunded."), '[0] control: the scanner catches a planted promise and passes a refusal')
   assert(promisers.length === 1 && promisers[0] === 'lib/refund-copy.ts', `service-fee promises exist only in lib/refund-copy.ts (found: ${promisers.join(', ')})`)
 
