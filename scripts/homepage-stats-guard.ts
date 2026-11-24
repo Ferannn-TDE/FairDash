@@ -19,7 +19,10 @@
  *       out, no deliver/delivery words, no competitor names, no "Get Started"
  *   [6] links: every path's destination; the vendor sign-up path; tiles and path links through
  *       AudienceLink with no hero vendor button (was: hero button, tiles and path links); header
- *       choices; no legal links until the legal pages are rewritten (Jordan, 2026-11-23)
+ *       choices; the footer's three legal links, exact and in order (Vendor Agreement, Privacy
+ *       Policy, Terms), each equal to its lib/legal/ path and going to a page that exists, legal
+ *       wording nowhere else on the homepage, and still no refund-policy link (item 11, Jordan
+ *       2026-11-23; was: no legal links until the legal pages are rewritten)
  *
  * Run:  npx tsx scripts/homepage-stats-guard.ts
  */
@@ -28,6 +31,9 @@ import { readFileSync, existsSync } from 'node:fs'
 import * as copy from '../lib/homepage-copy'
 import { authDestinations } from '../lib/auth-destinations'
 import { initialAuthMode } from '../lib/auth-mode'
+import { VENDOR_AGREEMENT_PATH } from '../lib/legal/vendor-agreement'
+import { PRIVACY_POLICY_PATH } from '../lib/legal/privacy-policy'
+import { WEBSITE_TERMS_PATH } from '../lib/legal/website-terms'
 
 let pass = 0, fail = 0
 const assert = (ok: boolean, label: string) => {
@@ -71,6 +77,7 @@ const COMPETITOR = /\b(DoorDash|Uber|Uber\s*Eats|Grubhub|Postmates|Square|Clover
 const TOAST = /\bToast\b/ // capital T only: "toast" is also the app's notification word
 const GET_STARTED = /get started/i
 const LEGAL = /\/(vendor-agreement|refund-policy|privacy|terms)\b|Vendor Agreement|Refund policy|>\s*Privacy\s*<|>\s*Terms\s*<|'Privacy'|'Terms'/i
+const REFUND = /\/refund-policy\b|refund policy/i
 
 console.log('[0] parser and scanner controls')
 const planted = `export const HOME_STRIP = [\n  { title: 'A', line: 'b c' },\n  { title: 'D', line: 'e' },\n] as const`
@@ -83,6 +90,7 @@ for (const [re, bad, ok] of [
   [COMPETITOR, 'unlike DoorDash', 'door'], [COMPETITOR, 'Uber Eats', 'tuber'], [COMPETITOR, 'an Uber ride', 'Uberty'],
   [TOAST, 'switch from Toast', 'toast.error(x)'], [GET_STARTED, 'Get Started', 'Get notified'],
   [LEGAL, "href: '/privacy'", "href: '/partners'"], [LEGAL, 'Refund policy', 'refunded'],
+  [REFUND, "href: '/refund-policy'", "href: '/privacy'"], [REFUND, 'our Refund Policy', 'a full refund'],
 ] as const) {
   assert(re.test(bad) && !re.test(ok), `[0] ${re.source.slice(0, 28)}… catches "${bad}", passes "${ok}"`)
 }
@@ -191,13 +199,20 @@ assert(same(copy.PICK_YOUR_PATH, {
     { key: 'group', label: 'Partner with us' },
   ],
 }), '"Ready? Pick your path": heading and four links, exact, same order as the tiles')
-assert(same(copy.HOME_FOOTER, { supportEmail: 'support@fairsynq.com', questionsLead: 'Questions? Email', copyright: '© 2026 FairSynq, formerly Fair Dash' }), 'footer: support email and "© 2026 FairSynq, formerly Fair Dash"')
+assert(same(copy.HOME_FOOTER, {
+  supportEmail: 'support@fairsynq.com', questionsLead: 'Questions? Email', copyright: '© 2026 FairSynq, formerly Fair Dash',
+  legalLinks: [
+    { label: 'Vendor Agreement', href: '/vendor-agreement' },
+    { label: 'Privacy Policy', href: '/privacy' },
+    { label: 'Terms', href: '/terms' },
+  ],
+}), 'footer: support email, "© 2026 FairSynq, formerly Fair Dash" and the three legal links, exact and in order')
 assert(copy.HOME_HEADER.signIn === 'Sign in', 'header button says "Sign in"')
 
 // Each field rendered, page in design order.
 for (const f of ['HOME_HERO.eyebrow', 'HOME_HERO.headingLine1', 'HOME_HERO.headingLine2', 'HOME_HERO.subhead',
   '{WHO_ARE_YOU}', 'HOME_TILES.map(', 'PICK_YOUR_PATH.heading', 'PICK_YOUR_PATH.headingAccent', 'PICK_YOUR_PATH.links.map(',
-  'HOME_FOOTER.questionsLead', 'HOME_FOOTER.supportEmail', 'HOME_FOOTER.copyright']) {
+  'HOME_FOOTER.questionsLead', 'HOME_FOOTER.supportEmail', 'HOME_FOOTER.legalLinks.map(', 'HOME_FOOTER.copyright']) {
   assert(src.landing.includes(f), `page renders ${f}`)
 }
 assert(!src.landing.includes('HOME_HERO.vendorButton') && !src.landing.includes('sign-up is open'),
@@ -231,7 +246,10 @@ assert(/isLoaded && isSignedIn === true \? VENDOR_SIGNUP_SIGNED_IN : VENDOR_SIGN
 const audienceLinks = (src.landing.match(/<AudienceLink\b/g) ?? []).length
 assert(audienceLinks === 2 && !/audience="vendor"/.test(src.landing) && /audience=\{key\}/.test(src.landing), 'tiles and path links go through AudienceLink; no hero vendor button')
 assert(/<AudienceLink\s+audience=\{selected\}/.test(src.sections), 'each tab button goes through AudienceLink for its audience')
-assert(!/<Link\b|href=/.test(src.landing.replace(/href=\{`mailto:\$\{HOME_FOOTER\.supportEmail\}`\}/, '')), 'the page has no other links besides the support email')
+const FOOTER_LEGAL_LINK = /HOME_FOOTER\.legalLinks\.map\(\(\{ label, href \}\) => \(\s*<a key=\{href\} href=\{href\}/
+assert(FOOTER_LEGAL_LINK.test(src.landing), 'the footer renders each legal link as a plain link to its href')
+assert(!/<Link\b|href=/.test(src.landing.replace(/href=\{`mailto:\$\{HOME_FOOTER\.supportEmail\}`\}/, '').replace(/key=\{href\} href=\{href\}/, '')),
+  'the page has no other links besides the support email and the footer legal links')
 assert(same(copy.HOME_HEADER.signInChoices, [
   { label: 'Vendor sign-in', href: '/sign-in/vendor' },
   { label: 'Organizer sign-in', href: '/organizer/login' },
@@ -242,9 +260,11 @@ const routes: Record<string, string> = {
   '/fairs': 'app/fairs/page.tsx', '/partners': 'app/partners/page.tsx', '/organizer/login': 'app/organizer/login/page.tsx',
   '/sign-in/vendor': 'app/sign-in/vendor/page.tsx', '/sign-in/customer': 'app/sign-in/customer/page.tsx',
   '/onboarding': 'app/onboarding/page.tsx', '/account': 'app/account/page.tsx', '/contact': 'app/contact/page.tsx',
+  '/vendor-agreement': 'app/vendor-agreement/page.tsx', '/privacy': 'app/privacy/page.tsx', '/terms': 'app/terms/page.tsx',
 }
 const hrefs = [...Object.values(copy.AUDIENCE_HREF), copy.VENDOR_SIGNUP_SIGNED_OUT, copy.VENDOR_SIGNUP_SIGNED_IN,
-  ...copy.HOME_HEADER.signInChoices.map(c => c.href), copy.HOME_HEADER.account.href, ...copy.HOME_HEADER.menu.map(m => m.href)]
+  ...copy.HOME_HEADER.signInChoices.map(c => c.href), copy.HOME_HEADER.account.href, ...copy.HOME_HEADER.menu.map(m => m.href),
+  ...copy.HOME_FOOTER.legalLinks.map(l => l.href)]
 for (const h of hrefs.filter(h => !h.startsWith('#'))) {
   const path = h.split('?')[0]
   assert(!!routes[path] && existsSync(routes[path]), `${h} goes to a page that exists`)
@@ -253,8 +273,23 @@ for (const h of copy.HOME_HEADER.menu.map(m => m.href).filter(h => h.startsWith(
   const id = h.slice(1)
   assert(new RegExp(`id="${id}"`).test(src.landing + src.sections), `menu anchor ${h} exists on the page`)
 }
-const legalHits = Object.entries(src).filter(([, s]) => LEGAL.test(s)).map(([k]) => FILES[k as keyof typeof FILES])
-assert(legalHits.length === 0 && !LEGAL.test(rendered), `no legal links on the homepage yet (Vendor Agreement, Privacy, Terms, Refund policy)${legalHits.length ? ` — ${legalHits.join(', ')}` : ''}`)
+// Item 11 (Jordan, 2026-11-23): the footer links the three legal pages, and nothing else on the
+// homepage mentions them. (Was: no legal links at all.)
+assert(same(copy.HOME_FOOTER.legalLinks.map(l => l.href), [VENDOR_AGREEMENT_PATH, PRIVACY_POLICY_PATH, WEBSITE_TERMS_PATH]),
+  'footer legal links: each href equals its lib/legal/ path (/vendor-agreement, /privacy, /terms)')
+const footerStart = src.copy.indexOf('export const HOME_FOOTER = {')
+const footerEnd = src.copy.indexOf('} as const', footerStart)
+const copyOutsideFooter = footerStart >= 0 && footerEnd > footerStart ? src.copy.slice(0, footerStart) + src.copy.slice(footerEnd) : src.copy
+assert(footerStart >= 0 && LEGAL.test(src.copy.slice(footerStart, footerEnd)), '[0] control: the scanner sees the legal links inside HOME_FOOTER')
+const legalHits = [
+  ...Object.entries(src).filter(([k, s]) => k !== 'copy' && LEGAL.test(s)).map(([k]) => FILES[k as keyof typeof FILES]),
+  ...(LEGAL.test(copyOutsideFooter) ? [`${FILES.copy} (outside HOME_FOOTER)`] : []),
+]
+const renderedWithoutFooterLinks = strings(Object.values({ ...copy, HOME_FOOTER: { ...copy.HOME_FOOTER, legalLinks: [] } })).join('\n')
+assert(legalHits.length === 0 && !LEGAL.test(renderedWithoutFooterLinks),
+  `legal wording appears only in the footer's three links${legalHits.length ? ` — also in ${legalHits.join(', ')}` : ''}`)
+const refundHits = Object.entries(src).filter(([, s]) => REFUND.test(s)).map(([k]) => FILES[k as keyof typeof FILES])
+assert(refundHits.length === 0 && !REFUND.test(rendered), `no refund-policy link or wording on the homepage${refundHits.length ? ` — ${refundHits.join(', ')}` : ''}`)
 
 console.log(`\n${fail === 0 ? '✅' : '❌'} homepage copy guard: ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -132,6 +132,11 @@ function HomeFooter() {
         {HOME_FOOTER.questionsLead}{' '}
         <a href={`mailto:${HOME_FOOTER.supportEmail}`} className="text-[#FF3D94] hover:text-[#FF73B0]">{HOME_FOOTER.supportEmail}</a>
       </p>
+      <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+        {HOME_FOOTER.legalLinks.map(({ label, href }) => (
+          <a key={href} href={href} className="text-[#B3B3B3] no-underline hover:text-white transition-colors">{label}</a>
+        ))}
+      </nav>
       <p className="m-0 text-[13px] text-[#8C8C8C]">{HOME_FOOTER.copyright}</p>
     </footer>
   )

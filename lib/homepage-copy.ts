@@ -165,13 +165,19 @@ export const PICK_YOUR_PATH = {
   ],
 } as const satisfies { heading: string; headingAccent: string; links: readonly { key: AudienceKey; label: string }[] }
 
-// Legal links (Vendor Agreement, Privacy, Terms, Refund policy) are left out until the legal pages
-// are rewritten (Jordan, 2026-11-23): the live Vendor Agreement and Refund Policy still carry old
-// wording, and Privacy and Terms pages don't exist yet.
+// Legal links (item 11, Jordan 2026-11-23): the three new legal pages. The paths are written out
+// here, not imported from lib/legal/, so the homepage's browser code never includes the documents'
+// text; scripts/homepage-stats-guard.ts [6] checks each one equals its lib/legal/ path. The refund
+// policy is not linked from the homepage.
 export const HOME_FOOTER = {
   supportEmail: 'support@fairsynq.com',
   questionsLead: 'Questions? Email',
   copyright: '© 2026 FairSynq, formerly Fair Dash',
+  legalLinks: [
+    { label: 'Vendor Agreement', href: '/vendor-agreement' },
+    { label: 'Privacy Policy', href: '/privacy' },
+    { label: 'Terms', href: '/terms' },
+  ],
 } as const
 
 // Fixed destinations for every audience except the vendor (whose link depends on sign-in).
