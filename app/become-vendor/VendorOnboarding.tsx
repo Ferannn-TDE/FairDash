@@ -33,6 +33,7 @@ import { WEBSITE_TERMS_PATH } from '@/lib/legal/website-terms'
 import LegalDocument from '@/app/_components/LegalDocument'
 import PitchVideo from '@/app/_components/PitchVideo'
 import type { VideoSource } from '@/lib/videos'
+import { fillEmptyFields, PREFILLED_EMAIL_HINT, type ContactPrefill } from '@/lib/contact-prefill'
 
 const SUBMIT_FALLBACK = 'Couldn’t submit your application — please try again.'
 
@@ -183,13 +184,14 @@ type FairMode = 'loading' | 'link' | 'signup' | 'picker' | 'unavailable'
 export const SIGNUP_EVENT_COPY =
   "You're applying to sell with FairSynq. Once you're approved, you'll be able to add the events you're working as they're announced."
 
-function Step1({ data, update, fairs, eventSlug, setEventSlug, fairMode }: {
+function Step1({ data, update, fairs, eventSlug, setEventSlug, fairMode, emailPrefilled }: {
   data: FormData
   update: (p: Partial<FormData>) => void
   fairs: { slug: string; name: string }[]
   eventSlug: string | null
   setEventSlug: (s: string) => void
   fairMode: FairMode
+  emailPrefilled: boolean
 }) {
   return (
     <div className="bg-bg-card border border-white/10 rounded-2xl p-6 space-y-5">
@@ -244,9 +246,10 @@ function Step1({ data, update, fairs, eventSlug, setEventSlug, fairMode }: {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label required>Email Address</Label>
+          <Label required>Business email</Label>
           <input type="email" className={iCls} placeholder="jane@business.com" value={data.email}
             onChange={e => update({ email: e.target.value })} />
+          {emailPrefilled && <p className="text-xs text-text-gray mt-1.5">{PREFILLED_EMAIL_HINT}</p>}
         </div>
         <div>
           <Label required>Phone Number</Label>
@@ -534,9 +537,14 @@ function Step8({ data, eventSlug }: { data: FormData; eventSlug: string | null }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function VendorOnboarding({ video }: { video: VideoSource | null }) {
+export default function VendorOnboarding({ video, prefill }: { video: VideoSource | null; prefill?: ContactPrefill }) {
   const [step, setStep] = useState(1)
-  const [data, setData] = useState<FormData>(INITIAL)
+  // Never ask twice: start from the sign-in name, email and phone. Only empty boxes are filled,
+  // and every box stays editable.
+  const [data, setData] = useState<FormData>(() => fillEmptyFields(INITIAL, {
+    contactName: prefill?.name, email: prefill?.email, phone: prefill?.phone,
+  }))
+  const emailPrefilled = !!prefill?.email.trim()
   const [docFiles, setDocFiles] = useState<DocFiles>(INITIAL_DOCS)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -719,7 +727,7 @@ export default function VendorOnboarding({ video }: { video: VideoSource | null 
 
         {/* Step content with key for animation re-trigger */}
         <div key={step} className="animate-fadeIn">
-          {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} fairMode={fairMode} />}
+          {step === 1 && <Step1 data={data} update={update} fairs={fairs} eventSlug={eventSlug} setEventSlug={setEventSlug} fairMode={fairMode} emailPrefilled={emailPrefilled} />}
           {step === 2 && <Step2 data={data} update={update} />}
           {step === 3 && <DocUploadStep files={docFiles} onPick={pickDoc} onClear={clearDoc} uploading={uploading} />}
           {step === 4 && <Step6 data={data} update={update} />}
