@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { CheckIcon } from '@heroicons/react/24/outline'
 import MarketplaceNavbar from '@/app/_components/MarketplaceNavbar'
 import { PARTNER_CARD } from '@/lib/partner-copy'
+import { getSignedInContact } from '@/lib/signed-in-contact'
 import PartnerApplicationForm from './PartnerApplicationForm'
 import PartnerVideoSlot from './PartnerVideoSlot'
 
@@ -13,7 +14,12 @@ export const metadata: Metadata = {
   alternates: { canonical: '/partners' },
 }
 
-export default function PartnersPage() {
+// A signed-in visitor's form starts filled in with their name, email and phone (never ask
+// twice), so this page is personal: rendered for each visitor, never prerendered, cached or shared.
+export const dynamic = 'force-dynamic'
+
+export default async function PartnersPage() {
+  const prefill = await getSignedInContact()
   return (
     <>
       <MarketplaceNavbar />
@@ -32,7 +38,7 @@ export default function PartnersPage() {
 
           <PartnerVideoSlot />
 
-          <PartnerApplicationForm />
+          <PartnerApplicationForm prefill={prefill} />
         </div>
       </main>
     </>

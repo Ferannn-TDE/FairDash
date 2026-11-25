@@ -170,7 +170,7 @@ async function main() {
   const form = readFileSync('app/partners/PartnerApplicationForm.tsx', 'utf8')
   assert(form.includes('label="Which fairs or events would your group like to work?"') && !/<select[^>]*p-interests/.test(form),
     'the optional field asks which fairs or events (free text, no fair picker: linking is Batch 2)')
-  assert(/PARTNER_CARD\.heading/.test(page) && /PARTNER_CARD\.points\.map/.test(page) && page.indexOf('<PartnerVideoSlot />') < page.indexOf('<PartnerApplicationForm />'),
+  assert(/PARTNER_CARD\.heading/.test(page) && /PARTNER_CARD\.points\.map/.test(page) && (() => { const v = page.indexOf('<PartnerVideoSlot />'), f = page.search(/<PartnerApplicationForm[\s/]/); return v >= 0 && f > v })(),
     '/partners: the card copy, then the video slot, then the form')
   const nextConfig = readFileSync('next.config.mjs', 'utf8')
   assert(/source: '\/become-driver', destination: '\/partners', permanent: false/.test(nextConfig), '/become-driver redirects (temporarily) to /partners')

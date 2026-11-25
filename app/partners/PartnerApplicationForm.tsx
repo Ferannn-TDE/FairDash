@@ -5,6 +5,7 @@ import {
   GROUP_TYPES, US_STATES, HONEYPOT_FIELD, PARTNER_APPLY_SUCCESS,
   validatePartnerApplication, type PartnerFieldErrors,
 } from '@/lib/partner-application'
+import { fillEmptyFields, PREFILLED_EMAIL_HINT, type ContactPrefill } from '@/lib/contact-prefill'
 
 // The partner application form. Validation is the same module the server runs
 // (lib/partner-application.ts): feedback here, the real gate on POST /api/partners/apply.
@@ -28,8 +29,13 @@ function Field({ label, required, error, children, htmlFor }: { label: string; r
   )
 }
 
-export default function PartnerApplicationForm() {
-  const [form, setForm] = useState<Form>(EMPTY)
+export default function PartnerApplicationForm({ prefill }: { prefill?: ContactPrefill } = {}) {
+  // Never ask twice: a signed-in visitor starts with their sign-in name, email and phone. Only
+  // empty boxes are filled, every box stays editable, and the email need not match the login.
+  const [form, setForm] = useState<Form>(() => fillEmptyFields(EMPTY, {
+    contactName: prefill?.name, email: prefill?.email, phone: prefill?.phone,
+  }))
+  const emailPrefilled = !!prefill?.email.trim()
   const [honeypot, setHoneypot] = useState('')
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [serverErrors, setServerErrors] = useState<PartnerFieldErrors>({})
@@ -108,8 +114,9 @@ export default function PartnerApplicationForm() {
         </Field>
       </div>
 
-      <Field label="Email" required error={errorFor('email')} htmlFor="p-email">
+      <Field label="Organization email" required error={errorFor('email')} htmlFor="p-email">
         <input id="p-email" type="email" value={form.email} onChange={set('email')} onBlur={blur('email')} className={inputCls(errorFor('email'))} autoComplete="email" />
+        {emailPrefilled && <p className="mt-1.5 text-xs text-text-gray">{PREFILLED_EMAIL_HINT}</p>}
       </Field>
 
       <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-5">
