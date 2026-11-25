@@ -144,6 +144,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'header-signin',          file: 'scripts/header-signin-test.ts' },
   { group: 'correctness', name: 'admin-forbidden-text',   file: 'scripts/admin-forbidden-text-test.ts' },
   { group: 'correctness', name: 'never-ask-twice-vendor', file: 'scripts/never-ask-twice-vendor-test.ts' },
+  { group: 'correctness', name: 'never-ask-twice-organizer', file: 'scripts/never-ask-twice-organizer-test.ts' },
   { group: 'correctness', name: 'signin-copy',            file: 'scripts/signin-copy-test.ts' },
   { group: 'boundary',    name: 'safe-redirect',          file: 'scripts/safe-redirect-test.ts' },
   { group: 'correctness', name: 'connect-card',           file: 'scripts/connect-card-state-test.ts' },

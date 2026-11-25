@@ -97,6 +97,10 @@ function SkeletonCard() {
   )
 }
 
+// Shown in place of the profile boxes when the saved profile could not be loaded. Empty boxes
+// there would let Save overwrite the saved name, phone and organization name with blanks.
+const PROFILE_LOAD_FAILED = "We couldn't load your saved profile. Reload the page to try again."
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function OrganizerSettingsPage() {
@@ -106,6 +110,9 @@ export default function OrganizerSettingsPage() {
   // Profile state
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [profileLoading, setProfileLoading] = useState(true)
+  // True only after the saved profile loaded. Until then Save is off, so a failed load can never
+  // send empty boxes over the saved values.
+  const [profileLoaded, setProfileLoaded] = useState(false)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [orgName, setOrgName] = useState('')
@@ -123,13 +130,15 @@ export default function OrganizerSettingsPage() {
       const res = await fetch('/api/organizer/profile')
       if (!res.ok) throw new Error('Failed to load profile')
       const json = await res.json()
+      if (json?.success !== true || !json.data) throw new Error('Failed to load profile')
       const data: ProfileData = json.data
       setProfile(data)
       setName(data.name ?? '')
       setPhone(data.phone ?? '')
       setOrgName(data.organizationName ?? '')
+      setProfileLoaded(true)
     } catch {
-      // silently fail — user sees empty fields
+      setProfileLoaded(false)
     } finally {
       setProfileLoading(false)
     }
@@ -171,6 +180,7 @@ export default function OrganizerSettingsPage() {
   // ── Save profile ────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
+    if (!profileLoaded) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -222,6 +232,10 @@ export default function OrganizerSettingsPage() {
 
       {profileLoading ? (
         <SkeletonCard />
+      ) : !profileLoaded ? (
+        <Section icon={UserCircleIcon} title="Profile & Account">
+          <p role="alert" className="text-red-400 text-sm">{PROFILE_LOAD_FAILED}</p>
+        </Section>
       ) : (
         <Section icon={UserCircleIcon} title="Profile & Account">
           {/* Avatar */}
@@ -296,7 +310,7 @@ export default function OrganizerSettingsPage() {
           <div className="flex items-center gap-3 mt-5">
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !profileLoaded}
               className="px-6 py-2.5 bg-neon-pink hover:bg-[#e6006b] disabled:opacity-60 text-white text-sm font-bold rounded-xl transition-colors"
             >
               {saving ? 'Saving…' : 'Save Changes'}
