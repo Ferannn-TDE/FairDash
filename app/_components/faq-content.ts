@@ -40,13 +40,13 @@ export interface FAQCategory {
 export const FAQ_CATEGORIES: FAQCategory[] = [
   { id: 'customers', label: 'Customers', items: [
     { q: 'How do I get my food?', a: "Two ways: pick it up at the vendor's booth, or have it brought to your car curbside where the event offers it." },
-    { q: 'What fees will I pay?', a: 'A 10% service fee on your food subtotal, plus a curbside fee if you choose curbside (the service fee isn\'t charged on it).' },
+    { q: 'What fees will I pay?', a: 'A service fee, shown at checkout before you pay, plus a curbside fee if you choose curbside.' },
     { q: "What happens if the vendor doesn't accept my order?", a: "If no vendor accepts your order within 10 minutes, it's cancelled automatically and you get back the food, plus any curbside fee and tip. The service fee isn't refunded." },
-    { q: 'Can I cancel an order?', a: "Before a vendor accepts, you can cancel and we'll refund your food — the 10% service fee isn't refunded. Once a vendor has accepted, you'll need to request a refund, and our team will review it." },
+    { q: 'Can I cancel an order?', a: "Before a vendor accepts, you can cancel and we'll refund your food — the service fee isn't refunded. Once a vendor has accepted, you'll need to request a refund, and our team will review it." },
   ]},
   { id: 'vendors', label: 'Vendors', items: [
     { q: 'When do I get paid?', a: 'Your payout is released 4 hours after an order is completed — a short window that covers any refunds before money moves.' },
-    { q: 'What does FairSynq take?', a: "No commission. Our only revenue is the customer's 10% service fee. You do cover your share of Stripe's processing fee, the same as any card payment." },
+    { q: 'What does FairSynq take?', a: "No commission. Our only revenue is the customer's service fee. You do cover your share of Stripe's processing fee, the same as any card payment." },
     { q: 'What do I need before customers can order from me?', a: 'Three things: your booth set to active, a verified Stripe payout account connected, and at least one item available on your menu.' },
     { q: 'Why did I disappear from the customer menu?', a: "Your dashboard sends a heartbeat while it's open. If it stops for 5 minutes, you're automatically hidden until it reconnects — just reopen your dashboard." },
   ]},
