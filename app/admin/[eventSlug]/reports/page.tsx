@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use } from 'react'
 import { DollarSign, ShoppingBag, TrendingDown, Users } from 'lucide-react'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 // ─── Types (mirror lib/admin-fair-reports FairReport — all cents) ─────────────
 interface PayeeTakeHome { settledCents: number; estimatedCents: number }
@@ -68,10 +69,10 @@ export default function AdminReportsPage({ params: paramsPromise }: { params: Pr
   useEffect(() => {
     let active = true
     fetch(`/api/admin/events/${params.eventSlug}/reports`)
-      .then(r => r.json())
-      .then(json => {
+      .then(r => r.json().then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
         if (!active) return
-        if (!json.success) { setError(json.error?.message ?? 'Failed to load report'); return }
+        if (!json.success) { setError(adminErrorText(status, json.error?.message ?? 'Failed to load report')); return }
         setReport(json.data.report as Report)
         setFairName(json.data.fair?.name ?? '')
       })

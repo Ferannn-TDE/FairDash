@@ -11,6 +11,7 @@ import {
 } from '@heroicons/react/24/outline'
 import type { GoLiveChecklist } from '@/lib/go-live-checklist'
 import { formatEventDateRange } from '@/lib/event-date'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 // ─── API response types ───────────────────────────────────────────────────────
 
@@ -331,12 +332,12 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
     setLoadError(null)
     fetch(`/api/admin/events/${params.eventSlug}/dashboard`)
       .then(async (r) => {
-        if (!r.ok) throw new Error(
+        if (!r.ok) throw new Error(adminErrorText(r.status,
           r.status === 504 || r.status === 502
             ? 'The dashboard timed out loading (server took too long). Retry, or check the deployment.'
-            : `Dashboard request failed (${r.status})`)
+            : `Dashboard request failed (${r.status})`))
         const json = await r.json()
-        if (!json.success) throw new Error(json.error?.message ?? 'Dashboard failed to load')
+        if (!json.success) throw new Error(adminErrorText(r.status, json.error?.message ?? 'Dashboard failed to load'))
         setDashboardData(json.data)
         setEventStatus(json.data.event.status)
         setIsPaused(json.data.event.isPaused)
@@ -374,7 +375,7 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
         body: JSON.stringify({ status }),
       })
       const json = await res.json()
-      if (!json.success) { setActionError(json.error?.message ?? 'Action failed'); return false }
+      if (!json.success) { setActionError(adminErrorText(res.status, json.error?.message ?? 'Action failed')); return false }
       setEventStatus(json.data.event.status)
       setIsPaused(json.data.event.isPaused)
       return true
@@ -399,7 +400,7 @@ export default function AdminDashboardPage({ params: paramsPromise }: { params: 
         body: JSON.stringify({ isPaused: !isPaused }),
       })
       const json = await res.json()
-      if (!json.success) { setActionError(json.error?.message ?? 'Action failed'); return }
+      if (!json.success) { setActionError(adminErrorText(res.status, json.error?.message ?? 'Action failed')); return }
       setIsPaused(json.data.event.isPaused)
       setShowPause(false)
     } catch {

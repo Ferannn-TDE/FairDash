@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { History } from 'lucide-react'
 import { bpsToText, centsToText } from '@/lib/money-input'
 import { BANNER_MAX_CHARS } from '@/lib/homepage-copy-rules'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 // /admin/settings panel (Batch 1 item 5). One card per setting with its own Save and an optional
 // reason; the change log underneath. Loading renders skeletons, never placeholder values
@@ -104,7 +105,7 @@ function SettingCard({ setting, onSaved, deliveryEventsOn, viewerRole }: { setti
       if (!json.success) {
         const fe = json.error?.details?.fieldErrors
         if (fe?.reason) setReasonError(fe.reason)
-        else setFieldError(fe?.[setting.key] ?? json.error?.message ?? 'Save failed')
+        else setFieldError(adminErrorText(res.status, fe?.[setting.key] ?? json.error?.message ?? 'Save failed'))
         return
       }
       setConflict(null)
@@ -261,7 +262,7 @@ export default function PlatformSettingsPanel() {
     try {
       const res = await fetch('/api/admin/settings', { cache: 'no-store' })
       const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message)
+      if (!json.success) throw new Error(adminErrorText(res.status, json.error?.message ?? 'Failed to load settings'))
       setData(json.data)
       setError(false)
     } catch {

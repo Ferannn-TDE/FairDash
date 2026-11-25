@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 // /admin/approvals panel (Batch 1 item 9). One decision per application through
 // POST /api/admin/approvals/{kind}/{id}. Loading shows skeletons, never placeholder data.
@@ -76,7 +77,7 @@ function DecisionControls({ kind, id, onDone, override = false }: { kind: Kind; 
       const json = await res.json()
       if (!json.success) {
         const missing = json.error?.details?.missing as string[] | undefined
-        setError(missing?.length ? `${json.error.message} Missing: ${missing.join(', ')}.` : json.error?.message ?? 'Something went wrong')
+        setError(adminErrorText(res.status, missing?.length ? `${json.error.message} Missing: ${missing.join(', ')}.` : json.error?.message ?? 'Something went wrong'))
         if (json.error?.code === 'ALREADY_DECIDED') onDone()
         return
       }
@@ -164,7 +165,7 @@ function ViewDocButton({ vendorId, docKey, label }: { vendorId: string; docKey: 
     try {
       const res = await fetch(`/api/admin/approvals/vendors/${vendorId}/documents/${docKey}`)
       const json = await res.json()
-      if (!json.success) { tab?.close(); toast.error(json.error?.message ?? `Couldn't open ${label}`); return }
+      if (!json.success) { tab?.close(); toast.error(adminErrorText(res.status, json.error?.message ?? `Couldn't open ${label}`)); return }
       if (tab) tab.location.href = json.data.url
       else toast.error('Allow pop-ups for this site to view documents')
     } catch {

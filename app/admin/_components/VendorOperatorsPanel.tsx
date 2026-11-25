@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle, CreditCard, Store, XCircle, Clock, ShieldAlert, X } from 'lucide-react'
 import ApprovalQueue, { type ApprovalItem } from './ApprovalQueue'
 import { formatAuditTimestamp } from '@/lib/audit-time'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 /**
  * The admin Vendor Operators panel — the surface for OPERATOR admittance.
@@ -118,7 +119,7 @@ export default function VendorOperatorsPanel() {
     try {
       const res = await fetch('/api/admin/vendor-members')
       const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json.success) { setError(json.error?.message ?? 'Could not load operators'); return }
+      if (!res.ok || !json.success) { setError(adminErrorText(res.status, json.error?.message ?? 'Could not load operators')); return }
       setOperators(json.data.vendorMembers ?? [])
     } catch {
       setError('Network error — could not load operators')
@@ -294,7 +295,7 @@ function RowActions({ op, onDone }: { op: Operator; onDone: () => void }) {
         body: action === 'reject' ? JSON.stringify({ reason: why }) : undefined,
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json.success) { setErr(json.error?.message ?? `Could not ${action}`); return }
+      if (!res.ok || !json.success) { setErr(adminErrorText(res.status, json.error?.message ?? `Could not ${action}`)); return }
       // Close only on success — a failed refuse keeps the form and the typed reason, so it can
       // be retried rather than re-written.
       setConfirming(false); setReason('')

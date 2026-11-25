@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, ChevronDown, ChevronUp, Package, User, Store, Clock, ArrowUpDown } from 'lucide-react'
 import { STRAND_THRESHOLDS_MS } from '@/lib/constants'
 import AnimatedPagination from '@/app/_components/ui/AnimatedPagination'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 // ─── Types (the real /api/admin/events/[id]/orders shape) ─
 
@@ -395,10 +396,10 @@ export default function AdminOrdersPage({ params: paramsPromise }: { params: Pro
     setCursorStack([])   // filters changed → back to page 1; old cursors address another query
     setPageDir(1)
     fetch(buildUrl())
-      .then((r) => r.json())
-      .then((json) => {
+      .then((r) => r.json().then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
         if (!active) return
-        if (!json.success) { setError(json.error?.message ?? 'Failed to load orders'); return }
+        if (!json.success) { setError(adminErrorText(status, json.error?.message ?? 'Failed to load orders')); return }
         setOrders((json.data.orders ?? []) as AdminOrder[])
         setTotal(json.data.total ?? 0)
         setTabCounts(json.data.meta?.tabCounts ?? {})

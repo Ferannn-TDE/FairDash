@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CheckCircle, XCircle, Clock, X } from 'lucide-react'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 // Reusable admin approval queue. Renders a list of PENDING applicants with
 // approve / reject actions that PATCH the endpoints the caller supplies. Kept
@@ -55,7 +56,7 @@ export default function ApprovalQueue({
         // Name what is missing when the server lists it (e.g. a booth owner's approval that also
         // approves the booth: Stripe payouts, documents, menu, booth number).
         const missing = json.error?.details?.missing as string[] | undefined
-        const msg = json.error?.message ?? 'Could not approve'
+        const msg = adminErrorText(res.status, json.error?.message ?? 'Could not approve')
         setError(missing?.length && !msg.includes(missing[0]) ? `${msg} Missing: ${missing.join(', ')}.` : msg)
         return
       }
@@ -72,7 +73,7 @@ export default function ApprovalQueue({
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: why }),
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok || !json.success) { setError(json.error?.message ?? 'Could not reject'); return }
+      if (!res.ok || !json.success) { setError(adminErrorText(res.status, json.error?.message ?? 'Could not reject')); return }
       // Close ONLY on success. A failed reject keeps the form open with the typed reason
       // intact, so the admin retries instead of re-writing it — the prompt threw it away.
       setConfirming(null); setReason('')

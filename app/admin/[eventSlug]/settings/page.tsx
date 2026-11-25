@@ -6,6 +6,7 @@ import DateRangePicker from '@/app/_components/ui/DateRangePicker'
 import { editDateBounds } from '@/lib/calendar-date'
 import { bpsToPercent, parseMarkupPercentInput } from '@/lib/menu/price'
 import { onlineUnitPrice } from '@/lib/checkout-total'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 /** The example item the markup preview prices: "On a $10.00 item, customers pay …". */
 const MARKUP_EXAMPLE_PRICE = 10
@@ -86,10 +87,10 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
   useEffect(() => {
     let active = true
     fetch(`/api/admin/events/${params.eventSlug}/settings`)
-      .then(r => r.json())
-      .then(json => {
+      .then(r => r.json().then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
         if (!active) return
-        if (!json.success) { setLoadError(json.error?.message ?? 'Failed to load settings'); return }
+        if (!json.success) { setLoadError(adminErrorText(status, json.error?.message ?? 'Failed to load settings')); return }
         adopt(json.data as Settings)
       })
       .catch(() => { if (active) setLoadError('Failed to load settings') })
@@ -144,7 +145,7 @@ export default function AdminSettingsPage({ params: paramsPromise }: { params: P
         }),
       })
       const json = await res.json()
-      if (!json.success) throw new Error(json.error?.message ?? 'Save failed')
+      if (!json.success) throw new Error(adminErrorText(res.status, json.error?.message ?? 'Save failed'))
       // Adopt the SERVER's re-read values as the new truth — not what we typed. If the server
       // normalised anything, the form now shows what actually persisted.
       adopt(json.data as Settings)

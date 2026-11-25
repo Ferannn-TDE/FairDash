@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import { formatAuditTimestamp } from '@/lib/audit-time'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 export interface OrganizerState {
   id: string
@@ -33,7 +34,7 @@ export default function OrganizerControl({ organizer }: { organizer: OrganizerSt
         body: JSON.stringify({ suspend, reason: suspend ? reason.trim() || null : null }),
       })
       const json = await res.json()
-      if (!json.success) { setError(json.error?.message ?? 'Failed to update'); return }
+      if (!json.success) { setError(adminErrorText(res.status, json.error?.message ?? 'Failed to update')); return }
       const o = json.data.organizer
       setState({
         id: o.id, name: o.name,

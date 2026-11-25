@@ -10,6 +10,7 @@ import {
   type OrganizerApproval,
 } from '@/lib/organizer-admin-view'
 import { formatAuditTimestamp, formatAuditDate } from '@/lib/audit-time'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 /**
  * The admin Organizers panel — the surface for two capabilities that were built and proven
@@ -106,7 +107,7 @@ export default function OrganizersPanel() {
       const res = await fetch('/api/admin/organizers')
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json.success) {
-        setError(json.error?.message ?? 'Failed to load organizers')
+        setError(adminErrorText(res.status, json.error?.message ?? 'Failed to load organizers'))
         return
       }
       setOrganizers((json.data.organizers ?? []) as Organizer[])
@@ -146,7 +147,7 @@ export default function OrganizersPanel() {
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok || !json.success) {
-        setRowError(prev => ({ ...prev, [id]: json.error?.message ?? `Could not ${action}` }))
+        setRowError(prev => ({ ...prev, [id]: adminErrorText(res.status, json.error?.message ?? `Could not ${action}`) }))
         return // ← failure stays visible; no optimistic flip to a state the DB never reached
       }
       setConfirming(null)

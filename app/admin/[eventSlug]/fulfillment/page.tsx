@@ -6,6 +6,7 @@ import { CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outl
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
 import { usePlatformDelivery } from '@/app/_components/usePlatformDelivery'
 import Link from 'next/link'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 const DEFAULT_STATE: FulfillmentState = {
   boothPickupEnabled: true,
@@ -182,7 +183,7 @@ export default function FulfillmentConfigPage() {
         }),
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error?.message ?? 'Save failed')
+      if (!res.ok) throw new Error(adminErrorText(res.status, json?.error?.message ?? 'Save failed'))
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (e) {

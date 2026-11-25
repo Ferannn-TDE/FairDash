@@ -7,6 +7,7 @@ import { useUser } from '@clerk/clerk-react'
 import { hasSettingsRole } from '@/lib/roles'
 import { listingBadgeLabel } from '@/lib/fair-view'
 import { formatEventDateRange } from '@/lib/event-date'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 interface Fair {
   id: string
@@ -41,10 +42,10 @@ export default function FairPicker() {
   useEffect(() => {
     let active = true
     fetch('/api/admin/fairs')
-      .then(r => r.json())
-      .then(json => {
+      .then(r => r.json().then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
         if (!active) return
-        if (!json.success) { setError(json.error?.message ?? 'Failed to load fairs'); return }
+        if (!json.success) { setError(adminErrorText(status, json.error?.message ?? 'Failed to load fairs')); return }
         setFairs((json.data.fairs ?? []) as Fair[])
         setPending(typeof json.data.applicationsPending === 'number' ? json.data.applicationsPending : 0)
       })

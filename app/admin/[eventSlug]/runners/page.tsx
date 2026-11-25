@@ -4,6 +4,7 @@ import { useState, useEffect, use, useCallback } from 'react'
 import { Truck, AlertTriangle } from 'lucide-react'
 import ApprovalQueue, { type ApprovalItem } from '../../_components/ApprovalQueue'
 import { RUNNER_MIN_COMPLETION_RATE } from '@/lib/constants'
+import { adminErrorText } from '@/lib/admin-error-text'
 
 type RunnerStatus = 'ACTIVE' | 'OFFLINE' | 'ON_DELIVERY'
 type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
@@ -69,10 +70,10 @@ export default function RunnersPage({ params: paramsPromise }: { params: Promise
     setLoading(true)
     setError(null)
     fetch(`/api/admin/events/${params.eventSlug}/runners?take=200`)
-      .then(r => r.json())
-      .then(json => {
+      .then(r => r.json().then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
         if (!active) return
-        if (!json.success) { setError(json.error?.message ?? 'Failed to load runners'); return }
+        if (!json.success) { setError(adminErrorText(status, json.error?.message ?? 'Failed to load runners')); return }
         setRunners((json.data.runners ?? []) as AdminRunner[])
       })
       .catch(() => { if (active) setError('Failed to load runners') })
