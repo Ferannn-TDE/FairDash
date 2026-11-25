@@ -23,7 +23,7 @@ interface PartnerApp {
   contactName: string; contactEmail: string; contactPhone: string; city: string; state: string
   interests: string | null; staffHours: string | null; note: string | null; createdAt: string
 }
-interface Outbox { connected: boolean; waitingAdmin: number; waitingApplicant: number; heldNoAlertEmail: number; failed: number }
+interface Outbox { connected: boolean; waitingAdmin: number; waitingApplicant: number; heldNoAlertEmail: number; heldSafeDomain: number; failed: number }
 interface Data { vendors: VendorApp[]; organizers: OrganizerApp[]; partners: PartnerApp[]; outbox: Outbox }
 
 const TABS: { kind: Kind; label: string }[] = [
@@ -46,6 +46,7 @@ function OutboxLine({ o }: { o: Outbox }) {
   }
   const parts = [
     o.heldNoAlertEmail > 0 && `${plural(o.heldNoAlertEmail, 'alert', 'alerts')} held: no alert email set in Platform settings`,
+    o.heldSafeDomain > 0 && `${plural(o.heldSafeDomain, 'email', 'emails')} held: outside the test domain`,
     o.failed > 0 && `${plural(o.failed, 'email', 'emails')} failed`,
   ].filter(Boolean)
   if (!parts.length) return null

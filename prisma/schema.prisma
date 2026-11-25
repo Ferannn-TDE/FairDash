@@ -2176,7 +2176,7 @@ model Notification {
   /// EXPIRED: a menu-alert email held for no provider and older than 48 hours when a provider
   /// was connected (lib/notifications.ts); kept, never sent. Bell notifications are separate.
   status        String    @default("PENDING")
-  /// Why a PENDING row is waiting: NO_EMAIL_PROVIDER | NO_ALERT_EMAIL (null = due normally).
+  /// Why a PENDING row is waiting: NO_EMAIL_PROVIDER | NO_ALERT_EMAIL | SAFE_RECIPIENT_DOMAIN (null = due normally).
   heldReason    String?
   attempts      Int       @default(0)
   lastError     String?

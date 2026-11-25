@@ -12,6 +12,8 @@
  *       emails of any age are sent
  *   [8] Templates: the agreed wording; the contact line (no "reply to this email")
  *   [9] Triggers: vendor, organizer and partner sign-ups each write exactly one admin alert
+ *   [10] Resend (fetch faked): safety switch holds, 429 waits and stops the run, our-settings
+ *        errors (401, 403, 422 invalid_from_address, bad EMAIL_FROM) hold, other 4xx FAIL, 5xx retry
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/notifications-test.ts
  */
@@ -241,6 +243,112 @@ async function main() {
     body: JSON.stringify({ name: `${PFX}PTA`, groupType: 'school', contactName: 'P', email: `p-${rand()}${MAIL}`, phone: '6185550100', city: 'Alton', state: 'IL' }) }) as any)
   const prow = await prisma.partnerOrganization.findFirst({ where: { name: `${PFX}PTA` } })
   assert(pr.status === 201 && !!prow && (await prisma.notification.count({ where: { dedupeKey: `signup:partner:${prow.id}` } })) === 1, 'partner application → one admin alert')
+
+  // ── [10] Resend through the outbox (resend-email-v1) ───────────────────────────────────
+  // The real Resend transport with fetch faked (no network), on the real outbox and test DB.
+  console.log('\n[10] Resend through the outbox (fetch faked)')
+  // Only this section's rows may be due: earlier sections' leftovers (e.g. [9]'s alerts) are parked.
+  await prisma.notification.updateMany({ where: { status: { in: ['PENDING', 'SENDING'] } }, data: { status: 'SKIPPED' } })
+  const KEY = 'rk-test-not-a-real-key-7Q2'
+  const RS_ENV = { NODE_ENV: 'production', EMAIL_TRANSPORT: 'resend', RESEND_API_KEY: KEY, EMAIL_FROM: 'FairSynq <support@fairsynq.com>', EMAIL_REPLY_TO: 'support@fairsynq.com' }
+  const answerJson = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
+  let answer: () => Response = () => answerJson(200, { id: 're-test-1' })
+  const calls: { body: any; headers: Record<string, string> }[] = []
+  const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ body: JSON.parse(String(init?.body ?? '{}')), headers: (init?.headers ?? {}) as Record<string, string> })
+    return answer()
+  }) as typeof fetch
+  const tLines: string[] = []
+  const rs = T.getEmailTransport(RS_ENV, l => tLines.push(l), { fetchImpl: fakeFetch, errorLog: l => tLines.push(l) })
+  const dLines: string[] = []
+  const dlog = (_level: 'warn' | 'error', line: string) => { dLines.push(line) }
+  const RS = `${PFX}rs-`
+  const mk = (key: string, to: string) => prisma.notification.create({ data: {
+    audience: 'applicant', to, template: 'decision_approved', payload: { kind: 'partner', name: `${PFX}Resend`, contactName: null }, dedupeKey: `${RS}${key}`,
+  } })
+  const row = (id: string) => prisma.notification.findUnique({ where: { id } })
+  const clearRs = () => prisma.notification.deleteMany({ where: { dedupeKey: { startsWith: RS } } })
+  assert(rs.kind === 'resend' && rs.canSend, '[0] control: a resend transport that can send')
+
+  // Safety switch
+  const outside = await mk('outside', `vendor-${rand()}@gmail.test`)
+  const inside = await mk('inside', 'jordan@fairsynq.com')
+  const tSafe = await dueAt(`${RS}outside`, `${RS}inside`)
+  const rSafe = await N.deliverDueNotifications({ transport: rs, now: tSafe, safeDomain: 'fairsynq.com', log: dlog })
+  const outRow = await row(outside.id), inRow = await row(inside.id)
+  assert(outRow?.status === 'PENDING' && outRow.heldReason === 'SAFE_RECIPIENT_DOMAIN' && outRow.attempts === 0 && outRow.sentAt === null,
+    'safe domain set: the outside email waits (SAFE_RECIPIENT_DOMAIN), not SENT, attempts unchanged')
+  assert(!!outRow, 'and it is kept, not deleted')
+  assert(inRow?.status === 'SENT' && rSafe.sent === 1 && calls.length === 1 && calls[0].body.to[0] === 'jordan@fairsynq.com',
+    '[0] control: the email inside the domain is sent (one request)')
+  assert(calls[0].headers['Idempotency-Key'] === `notification-${inside.id}`, 'the request carries the row\'s idempotency key')
+  assert(calls[0].body.from === RS_ENV.EMAIL_FROM && calls[0].body.reply_to === RS_ENV.EMAIL_REPLY_TO, 'from and reply_to come from the settings')
+  assert(dLines.includes('[email] held: outside safe domain template=decision_approved') && dLines.every(l => !l.includes('gmail.test')),
+    'the held line names the email type only, no address')
+  assert((await N.outboxStatus(rs)).heldSafeDomain === 1, 'the approvals page counts it as held: outside the test domain')
+  const rRelease = await N.deliverDueNotifications({ transport: rs, now: new Date(tSafe.getTime() + N.SAFE_DOMAIN_RECHECK_MS + 1000), safeDomain: null, log: dlog })
+  assert(rRelease.sent === 1 && (await row(outside.id))?.status === 'SENT', '[0] control: with the switch removed, it goes out')
+  await clearRs()
+
+  // 429: waits, no attempt counted, the run stops
+  answer = () => answerJson(429, { name: 'rate_limit_exceeded' }, { 'retry-after': '120' })
+  const rl1 = await mk('rl1', 'a@fairsynq.com')
+  const rl2 = await mk('rl2', 'b@fairsynq.com')
+  await prisma.notification.update({ where: { id: rl2.id }, data: { createdAt: new Date(rl1.createdAt.getTime() + 1000) } }) // rl1 is tried first
+  const callsBefore429 = calls.length
+  const t429 = await dueAt(`${RS}rl1`, `${RS}rl2`)
+  const r429 = await N.deliverDueNotifications({ transport: rs, now: t429, safeDomain: null, log: dlog })
+  const rl1Row = await row(rl1.id), rl2Row = await row(rl2.id)
+  assert(rl1Row?.status === 'PENDING' && rl1Row.attempts === 0 && rl1Row.lastError === 'Resend 429 rate_limit_exceeded' && r429.rateLimited === 1,
+    '429 → still waiting, attempts unchanged, reason kept')
+  assert(rl1Row?.nextAttemptAt.getTime() === t429.getTime() + 120_000, 'it waits the 120 s Resend asked for')
+  assert(calls.length === callsBefore429 + 1 && rl2Row?.status === 'PENDING' && rl2Row.lastError === null, 'the run stopped: the next email was not tried')
+  await clearRs()
+
+  // Our settings wrong: held, never FAILED
+  for (const [status, name] of [[401, 'missing_api_key'], [403, 'validation_error'], [422, 'invalid_from_address']] as const) {
+    answer = () => answerJson(status, { name })
+    const h = await mk(`cfg-${status}`, 'c@fairsynq.com')
+    const tc = await dueAt(`${RS}cfg-${status}`)
+    const linesBefore = dLines.length
+    await N.deliverDueNotifications({ transport: rs, now: tc, safeDomain: null, log: dlog })
+    const hr = await row(h.id)
+    assert(hr?.status === 'PENDING' && hr.attempts === 0 && hr.lastError === `Resend ${status} ${name}` && hr.nextAttemptAt.getTime() === tc.getTime() + N.SETTINGS_HOLD_MS,
+      `${status} ${name} → held 15 min, attempts unchanged, not FAILED`)
+    assert(dLines.slice(linesBefore).some(l => l.startsWith(`[email] Resend ${status} ${name}`)), `${status}: one error line naming the status and error only`)
+    await clearRs()
+  }
+
+  // A malformed EMAIL_FROM: the transport cannot send, rows wait
+  const badFromT = T.getEmailTransport({ ...RS_ENV, EMAIL_FROM: 'FairSynq support' }, l => tLines.push(l), { fetchImpl: fakeFetch, errorLog: l => tLines.push(l) })
+  const bf = await mk('badfrom', 'd@fairsynq.com')
+  const callsBeforeBadFrom = calls.length
+  await N.deliverDueNotifications({ transport: badFromT, now: await dueAt(`${RS}badfrom`), safeDomain: null, log: dlog })
+  const bfRow = await row(bf.id)
+  assert(badFromT.canSend === false && bfRow?.status === 'PENDING' && bfRow.heldReason === 'NO_EMAIL_PROVIDER' && bfRow.attempts === 0 && calls.length === callsBeforeBadFrom,
+    'malformed EMAIL_FROM → nothing requested, the email waits, attempts unchanged')
+  assert(tLines.some(l => l.includes('malformed EMAIL_FROM')), 'one error line names EMAIL_FROM')
+  await clearRs()
+
+  // Any other 4xx: FAILED in one run
+  answer = () => answerJson(422, { name: 'validation_error', message: 'Invalid `to` field' })
+  const pf = await mk('perm', 'e@fairsynq.com')
+  const rPerm = await N.deliverDueNotifications({ transport: rs, now: await dueAt(`${RS}perm`), safeDomain: null, log: dlog })
+  const pfRow = await row(pf.id)
+  assert(pfRow?.status === 'FAILED' && pfRow.attempts === 1 && pfRow.lastError === 'Resend 422 validation_error' && rPerm.failed === 1, '422 validation_error → FAILED at once, with the reason')
+
+  // 5xx: the usual retry ladder
+  answer = () => answerJson(500, { name: 'application_error' })
+  const sx = await mk('5xx', 'f@fairsynq.com')
+  const t5 = await dueAt(`${RS}5xx`)
+  await N.deliverDueNotifications({ transport: rs, now: t5, safeDomain: null, log: dlog })
+  const sxRow = await row(sx.id)
+  assert(sxRow?.status === 'PENDING' && sxRow.attempts === 1 && sxRow.nextAttemptAt.getTime() === t5.getTime() + 60e3, '500 → retried in 1 minute (attempt counted)')
+
+  // Nothing secret anywhere
+  const rsRows = await prisma.notification.findMany({ where: { dedupeKey: { startsWith: RS } }, select: { lastError: true } })
+  assert([...dLines, ...tLines, ...rsRows.map(r => r.lastError ?? '')].every(s => !s.includes(KEY)), 'the API key is in no log line and no stored reason')
 }
 
 main()

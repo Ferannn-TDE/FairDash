@@ -7,10 +7,17 @@
 //   (PENDING → SENDING by id), so two workers never send the same row; retries 1/5/15/60 min up to
 //   5 attempts, then FAILED. Admin rows resolve recipients from the alerts.email setting at send
 //   time; with none set they wait (held: NO_ALERT_EMAIL).
-// NO PROVIDER (production today): nothing is sent, logged or marked SENT; rows are held with
-//   NO_EMAIL_PROVIDER. When a provider is connected later, held ADMIN alerts older than 48 hours
-//   are marked SKIPPED (kept, not deleted), held MENU-ALERT emails older than 48 hours are marked
-//   EXPIRED (kept, never sent; audit H5 step 3), and applicant emails go out whatever their age.
+// NO PROVIDER (production until EMAIL_TRANSPORT=resend is set on the worker): nothing is sent,
+//   logged or marked SENT; rows are held with NO_EMAIL_PROVIDER. When a provider is connected,
+//   held ADMIN alerts older than 48 hours are marked SKIPPED (kept, not deleted), held MENU-ALERT
+//   emails older than 48 hours are marked EXPIRED (kept, never sent; audit H5 step 3), and
+//   applicant emails go out whatever their age.
+// SAFETY SWITCH (resend-email-v1): with EMAIL_SAFE_RECIPIENT_DOMAIN set, an email with any address
+//   outside that domain is not sent: it waits (SAFE_RECIPIENT_DOMAIN), is never SENT or deleted,
+//   and the log line names the template only.
+// PROVIDER ANSWERS (lib/email/transport.ts EmailSendError): a 429 or a problem with OUR settings
+//   (401, 403, bad from-address) waits without counting an attempt and stops the run; a provider
+//   or network problem uses the retry ladder; an email that can never go out is FAILED at once.
 // MENU ALERTS: queued by lib/menu-notify/digest.ts with audience 'user' and a `to` address.
 
 import { Prisma, type PrismaClient } from '@prisma/client'
@@ -18,7 +25,10 @@ import { db } from '@/lib/db'
 import { getSetting } from '@/lib/settings'
 import { SITE_URL } from '@/lib/seo'
 import { CONTACT_EMAIL } from '@/lib/contact-info'
-import { getEmailTransport, type EmailTransport, type OutgoingEmail } from '@/lib/email/transport'
+import {
+  EmailSendError, getEmailTransport, outsideSafeDomain, resolveEmailTransport, safeRecipientDomain,
+  type EmailTransport, type OutgoingEmail,
+} from '@/lib/email/transport'
 import { MENU_ALERT_TEMPLATE, MENU_ALERT_TEMPLATES, MENU_ALERT_EMAIL_EXPIRY_MS } from '@/lib/menu-notify/constants'
 import type { MenuAlertEmailPayload } from '@/lib/menu-notify/digest'
 
@@ -31,6 +41,14 @@ export const BACKOFF_MINUTES = [1, 5, 15, 60] as const
 export const MAX_ATTEMPTS = 5
 export const STALE_ADMIN_ALERT_MS = 48 * 3600e3
 export const NO_ALERT_EMAIL_RECHECK_MS = 5 * 60e3
+/** An email held by the safety switch is looked at again after this long. */
+export const SAFE_DOMAIN_RECHECK_MS = 15 * 60e3
+/** Wait after a problem with our provider settings (401, 403, bad from-address). */
+export const SETTINGS_HOLD_MS = 15 * 60e3
+/** Wait after a 429 when Resend gives no Retry-After; a given one is kept within the bounds below. */
+export const RATE_LIMIT_WAIT_MS = 15 * 60e3
+export const RATE_LIMIT_WAIT_MIN_MS = 60e3
+export const RATE_LIMIT_WAIT_MAX_MS = 24 * 3600e3
 const SENDING_RECLAIM_MS = 10 * 60e3
 
 // ── Templates ───────────────────────────────────────────────────────────────────────────────
@@ -107,10 +125,9 @@ function renderEmailParts(template: string, payload: unknown): { subject: string
 // ── Subject line (independent review F17; Jordan, Nov 17) ─────────────────────────────────────
 // Vendor, fair and applicant names go into subjects. A line break in a name could start a new
 // email header, so every subject is made ONE line here, at the single exit of renderEmail, for
-// every template now and later. Not live today (no email provider; lib/email/transport.ts), but
-// cheap and easy to forget. The email body keeps its line breaks: they are not headers.
-// When a real provider is connected, its transport must ALSO refuse CR/LF in subjects and
-// addresses (audit progress note, "Before any email provider is connected").
+// every template now and later. The email body keeps its line breaks: they are not headers.
+// The Resend transport ALSO refuses CR/LF and other control characters in the subject and in every
+// address (audit progress note, "Before any email provider is connected"; lib/email/transport.ts).
 
 /** At most this many characters in an email subject (whole characters, after flattening). */
 export const EMAIL_SUBJECT_MAX = 200
@@ -178,8 +195,17 @@ export interface DeliverDeps {
   /** alerts.email resolver; defaults to the setting. */
   alertEmails?: () => Promise<string[]>
   limit?: number
+  /** EMAIL_SAFE_RECIPIENT_DOMAIN; defaults to the env var. null = no limit. */
+  safeDomain?: string | null
+  /** Where held and settings lines go. Default console.warn / console.error (console.log is stripped in production). */
+  log?: (level: 'warn' | 'error', line: string) => void
 }
-export interface DeliverResult { sent: number; retried: number; failed: number; held: number; skipped: number; expired: number }
+export interface DeliverResult { sent: number; retried: number; failed: number; held: number; skipped: number; expired: number; rateLimited: number }
+
+function defaultLog(level: 'warn' | 'error', line: string) {
+  if (level === 'error') console.error(line)
+  else console.warn(line)
+}
 
 async function defaultAlertEmails(): Promise<string[]> {
   return ((await getSetting('alerts.email')) as string[] | null) ?? []
@@ -189,7 +215,9 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
   const now = deps.now ?? new Date()
   const transport = deps.transport ?? getEmailTransport()
   const alertEmails = deps.alertEmails ?? defaultAlertEmails
-  const res: DeliverResult = { sent: 0, retried: 0, failed: 0, held: 0, skipped: 0, expired: 0 }
+  const safeDomain = deps.safeDomain !== undefined ? deps.safeDomain : safeRecipientDomain()
+  const log = deps.log ?? defaultLog
+  const res: DeliverResult = { sent: 0, retried: 0, failed: 0, held: 0, skipped: 0, expired: 0, rateLimited: 0 }
 
   // A worker that died mid-send leaves SENDING rows; give them back after 10 minutes.
   await db.notification.updateMany({
@@ -251,16 +279,44 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
       to = n.to ? [n.to] : []
     }
 
+    // Safety switch: any address outside the test domain → this email waits, untouched otherwise.
+    if (outsideSafeDomain(to, safeDomain)) {
+      await db.notification.update({ where: { id: n.id }, data: { status: 'PENDING', heldReason: 'SAFE_RECIPIENT_DOMAIN', nextAttemptAt: new Date(now.getTime() + SAFE_DOMAIN_RECHECK_MS) } })
+      log('warn', `[email] held: outside safe domain template=${n.template}`)
+      res.held++
+      continue
+    }
+
     try {
       const { subject, text } = renderEmail(n.template, n.payload)
-      const email: OutgoingEmail = { to, subject, text }
+      // One key per outbox row, the same on every retry: Resend never sends the row twice.
+      const email: OutgoingEmail = { to, subject, text, idempotencyKey: `notification-${n.id}` }
       await transport.send(email)
       await db.notification.update({ where: { id: n.id }, data: { status: 'SENT', sentAt: now, heldReason: null, lastError: null } })
       res.sent++
     } catch (err) {
+      // 429 or our own settings wrong: wait, attempts not counted, and stop this run — every other
+      // row would get the same answer.
+      if (err instanceof EmailSendError && (err.failure === 'rate_limited' || err.failure === 'config')) {
+        const wait = err.failure === 'config'
+          ? SETTINGS_HOLD_MS
+          : Math.min(RATE_LIMIT_WAIT_MAX_MS, Math.max(RATE_LIMIT_WAIT_MIN_MS, err.retryAfterMs ?? RATE_LIMIT_WAIT_MS))
+        await db.notification.update({ where: { id: n.id }, data: { status: 'PENDING', lastError: err.message.slice(0, 500), nextAttemptAt: new Date(now.getTime() + wait) } })
+        if (err.failure === 'config') {
+          log('error', `[email] ${err.message}: check the Resend settings on the worker; emails stay waiting`)
+          res.held++
+        } else {
+          log('warn', `[email] ${err.message}: waiting ${Math.round(wait / 60e3)} min`)
+          res.rateLimited++
+        }
+        break
+      }
       const attempts = n.attempts + 1
       const lastError = (err instanceof Error ? err.message : String(err)).slice(0, 500)
-      if (attempts >= MAX_ATTEMPTS) {
+      if (err instanceof EmailSendError && err.failure === 'permanent') {
+        await db.notification.update({ where: { id: n.id }, data: { status: 'FAILED', attempts, lastError } })
+        res.failed++
+      } else if (attempts >= MAX_ATTEMPTS) {
         await db.notification.update({ where: { id: n.id }, data: { status: 'FAILED', attempts, lastError } })
         res.failed++
       } else {
@@ -279,15 +335,22 @@ export interface OutboxStatus {
   waitingAdmin: number
   waitingApplicant: number
   heldNoAlertEmail: number
+  heldSafeDomain: number
   failed: number
 }
 
-export async function outboxStatus(transport: EmailTransport = getEmailTransport()): Promise<OutboxStatus> {
-  const [waitingAdmin, waitingApplicant, heldNoAlertEmail, failed] = await Promise.all([
+/**
+ * The approvals page line. With no transport given (the web app), "connected" comes from the mode
+ * alone: Vercel has EMAIL_TRANSPORT but not the Resend key, which only the worker needs.
+ */
+export async function outboxStatus(transport?: EmailTransport): Promise<OutboxStatus> {
+  const [waitingAdmin, waitingApplicant, heldNoAlertEmail, heldSafeDomain, failed] = await Promise.all([
     db.notification.count({ where: { status: 'PENDING', audience: 'admin' } }),
     db.notification.count({ where: { status: 'PENDING', audience: 'applicant' } }),
     db.notification.count({ where: { status: 'PENDING', heldReason: 'NO_ALERT_EMAIL' } }),
+    db.notification.count({ where: { status: 'PENDING', heldReason: 'SAFE_RECIPIENT_DOMAIN' } }),
     db.notification.count({ where: { status: 'FAILED' } }),
   ])
-  return { connected: transport.canSend, waitingAdmin, waitingApplicant, heldNoAlertEmail, failed }
+  const connected = transport ? transport.canSend : resolveEmailTransport() !== 'none'
+  return { connected, waitingAdmin, waitingApplicant, heldNoAlertEmail, heldSafeDomain, failed }
 }
