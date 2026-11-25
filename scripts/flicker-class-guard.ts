@@ -297,8 +297,8 @@ assert(/\{!isLoaded \? \([\s\S]{0,400}?\) : isSignedIn \? \(/.test(navSrc),
   'the right-hand slot renders a placeholder while auth is unknown, then chooses')
 assert(/aria-hidden="true" className="w-\[7\.5rem\] h-9"/.test(navSrc),
   'the placeholder has a fixed footprint (no reflow when the CTA or avatar lands)')
-assert(/Get Started/.test(navSrc),
-  'the signed-out CTA still exists (the fix delays it, it does not delete it)')
+assert(/<SignInChooser\b/.test(navSrc),
+  'the signed-out sign-in chooser still exists (the fix delays it, it does not delete it)')
 
 // ── [J] the homepage does not guess the auth state (11th instance) ────────────────────────
 // RoleSection ("Work with FairSynq") returned null only when `isSignedIn` was true. Before Clerk
@@ -322,7 +322,7 @@ assert(HIDES_ON_SIGNED_IN_ONLY.test('  const { isSignedIn } = useUser()\n  if (i
 assert(!HIDES_ON_SIGNED_IN_ONLY.test('  if (isLoaded && isSignedIn) return null'),
   '[0] baseline: it does NOT flag the gated `if (isLoaded && isSignedIn) return null`')
 const accountSlot = headerSrc.slice(headerSrc.indexOf('{!isLoaded ? ('), headerSrc.indexOf('aria-label={HOME_HEADER.menuLabel}'))
-assert(accountSlot.length > 0 && accountSlot.includes('HOME_HEADER.signIn') && accountSlot.includes('HOME_HEADER.account'),
+assert(accountSlot.length > 0 && accountSlot.includes('<SignInChooser') && accountSlot.includes('HOME_HEADER.account'),
   '[0] the header account-slot slice was found (the checks below are not reading an empty string)')
 
 assert(/const \{ isLoaded, isSignedIn \} = useUser\(\)/.test(headerSrc) && /const \{ isLoaded, isSignedIn \} = useUser\(\)/.test(sectionsSrc),

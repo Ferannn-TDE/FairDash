@@ -132,9 +132,10 @@ async function main() {
   // group" tile with the design's wording; the PARTNER_CARD copy is still checked on /partners below.
   const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
   const homeHeader = readFileSync('app/_components/HomeHeader.tsx', 'utf8')
+  const signInChooser = readFileSync('app/_components/SignInChooser.tsx', 'utf8')
   const homeSections = readFileSync('app/_components/HomeAudienceSections.tsx', 'utf8')
   const homeCopySrc = readFileSync('lib/homepage-copy.ts', 'utf8')
-  const homeAll = [landing, homeHeader, homeSections, homeCopySrc].join('\n')
+  const homeAll = [landing, homeHeader, signInChooser, homeSections, homeCopySrc].join('\n')
   const home = await import('../lib/homepage-copy')
   const { PARTNERS_PATH } = await import('../lib/partner-copy')
   assert(PARTNERS_PATH === '/partners', '[0] PARTNERS_PATH is /partners (the checks below compare against it)')
@@ -156,7 +157,7 @@ async function main() {
     '[0] positive control: a planted /partners link in header code is caught')
   assert(!headerHasPartnerLink(`// other pages (/partners) keep the navbar\n<nav>\n  {/* see /partners */}\n  <Link href="/contact">Contact</Link>\n</nav>`),
     '[0] baseline: the same /partners text inside comments is not counted')
-  assert(!home.HOME_HEADER.menu.some(m => (m.href as string) === PARTNERS_PATH) && !headerHasPartnerLink(homeHeader),
+  assert(!home.HOME_HEADER.menu.some(m => (m.href as string) === PARTNERS_PATH) && !headerHasPartnerLink(homeHeader + '\n' + signInChooser),
     'the homepage header menu has no partner link (the top link stays removed pending the client\'s OK)')
   assert(!/PARTNER_TOP_LINK|PARTNERS_PATH|aria-label="Menu"/.test(navbar), 'the top link (and its mobile menu) is not in the navbar: removed pending the client\'s OK')
   assert(/NOT SHOWN: removed from the site on 2026-11-05 pending the client's OK/.test(copy), 'the wording stays on record, marked as not shown')

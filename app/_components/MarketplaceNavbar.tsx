@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useClerk, useUser } from '@clerk/clerk-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { EASE } from '@/components/animations/motion'
 import {
   ChevronDownIcon,
   UserIcon,
@@ -17,6 +16,7 @@ import {
   TruckIcon,
 } from '@heroicons/react/24/outline'
 import SignOutModal from './SignOutModal'
+import SignInChooser, { usePanelDismiss } from './SignInChooser'
 import { useRole } from '@/app/_contexts/RoleContext'
 
 export default function MarketplaceNavbar() {
@@ -27,6 +27,10 @@ export default function MarketplaceNavbar() {
   const [showSignOut, setShowSignOut] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const [signInOpen, setSignInOpen] = useState(false)
+  const signInRef = useRef<HTMLDivElement>(null)
+  const closeSignIn = useCallback(() => setSignInOpen(false), [])
+  usePanelDismiss(signInRef, signInOpen, closeSignIn)
 
   const displayName = user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] ?? 'Account'
   const initial = (user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0] ?? 'U').toUpperCase()
@@ -96,8 +100,8 @@ export default function MarketplaceNavbar() {
           {/* Right actions */}
           <div className="flex items-center gap-3">
             {/* Auth unknown until Clerk loads (and always on the server). Reserve the slot
-                rather than guessing: defaulting to the signed-out CTA flashed "Get Started" at
-                signed-in users before the avatar replaced it (flicker-class-guard [I]). */}
+                rather than guessing: defaulting to the signed-out button flashed it at signed-in
+                users before the avatar replaced it (flicker-class-guard [I]). */}
             {!isLoaded ? (
               <div aria-hidden="true" className="w-[7.5rem] h-9" />
             ) : isSignedIn ? (
@@ -161,17 +165,9 @@ export default function MarketplaceNavbar() {
                 </AnimatePresence>
               </div>
             ) : (
-              <motion.div
-                whileHover={{ scale: 1.04, transition: { duration: 0.15, ease: EASE.smooth } }}
-                whileTap={{ scale: 0.97 }}
-              >
-                <Link
-                  href="/fairs"
-                  className="inline-flex items-center px-5 py-2 rounded-xl bg-neon-pink text-white text-sm font-semibold leading-none hover:bg-[#e0006b] shadow-[0_4px_12px_rgba(255,0,119,0.3)] transition-colors"
-                >
-                  Get Started
-                </Link>
-              </motion.div>
+              <div ref={signInRef} className="relative">
+                <SignInChooser open={signInOpen} onToggle={() => setSignInOpen(o => !o)} onChoose={closeSignIn} panelId="nav-signin-panel" />
+              </div>
             )}
           </div>
         </div>

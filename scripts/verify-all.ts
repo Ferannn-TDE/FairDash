@@ -140,6 +140,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'legal-pages',            file: 'scripts/legal-pages-test.ts' },
   { group: 'correctness', name: 'video-slot',             file: 'scripts/video-slot-guard.ts' },
   { group: 'correctness', name: 'organizers-page',        file: 'scripts/organizers-page-test.ts' },
+  { group: 'correctness', name: 'header-signin',          file: 'scripts/header-signin-test.ts' },
   { group: 'correctness', name: 'signin-copy',            file: 'scripts/signin-copy-test.ts' },
   { group: 'boundary',    name: 'safe-redirect',          file: 'scripts/safe-redirect-test.ts' },
   { group: 'correctness', name: 'connect-card',           file: 'scripts/connect-card-state-test.ts' },

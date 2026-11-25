@@ -56,6 +56,7 @@ const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').f
 const FILES = {
   landing: 'app/MarketplaceLanding.tsx',
   header: 'app/_components/HomeHeader.tsx',
+  chooser: 'app/_components/SignInChooser.tsx',
   sections: 'app/_components/HomeAudienceSections.tsx',
   copy: 'lib/homepage-copy.ts',
   page: 'app/page.tsx',
@@ -282,7 +283,7 @@ for (const f of ['HOW_IT_WORKS.eyebrow', 'HOW_IT_WORKS.heading', 'HOW_IT_WORKS.h
   assert(src.sections.includes(f), `tabs/FAQ render ${f}`)
 }
 for (const f of ['HOME_HEADER.signIn', 'HOME_HEADER.signInChoices.map(', 'HOME_HEADER.menu.map(', 'HOME_HEADER.menuLabel']) {
-  assert(src.header.includes(f), `header renders ${f}`)
+  assert((src.header + src.chooser).includes(f), `header renders ${f}`)
 }
 const order = ['<HomeHeader />', '<Hero banner={banner} />', '<Strip />', '<HomeAudienceSections />', '<PickYourPath />', '<HomeFooter />'].map(s => src.landing.indexOf(s))
 assert(order.every(i => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'sections in design order: header, hero + tiles, strip, how it works + FAQ, pick your path, footer')

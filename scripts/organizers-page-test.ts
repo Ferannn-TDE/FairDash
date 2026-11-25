@@ -116,6 +116,7 @@ console.log('\n[4] homepage organizer paths and header sign-in')
 const homeCopySrc = readFileSync('lib/homepage-copy.ts', 'utf8')
 const landing = readFileSync('app/MarketplaceLanding.tsx', 'utf8')
 const homeHeader = readFileSync('app/_components/HomeHeader.tsx', 'utf8')
+const signInChooser = readFileSync('app/_components/SignInChooser.tsx', 'utf8')
 const homeSections = readFileSync('app/_components/HomeAudienceSections.tsx', 'utf8')
 assert(AUDIENCE_HREF.organizer === ORGANIZER_APPLY_PATH && ORGANIZER_APPLY_PATH === '/organizer/login?mode=apply'
   && /organizer: ORGANIZER_SIGNUP_PATH,/.test(homeCopySrc) && /export const ORGANIZER_SIGNUP_PATH = ORGANIZER_APPLY_PATH/.test(homeCopySrc),
@@ -137,9 +138,9 @@ assert(JSON.stringify(AUDIENCES.organizer.steps) === JSON.stringify([
   ['Can I run more than one event?', 'Yes. Run several events from one account.'],
   ['Who runs curbside pickup?', "A local partner group brings its own volunteers, so you don't need extra staff."],
 ]), 'the organizer steps and FAQs are the approved text, word for word')
-assert(HOME_HEADER.signInChoices.some(c => c.label === 'Organizer sign-in' && c.href === '/organizer/login') && /HOME_HEADER\.signInChoices\.map\(/.test(homeHeader),
+assert(HOME_HEADER.signInChoices.some(c => c.label === 'Organizer sign-in' && c.href === '/organizer/login') && /HOME_HEADER\.signInChoices\.map\(/.test(homeHeader + signInChooser),
   'header sign-in chooser "Organizer sign-in" → /organizer/login')
-for (const [name, s] of [['lib/homepage-copy.ts', homeCopySrc], ['app/MarketplaceLanding.tsx', landing], ['app/_components/HomeHeader.tsx', homeHeader], ['app/_components/HomeAudienceSections.tsx', homeSections]] as const) {
+for (const [name, s] of [['lib/homepage-copy.ts', homeCopySrc], ['app/MarketplaceLanding.tsx', landing], ['app/_components/HomeHeader.tsx', homeHeader], ['app/_components/SignInChooser.tsx', signInChooser], ['app/_components/HomeAudienceSections.tsx', homeSections]] as const) {
   assert(!/ORGANIZERS_PATH|'\/organizers'|"\/organizers"|\/organizers\b/.test(stripLineComments(s)), `${name}: no link to /organizers`)
 }
 
