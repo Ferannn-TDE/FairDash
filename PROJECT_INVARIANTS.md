@@ -1,7 +1,7 @@
 # FairSynq — Project Invariants
 
-> **Durable architecture and invariants.** Does NOT contain current state — see a fresh
-> `CURRENT_STATE.md` handoff for that. Every claim here should be true months from now; if one
+> **Durable architecture and invariants.** Does NOT contain current state (that lives in
+> internal handoff notes, not in this repo). Every claim here should be true months from now; if one
 > goes false, fix it in the same commit as the code change that falsified it.
 >
 > Citations are `file:line` as of the reading that produced this file. No commit hashes and no

@@ -134,7 +134,7 @@ const GRANDFATHERED: { file: string; why: string; proofIn?: string }[] = [
 /**
  * DECIDED IN PRINCIPLE, UNIMPLEMENTED IN FACT — not "nobody has thought about this".
  *
- * The rule is already written down at CURRENT_STATE.md:395-398: do NOT just filter, because a
+ * The rule is already decided: do NOT just filter, because a
  * voided order the customer PAID FOR vanishing looks like it never existed. The disposition keys
  * on WHETHER MONEY MOVED — visible (marked voided, with refund state) if there was a charge,
  * hidden if not. Neither bucket above expresses that: it is a product change, not a where-clause.
@@ -147,9 +147,9 @@ const GRANDFATHERED: { file: string; why: string; proofIn?: string }[] = [
  */
 const PENDING_DISPOSITION: { file: string; rule: string }[] = [
   { file: 'app/api/orders/history/route.ts',
-    rule: 'CURRENT_STATE.md:395 — show-if-charged / hide-if-not; do NOT blanket-filter (a paid order must not vanish)' },
+    rule: 'decided rule — show-if-charged / hide-if-not; do NOT blanket-filter (a paid order must not vanish)' },
   { file: 'app/api/orders/recent/route.ts',
-    rule: 'CURRENT_STATE.md:395 — same rule, on the 30-day recent-orders list' },
+    rule: 'decided rule — same rule, on the 30-day recent-orders list' },
 ]
 
 // ── SCANNER ───────────────────────────────────────────────────────────────────────────────────

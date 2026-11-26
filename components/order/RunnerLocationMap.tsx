@@ -24,7 +24,7 @@ import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps'
 //   • staleness → the dot stops pulsing and goes grey; the caption says "last seen".
 //
 // This file is 'use client' and must stay free of any server-only import (lib/db, prisma,
-// stripe, …) — see CURRENT_STATE.md §7: a server-only module reachable from a client entry
+// stripe, …): a server-only module reachable from a client entry
 // point passes every suite and dies on first page load.
 
 /** Metres-per-pixel at a given latitude and zoom, for sizing the accuracy circle in CSS px. */
