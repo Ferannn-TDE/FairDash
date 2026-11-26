@@ -4,11 +4,16 @@ import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireStrictAdminAuth } from '@/lib/auth'
 import { logger } from '@/lib/logger'
+import { DECIDE_IN_APPROVALS_CODE, DECIDE_IN_APPROVALS_TEXT } from '@/lib/approvals-front-door'
 
 // POST /api/admin/organizers/[id]/reject   body: { reason: string }
 //
-// Flips an organizer → REJECTED. They stay blocked by the gate (403 ORGANIZER_REJECTED, with
-// the reason surfaced), and every organizer power remains refused.
+// Flips an already-decided organizer → REJECTED. They stay blocked by the gate (403
+// ORGANIZER_REJECTED, with the reason surfaced), and every organizer power remains refused.
+//
+// A PENDING organizer is an APPLICATION: it is decided only on the Approvals page (Jordan,
+// Nov 25; lib/approvals-front-door.ts), which writes the ApprovalAction and queues the
+// organizer's email. This route refuses it with 409 DECIDE_IN_APPROVALS and changes nothing.
 //
 // NOTHING TO CLEAN UP — Option A's payoff. Because fair CREATION is itself gated by
 // requireOrganizerAuth, a pending organizer can never have accumulated a fair, vendors, or
@@ -40,6 +45,9 @@ export async function POST(
       select: { id: true, approvalStatus: true },
     })
     if (!organizer) throw new ApiError('Organizer not found', 404, 'ORGANIZER_NOT_FOUND')
+    if (organizer.approvalStatus === 'PENDING') {
+      throw new ApiError(DECIDE_IN_APPROVALS_TEXT, 409, DECIDE_IN_APPROVALS_CODE)
+    }
 
     const updated = await db.fairOrganizer.update({
       where: { id },

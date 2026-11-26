@@ -1,19 +1,22 @@
 /**
- * BOOTH OPERATORS APPROVE (Jordan, Nov 16; sub-step C). Real routes and lib, test DB, Clerk mocked,
- * Stripe stubbed through the seam (never called).
+ * BOOTH OPERATORS APPROVE. Real routes and lib, test DB, Clerk mocked, Stripe stubbed through the
+ * seam (never called).
  *
- * The bug: admitting a booth's OWNER on Booth Operators set VendorMember.approvalStatus but left
- * Vendor.status PENDING. Now, for the owner of a PENDING booth:
- *   [1] fair with NO organizer → the full vendor approval: booth ACTIVE + owner APPROVED together,
- *       ApprovalAction (reviewer name, detail.via 'booth-operators'), the vendor's email
- *   [2] …refused (no Stripe account / payouts off / Stripe down / checklist) → NOTHING changes:
- *       owner stays PENDING, booth PENDING, no record, no email
- *   [3] a REJECTED owner ("Admit anyway") on such a booth is re-admitted with the booth
- *   [4] fair WITH an organizer → the person only; booth stays PENDING; boothWaitsForOrganizer; no
- *       record, no email, no Stripe check
+ * History: Nov 16 (sub-step C) admitting the OWNER of a PENDING booth here ran the full vendor
+ * approval. Nov 25 (Approvals front door, Jordan): the owner of a PENDING booth is a vendor
+ * APPLICATION, decided ONLY on the Approvals page (the one path that writes the ApprovalAction
+ * and queues the email). This route now refuses it and changes nothing:
+ *   [1] fair with NO organizer → 409 DECIDE_IN_APPROVALS (exact text), nothing changed, no record,
+ *       no email, no Stripe check; the old boothApproved / boothWaitsForOrganizer fields are gone
+ *   [2] a booth that would also fail Stripe → still 409 DECIDE_IN_APPROVALS: the guard runs first
+ *   [3] a REJECTED owner ("Admit anyway") of a PENDING booth → 409; stays REJECTED with its reason
+ *   [4] fair WITH an organizer → 409; nothing changed
  *   [5] unchanged: staff rows; owners of ACTIVE / REJECTED booths; the reject route never touches
- *       the booth; who may call it (strict admins only)
+ *       the booth (ACTIVE booth); the reject route refuses a pending booth's owner too; who may
+ *       call it (strict admins only)
  *   [6] the list says whether the fair's organizer approves; the panel's wording
+ * The full booth approval itself is proved through the Approvals route in
+ * scripts/approvals-front-door-test.ts (AF1) and scripts/approvals-test.ts.
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/booth-operators-approve-test.ts
  */
@@ -61,8 +64,11 @@ async function call(p: Promise<Response>) {
   const r = await p
   let j: CallJson = {}
   try { j = await r.json() as CallJson } catch { /* not JSON */ }
-  return { status: r.status, code: j?.error?.code, data: j?.data }
+  return { status: r.status, code: j?.error?.code, message: j?.error?.message, data: j?.data }
 }
+const DECIDE_TEXT = 'Pending applications are decided on the Approvals page.'
+const refusedToApprovals = (r: { status: number; code?: string; message?: string }) =>
+  r.status === 409 && r.code === 'DECIDE_IN_APPROVALS' && r.message === DECIDE_TEXT
 
 const SUPER: Who = { id: `${PFX}super`, roles: ['super_admin'], fullName: 'Sam Super' }
 const PM: Who = { id: `${PFX}pm`, roles: ['platform_manager'], fullName: 'Pat Manager' }
@@ -133,68 +139,45 @@ async function main() {
   const approve = (who: Who, id: string) => { login(who); return call(approveRoute(req(`/api/admin/vendor-members/${id}/approve`, 'PATCH', {}), { params: Promise.resolve({ id }) })) }
   const reject = (who: Who, id: string, reason: string) => { login(who); return call(rejectRoute(req(`/api/admin/vendor-members/${id}/reject`, 'PATCH', { reason }), { params: Promise.resolve({ id }) })) }
 
-  // ── [1] organizer-less fair: the full approval ──────────────────────────────────────────
-  console.log('\n[1] Owner of a PENDING booth, fair with no organizer → the full approval')
+  // ── [1] organizer-less fair: refused, decided on Approvals ──────────────────────────────
+  console.log('\n[1] Owner of a PENDING booth, fair with no organizer → 409 DECIDE_IN_APPROVALS')
   const ok = await mkBooth()
+  const calls1 = stripeCalls
   const r1 = await approve(SUPER, ok.ownerId)
   const s1 = await state(ok.vendor.id, ok.ownerId)
-  assert(r1.status === 200 && s1.booth === 'ACTIVE' && s1.member === 'APPROVED' && r1.data?.boothApproved === true && r1.data?.boothWaitsForOrganizer === false,
-    `booth ACTIVE + owner APPROVED together, response says boothApproved (got ${r1.status} ${s1.key})`)
-  assert(r1.data?.vendorMember?.approvalStatus === 'APPROVED' && r1.data.vendorMember.vendor?.status === 'ACTIVE', 'the response shows the person and the booth as they now are')
-  const a1 = await prisma.approvalAction.findFirst({ where: { applicationId: ok.vendor.id, action: 'APPROVE' } })
-  const d1 = a1?.detail as Record<string, unknown> | null
-  const superUser = await prisma.user.findUnique({ where: { clerkId: SUPER.id }, select: { id: true } })
-  const om1 = await prisma.vendorMember.findUnique({ where: { id: ok.ownerId }, select: { approvedBy: true, approvedAt: true } })
-  assert(a1?.actorName === 'Sam Super' && a1.actorType === 'super_admin' && d1?.via === 'booth-operators' && d1?.ownerChanged === true,
-    `one APPROVE record: the reviewer's name, role, detail.via 'booth-operators' (got ${a1?.actorName}/${String(d1?.via)})`)
-  assert(om1?.approvedBy === superUser?.id && !!om1?.approvedAt, 'the owner row records who admitted them (the admin\'s User.id) and when, as before')
-  const mails1 = await prisma.notification.findMany({ where: { dedupeKey: { contains: ok.vendor.id } } })
-  assert(mails1.length === 1 && mails1[0].template === 'decision_approved', 'the vendor\'s approved email is queued (one)')
+  assert(refusedToApprovals(r1) && s1.key === 'PENDING|PENDING|0|0',
+    `409 DECIDE_IN_APPROVALS with the fixed text; booth and owner still PENDING, no record, no email (got ${r1.status} ${r1.code} ${s1.key})`)
+  assert(stripeCalls === calls1, 'no Stripe check: the refusal comes before anything is asked')
+  assert(r1.data === undefined, 'no success body, so no boothApproved / boothWaitsForOrganizer either')
 
-  // ── [2] refusals change nothing ─────────────────────────────────────────────────────────
-  console.log('\n[2] A refused approval changes NOTHING (owner stays pending)')
+  // ── [2] the guard runs before the Stripe and checklist refusals ─────────────────────────
+  console.log('\n[2] A booth that would also fail Stripe → still DECIDE_IN_APPROVALS (guard first)')
   const noAcct = await mkBooth({ account: null })
   const r2a = await approve(SUPER, noAcct.ownerId)
-  assert(r2a.status === 409 && r2a.code === 'VENDOR_STRIPE_NOT_LINKED' && (await state(noAcct.vendor.id, noAcct.ownerId)).key === 'PENDING|PENDING|0|0',
-    `no Stripe account → 409 VENDOR_STRIPE_NOT_LINKED, owner + booth still PENDING, no record, no email (got ${r2a.status} ${r2a.code})`)
-  const noPay = await mkBooth()
-  stub.set(noPay.account!, { readyToReceivePayments: true, payoutsEnabled: false })
-  const r2b = await approve(SUPER, noPay.ownerId)
-  assert(r2b.status === 409 && r2b.code === 'VENDOR_PAYOUTS_NOT_ENABLED' && (await state(noPay.vendor.id, noPay.ownerId)).key === 'PENDING|PENDING|0|0',
-    `payouts not enabled → 409 VENDOR_PAYOUTS_NOT_ENABLED, nothing changed (got ${r2b.code})`)
-  const down = await mkBooth()
-  stub.set(down.account!, 'throw')
-  const r2c = await approve(SUPER, down.ownerId)
-  assert(r2c.status === 503 && r2c.code === 'STRIPE_CHECK_FAILED' && (await state(down.vendor.id, down.ownerId)).key === 'PENDING|PENDING|0|0',
-    `Stripe unreachable → 503 STRIPE_CHECK_FAILED, nothing changed (got ${r2c.status} ${r2c.code})`)
+  assert(refusedToApprovals(r2a) && (await state(noAcct.vendor.id, noAcct.ownerId)).key === 'PENDING|PENDING|0|0',
+    `no Stripe account → 409 DECIDE_IN_APPROVALS (not VENDOR_STRIPE_NOT_LINKED), nothing changed (got ${r2a.status} ${r2a.code})`)
   const noMenu = await mkBooth({ menu: false })
   const r2d = await approve(SUPER, noMenu.ownerId)
-  assert(r2d.status === 409 && r2d.code === 'VENDOR_NOT_READY_TO_GO_LIVE' && (await state(noMenu.vendor.id, noMenu.ownerId)).key === 'PENDING|PENDING|0|0',
-    `checklist incomplete (no menu) → 409 VENDOR_NOT_READY_TO_GO_LIVE, nothing changed (got ${r2d.code})`)
+  assert(refusedToApprovals(r2d) && (await state(noMenu.vendor.id, noMenu.ownerId)).key === 'PENDING|PENDING|0|0',
+    `checklist incomplete (no menu) → 409 DECIDE_IN_APPROVALS, nothing changed (got ${r2d.code})`)
 
-  // ── [3] a rejected owner re-admitted ────────────────────────────────────────────────────
-  console.log('\n[3] "Admit anyway" on a rejected owner of a pending booth')
+  // ── [3] a rejected owner of a pending booth is not re-admitted here ─────────────────────
+  console.log('\n[3] "Admit anyway" on a rejected owner of a pending booth → 409')
   const back = await mkBooth({ ownerStatus: 'REJECTED' })
   const r3 = await approve(SUPER, back.ownerId)
   const s3 = await state(back.vendor.id, back.ownerId)
-  const d3 = (await prisma.approvalAction.findFirst({ where: { applicationId: back.vendor.id } }))?.detail as Record<string, unknown> | null
-  assert(r3.status === 200 && s3.booth === 'ACTIVE' && s3.member === 'APPROVED' && s3.reason === null && d3?.ownerBefore === 'REJECTED' && d3?.ownerChanged === true,
-    `owner re-admitted (reason cleared) and the booth approved with them; the record notes the owner was REJECTED (got ${r3.status} ${s3.key})`)
-  const backNoAcct = await mkBooth({ ownerStatus: 'REJECTED', account: null })
-  const r3b = await approve(SUPER, backNoAcct.ownerId)
-  const s3b = await state(backNoAcct.vendor.id, backNoAcct.ownerId)
-  assert(r3b.status === 409 && s3b.booth === 'PENDING' && s3b.member === 'REJECTED' && s3b.reason === 'Earlier no',
-    `…but refused by Stripe → the owner stays REJECTED with their reason, booth PENDING (got ${r3b.status} ${s3b.key})`)
+  assert(refusedToApprovals(r3) && s3.booth === 'PENDING' && s3.member === 'REJECTED' && s3.reason === 'Earlier no' && s3.key === 'PENDING|REJECTED|0|0',
+    `409 DECIDE_IN_APPROVALS; the owner stays REJECTED with their reason, booth PENDING, no record, no email (got ${r3.status} ${s3.key})`)
 
-  // ── [4] organizer's fair: the person only ───────────────────────────────────────────────
-  console.log("\n[4] Owner of a PENDING booth on an organizer's fair → the person only")
+  // ── [4] organizer's fair: refused too ───────────────────────────────────────────────────
+  console.log("\n[4] Owner of a PENDING booth on an organizer's fair → 409")
   const og = await mkBooth({ eventId: orgEv.id, account: null })
   const callsBefore = stripeCalls
   const r4 = await approve(SUPER, og.ownerId)
   const s4 = await state(og.vendor.id, og.ownerId)
-  assert(r4.status === 200 && s4.key === 'PENDING|APPROVED|0|0' && r4.data?.boothWaitsForOrganizer === true && r4.data?.boothApproved === false,
-    `owner APPROVED, booth still PENDING, no record, no email, response says boothWaitsForOrganizer (got ${r4.status} ${s4.key})`)
-  assert(stripeCalls === callsBefore, 'no Stripe check (nothing is being approved for trading)')
+  assert(refusedToApprovals(r4) && s4.key === 'PENDING|PENDING|0|0',
+    `409 DECIDE_IN_APPROVALS; owner and booth still PENDING, no record, no email (got ${r4.status} ${s4.key})`)
+  assert(stripeCalls === callsBefore, 'no Stripe check')
 
   // ── [5] unchanged cases ─────────────────────────────────────────────────────────────────
   console.log('\n[5] Unchanged: staff, booths not pending, the reject route, who may call it')
@@ -202,8 +185,9 @@ async function main() {
   const staffUser = await prisma.user.create({ data: { clerkId: `${PFX}st-${rand()}`, email: `st-${rand()}${MAIL}`, name: 'Staff' } })
   const staff = await prisma.vendorMember.create({ data: { vendorId: withStaff.vendor.id, userId: staffUser.id, role: 'staff', approvalStatus: 'PENDING' } })
   const r5a = await approve(SUPER, staff.id)
-  assert(r5a.status === 200 && (await state(withStaff.vendor.id, staff.id)).key === 'PENDING|APPROVED|0|0' && r5a.data?.boothApproved === false,
-    `a STAFF row on a pending booth → the person only, booth PENDING, no record (got ${r5a.status})`)
+  assert(r5a.status === 200 && (await state(withStaff.vendor.id, staff.id)).key === 'PENDING|APPROVED|0|0'
+    && r5a.data !== undefined && !('boothApproved' in r5a.data) && !('boothWaitsForOrganizer' in r5a.data),
+  `a STAFF row on a pending booth → the person only, booth PENDING, no record; the response has no booth fields (got ${r5a.status})`)
   const activeBooth = await mkBooth({ status: VendorStatus.ACTIVE })
   const r5b = await approve(SUPER, activeBooth.ownerId)
   assert(r5b.status === 200 && (await state(activeBooth.vendor.id, activeBooth.ownerId)).key === 'ACTIVE|APPROVED|0|0',
@@ -212,10 +196,14 @@ async function main() {
   const r5c = await approve(SUPER, rejBooth.ownerId)
   assert(r5c.status === 200 && (await state(rejBooth.vendor.id, rejBooth.ownerId)).key === 'REJECTED|APPROVED|0|0',
     `owner of a REJECTED booth → the person only, booth stays REJECTED (got ${r5c.status})`)
-  const toRefuse = await mkBooth()
+  const toRefuse = await mkBooth({ status: VendorStatus.ACTIVE, ownerStatus: 'APPROVED' })
   const r5d = await reject(SUPER, toRefuse.ownerId, 'Wrong person')
-  assert(r5d.status === 200 && (await state(toRefuse.vendor.id, toRefuse.ownerId)).key === 'PENDING|REJECTED|0|0',
-    `the reject route refuses the person only; the booth is untouched (got ${r5d.status})`)
+  assert(r5d.status === 200 && (await state(toRefuse.vendor.id, toRefuse.ownerId)).key === 'ACTIVE|REJECTED|0|0',
+    `the reject route refuses the person only; the ACTIVE booth is untouched (got ${r5d.status})`)
+  const pendingOwner = await mkBooth()
+  const r5f = await reject(SUPER, pendingOwner.ownerId, 'Wrong person')
+  assert(refusedToApprovals(r5f) && (await state(pendingOwner.vendor.id, pendingOwner.ownerId)).key === 'PENDING|PENDING|0|0',
+    `the reject route refuses the owner of a PENDING booth too: 409 DECIDE_IN_APPROVALS, nothing changed (got ${r5f.status} ${r5f.code})`)
   const pmTry = await mkBooth()
   const r5e = await approve(PM, pmTry.ownerId)
   assert(r5e.status === 403 && (await state(pmTry.vendor.id, pmTry.ownerId)).key === 'PENDING|PENDING|0|0',

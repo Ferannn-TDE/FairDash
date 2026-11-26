@@ -114,6 +114,8 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'partner-application',    file: 'scripts/partner-application-test.ts' },
   { group: 'correctness', name: 'vendor-agreement',       file: 'scripts/vendor-agreement-test.ts' },
   { group: 'correctness', name: 'approvals',              file: 'scripts/approvals-test.ts' },
+  // Approvals front door (Nov 25): pending applications decided only on Approvals; the old routes refuse them.
+  { group: 'correctness', name: 'approvals-front-door',   file: 'scripts/approvals-front-door-test.ts' },
   { group: 'correctness', name: 'notifications',          file: 'scripts/notifications-test.ts' },
   { group: 'security',    name: 'resend-transport',       file: 'scripts/resend-transport-test.ts' },
   // Every email through the one FairSynq layout: html + plain text, escaped input, no images.

@@ -4,11 +4,16 @@ import { success } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireStrictAdminAuth } from '@/lib/auth'
 import { logger } from '@/lib/logger'
+import { DECIDE_IN_APPROVALS_CODE, DECIDE_IN_APPROVALS_TEXT } from '@/lib/approvals-front-door'
 
 // POST /api/admin/organizers/[id]/approve
 //
-// Flips an organizer PENDING (or REJECTED) → APPROVED, unlocking every organizer power the
+// Flips a REJECTED organizer → APPROVED (a re-decision), unlocking every organizer power the
 // gate blocks: fair creation, VENDOR APPROVAL, refunds/disputes/chargebacks, settings.
+//
+// A PENDING organizer is an APPLICATION: it is decided only on the Approvals page (Jordan,
+// Nov 25; lib/approvals-front-door.ts), which writes the ApprovalAction and queues the
+// organizer's email. This route refuses it with 409 DECIDE_IN_APPROVALS and changes nothing.
 //
 // PLATFORM-LEVEL AUTHORITY. requireStrictAdminAuth — STRICT platform admin (admin |
 // super_admin, NOT event_operator), matching the sibling organizer-suspend route. An
@@ -39,6 +44,9 @@ export async function POST(
       select: { id: true, approvalStatus: true },
     })
     if (!organizer) throw new ApiError('Organizer not found', 404, 'ORGANIZER_NOT_FOUND')
+    if (organizer.approvalStatus === 'PENDING') {
+      throw new ApiError(DECIDE_IN_APPROVALS_TEXT, 409, DECIDE_IN_APPROVALS_CODE)
+    }
 
     const updated = await db.fairOrganizer.update({
       where: { id },

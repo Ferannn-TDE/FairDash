@@ -3,10 +3,10 @@
  *
  *   [1] Gates: approvals routes admit admin / super_admin / platform_manager only; the per-fair
  *       vendor approve/reject no longer admit event_operator
- *   [2] Vendor owner rows (approval is per booth): every agreed case, a REJECTED owner pre-set through
- *       the Booth Operators reject route, an APPROVED one written directly (since sub-step C admitting
- *       a pending booth's owner there approves the booth too) — incl. reject leaving an
- *       already-APPROVED owner untouched
+ *   [2] Vendor owner rows (approval is per booth): every agreed case. REJECTED and APPROVED owners
+ *       are written directly: since Nov 25 (Approvals front door) Booth Operators refuses to decide
+ *       the owner of a PENDING booth (scripts/approvals-front-door-test.ts). Incl. reject leaving an
+ *       already-APPROVED owner untouched, and the exact OWNER_REJECTED text (Jordan, Nov 25)
  *   [3] Documents gate, required reject reason, double decision → 409, staff never touched
  *   [4] Organizer and partner decisions; applicant emails queued; audit rows
  *   [5] The per-fair admin vendor routes run the same single decision
@@ -49,7 +49,7 @@ const req = (url: string, method = 'GET', body?: unknown) => new NextRequest(`ht
 async function call(p: Promise<Response>) {
   const r = await p
   const j: any = await r.json().catch(() => ({}))
-  return { status: r.status, code: j?.error?.code as string | undefined, data: j?.data, details: j?.error?.details }
+  return { status: r.status, code: j?.error?.code as string | undefined, message: j?.error?.message as string | undefined, data: j?.data, details: j?.error?.details }
 }
 
 const SUPER = { id: `${PFX}super`, roles: ['super_admin'] }
@@ -135,7 +135,6 @@ async function main() {
   const decideAs = (who: { id: string; roles: string[] }, kind: string, id: string, body: object) => {
     login(who.id, who.roles); return call(decideRoute(req(`/api/admin/approvals/${kind}/${id}`, 'POST', body), { params: Promise.resolve({ kind, id }) }))
   }
-  const memberReject = (await import('../app/api/admin/vendor-members/[id]/reject/route')).PATCH
 
   // ── [1] gates ──────────────────────────────────────────────────────────────────────────
   console.log('\n[1] Who can approve')
@@ -167,6 +166,12 @@ async function main() {
   const ownerApprovedSeparately = (ownerId: string) => prisma.vendorMember.update({
     where: { id: ownerId }, data: { approvalStatus: 'APPROVED', approvedAt: new Date(), approvedBy: 'apr-setup' },
   })
+  // Owner REJECTED as a person, booth still PENDING (Nov 25: tonight's live rows). Booth Operators
+  // now refuses that rejection (409 DECIDE_IN_APPROVALS), so the setup writes the row directly, the
+  // same shape the reject route wrote before.
+  const ownerRejectedSeparately = (ownerId: string, reason: string) => prisma.vendorMember.update({
+    where: { id: ownerId }, data: { approvalStatus: 'REJECTED', rejectionReason: reason, approvedAt: null, approvedBy: 'apr-setup' },
+  })
   const b = await mkVendor()
   await ownerApprovedSeparately(b.ownerId)
   const before = await state(b.vendor.id, b.ownerId)
@@ -176,11 +181,12 @@ async function main() {
   assert(rb.status === 200 && sb.booth === 'ACTIVE' && sb.owner === 'APPROVED' && sb.ownerApprovedAt === before.ownerApprovedAt, 'owner already APPROVED → approve changes only the booth (owner row untouched)')
 
   const c = await mkVendor()
-  login(SUPER.id, SUPER.roles)
-  await memberReject(req(`/api/admin/vendor-members/${c.ownerId}/reject`, 'PATCH', { reason: 'Not the owner' }), { params: Promise.resolve({ id: c.ownerId }) })
+  await ownerRejectedSeparately(c.ownerId, 'Not the owner')
   const rc = await decideAs(PM, 'vendor', c.vendor.id, { decision: 'approve' })
   const sc = await state(c.vendor.id, c.ownerId)
   assert(rc.status === 409 && rc.code === 'OWNER_REJECTED' && sc.booth === 'PENDING' && sc.owner === 'REJECTED', 'owner already REJECTED → approve refused, nothing changes (an explicit rejection is never overridden)')
+  assert(rc.message === "The owner was rejected separately, so this booth can't be approved yet. You can reject it here.",
+    `OWNER_REJECTED says the booth can be rejected here, not "go to Booth Operators" (Jordan, Nov 25) (got ${JSON.stringify(rc.message)})`)
 
   const d = await mkVendor({ withStaff: true })
   const rd = await decideAs(PM, 'vendor', d.vendor.id, { decision: 'reject', reason: 'Missing health permit' })
@@ -197,8 +203,7 @@ async function main() {
     'owner already APPROVED → reject rejects ONLY the booth; the owner stays APPROVED, untouched')
 
   const f = await mkVendor()
-  login(SUPER.id, SUPER.roles)
-  await memberReject(req(`/api/admin/vendor-members/${f.ownerId}/reject`, 'PATCH', { reason: 'Earlier no' }), { params: Promise.resolve({ id: f.ownerId }) })
+  await ownerRejectedSeparately(f.ownerId, 'Earlier no')
   const rf = await decideAs(PM, 'vendor', f.vendor.id, { decision: 'reject', reason: 'Later no' })
   const sf = await state(f.vendor.id, f.ownerId)
   assert(rf.status === 200 && sf.booth === 'REJECTED' && sf.owner === 'REJECTED' && sf.ownerReason === 'Earlier no', 'owner already REJECTED → reject changes only the booth (owner keeps its own reason)')
