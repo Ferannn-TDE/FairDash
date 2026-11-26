@@ -1787,8 +1787,8 @@ export async function patternV(sum: SweepSummary, o: { maxPerPattern: number }) 
  * moved. The set therefore CANNOT grow — anything new arriving here is a genuine defect.
  *
  * IT IS TEST-MODE MONEY. Stripe was in test mode; these are test-mode transfers in a test-mode
- * account on Italian Fest 2026 — the same cohort and the same disposition as
- * `CURRENT_STATE.md` §6 item 3. There is nothing to reconcile. Recorded explicitly because
+ * account on Italian Fest 2026 — the same cohort and the same disposition as the other
+ * Italian Fest test-mode transfers, which are left as they are by decision. There is nothing to reconcile. Recorded explicitly because
  * "settled transfer with no ledger row" reads as a books emergency to anyone who finds it
  * later without the key-mode context.
  *

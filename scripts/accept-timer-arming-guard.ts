@@ -21,7 +21,7 @@
  *     (lib/event-date.ts:82, guarded by scripts/fair-open-gate-guard.ts); a `new Date()` compare
  *     next to the enqueue would be a fifth copy, which is this codebase's central bug class.
  * [3] the skip is LOGGED. `if (ordersQueue)` has no else, so a missing queue already skips the
- *     enqueue silently on the money-in path (CURRENT_STATE.md §7). A second silent skip would be
+ *     enqueue silently on the money-in path. A second silent skip would be
  *     indistinguishable from that failure while meaning the opposite, so the deliberate skip must
  *     name the order and the reason.
  * [4] the OPEN path is unchanged — an open fair still arms the timer with the shared constant

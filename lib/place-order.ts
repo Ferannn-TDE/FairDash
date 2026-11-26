@@ -164,7 +164,7 @@ export async function placePaidOrder(
   const ordersQueue = getOrderQueue()
   if (liveState !== 'live') {
     // A DELIBERATE SKIP, LOGGED AS ONE. `if (ordersQueue)` below has no else, so a missing queue
-    // skips the enqueue silently on the money-in path (CURRENT_STATE.md §7). This branch must not
+    // skips the enqueue silently on the money-in path. This branch must not
     // add a second indistinguishable silence: "no timer because the fair is closed" and "no timer
     // because the producer failed" have identical observable effects and opposite meanings.
     logger.warn('[PlaceOrder] Accept-timeout NOT armed — fair is not open', {

@@ -217,7 +217,7 @@ You already have delegate access to the GoDaddy account holding fairsynq.com, so
 
 - [x] Read the failed Railway worker build for `928808d` (2026-10-26) and confirm the cause. *(Confirmed 2026-10-26 from the build log: Railway's builder failed 13s in, before `npm install` ran: `build daemon returned an error < failed to solve: frontend grpc server closed unexpectedly >`, during Railway's "slow build snapshot uploads" incident. Not our code; the next push (`8f59434`) built and deployed. The previous worker kept running throughout. Note: the worker build is only `npm install --include=dev && npx prisma generate`, start `npm run worker`; it does not run the migration drift check.)*
 
-### 2.4 Free-tier inventory (`docs/COST-WORKSHEET.md`)
+### 2.4 Free-tier inventory (internal cost worksheet, not in this repo)
 - [ ] Every free tier we depend on, with its limit, current usage and upgrade trigger: Supabase, Upstash, Railway, Vercel, Clerk, Resend, Zoho, Google Maps/Geocoding/Routes, Sentry, Better Stack.
 - [ ] Upstash budget updated for 3-minute health checks (~29K commands/month).
 - [ ] Upstash commands spent by rate limiting on a busy fair day (e.g. 2,000 attendees, typical browsing; every limited request is at least one command, including signed-out menu reads at 600/min per IP), checked against the daily share of the 500K/month budget the worker also lives on.
