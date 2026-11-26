@@ -10,7 +10,7 @@
  *   [6] No provider ('none'): nothing SENT, nothing logged, rows held NO_EMAIL_PROVIDER
  *   [7] Provider connected later: held admin alerts older than 48h → SKIPPED (kept); applicant
  *       emails of any age are sent
- *   [8] Templates: the agreed wording; the contact line (no "reply to this email")
+ *   [8] Templates: the agreed wording; the contact line; then the Email Look v1 footer (Nov 25)
  *   [9] Triggers: vendor, organizer and partner sign-ups each write exactly one admin alert
  *   [10] Resend (fetch faked): safety switch holds, 429 waits and stops the run, our-settings
  *        errors (401, 403, 422 invalid_from_address, bad EMAIL_FROM) hold, other 4xx FAIL, 5xx retry
@@ -124,7 +124,8 @@ async function main() {
   const appRow = await prisma.notification.findUnique({ where: { dedupeKey: `decision:partner:${PFX}app1:approved` } })
   assert(r1.sent === 2 && adminRow?.status === 'SENT' && appRow?.status === 'SENT' && !!adminRow.sentAt, '[0] positive control: the probe sees SENT rows after a delivery run')
   assert(sent.some(e => e.to.join(',') === 'ops@client.test,two@client.test' && e.subject.startsWith('New partner organization application')), 'the admin alert went to every alerts.email address')
-  assert(sent.some(e => e.to.join(',') === `applicant${MAIL}` && e.subject === "You're approved on FairSynq"), 'the applicant email went to the applicant')
+  assert(sent.some(e => e.to.join(',') === `applicant${MAIL}` && e.subject === `${PFX}Scouts is approved on FairSynq`), 'the applicant email went to the applicant')
+  assert(sent.length === 2 && sent.every((e: any) => typeof e.html === 'string' && e.html.includes('fairsynq-email-look-v1') && e.text.length > 0), 'every delivered email carries text AND the FairSynq html (multipart)')
   const r1b = await N.deliverDueNotifications({ transport: okT, alertEmails: async () => ['ops@client.test'] })
   assert(r1b.sent === 0 && sent.length === 2, 'a second run sends nothing again')
 
@@ -215,12 +216,16 @@ async function main() {
   // ── [8] templates ──────────────────────────────────────────────────────────────────────
   console.log('\n[8] Wording')
   const rej = N.renderEmail('decision_rejected', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana', reason: 'Missing insurance' })
-  assert(rej.subject === 'Your FairSynq application' && rej.text === "Hi Ana, we're not able to approve Taco Stand right now. Reason: Missing insurance. If you have questions, contact support@fairsynq.com.",
-    'not-approved email: agreed wording, contact line, no "reply to this email"')
+  // email-look-v1: the plain text ends with the approved footer (Jordan, Nov 25, "FairSynq Email Look v1").
+  const FOOTER = '\n\nQuestions? Just reply to this email, or write to support@fairsynq.com.\nFairSynq · Order ahead and skip the line at fairs and festivals.'
+  assert(rej.subject === 'Your FairSynq application' && rej.text === `Hi Ana, we're not able to approve Taco Stand right now. Reason: Missing insurance. If you have questions, contact support@fairsynq.com.${FOOTER}`,
+    'not-approved email: agreed wording and contact line, then the approved Email Look v1 footer')
   const apv = N.renderEmail('decision_approved', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana' })
-  assert(apv.text === 'Hi Ana, Taco Stand is approved. Sign in to finish your setup (payouts and menu): https://www.fairsynq.com/sign-in/vendor', 'vendor approved email: agreed wording')
+  assert(apv.text === `Hi Ana, Taco Stand is approved. Sign in to finish your setup (payouts and menu): https://www.fairsynq.com/sign-in/vendor${FOOTER}`, 'vendor approved email: agreed wording')
   const adm = N.renderEmail('signup_admin_alert', { kind: 'organizer', name: 'County Fair Board', contactName: 'Lee', email: 'lee@x.test', phone: null })
-  assert(adm.subject === 'New organizer application: County Fair Board' && adm.text.endsWith('Review it at https://www.fairsynq.com/admin/approvals'), 'admin alert: agreed subject and link')
+  assert(adm.subject === 'New organizer application: County Fair Board'
+      && adm.text.endsWith('Review it at https://www.fairsynq.com/admin/approvals\n\nFairSynq admin alert · sent to the alerts address in Platform settings.'),
+    'admin alert: agreed subject and link, then the admin footer')
 
   // ── [9] triggers ───────────────────────────────────────────────────────────────────────
   console.log('\n[9] Each sign-up writes one admin alert')

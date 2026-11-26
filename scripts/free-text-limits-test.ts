@@ -121,7 +121,7 @@ type ReasonLib = {
   parseReviewReason?: (raw: unknown) => { ok: true; reason: string | null } | { ok: false; message: string }
 }
 type MailLib = {
-  renderEmail: (template: string, payload: unknown) => { subject: string; text: string }
+  renderEmail: (template: string, payload: unknown) => { subject: string; text: string; html?: string }
   emailSubjectLine?: (s: string) => string
   EMAIL_SUBJECT_MAX?: number
   VENDOR_OVERRIDE_TEMPLATE: string
@@ -243,10 +243,11 @@ async function main() {
   const PRICE = (vendorName: string) => ['menu_price_change_pending', { alertType: 'MENU_PRICE_CHANGE_PENDING', fairName: 'F', vendorName, lines: ['a', 'b'], link: 'L' }] as const
 
   assert(subjectOf(...SIGNUP('County Fair Board')) === 'New organizer application: County Fair Board'
-      && subjectOf(...OVERRIDE('Taco Stand', 'Dev Fair')) === 'FairSynq approved Taco Stand at Dev Fair'
+      // C5 and C3 (Jordan, Nov 25, email-look-v1): the approved new subjects.
+      && subjectOf(...OVERRIDE('Taco Stand', 'Dev Fair')) === 'FairSynq made a decision on Taco Stand at Dev Fair'
       && subjectOf(...DELETED('Taco Stand', 'Dev Fair')) === 'Taco Stand removed 2 menu items at Dev Fair'
       && subjectOf(...PRICE('Taco Stand')) === '2 price increases are waiting for your approval: Taco Stand'
-      && subjectOf('decision_approved', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana' }) === "You're approved on FairSynq"
+      && subjectOf('decision_approved', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana' }) === 'Taco Stand is approved on FairSynq'
       && subjectOf('decision_rejected', { kind: 'vendor', name: 'Taco Stand', contactName: 'Ana', reason: 'x' }) === 'Your FairSynq application',
     'normal names → exactly today\'s subjects, every template')
 
@@ -303,12 +304,16 @@ async function main() {
       && /if \(!parsedReason\.ok\) throw new ApiError\(parsedReason\.message, 400, 'VALIDATION_ERROR'\)/.test(decide)
       && !/input\.reason \?\? null/.test(decide),
     'applyMenuRequestDecision checks the reason first, before any database read, and throws 400 VALIDATION_ERROR')
+  // The templates moved to lib/email/templates.ts (email-look-v1, Nov 25); the outbox still sends
+  // through renderEmail from lib/notifications.ts.
   const notif = src('lib/notifications.ts')
-  assert(/export function renderEmail\([^)]*\)[^\n]*\{\n\s*const \{ subject, text \} = renderEmailParts\(template, payload\)\s*return \{ subject: emailSubjectLine\(subject\), text \}\s*\}/.test(notif)
-      && !/export function renderEmailParts/.test(notif) && (notif.match(/renderEmailParts\(/g) ?? []).length === 2,
+  const tmpl = src('lib/email/templates.ts')
+  assert(/export function renderEmail\([^)]*\)[^\n]*\{\n\s*const \{ subject, text, layout \} = renderEmailParts\(template, payload, context\)\s*const line = emailSubjectLine\(subject\)\s*return \{ subject: line,/.test(tmpl)
+      && !/export function renderEmailParts/.test(tmpl) && (tmpl.match(/renderEmailParts\(/g) ?? []).length === 2
+      && !/renderEmailParts/.test(notif),
     'renderEmail is the one exit: renderEmailParts (private) → emailSubjectLine(subject)')
-  assert(/renderEmail\(n\.template, n\.payload\)/.test(notif), 'deliverDueNotifications renders through renderEmail')
-  assert(/const \w+ = \/\[\\p\{Cc\}\\p\{Zl\}\\p\{Zp\}\]\/gu/.test(notif)
+  assert(/renderEmail\(n\.template, n\.payload[,)]/.test(notif), 'deliverDueNotifications renders through renderEmail')
+  assert(/const \w+ = \/\[\\p\{Cc\}\\p\{Zl\}\\p\{Zp\}\]\/gu/.test(tmpl)
       && /const \w+ = \/\[\\p\{Cc\}\\p\{Zl\}\\p\{Zp\}\]\/gu/.test(src('lib/menu-requests/review-reason.ts')),
     'both control-character patterns are /[\\p{Cc}\\p{Zl}\\p{Zp}]/gu (plain ASCII source)')
   const page = src('app/organizer/fairs/[fairSlug]/menu-requests/page.tsx')

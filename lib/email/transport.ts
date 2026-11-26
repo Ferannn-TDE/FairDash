@@ -8,6 +8,7 @@
 //            holds rows with reason NO_EMAIL_PROVIDER until a real provider exists.
 //   resend — production ONLY, and only when EMAIL_TRANSPORT=resend. POSTs to Resend's REST API
 //            with fetch (no SDK). Needs RESEND_API_KEY and EMAIL_FROM; EMAIL_REPLY_TO is optional.
+//            Sends `text` and, when given, `html` (email-look-v1): one multipart email.
 //            The from and reply-to addresses live ONLY in those env vars: no address is written in
 //            this file (scripts/resend-transport-test.ts checks), so changing the sending address
 //            is a settings change. Missing or malformed settings → canSend false plus ONE error
@@ -22,6 +23,8 @@ export interface OutgoingEmail {
   to: string[]
   subject: string
   text: string
+  /** The HTML part (lib/email/layout.ts). Sent with `text`, so every email is multipart. */
+  html?: string
   /** The same on every retry of one outbox row, so Resend never sends it twice (kept 24 hours). */
   idempotencyKey?: string
 }
@@ -155,7 +158,11 @@ function resendTransport(key: string, from: string, replyTo: string | null, fetc
 
       const headers: Record<string, string> = { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
       if (email.idempotencyKey) headers['Idempotency-Key'] = email.idempotencyKey
-      const body = { from, to: email.to, subject: email.subject, text: email.text, ...(replyTo ? { reply_to: replyTo } : {}) }
+      const body = {
+        from, to: email.to, subject: email.subject, text: email.text,
+        ...(email.html ? { html: email.html } : {}),
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }
 
       let res: Response
       try {
@@ -204,7 +211,8 @@ export function getEmailTransport(
   if (kind === 'log') {
     return {
       kind, canSend: true,
-      async send(email) { log(`[email:log] to=${email.to.join(',')} subject=${JSON.stringify(email.subject)} text=${JSON.stringify(email.text)}`) },
+      // The HTML is long: only its size is logged (open scripts/email-preview.ts output to see it).
+      async send(email) { log(`[email:log] to=${email.to.join(',')} subject=${JSON.stringify(email.subject)} text=${JSON.stringify(email.text)} html=${email.html ? `${email.html.length} chars` : 'none'}`) },
     }
   }
   if (kind === 'resend') {

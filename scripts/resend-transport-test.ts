@@ -5,7 +5,8 @@
  *   [1] Which transport runs where: resend only in production AND only when asked; dev/test never
  *   [2] Settings: missing key / from, malformed from / reply-to → cannot send, ONE line naming
  *       the variables only (never a value)
- *   [3] The request: URL, method, headers, Idempotency-Key, from / reply_to / to / subject / text
+ *   [3] The request: URL, method, headers, Idempotency-Key, from / reply_to / to / subject / text,
+ *       and html when given (email-look-v1)
  *   [4] Refused before any network call: control characters in subject or address, no recipient
  *   [5] Resend's answers: 2xx needs an id; 429 waits; 5xx / 409-concurrent / network / timeout
  *       retry; 401 / 403 / 422 invalid_from_address are OUR settings; other 4xx are permanent
@@ -50,7 +51,7 @@ function fakeFetch(answer: () => Response | Promise<Response>) {
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 
-const email = (over: Partial<{ to: string[]; subject: string; text: string; idempotencyKey: string }> = {}) =>
+const email = (over: Partial<{ to: string[]; subject: string; text: string; html: string; idempotencyKey: string }> = {}) =>
   ({ to: [TO], subject: 'Your FairSynq application', text: `Hi Pat ${BODY_MARKER}`, idempotencyKey: 'notification-abc123', ...over })
 
 async function caught(p: Promise<unknown>): Promise<unknown> {
@@ -138,7 +139,7 @@ async function main() {
     assert(body.from === FROM, 'from = EMAIL_FROM exactly')
     assert(body.reply_to === REPLY_TO, 'reply_to = EMAIL_REPLY_TO')
     assert(JSON.stringify(body.to) === JSON.stringify([TO]) && body.subject === 'Your FairSynq application' && body.text === `Hi Pat ${BODY_MARKER}`, 'to, subject and text as given')
-    assert(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(['from', 'reply_to', 'subject', 'text', 'to']), 'no other fields in the body')
+    assert(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(['from', 'reply_to', 'subject', 'text', 'to']), 'no other fields in the body (no html given → no html field)')
     assert(c?.init.signal instanceof AbortSignal, 'the request carries a timeout signal')
     assert(T.RESEND_TIMEOUT_MS === 10_000, 'the timeout is 10 seconds')
 
@@ -147,6 +148,13 @@ async function main() {
     assert(noReply.err === null && !('reply_to' in nb), 'EMAIL_REPLY_TO unset → no reply_to in the body')
     const other = await sendWith(() => json(200, { id: 'x' }), { ...PROD, EMAIL_FROM: 'Fair Team <hello@notifications.fairsynq.com>' })
     assert(JSON.parse(String(other.calls[0]?.init.body ?? '{}')).from === 'Fair Team <hello@notifications.fairsynq.com>', 'a different EMAIL_FROM is used as is (moving domains is a settings change)')
+
+    // email-look-v1: the HTML part goes with the text (multipart).
+    const HTML = `<!DOCTYPE html><p>Hi Pat ${BODY_MARKER}</p>`
+    const withHtml = await sendWith(() => json(200, { id: 'x' }), PROD, { ...email(), html: HTML })
+    const hb = JSON.parse(String(withHtml.calls[0]?.init.body ?? '{}'))
+    assert(withHtml.err === null && hb.html === HTML && hb.text === `Hi Pat ${BODY_MARKER}`, 'html is sent exactly as given, next to text')
+    assert(JSON.stringify(Object.keys(hb).sort()) === JSON.stringify(['from', 'html', 'reply_to', 'subject', 'text', 'to']), 'with html: no other fields in the body')
   })
 
   await section('[4] Refused before any network call', async () => {

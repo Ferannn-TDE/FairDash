@@ -19,23 +19,27 @@
 //   (401, 403, bad from-address) waits without counting an attempt and stops the run; a provider
 //   or network problem uses the retry ladder; an email that can never go out is FAILED at once.
 // MENU ALERTS: queued by lib/menu-notify/digest.ts with audience 'user' and a `to` address.
+// LOOK (email-look-v1): every email leaves with plain text AND html from the one FairSynq layout
+//   (lib/email/templates.ts → lib/email/layout.ts).
 
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { db } from '@/lib/db'
 import { getSetting } from '@/lib/settings'
-import { SITE_URL } from '@/lib/seo'
-import { CONTACT_EMAIL } from '@/lib/contact-info'
 import {
   EmailSendError, getEmailTransport, outsideSafeDomain, resolveEmailTransport, safeRecipientDomain,
   type EmailTransport, type OutgoingEmail,
 } from '@/lib/email/transport'
-import { MENU_ALERT_TEMPLATE, MENU_ALERT_TEMPLATES, MENU_ALERT_EMAIL_EXPIRY_MS } from '@/lib/menu-notify/constants'
-import type { MenuAlertEmailPayload } from '@/lib/menu-notify/digest'
+import { MENU_ALERT_TEMPLATES, MENU_ALERT_EMAIL_EXPIRY_MS } from '@/lib/menu-notify/constants'
+// The templates live in lib/email/templates.ts (no database there, so tests and the preview
+// script can render them). Re-exported here so every existing caller keeps its import.
+import {
+  renderEmail, VENDOR_OVERRIDE_TEMPLATE,
+  type DecisionPayload, type OverridePayload, type SignupAlertPayload,
+} from '@/lib/email/templates'
+export { renderEmail, emailSubjectLine, EMAIL_SUBJECT_MAX, VENDOR_OVERRIDE_TEMPLATE } from '@/lib/email/templates'
+export type { ApplicationKind, DecisionPayload, OverridePayload, SignupAlertPayload } from '@/lib/email/templates'
 
 type Tx = Pick<PrismaClient, 'notification'> | Prisma.TransactionClient
-
-export type ApplicationKind = 'vendor' | 'organizer' | 'partner'
-const KIND_LABEL: Record<ApplicationKind, string> = { vendor: 'vendor', organizer: 'organizer', partner: 'partner organization' }
 
 export const BACKOFF_MINUTES = [1, 5, 15, 60] as const
 export const MAX_ATTEMPTS = 5
@@ -50,108 +54,6 @@ export const RATE_LIMIT_WAIT_MS = 15 * 60e3
 export const RATE_LIMIT_WAIT_MIN_MS = 60e3
 export const RATE_LIMIT_WAIT_MAX_MS = 24 * 3600e3
 const SENDING_RECLAIM_MS = 10 * 60e3
-
-// ── Templates ───────────────────────────────────────────────────────────────────────────────
-export interface SignupAlertPayload { kind: ApplicationKind; name: string; contactName: string | null; email: string | null; phone: string | null }
-/** `decidedBy` (vendor decisions): who decided, as the VENDOR may see it — "FairSynq" or the
- *  organizer's organization name, never a person (lib/reviewer-label.ts; Jordan, Nov 16). Absent on
- *  rows queued before Nov 16, which read as FairSynq. */
-export interface DecisionPayload { kind: ApplicationKind; name: string; contactName: string | null; reason?: string; decidedBy?: string }
-/** The organizer's notice that FairSynq decided a vendor on their event (strict-admin override). */
-export interface OverridePayload { vendorName: string; fairName: string; decision: 'approved' | 'rejected'; reason: string; link: string }
-export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
-const byFairSynq = (p: DecisionPayload) => !p.decidedBy || p.decidedBy === 'FairSynq'
-
-/** The templates themselves. Private: every caller goes through renderEmail, which makes the subject one safe line. */
-function renderEmailParts(template: string, payload: unknown): { subject: string; text: string } {
-  if (template === 'signup_admin_alert') {
-    const p = payload as SignupAlertPayload
-    const label = KIND_LABEL[p.kind]
-    const contact = [p.contactName, p.email, p.phone].filter(Boolean).join(', ')
-    return {
-      subject: `New ${label} application: ${p.name}`,
-      text: `${p.name} applied to join FairSynq as a ${label}.${contact ? ` Contact: ${contact}.` : ''} Review it at ${SITE_URL}/admin/approvals`,
-    }
-  }
-  if (template === 'decision_approved') {
-    const p = payload as DecisionPayload
-    const hi = `Hi ${p.contactName || p.name}`
-    const text =
-      p.kind === 'vendor' ? `${hi}, ${p.name} is approved${byFairSynq(p) ? '' : ` by ${p.decidedBy}`}. Sign in to finish your setup (payouts and menu): ${SITE_URL}/sign-in/vendor`
-      : p.kind === 'organizer' ? `${hi}, your organizer account is approved. Sign in to create your first fair: ${SITE_URL}/organizer/login`
-      : `${hi}, ${p.name} is approved as a FairSynq partner organization. We'll be in touch about upcoming events.`
-    return { subject: "You're approved on FairSynq", text }
-  }
-  if (template === 'decision_rejected') {
-    const p = payload as DecisionPayload
-    return {
-      subject: 'Your FairSynq application',
-      text: `Hi ${p.contactName || p.name}, ${byFairSynq(p) ? "we're" : `${p.decidedBy} is`} not able to approve ${p.name} right now. Reason: ${p.reason ?? ''}. If you have questions, contact ${CONTACT_EMAIL}.`,
-    }
-  }
-  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
-  if (template === VENDOR_OVERRIDE_TEMPLATE) {
-    const p = payload as OverridePayload
-    return {
-      subject: `FairSynq ${p.decision} ${p.vendorName} at ${p.fairName}`,
-      text: `FairSynq ${p.decision} ${p.vendorName}, a vendor at your event ${p.fairName}, instead of waiting for your decision. Reason: ${p.reason}\n\nSee the vendor: ${p.link}`,
-    }
-  }
-  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
-  if (template === MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED) {
-    const p = payload as MenuAlertEmailPayload
-    const n = p.lines.length
-    return {
-      subject: `${p.vendorName} removed ${n} menu item${n === 1 ? '' : 's'} at ${p.fairName}`,
-      text: `${p.vendorName} removed ${n === 1 ? 'this item' : 'these items'} from their menu at ${p.fairName}:\n`
-        + p.lines.map(l => `- ${l}`).join('\n')
-        + `\n\nSee the vendor's menu requests: ${p.link}`,
-    }
-  }
-  // DRAFT – not approved by Jordan; move to branded FairSynq template when built.
-  if (template === MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING) {
-    const p = payload as MenuAlertEmailPayload
-    const n = p.lines.length
-    return {
-      subject: `${n === 1 ? 'A price increase is' : `${n} price increases are`} waiting for your approval: ${p.vendorName}`,
-      text: `${p.vendorName} at ${p.fairName} asked for ${n === 1 ? 'this price increase' : 'these price increases'}. Nothing changes on the menu until it is approved:\n`
-        + p.lines.map(l => `- ${l}`).join('\n')
-        + `\n\nApprove or reject: ${p.link}`,
-    }
-  }
-  throw new Error(`Unknown email template: ${template}`)
-}
-
-// ── Subject line (independent review F17; Jordan, Nov 17) ─────────────────────────────────────
-// Vendor, fair and applicant names go into subjects. A line break in a name could start a new
-// email header, so every subject is made ONE line here, at the single exit of renderEmail, for
-// every template now and later. The email body keeps its line breaks: they are not headers.
-// The Resend transport ALSO refuses CR/LF and other control characters in the subject and in every
-// address (audit progress note, "Before any email provider is connected"; lib/email/transport.ts).
-
-/** At most this many characters in an email subject (whole characters, after flattening). */
-export const EMAIL_SUBJECT_MAX = 200
-
-/** Control characters (C0, DEL, C1 — CR, LF and tab among them) and the Unicode line/paragraph separators. */
-const SUBJECT_LINE_BREAKS_AND_CONTROLS = /[\p{Cc}\p{Zl}\p{Zp}]/gu
-
-/**
- * One safe subject line: line breaks and other control characters become spaces, repeated spaces
- * become one, the ends are trimmed. Over EMAIL_SUBJECT_MAX characters it keeps the first
- * EMAIL_SUBJECT_MAX − 1 and adds "…". Counted and cut by WHOLE characters (Array.from, code points),
- * so an emoji or other 2-unit character is never split in half.
- */
-export function emailSubjectLine(subject: string): string {
-  const flat = subject.replace(SUBJECT_LINE_BREAKS_AND_CONTROLS, ' ').replace(/ {2,}/g, ' ').trim()
-  const chars = Array.from(flat)
-  return chars.length > EMAIL_SUBJECT_MAX ? `${chars.slice(0, EMAIL_SUBJECT_MAX - 1).join('')}…` : flat
-}
-
-/** Renders a template. The subject always leaves as one safe line (emailSubjectLine). */
-export function renderEmail(template: string, payload: unknown): { subject: string; text: string } {
-  const { subject, text } = renderEmailParts(template, payload)
-  return { subject: emailSubjectLine(subject), text }
-}
 
 // ── Enqueue (inside the caller's transaction) ───────────────────────────────────────────────
 export async function enqueueSignupAlert(tx: Tx, applicationId: string, payload: SignupAlertPayload) {
@@ -288,9 +190,10 @@ export async function deliverDueNotifications(deps: DeliverDeps = {}): Promise<D
     }
 
     try {
-      const { subject, text } = renderEmail(n.template, n.payload)
+      // Plain text and HTML together (multipart); createdAt is the "Submitted" time on admin alerts.
+      const { subject, text, html } = renderEmail(n.template, n.payload, { createdAt: n.createdAt })
       // One key per outbox row, the same on every retry: Resend never sends the row twice.
-      const email: OutgoingEmail = { to, subject, text, idempotencyKey: `notification-${n.id}` }
+      const email: OutgoingEmail = { to, subject, text, html, idempotencyKey: `notification-${n.id}` }
       await transport.send(email)
       await db.notification.update({ where: { id: n.id }, data: { status: 'SENT', sentAt: now, heldReason: null, lastError: null } })
       res.sent++

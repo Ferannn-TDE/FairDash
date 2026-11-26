@@ -26,7 +26,7 @@
  *        ignored (BOTH)
  *   [10] no duplicates: the same run twice, and two workers at once
  *   [11] email: production 'none' holds menu emails (bell rows still made); a working transport
- *        sends the draft wording; nothing private in any notification
+ *        sends the approved wording; nothing private in any notification
  *   [12] expiry: with a provider connected, held menu emails older than 48h → EXPIRED, not sent;
  *        younger ones sent; the bell row is untouched; sign-up and decision emails as before;
  *        with no provider nothing expires
@@ -615,7 +615,7 @@ async function main() {
   }
 
   // ── [11] email delivery and privacy ─────────────────────────────────────────────────────────
-  console.log('\n[11] email: held with no provider, the draft wording, nothing private')
+  console.log('\n[11] email: held with no provider, the approved wording, nothing private')
   {
     const none = { kind: 'none' as const, canSend: false, send: async () => { throw new Error('none') } }
     const held = await N.deliverDueNotifications({ transport: none })
@@ -630,10 +630,11 @@ async function main() {
     const m = sent.find(s => s.to[0] === mEmail.email)
     assert(!!m && m.subject === `Booth B removed 1 menu item at ${PFX}Spring Fair` && m.text.includes(`- ${PFX}Dup ($5.00)`)
       && m.text.includes(`https://www.fairsynq.com/organizer/fairs/${fair.urlSlug}/menu-requests`),
-    `with a provider it sends the draft wording (subject "${m?.subject}")`)
+    `with a provider it sends the approved wording (subject "${m?.subject}")`)
     const pr = N.renderEmail('menu_price_change_pending', { alertType: 'MENU_PRICE_CHANGE_PENDING', fairName: 'F', vendorName: 'V', lines: ['a', 'b'], link: 'L' })
+    // email-look-v1: the link line is followed by the plain-text footer.
     assert(pr.subject === '2 price increases are waiting for your approval: V' && pr.text.includes('Nothing changes on the menu until it is approved')
-      && pr.text.endsWith('Approve or reject: L'), `price template: "${pr.subject}"`)
+      && pr.text.includes('\n\nApprove or reject: L\n\nQuestions? Just reply to this email'), `price template: "${pr.subject}"`)
 
     // Nothing private: vendor contact details and Stripe ids never reach any notification.
     const everything = JSON.stringify([
@@ -689,17 +690,16 @@ async function main() {
   console.log('\n[13] source checks')
   {
     const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/(?! DRAFT).*$/gm, '')
+    // The two menu templates and the vendor-override notice were marked DRAFT until Jordan approved
+    // their words (email-look-v1, Nov 25, C4). They now live in lib/email/templates.ts, unmarked.
+    const tmpl = readFileSync('lib/email/templates.ts', 'utf8').replace(/\r\n/g, '\n')
     const notif = readFileSync('lib/notifications.ts', 'utf8').replace(/\r\n/g, '\n')
-    const mark = '// DRAFT – not approved by Jordan; move to branded FairSynq template when built.'
-    const marks = notif.split(mark).length - 1
-    const del = notif.indexOf('if (template === MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED)')
-    const pri = notif.indexOf('if (template === MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING)')
-    // Third draft (Nov 16): the organizer's vendor-override notice (lib/approvals.ts), same rule.
-    const ovr = notif.indexOf('if (template === VENDOR_OVERRIDE_TEMPLATE)')
-    assert(marks === 3 && notif.lastIndexOf(mark, del) > 0 && del - notif.lastIndexOf(mark, del) < mark.length + 5
-      && pri - notif.lastIndexOf(mark, pri) < mark.length + 5
-      && ovr > 0 && ovr - notif.lastIndexOf(mark, ovr) < mark.length + 5,
-    `both menu templates and the vendor-override notice are marked DRAFT on the line above them (${marks} mark(s))`)
+    const marks = (tmpl + notif).split(/DRAFT\s*[–-]\s*not approved/).length - 1
+    const del = tmpl.indexOf('if (template === MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED)')
+    const pri = tmpl.indexOf('if (template === MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING)')
+    const ovr = tmpl.indexOf('if (template === VENDOR_OVERRIDE_TEMPLATE)')
+    assert(marks === 0 && del > 0 && pri > 0 && ovr > 0,
+      `the menu templates and the vendor-override notice are in lib/email/templates.ts with no DRAFT mark (${marks} mark(s))`)
 
     // The clock-race fix stays fixed: no "next tick" call goes back to the bare computer clock
     // ([5b]'s control calls runMenuNotificationDigests directly, on purpose).
