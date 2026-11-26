@@ -30,6 +30,8 @@ const seededOrderIds: string[] = []
 const seededUserIds: string[] = []
 
 async function main() {
+  // No network: the sweep's Stripe reads are stubbed (scripts/_network-stubs.ts).
+  const stubs = await import('./_network-stubs'); stubs.stubStripeSweepReads()
   console.log(`\n${CYN}Phase 6 staging — reconciler backstop + strand alert + Pattern L fix${RESET}\n`)
 
   // SELF-CONTAINED FIXTURE. This used to grab whatever menu item happened to exist and bail
@@ -110,6 +112,7 @@ async function main() {
   check('L caught the delivered order with MISSING earnings', sum.details.L.includes(delBad), `L=[${sum.details.L.join(',')}]`)
   check('L did NOT flag the correctly-accrued delivered order', !sum.details.L.includes(delGood))
 
+  check('[stub] the sweep\'s Stripe reads went to the stub, never the network', stubs.stubCalls.piList > 0, `list ${stubs.stubCalls.piList}, retrieve ${stubs.stubCalls.piRetrieve}`)
   console.log(`\n${'─'.repeat(70)}`)
   console.log(`${pass + fail} checks — ${GRN}${pass} passed${RESET}${fail ? `, ${RED}${fail} failed${RESET}` : ''}`)
   if (fail === 0) {

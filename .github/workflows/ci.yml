@@ -1,0 +1,80 @@
+# CI — the same gate as `npm run gate` on a laptop, on every pull request and every push to main.
+#
+# The required check is the job below, "ci / verify". It runs scripts/gate.sh unchanged, so the rules are the
+# local ones: every suite in scripts/verify-all.ts (typecheck included), judged by exit code, with the same
+# EXPECTED_FAIL list and expiries and the same one-retry flake policy.
+#
+# No secrets. The test database, Redis and the Upstash stand-in are throwaway containers from
+# docker-compose.test.yml (started by the gate itself); Stripe gets no key (lib/stripe falls back to a
+# placeholder) and every suite that touches Stripe uses an in-process spy. The network tripwire refuses any
+# outbound connection that isn't to this machine, and the report step fails the job if any suite tried one or
+# ran without the tripwire loaded.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: ci / verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      # fees-stage4's real-Redis rate-limit check (LOCAL_REDIS_URL). Locally it uses the dev stack's Redis
+      # on the same port (fairsynq-dev-redis, 56379).
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      CI: 'true'
+      CHECKPOINT_DISABLE: '1'        # Prisma update check (a network call)
+      NEXT_TELEMETRY_DISABLED: '1'
+      LOCAL_REDIS_URL: redis://localhost:56379
+    steps:
+      - uses: actions/checkout@v4
+
+      # The repo doesn't declare a Node version (no .nvmrc / engines; adding one could change the Railway worker's
+      # runtime). This matches the version the local gate runs on.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.1'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      # Positive control: the tripwire must refuse a real host and allow localhost, or the report below is vacuous.
+      - name: Network tripwire control
+        env:
+          NODE_OPTIONS: --import ${{ github.workspace }}/scripts/ci/network-tripwire.mjs
+        run: |
+          node -e "
+            fetch('https://api.stripe.com/v1/charges').then(
+              () => { console.error('tripwire control FAILED: api.stripe.com was reached'); process.exit(1) },
+              e => { if (!/network-tripwire/.test(String(e.cause?.message ?? e.message))) { console.error('unexpected error', e); process.exit(1) }
+                     console.log('tripwire control: api.stripe.com refused ✓') })"
+
+      # The gate: starts the test containers, sets up the test schema (prisma db push + the money-settings rows),
+      # flushes the test Redis, runs every suite. Its push stamp (.gate-pass) is written and ignored here.
+      - name: Gate (verify-all, typecheck included)
+        env:
+          NODE_OPTIONS: --import ${{ github.workspace }}/scripts/ci/network-tripwire.mjs
+          NETWORK_TRIPWIRE_LOG: ${{ runner.temp }}/tripwire.log
+        run: npm run gate
+
+      - name: Network tripwire report
+        if: success() || failure()
+        run: node scripts/ci/tripwire-report.mjs "${{ runner.temp }}/tripwire.log"

@@ -168,6 +168,8 @@ const approvalOf   = async (runnerId: string) => (await prisma.runner.findUnique
 const runnerByUser = async (userId: string) => prisma.runner.findUnique({ where: { userId }, select: { id: true, eventId: true, approvalStatus: true, status: true } })
 
 async function main() {
+  // No network: the role sync's Clerk calls are stubbed (scripts/_network-stubs.ts).
+  const stubs = await import('./_network-stubs'); stubs.stubClerkUsers()
   await loadHandlers()
   await cleanup()
   try {
@@ -295,6 +297,7 @@ async function main() {
     )
     assert(await prisma.runner.count({ where: { userId: gNoRow.id } }) === 0, 'entry guard created NO row for the no-row user')
 
+    assert(stubs.stubCalls.clerkGetUser > 0 && stubs.stubCalls.clerkUpdate === 0, `[stub] the role sync reached the Clerk stub (${stubs.stubCalls.clerkGetUser} call(s)), never the network`)
     console.log(`\n── RESULT: ${pass} passed, ${fail} failed ──`)
   } finally {
     await cleanup()
