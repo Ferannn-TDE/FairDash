@@ -66,6 +66,8 @@ const versionMatchesLastUpdated = (version: string, text: string) => versionMatc
 const versionMatchesEffective = (version: string, text: string) => versionMatchesDateLine(version, text, 'Effective')
 
 async function main() {
+  // No network: the role sync's Clerk calls are stubbed (scripts/_network-stubs.ts).
+  const stubs = await import('./_network-stubs'); stubs.stubClerkUsers()
   await cleanup()
   const agreement = await import('../lib/legal/vendor-agreement')
   const archive = await import('../lib/legal/vendor-agreement-2026-01-01')
@@ -198,6 +200,7 @@ async function main() {
   assert(/<RoleAuthCard role="vendor"/.test(signIn), 'the vendor sign-in page renders the shared sign-in shell as vendor')
   assert(/heading: VENDOR_PITCH\.heading/.test(signinCopy) && /points: VENDOR_PITCH\.points\.map/.test(signinCopy)
     && /\{copy\.heading\}/.test(shell) && /points\.map\(\(p\) =>/.test(shell), 'the pitch is rendered on vendor sign-in')
+  assert(stubs.stubCalls.clerkGetUser > 0 && stubs.stubCalls.clerkUpdate === 0, `[stub] the role sync reached the Clerk stub (${stubs.stubCalls.clerkGetUser} call(s)), never the network`)
 }
 
 main()

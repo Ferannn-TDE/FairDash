@@ -46,6 +46,8 @@ async function cleanup() {
 }
 
 async function main() {
+  // No network: the sweep's Stripe reads are stubbed (scripts/_network-stubs.ts).
+  const stubs = await import('./_network-stubs'); stubs.stubStripeSweepReads()
   await cleanup()
   try {
     const ev = await prisma.event.create({ data: { name: `REVT ${rand()}`, urlSlug: `${SLUG}${rand()}`, startDate: new Date(), endDate: new Date(Date.now() + 864e5), status: 'ACTIVE' } })
@@ -129,6 +131,7 @@ async function main() {
     assert(readFileSync('app/api/organizer/fairs/[fairSlug]/orders/[orderId]/refund/route.ts', 'utf8').includes("type: 'organizer'"), "organizer refund threads moneyActor {type:'organizer'}")
     assert(readFileSync('app/api/admin/events/[id]/money/refund/route.ts', 'utf8').includes("type: 'admin'"), "admin refund threads moneyActor {type:'admin'}")
 
+    assert(stubs.stubCalls.piList > 0, `[stub] the sweep's Stripe reads went to the stub (list ${stubs.stubCalls.piList}, retrieve ${stubs.stubCalls.piRetrieve}), never the network`)
     console.log(`\n${'─'.repeat(52)}`)
     console.log(fail === 0 ? `  ✅ ${pass} passed, 0 failed` : `  ❌ ${pass} passed, ${fail} failed`)
   } finally {

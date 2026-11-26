@@ -76,6 +76,8 @@ async function cleanup() {
 }
 
 async function main() {
+  // No network: the role sync's Clerk calls are stubbed (scripts/_network-stubs.ts).
+  const stubs = await import('./_network-stubs'); stubs.stubClerkUsers()
   await cleanup()
   // Isolate from any other suite's rows: this suite only reasons about rows it created.
   await prisma.notification.deleteMany({})
@@ -354,6 +356,7 @@ async function main() {
   // Nothing secret anywhere
   const rsRows = await prisma.notification.findMany({ where: { dedupeKey: { startsWith: RS } }, select: { lastError: true } })
   assert([...dLines, ...tLines, ...rsRows.map(r => r.lastError ?? '')].every(s => !s.includes(KEY)), 'the API key is in no log line and no stored reason')
+  assert(stubs.stubCalls.clerkGetUser > 0 && stubs.stubCalls.clerkUpdate === 0, `[stub] the role sync reached the Clerk stub (${stubs.stubCalls.clerkGetUser} call(s)), never the network`)
 }
 
 main()

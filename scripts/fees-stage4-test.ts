@@ -19,7 +19,7 @@
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/fees-stage4-test.ts
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { parse } from 'dotenv'
 import {
   runPayoutScenarios, comparePayoutGolden, loadPayoutGolden,
@@ -193,8 +193,10 @@ async function main() {
 
     // The Slack limit: once per order per 24 h via a Redis key (the worker's REDIS_URL); sent anyway if Redis is down.
     // Real Redis = the LOCAL dev stack's (localhost, from .env.local), never a shared one; keys removed after.
+    // CI has no .env.local: it sets LOCAL_REDIS_URL to its throwaway Redis service (still checked localhost-only below).
     const alertMod = await import('../lib/partner-earning-alert')
-    const localRedis = parse(readFileSync('.env.local', 'utf8')).REDIS_URL ?? ''
+    const localRedis = process.env.LOCAL_REDIS_URL
+      ?? (existsSync('.env.local') ? parse(readFileSync('.env.local', 'utf8')).REDIS_URL ?? '' : '')
     assert(/^redis:\/\/(localhost|127\.0\.0\.1)[:/]/.test(localRedis), '[0] the real-Redis check runs against the LOCAL dev Redis only')
     const IORedis = (await import('ioredis')).default
     const rds = new IORedis(localRedis, { maxRetriesPerRequest: 1 })

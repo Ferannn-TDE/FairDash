@@ -74,6 +74,8 @@ async function cleanup() {
 }
 
 async function main() {
+  // No network: the role sync's Clerk calls are stubbed (scripts/_network-stubs.ts).
+  const stubs = await import('./_network-stubs'); stubs.stubClerkUsers()
   await cleanup()
   // Any sign-up event left in the test DB by something else would skew [6]; this suite owns them.
   const stray = await prisma.event.count({ where: { listing: EventListing.SIGNUP_ONLY, NOT: { urlSlug: { startsWith: PFX } } } })
@@ -289,6 +291,7 @@ async function main() {
   const unlistedCount = await prisma.event.count({ where: { listing: EventListing.UNLISTED, archivedAt: null, urlSlug: { startsWith: PFX } } })
   assert(unlistedCount === 1 && (await refused(planSignupEvent(db, input(owner.email)))) === 'ALREADY_EXISTS',
     'with an UNLISTED test fair live, the exactly-one rule still sees only the one sign-up event')
+  assert(stubs.stubCalls.clerkGetUser > 0 && stubs.stubCalls.clerkUpdate === 0, `[stub] the role sync reached the Clerk stub (${stubs.stubCalls.clerkGetUser} call(s)), never the network`)
 }
 
 main()

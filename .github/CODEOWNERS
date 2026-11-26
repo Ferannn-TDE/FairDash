@@ -1,0 +1,84 @@
+# CODEOWNERS — which GitHub account is asked to review changes to each area.
+#
+# Area ownership agreed 2026-11-24: the client owns content, forms, the homepage and
+# the legal pages; Feran owns money, the database and production migrations.
+# With the ruleset's 0 required approvals this only REQUESTS a review from the owner; it blocks nothing unless
+# "Require review from Code Owners" is switched on later.
+# The LAST matching line wins, so the money lines come after the broad content lines.
+
+# ── Content, forms, homepage, legal pages → the client ───────────────────────────────────────────────────────
+/app/page.tsx                           @Jtribb
+/app/MarketplaceLanding.tsx             @Jtribb
+/app/home/                              @Jtribb
+/app/faq/                               @Jtribb
+/app/contact/                           @Jtribb
+/app/organizers/                        @Jtribb
+/app/partners/                          @Jtribb
+/app/become-vendor/                     @Jtribb
+/app/become-driver/                     @Jtribb
+/app/terms/                             @Jtribb
+/app/privacy/                           @Jtribb
+/app/refund-policy/                     @Jtribb
+/app/vendor-agreement/                  @Jtribb
+/app/_components/faq-content.ts         @Jtribb
+/app/_components/FAQSection.tsx         @Jtribb
+/app/_components/HomeHeader.tsx         @Jtribb
+/app/_components/HomeAudienceSections.tsx @Jtribb
+/app/_components/HowItWorksSection.tsx  @Jtribb
+/app/_components/ContactSection.tsx     @Jtribb
+/app/_components/LegalDocument.tsx      @Jtribb
+/lib/legal/                             @Jtribb
+/lib/email/                             @Jtribb
+/lib/homepage-copy.ts                   @Jtribb
+/lib/organizer-copy.ts                  @Jtribb
+/lib/partner-copy.ts                    @Jtribb
+/lib/signin-copy.ts                     @Jtribb
+/lib/vendor-pitch.ts                    @Jtribb
+
+# ── Money, payouts, refunds, tax, Stripe → Feran ────────────────────────────────────────────────────────────
+/lib/fees/                              @Ferannn-TDE
+/lib/fee-split.ts                       @Ferannn-TDE
+/lib/process-payout.ts                  @Ferannn-TDE
+/lib/payout-*.ts                        @Ferannn-TDE
+/lib/stuck-payouts.ts                   @Ferannn-TDE
+/lib/vendor-payouts-check.ts            @Ferannn-TDE
+/lib/runner-payout.ts                   @Ferannn-TDE
+/lib/organizer-payout.ts                @Ferannn-TDE
+/lib/runner-earnings.ts                 @Ferannn-TDE
+/lib/runner-fee-gate.ts                 @Ferannn-TDE
+/lib/vendor-earnings.ts                 @Ferannn-TDE
+/lib/partner-earning-alert.ts           @Ferannn-TDE
+/lib/process-refund.ts                  @Ferannn-TDE
+/lib/tip-refund.ts                      @Ferannn-TDE
+/lib/refund-copy.ts                     @Ferannn-TDE
+/lib/process-chargeback.ts              @Ferannn-TDE
+/lib/reverse-accrual.ts                 @Ferannn-TDE
+/lib/reconciler.ts                      @Ferannn-TDE
+/lib/reconcile-order-status.ts          @Ferannn-TDE
+/lib/transfer-existence.ts              @Ferannn-TDE
+/lib/admin-money.ts                     @Ferannn-TDE
+/lib/money-input.ts                     @Ferannn-TDE
+/lib/payee-membership.ts                @Ferannn-TDE
+/lib/event-tax-rates.ts                 @Ferannn-TDE
+/lib/tax-report.ts                      @Ferannn-TDE
+/lib/stripe*.ts                         @Ferannn-TDE
+/lib/prod-write-guard.ts                @Ferannn-TDE
+/lib/prod-db-guard.ts                   @Ferannn-TDE
+/app/api/webhooks/stripe/               @Ferannn-TDE
+/app/api/stripe/                        @Ferannn-TDE
+/app/api/orders/                        @Ferannn-TDE
+/app/api/admin/events/*/money/          @Ferannn-TDE
+/app/api/admin/settings/                @Ferannn-TDE
+/workers/                               @Ferannn-TDE
+
+# ── Database and migrations → Feran ─────────────────────────────────────────────────────────────────────────
+/prisma/                                @Ferannn-TDE
+/scripts/safe-migrate.ts                @Ferannn-TDE
+/scripts/migration-drift.ts             @Ferannn-TDE
+/scripts/with-prod-db.sh                @Ferannn-TDE
+
+# ── The gate and CI itself → Feran ──────────────────────────────────────────────────────────────────────────
+/.github/                               @Ferannn-TDE
+/scripts/gate.sh                        @Ferannn-TDE
+/scripts/verify-all.ts                  @Ferannn-TDE
+/scripts/git-hooks/                     @Ferannn-TDE
