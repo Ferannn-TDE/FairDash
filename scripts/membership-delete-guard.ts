@@ -6,7 +6,7 @@
  * membership rows, preserving only admin-family grants. That dropped any role whose row did not
  * (yet) exist — and roles[] was also written optimistically at signup, before any row existed.
  * Acquiring a second role silently revoked the first. Proven live on 2026-08-01:
- * oodedai@siue.edu signed up as a vendor, acquired organizer, and lost 'vendor'.
+ * a real user signed up as a vendor, acquired organizer, and lost 'vendor'.
  *
  * The fix makes sync UNION rather than replace. The cost of a union is that sync can no longer
  * REMOVE a role — so if a VendorMember / OrgMember / Runner row is ever deleted, roles[] would

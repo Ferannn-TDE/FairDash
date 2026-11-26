@@ -103,3 +103,8 @@ media/
 
 # Client documents and their working copies (BATCH-1 "Client documents"): never in git
 docs/client/
+
+# Internal notes kept locally, untracked since the repo went public (2026-11-26)
+CURRENT_STATE.md
+docs/COST-WORKSHEET.md
+stripe_integrate.md

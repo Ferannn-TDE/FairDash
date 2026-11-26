@@ -86,7 +86,7 @@ export async function syncUserRoleMetadata(
   // UNION, not replace. This used to be `[...dbRoles, ...existing.filter(isAdminFamily)]`,
   // which DISCARDED every non-admin role that had no DB row behind it — and that was reachable,
   // because roles[] was also written optimistically at signup before any membership existed.
-  // Proven live on 2026-08-01: oodedai@siue.edu signed up as a vendor (roles ['vendor'], no
+  // Proven live on 2026-08-01: a real user signed up as a vendor (roles ['vendor'], no
   // VendorMember yet), then acquired organizer; the bootstrap's sync recomputed ['organizer']
   // and silently dropped 'vendor'. Acquiring one role revoked another.
   //
