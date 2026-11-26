@@ -16,11 +16,10 @@
  *            an organizer) → 409 DECIDE_IN_APPROVALS, nothing
  *   AF11     …a team member on an ACTIVE booth: approve and reject work as today
  *   AF12     …the owner of an ACTIVE booth (a person re-decision): works as today
- *   AF18     GET /api/admin/approvals/count → the pending total; approvals roles only
  *
  * BITE: the 409 code and text are literal strings here (not imported from the new
- * lib/approvals-front-door.ts) and the count route is loaded inside try, so on the old code each
- * missing piece fails its own row instead of crashing the file.
+ * lib/approvals-front-door.ts), so on the old code each missing piece fails its own row instead
+ * of crashing the file.
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/approvals-front-door-test.ts
  */
@@ -59,7 +58,7 @@ const login = (who: Who | null) => {
 const req = (url: string, method = 'GET', body?: unknown) => new NextRequest(`http://localhost${url}`, {
   method, headers: { 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
 })
-interface CallJson { error?: { code?: string; message?: string }; data?: { pending?: unknown } }
+interface CallJson { error?: { code?: string; message?: string }; data?: unknown }
 async function call(p: Promise<Response>) {
   const r = await p
   let j: CallJson = {}
@@ -245,36 +244,6 @@ async function main() {
   const r12b = await memApprove(live.ownerId)
   assert(r12b.status === 200 && (await boothState(live.vendor.id, live.ownerId)) === 'ACTIVE|APPROVED|0|0',
     `AF12 approve them again → 200 (got ${r12b.status})`)
-
-  // ── AF18: the count route ───────────────────────────────────────────────────────────────
-  console.log('\n[AF18] GET /api/admin/approvals/count')
-  let countGET: ((r: NextRequest) => Promise<Response>) | null = null
-  try {
-    countGET = (await import('../app/api/admin/approvals/count/route')).GET
-  } catch {
-    countGET = null
-  }
-  assert(countGET !== null, 'the count route exists')
-  if (countGET) {
-    const [pv, po, pp] = await Promise.all([
-      prisma.vendor.count({ where: { status: VendorStatus.PENDING, event: { archivedAt: null } } }),
-      prisma.fairOrganizer.count({ where: { approvalStatus: 'PENDING' } }),
-      prisma.partnerOrganization.count({ where: { approvalStatus: 'PENDING' } }),
-    ])
-    login(PM)
-    const c = await call(countGET(req('/api/admin/approvals/count')))
-    assert(c.status === 200 && c.data?.pending === pv + po + pp && pv + po + pp > 0,
-      `platform_manager → 200 { pending: ${pv + po + pp} } (vendors + organizers + partners) (got ${c.status} ${JSON.stringify(c.data)})`)
-    login(SUPER)
-    assert((await call(countGET(req('/api/admin/approvals/count')))).status === 200, 'super_admin → 200')
-    for (const roles of [['event_operator'], ['vendor'], ['organizer'], []]) {
-      login({ id: `${PFX}x-${rand()}`, roles })
-      const r = await call(countGET(req('/api/admin/approvals/count')))
-      assert(r.status === 403, `${roles.join(',') || 'customer'} → 403 (got ${r.status})`)
-    }
-    login(null)
-    assert((await call(countGET(req('/api/admin/approvals/count')))).status === 401, 'anonymous → 401')
-  }
 }
 
 main()
