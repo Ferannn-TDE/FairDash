@@ -239,59 +239,74 @@ async function main() {
     assert(vPending.canApprove === true && vPending.canReject === true, 'a pending organizer offers Approve / Reject')
     assert(vRejected.canApprove === true, 'a rejected organizer can be reconsidered (the route allows REJECTED → APPROVED)')
 
-    // ── [4] APPROVE → the organizer can now operate (a previously-403’d route succeeds) ─
-    console.log('\n[4] APPROVE: a previously-403’d REAL organizer route starts succeeding')
-    const before = await canOperate(pending.user.clerkId)
+    // ── [4a] a PENDING organizer is decided on Approvals (Jordan, Nov 25) ──────────────
+    console.log('\n[4a] the panel’s Approve on a PENDING organizer → 409 DECIDE_IN_APPROVALS, still blocked')
+    const pendBefore = await canOperate(pending.user.clerkId)
+    assert(pendBefore.ok === false && pendBefore.status === 403 && pendBefore.code === 'ORGANIZER_NOT_APPROVED',
+      `before: GET /api/organizer/vendors (the vendor-approval power) → 403 ORGANIZER_NOT_APPROVED (got ${pendBefore.status} ${pendBefore.code})`)
+    login(admin.clerkId, ['admin'])
+    const pendAppr = await panelApprove(pending.org.id)
+    assert(pendAppr.status === 409 && pendAppr.json?.error?.code === 'DECIDE_IN_APPROVALS',
+      `the panel’s Approve on PENDING → 409 DECIDE_IN_APPROVALS (got ${pendAppr.status} ${pendAppr.json?.error?.code})`)
+    const pendAfter = await canOperate(pending.user.clerkId)
+    assert(pendAfter.ok === false && pendAfter.code === 'ORGANIZER_NOT_APPROVED', 'and the organizer is still blocked: nothing changed')
+
+    // ── [4] APPROVE (a re-decision) → the organizer can now operate ──────────────────────
+    // The rest of the flow runs on the seeded REJECTED organizer: REJECTED → APPROVED is a
+    // re-decision, which stays on this route.
+    const subject = rejected
+    console.log('\n[4] APPROVE (rejected → approved): a previously-403’d REAL organizer route starts succeeding')
+    const before = await canOperate(subject.user.clerkId)
     assert(before.ok === false && before.status === 403, `before: GET /api/organizer/vendors (the vendor-approval power) → 403 (got ${before.status})`)
-    assert(before.code === 'ORGANIZER_NOT_APPROVED', `…with ORGANIZER_NOT_APPROVED (got ${before.code})`)
+    assert(before.code === 'ORGANIZER_REJECTED', `…with ORGANIZER_REJECTED (got ${before.code})`)
 
     login(admin.clerkId, ['admin'])
-    const appr = await panelApprove(pending.org.id)
+    const appr = await panelApprove(subject.org.id)
     assert(appr.status === 200, `the panel’s Approve button (POST) → 200 (got ${appr.status}) — the UI drives the proven route correctly`)
 
-    const after = await canOperate(pending.user.clerkId)
+    const after = await canOperate(subject.user.clerkId)
     assert(after.ok === true, `after: the SAME route now → 200 (got ${after.status}) — approval genuinely unlocks the organizer`)
 
     console.log('\n[4b] the panel RE-READS: the list now reports the new state from the DB')
     login(admin.clerkId, ['admin'])
     const afterList = (await panelList()).json?.data?.organizers ?? []
-    assert(findOrg(afterList, pending.org.id)?.approvalStatus === 'APPROVED', 'the re-read list shows APPROVED (not a locally-patched guess)')
-    assert(findOrg(afterList, pending.org.id)?.approvedBy === admin.clerkId, 'and records WHO approved — audit, on the row')
+    assert(findOrg(afterList, subject.org.id)?.approvalStatus === 'APPROVED', 'the re-read list shows APPROVED (not a locally-patched guess)')
+    assert(findOrg(afterList, subject.org.id)?.approvedBy === admin.clerkId, 'and records WHO approved — audit, on the row')
 
     // ── [5] SUSPEND → immediately blocked. UN-SUSPEND → restored. (A6, via the panel) ───
     console.log('\n[5] SUSPEND (the A6 kill-switch, driven by the panel): immediate block')
     login(admin.clerkId, ['admin'])
-    const susp = await panelSuspend(pending.org.id, true, 'panel test')
+    const susp = await panelSuspend(subject.org.id, true, 'panel test')
     assert(susp.status === 200, `the panel’s Suspend button (PATCH) → 200 (got ${susp.status})`)
 
-    const blocked = await canOperate(pending.user.clerkId)
+    const blocked = await canOperate(subject.user.clerkId)
     assert(blocked.ok === false && blocked.status === 403, `the just-approved organizer is IMMEDIATELY blocked → 403 (got ${blocked.status})`)
     assert(blocked.code === 'ORGANIZER_SUSPENDED', `…with ORGANIZER_SUSPENDED — a DIFFERENT code from NOT_APPROVED (got ${blocked.code})`)
 
     console.log('\n[5b] …and the panel shows it as the OTHER axis: approved, but stopped')
     login(admin.clerkId, ['admin'])
     const suspList = (await panelList()).json?.data?.organizers ?? []
-    const vNow = organizerRowView(findOrg(suspList, pending.org.id))
+    const vNow = organizerRowView(findOrg(suspList, subject.org.id))
     assert(vNow.approval === 'APPROVED' && vNow.operating === 'SUSPENDED', 'the row reads APPROVED + SUSPENDED — "we let them in, then stopped them", which is the truth')
 
     console.log('\n[5c] UN-SUSPEND: restored')
     login(admin.clerkId, ['admin'])
-    const unsusp = await panelSuspend(pending.org.id, false)
+    const unsusp = await panelSuspend(subject.org.id, false)
     assert(unsusp.status === 200, `the panel’s Un-suspend button → 200 (got ${unsusp.status})`)
-    const restored = await canOperate(pending.user.clerkId)
+    const restored = await canOperate(subject.user.clerkId)
     assert(restored.ok === true, `the organizer can operate again → 200 (got ${restored.status})`)
 
     // ── [6] REJECT → terminal, reason required, reason surfaced ────────────────────────
     console.log('\n[6] REJECT: a reason is REQUIRED (the UI disables Confirm without one — the API refuses it)')
     login(admin.clerkId, ['admin'])
-    const blank = await panelReject(pending.org.id, '   ')
+    const blank = await panelReject(subject.org.id, '   ')
     assert(blank.status === 400, `blank reason → 400 (got ${blank.status}) — so the disabled Confirm button matches the API, it isn’t decoration`)
 
     login(admin.clerkId, ['admin'])
-    const rej = await panelReject(pending.org.id, 'did not pass vetting')
+    const rej = await panelReject(subject.org.id, 'did not pass vetting')
     assert(rej.status === 200, `the panel’s Reject button (POST, with reason) → 200 (got ${rej.status})`)
 
-    const rejBlocked = await canOperate(pending.user.clerkId)
+    const rejBlocked = await canOperate(subject.user.clerkId)
     assert(rejBlocked.ok === false, 'a REJECTED organizer is refused by the gate (terminal)')
     assert(rejBlocked.code === 'ORGANIZER_REJECTED', `…with ORGANIZER_REJECTED (got ${rejBlocked.code})`)
     assert(/did not pass vetting/.test(rejBlocked.message ?? ''), 'and the REASON is surfaced to the organizer — they hit an explanation, not a silent wall')
@@ -308,10 +323,10 @@ async function main() {
     // ── [8] the panel never invents a second source of truth ───────────────────────────
     console.log('\n[8] no second source of truth: every figure the panel shows is the DB’s')
     const dbRow = await prisma.fairOrganizer.findUnique({
-      where: { id: pending.org.id },
+      where: { id: subject.org.id },
       select: { approvalStatus: true, rejectionReason: true, suspendedAt: true, approvedBy: true },
     })
-    const uiRow = findOrg(finalList, pending.org.id)
+    const uiRow = findOrg(finalList, subject.org.id)
     assert(uiRow?.approvalStatus === dbRow?.approvalStatus, 'approvalStatus: panel === DB')
     assert(uiRow?.rejectionReason === dbRow?.rejectionReason, 'rejectionReason: panel === DB')
     assert((uiRow?.suspendedAt ?? null) === (dbRow?.suspendedAt?.toISOString() ?? null) || (!uiRow?.suspendedAt && !dbRow?.suspendedAt), 'suspendedAt: panel === DB')

@@ -5,8 +5,15 @@ import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireStrictAdminAuth } from '@/lib/auth'
 import { invalidateVendorAuth } from '@/lib/vendor-auth-cache'
 import { logger } from '@/lib/logger'
+import { DECIDE_IN_APPROVALS_CODE, DECIDE_IN_APPROVALS_TEXT, isBoothApplication } from '@/lib/approvals-front-door'
 
 // PATCH /api/admin/vendor-members/[id]/reject   body: { reason: string }
+//
+// The OWNER of a PENDING booth is a vendor APPLICATION: it is decided only on the Approvals page
+// (Jordan, Nov 25; lib/approvals-front-door.ts), which rejects the booth and the owner together,
+// writes the ApprovalAction and queues the vendor's email. On Nov 25 rejecting such owners here
+// sent no email and left the booth PENDING, so this route now refuses that case with 409
+// DECIDE_IN_APPROVALS and changes nothing.
 //
 // Refuses a HUMAN permission to operate a booth. The booth axis (Vendor.status) is untouched:
 // rejecting the operator does not close the stall, and an ACTIVE booth with a rejected operator
@@ -48,9 +55,12 @@ export async function PATCH(
     const { id } = await params
     const member = await db.vendorMember.findUnique({
       where: { id },
-      select: { id: true, userId: true, vendorId: true, approvalStatus: true },
+      select: { id: true, userId: true, vendorId: true, approvalStatus: true, role: true, vendor: { select: { status: true } } },
     })
     if (!member) throw new ApiError('Vendor operator not found', 404, 'VENDOR_MEMBER_NOT_FOUND')
+    if (isBoothApplication({ role: member.role, boothStatus: member.vendor.status })) {
+      throw new ApiError(DECIDE_IN_APPROVALS_TEXT, 409, DECIDE_IN_APPROVALS_CODE)
+    }
 
     const updated = await db.vendorMember.update({
       where: { id },

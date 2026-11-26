@@ -14,6 +14,11 @@
  * rejects everyone. (The {role:} vs {roles:[]} catch earlier this session was exactly that
  * failure — a helper returning false for every input made the negatives pass vacuously.)
  *
+ * APPROVALS FRONT DOOR (Jordan, Nov 25): a PENDING organizer is an application, decided only on
+ * the Approvals page. Here a strict admin gets 409 DECIDE_IN_APPROVALS on a pending organizer
+ * ([3], proving they passed the gate), and the positive control runs on an organizer rejected
+ * earlier ([3b]): re-decisions still work on these routes.
+ *
  * Run: npx tsx --import ./scripts/_clerk-loader.mjs scripts/organizer-approval-admin-test.ts
  */
 
@@ -114,9 +119,29 @@ async function main() {
     assert(anon.status === 401 || anon.status === 403, `anonymous → ${anon.status} (refused)`)
     assert((await canOperate(org.id)) === false, 'after ALL those attempts the org is STILL pending')
 
-    // ── [3] ✅ POSITIVE CONTROL — a real admin SUCCEEDS on the same route ──────
-    // This is what makes [1]/[2] meaningful: the gate is not simply rejecting everyone.
-    console.log('\n[3] ✅ POSITIVE CONTROL: a STRICT ADMIN approves the same organizer on the same route')
+    // ── [3] a strict admin on a PENDING organizer → decided on Approvals ──────
+    console.log('\n[3] a STRICT ADMIN on the PENDING organizer → 409 DECIDE_IN_APPROVALS (passed the gate, nothing changes)')
+    login(admin.clerkId, ['admin'])
+    const pendApprove = await callApprove(org.id)
+    assert(pendApprove.status === 409 && pendApprove.json?.error?.code === 'DECIDE_IN_APPROVALS'
+      && pendApprove.json?.error?.message === 'Pending applications are decided on the Approvals page.',
+    `admin approve on PENDING → 409 DECIDE_IN_APPROVALS with the fixed text, not 403 (got ${pendApprove.status} ${pendApprove.json?.error?.code})`)
+    login(admin.clerkId, ['admin'])
+    const pendReject = await callReject(org.id, 'not here')
+    assert(pendReject.status === 409 && pendReject.json?.error?.code === 'DECIDE_IN_APPROVALS',
+      `admin reject on PENDING → 409 DECIDE_IN_APPROVALS (got ${pendReject.status} ${pendReject.json?.error?.code})`)
+    const stillPending = await prisma.fairOrganizer.findUnique({ where: { id: org.id }, select: { approvalStatus: true, approvedBy: true, rejectionReason: true } })
+    assert(stillPending?.approvalStatus === 'PENDING' && stillPending.approvedBy === null && stillPending.rejectionReason === null,
+      'still PENDING, nothing written')
+
+    // ── [3b] ✅ POSITIVE CONTROL — a real admin SUCCEEDS on the same route ─────
+    // This is what makes [1]/[2] meaningful: the gate is not simply rejecting everyone. The
+    // organizer is set to REJECTED first (an earlier decision): re-decisions stay on this route.
+    await prisma.fairOrganizer.update({ where: { id: org.id }, data: { approvalStatus: 'REJECTED', rejectionReason: 'earlier no', approvedBy: 'oatest-setup' } })
+    login(owner.clerkId, ['organizer'])
+    const selfAgain = await callApprove(org.id)
+    assert(selfAgain.status === 403 && (await canOperate(org.id)) === false, `⛔ a REJECTED organizer cannot approve themselves either → 403 (got ${selfAgain.status})`)
+    console.log('\n[3b] ✅ POSITIVE CONTROL: a STRICT ADMIN approves the (earlier rejected) organizer on the same route')
     login(admin.clerkId, ['admin'])
     const ok = await callApprove(org.id)
     assert(ok.status === 200, `admin approve → 200 (got ${ok.status}) — so the 403s above were REAL rejections, not a gate that refuses everyone`)
@@ -156,7 +181,7 @@ async function main() {
 
     console.log('\n[8] Option A payoff: a rejected organizer has NO fairs to orphan')
     const fairs = await prisma.event.count({ where: { organizerId: org.id } })
-    assert(fairs === 0, 'the (never-approved) organizer owns 0 fairs — fair creation was gated, so rejection is clean')
+    assert(fairs === 0, 'the organizer owns 0 fairs — fair creation was gated while not approved, so rejection is clean')
 
     console.log(`\n${'─'.repeat(66)}`)
     if (fail === 0) console.log(`  ${pass} passed, 0 failed`)

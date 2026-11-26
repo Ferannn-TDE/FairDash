@@ -205,7 +205,7 @@ export async function decideVendor(vendorId: string, decision: Decision, reasonI
   if (decision === 'approve') {
     await assertReadyToApprove(vendor, boothNumber)
     if (owner?.approvalStatus === 'REJECTED' && !readmit) {
-      throw new ApiError('The owner was rejected separately; resolve that on Booth Operators first.', 409, 'OWNER_REJECTED')
+      throw new ApiError("The owner was rejected separately, so this booth can't be approved yet. You can reject it here.", 409, 'OWNER_REJECTED')
     }
   }
 
