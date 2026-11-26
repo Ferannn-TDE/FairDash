@@ -11,8 +11,7 @@
  * Does NOT detach the user from any other vendor.
  *
  * Usage:
- *   npx tsx scripts/link-user-to-vendor.ts
- *   npx tsx scripts/link-user-to-vendor.ts <email> <vendorId> [role]
+ *   npx tsx scripts/link-user-to-vendor.ts <email> [vendorId] [role]
  */
 import { config } from 'dotenv'
 config({ path: '.env.local' })
@@ -24,8 +23,9 @@ import { addVendorMember } from '../lib/payee-membership'
 assertNotProductionDatabase('link-user-to-vendor.ts')
 const db = new PrismaClient()
 
-// Explicit targets (override via argv). Confirmed values, not guesses:
-const EMAIL = process.argv[2] ?? 'feranodedairo@gmail.com'
+// Explicit targets (override via argv). Confirmed values, not guesses. The email has no default: pass it.
+const EMAIL = process.argv[2]
+if (!EMAIL) { console.error('usage: npx tsx scripts/link-user-to-vendor.ts <email> [vendorId] [role]'); process.exit(2) }
 const VENDOR_ID = process.argv[3] ?? 'cmni6x68q000211znxtpw0076' // ALL PRO TEES
 const ROLE = process.argv[4] ?? 'owner' // owner → can run Stripe Connect onboarding
 
