@@ -6,6 +6,8 @@ import {
   validatePartnerApplication, type PartnerFieldErrors,
 } from '@/lib/partner-application'
 import { fillEmptyFields, PREFILLED_EMAIL_HINT, type ContactPrefill } from '@/lib/contact-prefill'
+import { WEBSITE_TERMS_PATH } from '@/lib/legal/website-terms'
+import { PRIVACY_POLICY_PATH } from '@/lib/legal/privacy-policy'
 
 // The partner application form. Validation is the same module the server runs
 // (lib/partner-application.ts): feedback here, the real gate on POST /api/partners/apply.
@@ -37,13 +39,15 @@ export default function PartnerApplicationForm({ prefill }: { prefill?: ContactP
   }))
   const emailPrefilled = !!prefill?.email.trim()
   const [honeypot, setHoneypot] = useState('')
+  // The required Terms + Privacy box (sign-up-fixes commit 4), recorded on the server.
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [serverErrors, setServerErrors] = useState<PartnerFieldErrors>({})
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState<string | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
 
-  const errors = validatePartnerApplication(form)
+  const errors = validatePartnerApplication({ ...form, agreedToTerms })
   const errorFor = (k: keyof Form) => (touched[k] ? errors[k] ?? serverErrors[k] : serverErrors[k])
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [k]: e.target.value }))
@@ -55,7 +59,7 @@ export default function PartnerApplicationForm({ prefill }: { prefill?: ContactP
     e.preventDefault()
     setFailure(null)
     if (Object.keys(errors).length) {
-      setTouched(Object.fromEntries(Object.keys(EMPTY).map(k => [k, true])))
+      setTouched({ ...Object.fromEntries(Object.keys(EMPTY).map(k => [k, true])), agreedToTerms: true })
       return
     }
     setSubmitting(true)
@@ -63,7 +67,7 @@ export default function PartnerApplicationForm({ prefill }: { prefill?: ContactP
       const res = await fetch('/api/partners/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, [HONEYPOT_FIELD]: honeypot }),
+        body: JSON.stringify({ ...form, agreedToTerms, [HONEYPOT_FIELD]: honeypot }),
       })
       const json = await res.json().catch(() => ({}))
       if (json?.success) { setDone(json.data?.message ?? PARTNER_APPLY_SUCCESS); return }
@@ -145,6 +149,20 @@ export default function PartnerApplicationForm({ prefill }: { prefill?: ContactP
       <div aria-hidden="true" className="absolute -left-[9999px] w-px h-px overflow-hidden">
         <label htmlFor="p-website">Website</label>
         <input id="p-website" name={HONEYPOT_FIELD} tabIndex={-1} autoComplete="off" value={honeypot} onChange={e => setHoneypot(e.target.value)} />
+      </div>
+
+      <div>
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" className="mt-1 accent-neon-pink" checked={agreedToTerms}
+            onChange={e => { setAgreedToTerms(e.target.checked); setTouched(t => ({ ...t, agreedToTerms: true })) }} />
+          <span className="text-sm text-white/90">
+            I agree to the FairSynq{' '}
+            <a href={WEBSITE_TERMS_PATH} target="_blank" rel="noopener noreferrer" className="text-neon-pink underline">Terms</a>
+            {' '}and{' '}
+            <a href={PRIVACY_POLICY_PATH} target="_blank" rel="noopener noreferrer" className="text-neon-pink underline">Privacy Policy</a>
+          </span>
+        </label>
+        {touched.agreedToTerms && errors.agreedToTerms && <p className="mt-1.5 text-xs text-red-400">{errors.agreedToTerms}</p>}
       </div>
 
       {failure && <p role="alert" className="text-sm text-red-400">{failure}</p>}

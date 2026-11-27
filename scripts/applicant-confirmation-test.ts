@@ -128,18 +128,20 @@ async function main() {
   const pEmail = `sam-${rand()}${MAIL}`
   const pName = `${PFX}PTA ${rand()}`
   const p = await partnerPOST(json('/api/partners/apply', 'POST',
-    { name: pName, groupType: 'school', contactName: 'Sam', email: pEmail, phone: '(217) 555-0134', city: 'Alton', state: 'IL' },
+    { name: pName, groupType: 'school', contactName: 'Sam', email: pEmail, phone: '(217) 555-0134', city: 'Alton', state: 'IL', agreedToTerms: true },
     { 'x-forwarded-for': '203.0.113.60' }))
   const pRow = await prisma.partnerOrganization.findFirst({ where: { name: pName }, select: { id: true } })
   const pRows = pRow ? await received('partner', pRow.id) : []
   assert(p.status === 201 && pRows.length === 1 && pRows[0].to === pEmail && pRows[0].audience === 'applicant', `one confirmation to the form email (got ${p.status}, ${pRows.length} row(s))`)
   assert(JSON.stringify(pRows[0]?.payload) === JSON.stringify({ kind: 'partner', name: pName }), 'payload: kind partner and the organization name')
   const dup = await partnerPOST(json('/api/partners/apply', 'POST',
-    { name: pName, groupType: 'school', contactName: 'Sam', email: pEmail, phone: '(217) 555-0134', city: 'Alton', state: 'IL' },
+    { name: pName, groupType: 'school', contactName: 'Sam', email: pEmail, phone: '(217) 555-0134', city: 'Alton', state: 'IL', agreedToTerms: true },
     { 'x-forwarded-for': '203.0.113.60' }))
   assert(dup.status === 200 && pRow ? (await prisma.notification.count({ where: { template: 'application_received', to: pEmail } })) === 1 : false,
     'a second application from the same pending email writes nothing and queues no second confirmation')
-  rl.__resetForTest()
+  // The always-allow limiter stays on for the signed-out driver calls below too (sign-up-fixes
+  // commit 4 rate-limits /api/drivers per connection); the limit itself is tested in
+  // organizer-apply-test. Reset once at the end.
 
   // ── [4] runner ─────────────────────────────────────────────────────────────────────────
   console.log('\n[4] POST /api/drivers')
@@ -165,8 +167,10 @@ async function main() {
   const walk = (dir: string): string[] => (readdirSync(dir, { recursive: true }) as string[])
     .filter(f => /\.(ts|tsx)$/.test(f)).map(f => `${dir}/${f.replace(/\\/g, '/')}`)
   const callers = [...walk('app'), ...walk('lib')].filter(f => /enqueueApplicationReceived\(/.test(readFileSync(f, 'utf8')) && f !== 'lib/notifications.ts')
-  assert(JSON.stringify(callers.sort()) === JSON.stringify(['app/api/drivers/route.ts', 'app/api/partners/apply/route.ts', 'app/api/vendors/route.ts']),
-    `called only by the three application routes (found: ${callers.join(', ')})`)
+  // sign-up-fixes commit 4 adds the organizer: queued by lib/organizer-bootstrap.ts inside the
+  // organizer row's transaction, reached only from POST /api/organizer/apply.
+  assert(JSON.stringify(callers.sort()) === JSON.stringify(['app/api/drivers/route.ts', 'app/api/partners/apply/route.ts', 'app/api/vendors/route.ts', 'lib/organizer-bootstrap.ts']),
+    `called only by the three application routes and the organizer bootstrap (found: ${callers.join(', ')})`)
   for (const f of ['app/api/vendors/route.ts', 'app/api/partners/apply/route.ts', 'app/api/drivers/route.ts']) {
     const src = readFileSync(f, 'utf8')
     const tx = src.indexOf('db.$transaction(async tx')
@@ -192,7 +196,7 @@ async function main() {
 
   rl.__setStateForTest({ type: 'ready', limiters: new Proxy({}, { get: () => allowAll }) as any })
   const partnerApply = (email: string, name: string) => partnerPOST(json('/api/partners/apply', 'POST',
-    { name, groupType: 'school', contactName: 'Sam', email, phone: '(217) 555-0134', city: 'Alton', state: 'IL' },
+    { name, groupType: 'school', contactName: 'Sam', email, phone: '(217) 555-0134', city: 'Alton', state: 'IL', agreedToTerms: true },
     { 'x-forwarded-for': '203.0.113.61' }))
   const pPad = `Pad-${rand()}${MAIL}`
   const ppName = `${PFX}Pad ${rand()}`
@@ -206,7 +210,6 @@ async function main() {
   const psBody: any = await ps.json()
   assert(ps.status === 400 && typeof psBody?.error?.details?.fieldErrors?.email === 'string' && !(await prisma.partnerOrganization.findFirst({ where: { name: psName } })),
     'partner: an all-spaces email is blank: refused with the email field error, nothing written')
-  rl.__resetForTest()
 
   login(null)
   const rPad = `pad-${rand()}${MAIL}`
@@ -227,6 +230,7 @@ async function main() {
     && /contactEmail: savedContactEmail,/.test(readFileSync('app/api/vendors/route.ts', 'utf8')), 'source: the vendor route saves the trimmed email')
   assert(/contactEmail: str\(input\.email\)\.toLowerCase\(\)/.test(readFileSync('lib/partner-application.ts', 'utf8')), 'source: the partner record saves the trimmed, lower-cased email')
   assert(/email: String\(personal\.email\)\.trim\(\),/.test(readFileSync('app/api/drivers/route.ts', 'utf8')), 'source: the runner application saves the trimmed email')
+  rl.__resetForTest()
   assert(stubs.stubCalls.clerkUpdate === 0, '[stub] nothing reached the Clerk network')
 }
 

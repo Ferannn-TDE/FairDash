@@ -18,7 +18,12 @@ export const RATE_LIMITS = {
   publicRoutes:       { requests: 60,  window: '1 m' }, // public reads, signed in, per user
   publicAnonymous:    { requests: 600, window: '1 m' }, // public reads, signed out, per IP — a fair crowd can share one IP
   partnerApply:       { requests: 3,   window: '1 h' }, // public partner application form, per IP (item 7)
+  // Application forms (sign-up-fixes commit 4). Each also caps its body at 10 KB (lib/read-json-body).
+  vendorApply:        { requests: 10,  window: '1 h' }, // POST /api/vendors, per user (one application per fair)
+  organizerApply:     { requests: 5,   window: '1 h' }, // POST /api/organizer/apply, per user
+  runnerApply:        { requests: 5,   window: '1 h' }, // POST /api/drivers, per user when signed in, else per IP
 } as const
+// Their one 429 sentence (Jordan, Nov 27) is APPLY_RATE_LIMITED_MESSAGE in lib/application-limits.ts.
 
 export type RateLimitPolicy = keyof typeof RATE_LIMITS
 type Duration = Parameters<typeof Ratelimit.slidingWindow>[1]

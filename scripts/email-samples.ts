@@ -69,6 +69,21 @@ export const EMAIL_SAMPLES: EmailSample[] = [
   // C6: an organizer with no name is stored under their email; the email shows "(no name given)".
   admin('admin-organizer-no-name', 'organizer', 'organizer', { name: 'lee@example.com', contactName: null, email: 'lee@example.com', phone: null }, '(no name given)', 'lee@example.com'),
   admin('admin-partner', 'partner', 'partner organization', { name: 'Rotary Club', contactName: 'Sam Lee', email: 'sam@example.com', phone: '555-0102' }, 'Rotary Club', 'Sam Lee, sam@example.com, 555-0102'),
+  // sign-up-fixes commit 4: an organizer who applied with their event — Event, Where and Dates rows.
+  {
+    id: 'admin-organizer-with-event', template: 'signup_admin_alert', variant: 'admin',
+    payload: {
+      kind: 'organizer', name: 'County Fair Board', contactName: 'Lee Park', email: 'lee@example.com', phone: '+12175550134',
+      event: { name: 'County Fair', city: 'Alton', state: 'IL', startDate: '2027-06-05', endDate: '2027-06-07' },
+    },
+    expect: {
+      subject: 'New organizer application: County Fair Board',
+      text: `County Fair Board applied to join FairSynq as an organizer. Contact: Lee Park, lee@example.com, +12175550134. Event: County Fair, Alton, IL, Jun 5 – Jun 7, 2027. Review it at ${SITE}/admin/approvals`,
+      heading: 'New organizer application',
+      preheader: 'County Fair Board applied to join FairSynq.',
+      button: { label: 'Review application', url: `${SITE}/admin/approvals` },
+    },
+  },
 
   // E2 — approved (C3: new subjects)
   {
@@ -99,6 +114,17 @@ export const EMAIL_SAMPLES: EmailSample[] = [
       text: `Hi County Fair Board, your organizer account is approved. Sign in to create your first fair: ${SITE}/organizer/login`,
       heading: "You're approved", preheader: 'Your organizer account is ready.',
       button: { label: 'Create your first fair', url: `${SITE}/organizer/login` },
+    },
+  },
+  // sign-up-fixes commit 4: approved with the draft saved at sign-up — the button finishes it.
+  {
+    id: 'approved-organizer-with-draft', template: 'decision_approved', variant: 'standard',
+    payload: { kind: 'organizer', name: 'County Fair Board', contactName: null, draft: { name: 'County Fair', slug: 'county-fair' } },
+    expect: {
+      subject: 'Your FairSynq organizer account is approved',
+      text: `Hi County Fair Board, your organizer account is approved. Sign in to finish setting up County Fair: ${SITE}/organizer/login?redirect=%2Forganizer%2Ffairs%2Fnew%3Fdraft%3Dcounty-fair`,
+      heading: "You're approved", preheader: 'Your organizer account is ready.',
+      button: { label: 'Finish setting up County Fair', url: `${SITE}/organizer/login?redirect=%2Forganizer%2Ffairs%2Fnew%3Fdraft%3Dcounty-fair` },
     },
   },
   {
@@ -207,6 +233,8 @@ export function hostileSamples(): { id: string; template: string; payload: Recor
     { id: 'hostile-approved', template: 'decision_approved', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, decidedBy: HOSTILE } },
     { id: 'hostile-declined', template: 'decision_rejected', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, reason: HOSTILE, decidedBy: HOSTILE } },
     { id: 'hostile-received', template: 'application_received', payload: { kind: 'vendor', name: HOSTILE } },
+    { id: 'hostile-admin-event', template: 'signup_admin_alert', payload: { kind: 'organizer', name: HOSTILE, contactName: HOSTILE, email: 'a@example.com', phone: null, event: { name: HOSTILE, city: HOSTILE, state: 'IL', startDate: '2027-06-05', endDate: '2027-06-07' } } },
+    { id: 'hostile-approved-draft', template: 'decision_approved', payload: { kind: 'organizer', name: HOSTILE, contactName: null, draft: { name: HOSTILE, slug: 'x"><script>' } } },
     { id: 'hostile-override', template: 'vendor_override_organizer', payload: { vendorName: HOSTILE, fairName: HOSTILE, decision: 'rejected', reason: HOSTILE, link: OVERRIDE_LINK } },
     { id: 'hostile-deleted', template: 'menu_items_deleted', payload: { alertType: 'MENU_ITEMS_DELETED', fairName: HOSTILE, vendorName: HOSTILE, lines: [HOSTILE], link: MENU_LINK } },
     { id: 'hostile-price', template: 'menu_price_change_pending', payload: { alertType: 'MENU_PRICE_CHANGE_PENDING', fairName: HOSTILE, vendorName: HOSTILE, lines: [HOSTILE], link: MENU_LINK } },

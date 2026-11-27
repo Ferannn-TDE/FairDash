@@ -36,6 +36,9 @@ register('./_route-loader.mjs', import.meta.url)
 
 import { readFileSync } from 'node:fs'
 import { NextRequest } from 'next/server'
+import type { RateLimitState } from '../lib/ratelimit'
+
+type Limiters = Extract<RateLimitState, { type: 'ready' }>['limiters']
 
 const prisma = testPrisma()
 const PFX = 'phe-'
@@ -167,6 +170,11 @@ async function main() {
   // ── [4] driver application ─────────────────────────────────────────────────────────────
   console.log('\n[4] POST /api/drivers')
   login(null)
+  // /api/drivers is rate-limited per connection since sign-up-fixes commit 4; these signed-out
+  // calls run with the always-allow test limiter (the limit itself: organizer-apply-test).
+  const rl = await import('../lib/ratelimit')
+  const allowAll = { limit: async () => ({ success: true, limit: 5, remaining: 5, reset: Date.now() + 3600e3 }) }
+  rl.__setStateForTest({ type: 'ready', limiters: new Proxy({}, { get: () => allowAll }) as unknown as Limiters })
   const driversPOST = (await import('../app/api/drivers/route')).POST
   const apply = async (phone: string) => {
     const email = `d-${rand()}${MAIL}`
@@ -184,6 +192,7 @@ async function main() {
   const goodApp = await apply('(217) 555-0134')
   const appRow = await prisma.runnerApplication.findFirst({ where: { email: goodApp.email }, select: { phone: true } })
   assert(goodApp.status < 300 && appRow?.phone === GOOD, `a good phone → accepted, saved as ${GOOD} (got ${goodApp.status}, ${appRow?.phone})`)
+  rl.__resetForTest()
 
   // ── [5] driver settings ────────────────────────────────────────────────────────────────
   console.log('\n[5] PATCH /api/runners/me')

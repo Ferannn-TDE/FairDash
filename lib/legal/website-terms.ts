@@ -5,6 +5,10 @@
 // 2026-11-23), byte for byte: scripts/legal-pages-test.ts locks its SHA-256. It is markdown,
 // rendered by app/_components/LegalDocument.tsx.
 
+/** The version recorded when someone accepts these terms: the text's "Effective" date (sign-up-fixes
+ *  commit 4). scripts/organizer-apply-test.ts checks it matches the "Effective …" line below. */
+export const WEBSITE_TERMS_VERSION = '2026-11-23'
+
 export const WEBSITE_TERMS_TEXT = `# Website Terms of Service
 
 Effective November 23, 2026

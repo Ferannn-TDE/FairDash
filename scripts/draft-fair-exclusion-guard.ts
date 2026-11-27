@@ -138,7 +138,7 @@ function main() {
   // ── [4] THE ACQUISITION GATE ────────────────────────────────────────────────
   console.log('\n[4] ⛔ a DRAFT fair cannot acquire a Vendor or a Runner')
   let threw: unknown = null
-  try { assertFairAcceptsJoins(EventStatus.DRAFT, 'Test Fair') } catch (e) { threw = e }
+  try { assertFairAcceptsJoins(EventStatus.DRAFT) } catch (e) { threw = e }
   assert(threw !== null, 'a DRAFT is refused by the gate')
   assert((threw as { code?: string })?.code === FAIR_NOT_JOINABLE,
     `refused with the NAMED code ${FAIR_NOT_JOINABLE} (got ${(threw as { code?: string })?.code}) — not a generic 403`)

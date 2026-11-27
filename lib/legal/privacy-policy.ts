@@ -4,6 +4,10 @@
 // 2026-11-23), byte for byte: scripts/legal-pages-test.ts locks its SHA-256. It is markdown,
 // rendered by app/_components/LegalDocument.tsx.
 
+/** The version recorded when someone accepts this policy: the text's "Effective" date (sign-up-fixes
+ *  commit 4). scripts/organizer-apply-test.ts checks it matches the "Effective …" line below. */
+export const PRIVACY_POLICY_VERSION = '2026-11-23'
+
 export const PRIVACY_POLICY_TEXT = `# Privacy Policy
 
 Effective November 23, 2026

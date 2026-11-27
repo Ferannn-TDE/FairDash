@@ -87,12 +87,17 @@ async function main() {
     assert(/approvalStatus: true/.test(authSrc),
       'requireOrganizerAuth SELECTS approvalStatus fresh per request (no token lag)')
 
-    // Fair creation being gated ⇒ a pending organizer can never accumulate a fair ⇒ no
-    // orphaned-fair problem on rejection. That's the whole reason Option A is free.
-    console.log('\n[5] because FAIR CREATION is gated, a pending organizer can never own a fair')
+    // Fair creation through the WIZARD stays gated. Since sign-up-fixes commit 4 a pending
+    // organizer may own exactly one kind of fair: the hidden DRAFT their sign-up form saved
+    // (Jordan Nov 26; organizer spec 2.3). Rejection archives it and frees its address
+    // (lib/approvals.ts decideOrganizer; scripts/organizer-apply-test.ts proves both).
+    console.log('\n[5] wizard FAIR CREATION is gated; a pending organizer owns at most their sign-up draft')
     const fairsSrc = readFileSync('app/api/organizer/fairs/route.ts', 'utf8')
     assert(/export async function POST[\s\S]{0,200}requireOrganizerAuth/.test(fairsSrc),
-      'POST /organizer/fairs (create) is behind the gate → no half-built fair to orphan on rejection')
+      'POST /organizer/fairs (wizard create) is behind the gate')
+    const approvalsSrc = readFileSync('lib/approvals.ts', 'utf8')
+    assert(/archivedAt, urlSlug: rejectedDraftSlug\(/.test(approvalsSrc),
+      'rejecting an organizer archives their sign-up draft and frees its address (no orphaned public fair)')
 
     // ── [6] ✅ THE PRODUCTION-CRITICAL POSITIVE: grandfathered orgs still work ──
     console.log('\n[6] ✅ GRANDFATHER: every pre-existing organizer is APPROVED (nobody locked out)')

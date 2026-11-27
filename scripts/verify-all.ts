@@ -120,6 +120,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'approvals-front-door',   file: 'scripts/approvals-front-door-test.ts' },
   { group: 'correctness', name: 'notifications',          file: 'scripts/notifications-test.ts' },
   { group: 'correctness', name: 'applicant-confirmation', file: 'scripts/applicant-confirmation-test.ts' },
+  { group: 'security',    name: 'organizer-apply',        file: 'scripts/organizer-apply-test.ts' },
   { group: 'security',    name: 'resend-transport',       file: 'scripts/resend-transport-test.ts' },
   // Every email through the one FairSynq layout: html + plain text, escaped input, no images.
   { group: 'security',    name: 'email-layout',           file: 'scripts/email-layout-test.ts' },

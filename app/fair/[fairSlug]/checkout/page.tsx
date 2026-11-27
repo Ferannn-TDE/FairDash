@@ -588,7 +588,7 @@ export default function CheckoutPage() {
           return
         }
         const message: string | undefined = json.error?.message
-        const fields =(json.error?.details as { fields?: DeliveryAddressError[] } | undefined)?.fields
+        const fields = (json.error?.details as { fields?: DeliveryAddressError[] } | undefined)?.fields
         if (fields?.length) {
           setFieldErrors(Object.fromEntries(fields.map(e => [FIELD_INPUT[e.field], e.message])))
           toast.error(message ?? 'Please check the delivery address')

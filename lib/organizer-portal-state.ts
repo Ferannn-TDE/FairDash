@@ -63,3 +63,18 @@ export function organizerPortalState(
 
   return { state: 'ACTIVE', message: null, reason: null }
 }
+
+/**
+ * The extra lines on the "Application under review" screen (sign-up-fixes commit 4; wording
+ * Jordan, Nov 26). Each shows only when its fact is true: the confirmation line only when a
+ * confirmation email was actually queued for this organizer (never a promise we didn't keep), the
+ * event line only when the sign-up form saved a draft. With neither, the screen is unchanged.
+ */
+export function organizerAwaitingLines(facts: { confirmationSentTo: string | null; draftEventName: string | null }): string[] {
+  const lines: string[] = []
+  if (facts.confirmationSentTo) lines.push(`We sent a confirmation to ${facts.confirmationSentTo}.`)
+  if (facts.draftEventName) {
+    lines.push(`Your event, ${facts.draftEventName}, is saved. Once you're approved, you can finish setting it up. You'll be able to change these details after approval.`)
+  }
+  return lines
+}

@@ -5,6 +5,8 @@ import { ApiError, handleApiError } from '@/lib/api-error'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { logger } from '@/lib/logger'
 import { enqueueSignupAlert, enqueueApplicationReceived } from '@/lib/notifications'
+import { WEBSITE_TERMS_VERSION } from '@/lib/legal/website-terms'
+import { PRIVACY_POLICY_VERSION } from '@/lib/legal/privacy-policy'
 import { normalizePartnerApplication, validatePartnerApplication, PARTNER_APPLY_SUCCESS, PARTNER_APPLY_DUPLICATE, HONEYPOT_FIELD } from '@/lib/partner-application'
 
 // POST /api/partners/apply — the public partner organization application (Batch 1 item 7, B1.11).
@@ -51,6 +53,15 @@ export async function POST(req: NextRequest) {
       await enqueueSignupAlert(tx, created.id, { kind: 'partner', name: app.name, contactName: app.contactName, email: app.contactEmail, phone: app.contactPhone })
       // The applicant's confirmation, to the email on the form (sign-up-fixes commit 2).
       await enqueueApplicationReceived(tx, created.id, app.contactEmail, { kind: 'partner', name: app.name })
+      // Terms + Privacy acceptance (sign-up-fixes commit 4): action TERMS_ACCEPTED, never a decision.
+      // Partners apply signed out, so the actor is 'signed-out' (the request IP is on the partner row).
+      await tx.approvalAction.create({
+        data: {
+          action: 'TERMS_ACCEPTED', applicationType: 'partner', applicationId: created.id,
+          actorId: 'signed-out', actorType: 'applicant', actorName: app.contactName,
+          detail: { terms: WEBSITE_TERMS_VERSION, privacy: PRIVACY_POLICY_VERSION },
+        },
+      })
       return created
     })
     logger.info('[Partners] Application received', { partnerId: row.id, name: app.name, state: app.state })

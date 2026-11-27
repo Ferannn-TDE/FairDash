@@ -10,6 +10,9 @@ import { validateApplication } from '@/lib/runner-application-validation'
 import { createRunnerRecord } from '@/lib/payee-membership'
 import { normalizeUsPhone } from '@/lib/phone'
 import { enqueueApplicationReceived } from '@/lib/notifications'
+import { enforceRateLimit } from '@/lib/ratelimit'
+import { readJsonBody } from '@/lib/read-json-body'
+import { APPLY_RATE_LIMITED, APPLY_RATE_LIMITED_MESSAGE } from '@/lib/application-limits'
 
 // GET  /api/drivers  — list driver applications (admin only, stub)
 // POST /api/drivers  — submit driver application (public + auth optional)
@@ -20,8 +23,20 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { personal, agreed, bgConsent, termsVersion, fairSlug } = body ?? {}
+    // Application limits (sign-up-fixes commit 4, review finding 1): this route works signed out and
+    // emails a confirmation to the typed address, so it is limited — 5 per hour per user when signed
+    // in, else per connection — and the body is capped at 10 KB.
+    const limitUserId = await getOptionalUserId()
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown'
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(`runner-apply:${limitUserId ?? `ip:${ip}`}`, 'runnerApply')
+    if (!allowed) {
+      const res = apiError(APPLY_RATE_LIMITED_MESSAGE, 429, APPLY_RATE_LIMITED)
+      for (const [k, v] of Object.entries(rlHeaders)) res.headers.set(k, v)
+      return res
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- validated by validateApplication below
+    const body = await readJsonBody(req) as Record<string, any>
+    const { personal, agreed, bgConsent, termsVersion, fairSlug } = body
 
     // REAL enforcement. The wizard runs these same rules for per-field feedback, but a
     // client gate is UX only — this is the gate that counts. Same module, so the two

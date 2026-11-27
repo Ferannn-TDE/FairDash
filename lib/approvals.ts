@@ -29,8 +29,9 @@
 //                      asked fresh, the checklist). A REJECTED owner row is re-admitted (APPROVED).
 //   rejectLiveVendor — an ACTIVE / PAUSED / SUSPENDED booth rejected: reason required; owner untouched.
 
-import { VendorStatus, type Prisma } from '@prisma/client'
+import { EventStatus, VendorStatus, type Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
+import { organizerDraftScope } from '@/lib/organizer-fair-context'
 import { ApiError } from '@/lib/api-error'
 import { REQUIRED_VENDOR_DOCS, VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
 import { GO_LIVE_LABELS, GO_LIVE_VENDOR_SELECT, vendorGoLiveRefusal } from '@/lib/vendor-go-live'
@@ -168,7 +169,9 @@ async function queueVendorDecisionMail(tx: Prisma.TransactionClient, vendor: Dec
 }) {
   const decidedBy = reviewerLabel({ kind: 'vendor' }, { actorType: args.actor.actorType, actorName: args.actorName, detail: args.ctx.detail })
   const owner = vendor.vendorMembers[0] ?? null
-  await enqueueDecisionEmail(tx, vendor.id, args.decision === 'approve' ? 'approved' : 'rejected', vendor.contactEmail ?? owner?.user.email ?? null,
+  // The form email, or the owner's sign-in email when it is blank (sign-up-fixes commit 4: a
+  // blank or all-spaces form email no longer swallows the decision email).
+  await enqueueDecisionEmail(tx, vendor.id, args.decision === 'approve' ? 'approved' : 'rejected', vendor.contactEmail?.trim() || owner?.user.email || null,
     { kind: 'vendor', name: vendor.name, contactName: vendor.contactName, decidedBy, ...(args.decision === 'reject' && args.reason ? { reason: args.reason } : {}) },
     args.laterDecision ? args.actionId : undefined)
   if (args.ctx.override) {
@@ -325,13 +328,35 @@ export async function rejectLiveVendor(vendorId: string, reasonIn: unknown, acto
 }
 
 // ── Organizer (platform-wide account) ───────────────────────────────────────────────────────
+/** A rejected organizer's draft gives up its address: "<slug>-rejected-<last 8 of the event id>". */
+export function rejectedDraftSlug(slug: string, eventId: string): string {
+  return `${slug}-rejected-${eventId.slice(-8)}`
+}
+
 export async function decideOrganizer(organizerId: string, decision: Decision, reasonIn: unknown, actor: Actor) {
   const reason = requireReason(decision, reasonIn)
-  const org = await db.fairOrganizer.findUnique({ where: { id: organizerId }, select: { id: true, name: true, contactEmail: true, approvalStatus: true } })
+  const org = await db.fairOrganizer.findUnique({
+    where: { id: organizerId },
+    select: {
+      id: true, name: true, contactEmail: true, approvalStatus: true,
+      members: { where: { role: 'owner' }, orderBy: { createdAt: 'asc' }, take: 1, select: { user: { select: { email: true } } } },
+    },
+  })
   if (!org) throw new ApiError('Organizer not found', 404, 'ORGANIZER_NOT_FOUND')
   if (org.approvalStatus !== 'PENDING') throw alreadyDecided()
   const actorName = await recordedActorName(actor)
+  // The decision email goes to the organization email, or the owner's sign-in email when it is
+  // blank (sign-up-fixes commit 4).
+  const to = org.contactEmail?.trim() || org.members[0]?.user.email || null
   await db.$transaction(async tx => {
+    // The event saved at sign-up (sign-up-fixes commit 4). Approve: left exactly as it is, and the
+    // email's button finishes it. Reject: archived, and its address (urlSlug) freed for anyone else
+    // by renaming it, in this same transaction.
+    const drafts = await tx.event.findMany({
+      where: organizerDraftScope(organizerId),
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true, urlSlug: true },
+    })
     const flip = await tx.fairOrganizer.updateMany({
       where: { id: organizerId, approvalStatus: 'PENDING' },
       // Same field writes as the existing organizer approve/reject routes (approvedBy = Clerk id).
@@ -341,7 +366,14 @@ export async function decideOrganizer(organizerId: string, decision: Decision, r
     })
     if (flip.count === 0) throw alreadyDecided()
     await tx.approvalAction.create({ data: { action: decision === 'approve' ? 'APPROVE' : 'REJECT', applicationType: 'organizer', applicationId: organizerId, actorId: actor.clerkId, actorType: actor.actorType, actorName, reason } })
-    await enqueueDecisionEmail(tx, organizerId, decision === 'approve' ? 'approved' : 'rejected', org.contactEmail, { kind: 'organizer', name: org.name, contactName: null, ...(reason ? { reason } : {}) })
+    if (decision === 'reject') {
+      const archivedAt = new Date()
+      for (const d of drafts) {
+        await tx.event.update({ where: { id: d.id }, data: { archivedAt, urlSlug: rejectedDraftSlug(d.urlSlug, d.id) } })
+      }
+    }
+    const draft = decision === 'approve' && drafts[0] ? { name: drafts[0].name, slug: drafts[0].urlSlug } : undefined
+    await enqueueDecisionEmail(tx, organizerId, decision === 'approve' ? 'approved' : 'rejected', to, { kind: 'organizer', name: org.name, contactName: null, ...(reason ? { reason } : {}), ...(draft ? { draft } : {}) })
   })
   return { id: organizerId, status: decision === 'approve' ? 'APPROVED' : 'REJECTED' }
 }
@@ -386,9 +418,31 @@ export async function listPendingApplications() {
         vendorMembers: { where: { role: 'owner' }, select: { approvalStatus: true }, take: 1 },
       },
     }),
-    db.fairOrganizer.findMany({ where: { approvalStatus: 'PENDING' }, orderBy: { createdAt: 'asc' }, select: { id: true, name: true, contactEmail: true, contactPhone: true, createdAt: true } }),
+    db.fairOrganizer.findMany({
+      where: { approvalStatus: 'PENDING' }, orderBy: { createdAt: 'asc' },
+      select: {
+        id: true, name: true, contactEmail: true, contactPhone: true, createdAt: true,
+        // The event saved with the sign-up form (sign-up-fixes commit 4), for the card.
+        fairs: {
+          where: { status: EventStatus.DRAFT, archivedAt: null }, orderBy: { createdAt: 'asc' }, take: 1,
+          select: { name: true, venueCity: true, venueState: true, startDate: true, endDate: true },
+        },
+      },
+    }),
     db.partnerOrganization.findMany({ where: { approvalStatus: 'PENDING' }, orderBy: { createdAt: 'asc' } }),
   ])
+  // Terms + Privacy acceptances (ApprovalAction TERMS_ACCEPTED, sign-up-fixes commit 4), newest per application.
+  const terms = await db.approvalAction.findMany({
+    where: { action: 'TERMS_ACCEPTED', applicationId: { in: [...organizers.map(o => o.id), ...partners.map(p => p.id)] } },
+    orderBy: { createdAt: 'desc' },
+    select: { applicationId: true, detail: true, createdAt: true },
+  })
+  const termsOf = (id: string) => {
+    const t = terms.find(r => r.applicationId === id)
+    if (!t) return null
+    const d = (t.detail ?? {}) as { terms?: string; privacy?: string }
+    return { terms: d.terms ?? null, privacy: d.privacy ?? null, at: t.createdAt }
+  }
   return {
     vendors: vendors.map(v => ({
       id: v.id, name: v.name, cuisineType: v.cuisineType, description: v.description,
@@ -400,11 +454,16 @@ export async function listPendingApplications() {
       ownerStatus: v.vendorMembers[0]?.approvalStatus ?? null,
       documents: REQUIRED_VENDOR_DOCS.map(d => ({ key: d, label: VENDOR_DOC_LABELS[d], onFile: v[DOC_PATH[d]] !== null })),
     })),
-    organizers,
+    organizers: organizers.map(o => ({
+      id: o.id, name: o.name, contactEmail: o.contactEmail, contactPhone: o.contactPhone, createdAt: o.createdAt,
+      draft: o.fairs[0] ?? null,
+      termsAccepted: termsOf(o.id),
+    })),
     partners: partners.map(p => ({
       id: p.id, name: p.name, groupType: p.groupType, groupTypeOther: p.groupTypeOther,
       contactName: p.contactName, contactEmail: p.contactEmail, contactPhone: p.contactPhone, city: p.city, state: p.state,
       interests: p.interests, staffHours: p.staffHours, note: p.note, createdAt: p.createdAt,
+      termsAccepted: termsOf(p.id),
     })),
   }
 }

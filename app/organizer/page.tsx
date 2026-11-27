@@ -28,6 +28,11 @@ interface Order {
   items: { id: string; name: string; quantity: number }[]
 }
 
+/** A DRAFT fair (GET /api/organizer/fairs/drafts): the event saved with the sign-up form, or a
+ *  wizard "Save Draft". The dashboard's fair list leaves drafts out, so the first one gets its own
+ *  card here (sign-up-fixes commit 4). */
+interface DraftFair { name: string; slug: string; createdAt: string }
+
 interface Stats {
   activeFairs: number
   totalOrders: number
@@ -68,6 +73,9 @@ export default function OrganizerDashboard() {
   const statsQuery  = useQuery({ queryKey: ['organizer-stats'],        queryFn: () => fetchJson<Stats>('/api/organizer/stats') })
   const fairsQuery  = useQuery({ queryKey: ['organizer-fairs-sidebar'], queryFn: () => fetchJson<{ fairs: Fair[] }>('/api/organizer/fairs') })
   const ordersQuery = useQuery({ queryKey: ['organizer-recent-orders'], queryFn: () => fetchJson<{ orders: Order[] }>('/api/organizer/orders?limit=10') })
+  // Same query key as the drafts list on /organizer/fairs, so both stay in step.
+  const draftsQuery = useQuery({ queryKey: ['organizer-fair-drafts'], queryFn: () => fetchJson<{ drafts: DraftFair[] }>('/api/organizer/fairs/drafts') })
+  const firstDraft = [...(draftsQuery.data?.drafts ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] ?? null
 
   const stats   = statsQuery.data ?? null
   const fairs   = fairsQuery.data?.fairs ?? []
@@ -88,6 +96,17 @@ export default function OrganizerDashboard() {
           + New Fair
         </Link>
       </div>
+
+      {/* The draft event (sign-up-fixes commit 4): finish it in the wizard, prefilled. */}
+      {firstDraft && (
+        <Link
+          href={`/organizer/fairs/new?draft=${encodeURIComponent(firstDraft.slug)}`}
+          className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-[#FF0077]/30 bg-[#FF0077]/[0.06] p-4 sm:p-5 hover:border-[#FF0077]/60 transition-colors"
+        >
+          <span className="text-white font-semibold text-sm sm:text-base">Finish setting up {firstDraft.name}</span>
+          <span className="text-[#FF0077] text-sm font-semibold whitespace-nowrap">Continue →</span>
+        </Link>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

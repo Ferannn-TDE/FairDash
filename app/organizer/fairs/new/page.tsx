@@ -89,7 +89,7 @@ function Step1({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) =
 function Step2({ data, onChange }: { data: FairDraft; onChange: (d: FairDraft) => void }) {
   const set = (k: keyof FairDraft, v: string) => onChange({ ...data, [k]: v })
 
-  // Creation rule (no past, hard 3-month horizon) lives in lib/calendar-date beside the edit
+  // Creation rule (no past, hard 18-month horizon since sign-up-fixes 4) lives in lib/calendar-date beside the edit
   // rule, so the two can be compared — and so date-bounds-guard can assert the EDIT form never
   // locks an admin out of a running fair. Computed once per mount: a stable identity keeps
   // DayPicker from re-clamping its month on every keystroke elsewhere in the form.
