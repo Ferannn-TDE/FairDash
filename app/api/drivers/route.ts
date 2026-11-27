@@ -9,6 +9,7 @@ import { logger } from '@/lib/logger'
 import { validateApplication } from '@/lib/runner-application-validation'
 import { createRunnerRecord } from '@/lib/payee-membership'
 import { normalizeUsPhone } from '@/lib/phone'
+import { enqueueApplicationReceived } from '@/lib/notifications'
 
 // GET  /api/drivers  — list driver applications (admin only, stub)
 // POST /api/drivers  — submit driver application (public + auth optional)
@@ -53,24 +54,32 @@ export async function POST(req: NextRequest) {
 
     // Persist the application (status PENDING). This is NOT a Runner row — Runner is
     // event-scoped and created by an admin when assigning the driver to a fair.
-    const application = await db.runnerApplication.create({
-      data: {
-        userId: applicant?.id ?? null,
-        firstName: String(personal.firstName).trim(),
-        lastName: String(personal.lastName).trim(),
-        email: String(personal.email).trim(),
-        phone,
-        dateOfBirth,
-        city: personal.city?.trim() || null,
-        // Vehicle columns are left null: sign-up no longer asks for a vehicle (Driver Terms
-        // 2026-11-04). Applications from before then keep theirs.
-        termsAgreed: true,
-        backgroundCheckConsent: true,
-        termsVersion: termsVersion ?? null,
-        termsAcceptedAt: new Date(),
-        termsAcceptedIp: acceptedIp,
-      },
-      select: { id: true },
+    // The application and the applicant's confirmation email commit together (sign-up-fixes
+    // commit 2): the email can't exist without the application, and is sent once per application.
+    const application = await db.$transaction(async tx => {
+      const created = await tx.runnerApplication.create({
+        data: {
+          userId: applicant?.id ?? null,
+          firstName: String(personal.firstName).trim(),
+          lastName: String(personal.lastName).trim(),
+          email: String(personal.email).trim(),
+          phone,
+          dateOfBirth,
+          city: personal.city?.trim() || null,
+          // Vehicle columns are left null: sign-up no longer asks for a vehicle (Driver Terms
+          // 2026-11-04). Applications from before then keep theirs.
+          termsAgreed: true,
+          backgroundCheckConsent: true,
+          termsVersion: termsVersion ?? null,
+          termsAcceptedAt: new Date(),
+          termsAcceptedIp: acceptedIp,
+        },
+        select: { id: true },
+      })
+      await enqueueApplicationReceived(tx, created.id, String(personal.email).trim(), {
+        kind: 'runner', name: String(personal.firstName).trim(),
+      })
+      return created
     })
 
     logger.info('[Drivers] Application received', {

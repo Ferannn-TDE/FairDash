@@ -32,6 +32,24 @@ export interface DecisionPayload { kind: ApplicationKind; name: string; contactN
 /** The organizer's notice that FairSynq decided a vendor on their event (strict-admin override). */
 export interface OverridePayload { vendorName: string; fairName: string; decision: 'approved' | 'rejected'; reason: string; link: string }
 export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
+
+/** The applicant's "we got your application" email (sign-up-fixes commit 2; wording Jordan, Nov 26). */
+export const APPLICATION_RECEIVED_TEMPLATE = 'application_received'
+export type ConfirmationKind = 'vendor' | 'partner' | 'organizer' | 'runner'
+/** `name`: the business or organization name; for a runner, the first name they typed. */
+export interface ApplicationReceivedPayload { kind: ConfirmationKind; name: string }
+const RECEIVED_SUBJECT: Record<ConfirmationKind, string> = {
+  vendor: 'We got your FairSynq application',
+  partner: 'We got your FairSynq partner application',
+  organizer: 'We got your FairSynq organizer application',
+  runner: 'We got your FairSynq runner application',
+}
+/** Runners get no decision email yet, so their confirmation makes no promise of one (Jordan, Nov 26). */
+function receivedSentence(p: ApplicationReceivedPayload): string {
+  const reviewing = `Thanks, ${p.name}. We got your ${p.kind} application and FairSynq is reviewing it now.`
+  return p.kind === 'runner' ? reviewing : `${reviewing} We'll email you here when there's a decision.`
+}
+
 const byFairSynq = (p: DecisionPayload) => !p.decidedBy || p.decidedBy === 'FairSynq'
 
 /** Every template name renderEmail knows. scripts/email-layout-test.ts needs a sample for each. */
@@ -40,6 +58,7 @@ export const EMAIL_TEMPLATES: readonly string[] = [
   'decision_approved',
   'decision_rejected',
   VENDOR_OVERRIDE_TEMPLATE,
+  APPLICATION_RECEIVED_TEMPLATE,
   MENU_ALERT_TEMPLATE.MENU_ITEMS_DELETED,
   MENU_ALERT_TEMPLATE.MENU_PRICE_CHANGE_PENDING,
 ]
@@ -138,6 +157,15 @@ function renderEmailParts(template: string, payload: unknown, context: EmailCont
         variant: 'decline', heading: 'About your FairSynq application', preheader: 'An update on your application.',
         paragraphs: [decision], button: { label: 'Email support', url: `mailto:${CONTACT_EMAIL}` },
       },
+    }
+  }
+  if (template === APPLICATION_RECEIVED_TEMPLATE) {
+    const p = payload as ApplicationReceivedPayload
+    const sentence = receivedSentence(p)
+    return {
+      subject: RECEIVED_SUBJECT[p.kind],
+      text: sentence,
+      layout: { variant: 'standard', heading: 'We got your application', preheader: 'FairSynq is reviewing it now.', paragraphs: [sentence] },
     }
   }
   if (template === VENDOR_OVERRIDE_TEMPLATE) {

@@ -33,11 +33,11 @@ import { MENU_ALERT_TEMPLATES, MENU_ALERT_EMAIL_EXPIRY_MS } from '@/lib/menu-not
 // The templates live in lib/email/templates.ts (no database there, so tests and the preview
 // script can render them). Re-exported here so every existing caller keeps its import.
 import {
-  renderEmail, VENDOR_OVERRIDE_TEMPLATE,
-  type DecisionPayload, type OverridePayload, type SignupAlertPayload,
+  renderEmail, VENDOR_OVERRIDE_TEMPLATE, APPLICATION_RECEIVED_TEMPLATE,
+  type ApplicationReceivedPayload, type DecisionPayload, type OverridePayload, type SignupAlertPayload,
 } from '@/lib/email/templates'
-export { renderEmail, emailSubjectLine, EMAIL_SUBJECT_MAX, VENDOR_OVERRIDE_TEMPLATE } from '@/lib/email/templates'
-export type { ApplicationKind, DecisionPayload, OverridePayload, SignupAlertPayload } from '@/lib/email/templates'
+export { renderEmail, emailSubjectLine, EMAIL_SUBJECT_MAX, VENDOR_OVERRIDE_TEMPLATE, APPLICATION_RECEIVED_TEMPLATE } from '@/lib/email/templates'
+export type { ApplicationKind, ApplicationReceivedPayload, ConfirmationKind, DecisionPayload, OverridePayload, SignupAlertPayload } from '@/lib/email/templates'
 
 type Tx = Pick<PrismaClient, 'notification'> | Prisma.TransactionClient
 
@@ -59,6 +59,22 @@ const SENDING_RECLAIM_MS = 10 * 60e3
 export async function enqueueSignupAlert(tx: Tx, applicationId: string, payload: SignupAlertPayload) {
   await tx.notification.createMany({
     data: [{ audience: 'admin', template: 'signup_admin_alert', payload: payload as unknown as Prisma.InputJsonValue, dedupeKey: `signup:${payload.kind}:${applicationId}` }],
+    skipDuplicates: true,
+  })
+}
+
+/** The applicant's "we got your application" email (sign-up-fixes commit 2). Called in the SAME
+ *  transaction that creates the application, so it exists only with it; the dedupe key makes it
+ *  exactly once per application, and nothing on a later edit calls it. A blank form email queues
+ *  nothing (the application itself still stands). */
+export async function enqueueApplicationReceived(tx: Tx, applicationId: string, to: string | null | undefined, payload: ApplicationReceivedPayload) {
+  const address = typeof to === 'string' ? to.trim() : ''
+  if (!address) return
+  await tx.notification.createMany({
+    data: [{
+      audience: 'applicant', to: address, template: APPLICATION_RECEIVED_TEMPLATE,
+      payload: payload as unknown as Prisma.InputJsonValue, dedupeKey: `received:${payload.kind}:${applicationId}`,
+    }],
     skipDuplicates: true,
   })
 }
