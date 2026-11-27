@@ -9,6 +9,8 @@
  *   [3] POST /api/partners/apply: the same
  *   [4] POST /api/drivers: the same, named by the typed first name
  *   [5] Only the application-creating routes queue it (never an edit route), in the same transaction
+ *   [6] (commit 3) Spaces around an email are trimmed before saving on every applicant route; an
+ *       all-spaces email counts as blank
  *
  * Run:  ./scripts/with-test-db.sh npx tsx scripts/applicant-confirmation-test.ts
  */
@@ -83,7 +85,7 @@ async function main() {
     assert(r.text === L.emailTextWithFooter(body, 'standard'), `${kind}: body word for word, then the footer`)
     assert(r.text.includes('Questions? Just reply to this email') && r.html.includes('Questions? Just reply to this email'), `${kind}: footer keeps "Questions? Just reply to this email"`)
     assert(r.html.includes('>We got your application</h1>') && r.html.includes('FairSynq is reviewing it now.'), `${kind}: heading and preheader`)
-    assert(!r.html.includes(L.BUTTON_FALLBACK) && !/class="fs-btn-cell/.test(r.html.replace(/<style[\s\S]*?<\/style>/g, '')), `${kind}: no button`)
+    assert(!r.html.includes(L.BUTTON_FALLBACK) && !r.html.includes(L.BUTTON_FALLBACK_EMAIL) && !/class="fs-btn-cell/.test(r.html.replace(/<style[\s\S]*?<\/style>/g, '')), `${kind}: no button`)
   }
   assert(!T.renderEmail('application_received', { kind: 'runner', name: 'Dee' }).text.includes('decision'), 'runner: no promise of a decision email')
 
@@ -172,6 +174,59 @@ async function main() {
     assert(tx > 0 && call > tx, `${f}: queued with tx, inside the application's transaction`)
   }
   assert(!/enqueueApplicationReceived/.test(readFileSync('app/api/vendors/[id]/route.ts', 'utf8')), 'the vendor edit route never queues it')
+
+  // ── [6] spaces around an email ─────────────────────────────────────────────────────────
+  console.log('\n[6] Spaces around an email (sign-up-fixes commit 3)')
+  const vPad = `pad-${rand()}${MAIL}`
+  const vp = await applyVendor(`  ${vPad}  `)
+  const vpRow = vp.id ? await prisma.vendor.findUnique({ where: { id: vp.id }, select: { contactEmail: true } }) : null
+  const vpMail = vp.id ? await received('vendor', vp.id) : []
+  assert(vp.status === 201 && vpRow?.contactEmail === vPad && vpMail.length === 1 && vpMail[0].to === vPad,
+    `vendor: "  ${vPad}  " is saved as "${vPad}" and the confirmation goes there (got ${JSON.stringify(vpRow?.contactEmail)})`)
+  const vs = await applyVendor('    ')
+  const vsRow = vs.id ? await prisma.vendor.findUnique({ where: { id: vs.id }, select: { contactEmail: true, vendorMembers: { select: { user: { select: { email: true } } } } } }) : null
+  const vsAlert = vs.id ? await prisma.notification.findUnique({ where: { dedupeKey: `signup:vendor:${vs.id}` } }) : null
+  assert(vs.status === 201 && vsRow?.contactEmail === null && vs.id ? (await received('vendor', vs.id)).length === 0 : false,
+    'vendor: an all-spaces email is saved as blank (null) and queues no confirmation')
+  assert((vsAlert?.payload as any)?.email === vsRow?.vendorMembers[0]?.user.email, 'vendor: the admin alert then shows the sign-in email')
+
+  rl.__setStateForTest({ type: 'ready', limiters: new Proxy({}, { get: () => allowAll }) as any })
+  const partnerApply = (email: string, name: string) => partnerPOST(json('/api/partners/apply', 'POST',
+    { name, groupType: 'school', contactName: 'Sam', email, phone: '(217) 555-0134', city: 'Alton', state: 'IL' },
+    { 'x-forwarded-for': '203.0.113.61' }))
+  const pPad = `Pad-${rand()}${MAIL}`
+  const ppName = `${PFX}Pad ${rand()}`
+  const pp = await partnerApply(`  ${pPad}  `, ppName)
+  const ppRow = await prisma.partnerOrganization.findFirst({ where: { name: ppName }, select: { id: true, contactEmail: true } })
+  const ppMail = ppRow ? await received('partner', ppRow.id) : []
+  assert(pp.status === 201 && ppRow?.contactEmail === pPad.toLowerCase() && ppMail[0]?.to === pPad.toLowerCase(),
+    `partner: a padded email is saved trimmed (and lower-cased) and the confirmation goes there (got ${JSON.stringify(ppRow?.contactEmail)})`)
+  const psName = `${PFX}Spaces ${rand()}`
+  const ps = await partnerApply('    ', psName)
+  const psBody: any = await ps.json()
+  assert(ps.status === 400 && typeof psBody?.error?.details?.fieldErrors?.email === 'string' && !(await prisma.partnerOrganization.findFirst({ where: { name: psName } })),
+    'partner: an all-spaces email is blank: refused with the email field error, nothing written')
+  rl.__resetForTest()
+
+  login(null)
+  const rPad = `pad-${rand()}${MAIL}`
+  const rp = await applyRunner(`  ${rPad}  `)
+  const rpRow = rp.appId ? await prisma.runnerApplication.findUnique({ where: { id: rp.appId }, select: { email: true } }) : null
+  const rpMail = rp.appId ? await received('runner', rp.appId) : []
+  assert(rp.status === 201 && rpRow?.email === rPad && rpMail[0]?.to === rPad, `runner: a padded email is saved trimmed and the confirmation goes there (got ${JSON.stringify(rpRow?.email)})`)
+  const rsFirst = `${PFX}Sp${rand()}`
+  const rs = await driversPOST(json('/api/drivers', 'POST', {
+    personal: { firstName: rsFirst, lastName: 'Driver', email: '    ', phone: '(217) 555-0134', dob: '1990-01-01', city: 'Alton' },
+    agreed: true, bgConsent: true, termsVersion: 'test',
+  }))
+  const rsBody: any = await rs.json()
+  assert(rs.status === 400 && typeof rsBody?.error?.details?.fieldErrors?.email === 'string' && !(await prisma.runnerApplication.findFirst({ where: { firstName: rsFirst } })),
+    'runner: an all-spaces email is blank: refused with the email field error, no application')
+
+  assert(/const savedContactEmail = typeof contactEmail === 'string' && contactEmail\.trim\(\) \? contactEmail\.trim\(\) : null/.test(readFileSync('app/api/vendors/route.ts', 'utf8'))
+    && /contactEmail: savedContactEmail,/.test(readFileSync('app/api/vendors/route.ts', 'utf8')), 'source: the vendor route saves the trimmed email')
+  assert(/contactEmail: str\(input\.email\)\.toLowerCase\(\)/.test(readFileSync('lib/partner-application.ts', 'utf8')), 'source: the partner record saves the trimmed, lower-cased email')
+  assert(/email: String\(personal\.email\)\.trim\(\),/.test(readFileSync('app/api/drivers/route.ts', 'utf8')), 'source: the runner application saves the trimmed email')
   assert(stubs.stubCalls.clerkUpdate === 0, '[stub] nothing reached the Clerk network')
 }
 

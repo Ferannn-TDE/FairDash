@@ -85,6 +85,8 @@ async function main() {
     const decline = L.renderEmailLayout({ variant: 'decline', title: 't', preheader: 'p', heading: 'h', paragraphs: ['x'], button: { label: 'Email support', url: 'mailto:support@fairsynq.com' } })
     assert(decline.includes('class="fs-btn-cell fs-btn-outline"') && decline.includes('border:2px solid #0A0A0A') && !decline.includes('bgcolor="#FF0077" class="fs-btn-cell"'), 'decline: black outline button, not pink')
     assert(decline.includes('>support@fairsynq.com</a>'), 'mailto link shown as the plain address')
+    assert(L.BUTTON_FALLBACK_EMAIL === 'Button not working? Email us at:' && decline.includes(`>${esc(L.BUTTON_FALLBACK_EMAIL)}</p>`) && !decline.includes(L.BUTTON_FALLBACK),
+      'under a mailto button: "Button not working? Email us at:", not "Copy this link:" (sign-up-fixes commit 3)')
 
     const adm = L.renderEmailLayout({ variant: 'admin', title: 't', preheader: 'p', heading: 'h', paragraphs: ['x'], details: [['Business', 'Taco Stand'], ['Phone', null]] })
     assert(adm.includes('>ADMIN</span>'), 'admin: ADMIN tag in the header')
@@ -105,7 +107,7 @@ async function main() {
     assert(count(html, esc(HOSTILE)) >= 7, 'escaped form appears in title, preheader, heading, paragraph, line, details, button')
     for (const bad of ['javascript:alert(1)', 'data:text/html,hi', '/relative/path', 'https://x.test/"onmouseover="alert(1)']) {
       const h = L.renderEmailLayout({ variant: 'standard', title: 't', preheader: 'p', heading: 'h', paragraphs: ['x'], button: { label: 'Go', url: bad } })
-      assert(!h.includes('>Go</a>') && !h.includes(L.BUTTON_FALLBACK), `unsafe link gets no button: ${bad}`)
+      assert(!h.includes('>Go</a>') && !h.includes(L.BUTTON_FALLBACK) && !h.includes(L.BUTTON_FALLBACK_EMAIL), `unsafe link gets no button: ${bad}`)
     }
     assert(L.isSafeEmailLink('http://localhost:3000/x') && !L.isSafeEmailLink('http://example.com'), 'http only on localhost')
   })
@@ -136,7 +138,7 @@ async function main() {
       if (e.button) {
         assert(html.includes(`href="${esc(e.button.url)}"`) && html.includes(`>${esc(e.button.label)}</a>`), `${tag} button "${e.button.label}" → ${e.button.url}`)
       } else {
-        assert(!html.includes(L.BUTTON_FALLBACK), `${tag} no button`)
+        assert(!html.includes(L.BUTTON_FALLBACK) && !html.includes(L.BUTTON_FALLBACK_EMAIL), `${tag} no button`)
       }
       // The class name is also in the dark-mode style block, so look for it on the button cell.
       if (s.variant === 'decline') assert(html.includes('class="fs-btn-cell fs-btn-outline"') && !html.includes('bgcolor="#FF0077" class="fs-btn-cell"'), `${tag} decline: outline button, not pink`)

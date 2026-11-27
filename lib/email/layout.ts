@@ -52,6 +52,8 @@ export const FOOTER_QUESTIONS = `Questions? Just reply to this email, or write t
 export const FOOTER_TAGLINE = 'FairSynq · Order ahead and skip the line at fairs and festivals.'
 export const FOOTER_ADMIN = 'FairSynq admin alert · sent to the alerts address in Platform settings.'
 export const BUTTON_FALLBACK = 'Button not working? Copy this link:'
+/** Under a mailto: button the "link" is an email address, so it says so (sign-up-fixes commit 3). */
+export const BUTTON_FALLBACK_EMAIL = 'Button not working? Email us at:'
 
 /** The footer lines for a variant. Admin alerts get only the admin line. */
 export function footerLines(variant: EmailVariant): string[] {
@@ -136,12 +138,13 @@ function buttonHtml(button: EmailButton, decline: boolean): string {
   const fg = decline ? BLACK : '#FFFFFF'
   const border = decline ? `2px solid ${BLACK}` : `2px solid ${PINK}`
   const cls = decline ? 'fs-btn-cell fs-btn-outline' : 'fs-btn-cell'
-  const shown = button.url.toLowerCase().startsWith('mailto:') ? button.url.slice('mailto:'.length) : button.url
+  const isMailto = button.url.toLowerCase().startsWith('mailto:')
+  const shown = isMailto ? button.url.slice('mailto:'.length) : button.url
   return `<table role="presentation" border="0" cellpadding="0" cellspacing="0" class="fs-btn-table" style="border-collapse:separate;margin:8px 0 16px 0;"><tr>`
     + `<td align="center" bgcolor="${bg}" class="${cls}" style="border-radius:8px;background-color:${bg};border:${border};mso-padding-alt:14px 28px;">`
     + `<a href="${url}" target="_blank" class="fs-btn-link" style="display:inline-block;padding:14px 28px;font-family:${FONT};font-size:19px;line-height:24px;font-weight:bold;color:${fg};text-decoration:none;border-radius:8px;">${label}</a>`
     + `</td></tr></table>`
-    + `<p class="fs-muted" style="margin:0 0 4px 0;font-family:${FONT};font-size:14px;line-height:1.5;color:${MUTED};">${escapeHtml(BUTTON_FALLBACK)}</p>`
+    + `<p class="fs-muted" style="margin:0 0 4px 0;font-family:${FONT};font-size:14px;line-height:1.5;color:${MUTED};">${escapeHtml(isMailto ? BUTTON_FALLBACK_EMAIL : BUTTON_FALLBACK)}</p>`
     + `<p style="margin:0 0 16px 0;font-family:${FONT};font-size:14px;line-height:1.5;word-break:break-all;"><a href="${url}" target="_blank" class="fs-text" style="color:${TEXT};text-decoration:underline;">${escapeHtml(shown)}</a></p>`
 }
 

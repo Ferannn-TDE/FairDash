@@ -96,6 +96,9 @@ export async function POST(req: Request) {
     // because the browser check can be skipped. Saved as +1XXXXXXXXXX.
     const phoneCheck = checkPhone(contactPhone, { required: true })
     if (!phoneCheck.ok) return apiError(phoneCheck.error, 400, INVALID_PHONE)
+    // Email (sign-up-fixes commit 3): spaces around the typed address are trimmed before saving;
+    // an address of only spaces counts as blank (stored as null, so no confirmation email).
+    const savedContactEmail = typeof contactEmail === 'string' && contactEmail.trim() ? contactEmail.trim() : null
 
     // Can't apply to a soft-deleted fair. UPCOMING is allowed — vendors apply before
     // a fair goes live — so this is archivedAt-gated only, not ACTIVE-gated.
@@ -130,7 +133,7 @@ export async function POST(req: Request) {
           boothNumber,
           status: 'PENDING',
           contactName:  contactName  ?? null,
-          contactEmail: contactEmail ?? null,
+          contactEmail: savedContactEmail,
           contactPhone: phoneCheck.value,
           termsAcceptedName: String(legalName).trim(),
           // Always the version this server publishes (lib/legal/vendor-agreement.ts), never a value
