@@ -30,6 +30,21 @@ export function resolveAppDatabaseUrl(env: Record<string, string | undefined>): 
   return env.TEST_DATABASE_URL
 }
 
+/**
+ * PREVIEW WITHOUT A DATABASE (2026-11-26). Vercel Preview has no database variables (they were removed so previews can't
+ * touch production). `next build` imports this module while collecting page data, and the throw below used to fail every
+ * Preview build. So — ONLY when VERCEL_ENV === 'preview' AND DATABASE_URL is unset — the client points at a reserved,
+ * never-resolving host (.invalid, RFC 6761) instead: the build passes, and any Preview page that needs data fails fast.
+ * Everything else with no DATABASE_URL still throws: production, the Railway worker, local dev, scripts and tests.
+ * The proper fix is a staging database for Preview (BATCH-1 §6). Pure; proven in scripts/test-isolation-guard.ts §[6].
+ */
+export const PREVIEW_NO_DATABASE_URL = 'postgresql://none@preview-no-db.invalid:5432/none'
+export function previewPlaceholderDatabaseUrl(env: Record<string, string | undefined>): string | null {
+  if (env.VERCEL_ENV !== 'preview') return null
+  if (env.DATABASE_URL) return null
+  return PREVIEW_NO_DATABASE_URL
+}
+
 function buildDatabaseUrl(): string {
   // ── TEST-DATABASE REDIRECT ──────────────────────────────────────────────────
   // Suites do not only write through their own client — they exercise APP CODE
@@ -49,6 +64,11 @@ function buildDatabaseUrl(): string {
   if (redirected) return redirected
 
   const raw = process.env.DATABASE_URL
+  const placeholder = previewPlaceholderDatabaseUrl(process.env)
+  if (placeholder) {
+    console.warn('[FairSynq] Preview build without a database: data pages are disabled')
+    return placeholder
+  }
   if (!raw) {
     throw new Error(
       '[FairSynq] DATABASE_URL is not set.\n' +

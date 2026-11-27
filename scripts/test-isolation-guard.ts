@@ -17,8 +17,10 @@
  */
 
 import { readFileSync, readdirSync } from 'fs'
+import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { resolveTestDatabaseUrl, resolveToolingDatabaseUrl, TestDatabaseMisconfigured } from '../lib/test-db'
-import { resolveAppDatabaseUrl } from '../lib/db'
+import { resolveAppDatabaseUrl, previewPlaceholderDatabaseUrl, PREVIEW_NO_DATABASE_URL } from '../lib/db'
 
 let passed = 0, failed = 0
 function assert(cond: boolean, msg: string) {
@@ -220,6 +222,36 @@ assert(resolveToolingDatabaseUrl({ TEST_DATABASE_URL: TEST, DIRECT_URL: PROD, DA
   'TEST_DATABASE_URL WINS over DIRECT_URL/DATABASE_URL in the tooling resolver')
 assert(resolveToolingDatabaseUrl({ DIRECT_URL: PROD }) === PROD,
   '[0] POSITIVE CONTROL: without TEST_DATABASE_URL it still reaches prod — prod ops keep working')
+
+// ── [6] PREVIEW WITHOUT A DATABASE — the placeholder never reaches anything but a Vercel Preview ──
+console.log('\n[6] a Vercel Preview with no DATABASE_URL gets the unreachable placeholder; nothing else does')
+const PREVIEW_LINE = 'Preview build without a database: data pages are disabled'
+assert(new URL(PREVIEW_NO_DATABASE_URL).hostname.endsWith('.invalid'), 'the placeholder host is a reserved, never-resolving .invalid name')
+assert(previewPlaceholderDatabaseUrl({ VERCEL_ENV: 'preview', NODE_ENV: 'production' }) === PREVIEW_NO_DATABASE_URL, 'Preview + no DATABASE_URL → placeholder')
+assert(previewPlaceholderDatabaseUrl({ VERCEL_ENV: 'preview', NODE_ENV: 'production', DATABASE_URL: PROD }) === null, 'Preview WITH a DATABASE_URL → its own URL (no placeholder)')
+assert(previewPlaceholderDatabaseUrl({ VERCEL_ENV: 'production', NODE_ENV: 'production' }) === null, '[0] control: Vercel production with no DATABASE_URL → no placeholder (throws)')
+assert(previewPlaceholderDatabaseUrl({ NODE_ENV: 'production', RAILWAY_ENVIRONMENT: 'production' }) === null, 'Railway worker with no DATABASE_URL → no placeholder (throws)')
+assert(previewPlaceholderDatabaseUrl({ NODE_ENV: 'development' }) === null, 'local dev with no DATABASE_URL → no placeholder (throws)')
+assert(previewPlaceholderDatabaseUrl({ NODE_ENV: 'test', TEST_DATABASE_URL: TEST }) === null && previewPlaceholderDatabaseUrl({}) === null, 'tests and scripts with no DATABASE_URL → no placeholder')
+assert(/const placeholder = previewPlaceholderDatabaseUrl\(process\.env\)/.test(dbSrc), 'buildDatabaseUrl decides through previewPlaceholderDatabaseUrl (the single, tested decision)')
+// The real module, imported in a fresh process. No database = EMPTY strings (importing Prisma loads a local .env into
+// any variable that is unset; neither Prisma nor dotenv overrides one that is set). Vercel and CI have no .env.
+const TSX = createRequire(import.meta.url).resolve('tsx/cli')
+const scrubbed = Object.fromEntries(Object.entries(process.env).filter(([k, v]) => v !== undefined &&
+  !/^(DATABASE_URL|DIRECT_URL|TEST_DATABASE_URL|VERCEL_ENV|VERCEL|RAILWAY_ENVIRONMENT|NODE_ENV|CONFIRM_PROD_DB)$/.test(k))) as Record<string, string>
+const importDb = (extra: Record<string, string>) => {
+  const r = spawnSync(process.execPath, [TSX, '--eval', "import('./lib/db').then(() => console.log('DB_MODULE_LOADED'))"],
+    { env: { ...scrubbed, DATABASE_URL: '', DIRECT_URL: '', ...extra } as unknown as NodeJS.ProcessEnv, encoding: 'utf8', timeout: 60_000 })
+  return { code: r.status, out: `${r.stdout}${r.stderr}` }
+}
+const pv = importDb({ VERCEL_ENV: 'preview', NODE_ENV: 'production' })
+assert(pv.code === 0 && pv.out.includes('DB_MODULE_LOADED') && pv.out.includes(PREVIEW_LINE), `real import, Preview + no database: loads and logs "${PREVIEW_LINE}" (exit ${pv.code})`)
+const prod = importDb({ VERCEL_ENV: 'production', NODE_ENV: 'production' })
+assert(prod.code !== 0 && prod.out.includes('DATABASE_URL is not set') && !prod.out.includes('DB_MODULE_LOADED'), `[0] control, real import, Vercel production + no database: THROWS (exit ${prod.code})`)
+const rail = importDb({ NODE_ENV: 'production', RAILWAY_ENVIRONMENT: 'production' })
+assert(rail.code !== 0 && rail.out.includes('DATABASE_URL is not set'), `real import, Railway worker + no database: THROWS (exit ${rail.code})`)
+const dev = importDb({ NODE_ENV: 'development' })
+assert(dev.code !== 0 && dev.out.includes('DATABASE_URL is not set') && !dev.out.includes(PREVIEW_LINE), `real import, local dev + no database: THROWS (exit ${dev.code})`)
 
 console.log('\n────────────────────────────────────')
 console.log(failed === 0 ? `  ✅ ${passed} passed, 0 failed` : `  ❌ ${passed} passed, ${failed} failed`)
