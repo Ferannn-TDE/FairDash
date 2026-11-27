@@ -51,8 +51,9 @@ export async function POST(req: NextRequest) {
     const row = await db.$transaction(async tx => {
       const created = await tx.partnerOrganization.create({ data: { ...app, requestIp: ip }, select: { id: true } })
       await enqueueSignupAlert(tx, created.id, { kind: 'partner', name: app.name, contactName: app.contactName, email: app.contactEmail, phone: app.contactPhone })
-      // The applicant's confirmation, to the email on the form (sign-up-fixes commit 2).
-      await enqueueApplicationReceived(tx, created.id, app.contactEmail, { kind: 'partner', name: app.name })
+      // The applicant's confirmation, to the email on the form (sign-up-fixes commit 2). No typed
+      // name in it (confirmation-email-safety): the payload is the kind only.
+      await enqueueApplicationReceived(tx, created.id, app.contactEmail, { kind: 'partner' })
       // Terms + Privacy acceptance (sign-up-fixes commit 4): action TERMS_ACCEPTED, never a decision.
       // Partners apply signed out, so the actor is 'signed-out' (the request IP is on the partner row).
       await tx.approvalAction.create({

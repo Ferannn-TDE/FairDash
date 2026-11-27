@@ -407,14 +407,14 @@ async function main() {
   // ── [11] screens, window, vendor and driver limits ─────────────────────────────────────
   console.log('\n[11] Screens, the 18-month window, vendor and driver limits')
   const { organizerAwaitingLines } = await import('../lib/organizer-portal-state')
-  const both = organizerAwaitingLines({ confirmationSentTo: 'lee@x.test', draftEventName: 'County Fair' })
-  assert(both[0] === 'We sent a confirmation to lee@x.test.' && both[1] === "Your event, County Fair, is saved. Once you're approved, you can finish setting it up. You'll be able to change these details after approval.",
-    'under review: the confirmation line and the saved-event line, word for word')
-  assert(organizerAwaitingLines({ confirmationSentTo: null, draftEventName: null }).length === 0 && organizerAwaitingLines({ confirmationSentTo: null, draftEventName: 'X' }).length === 1,
+  const both = organizerAwaitingLines({ updatesTo: 'lee@x.test', draftEventName: 'County Fair' })
+  assert(both[0] === "We'll email you at lee@x.test about your application." && both[1] === "Your event, County Fair, is saved. Once you're approved, you can finish setting it up. You'll be able to change these details after approval.",
+    'under review: the email line and the saved-event line, word for word')
+  assert(organizerAwaitingLines({ updatesTo: null, draftEventName: null }).length === 0 && organizerAwaitingLines({ updatesTo: null, draftEventName: 'X' }).length === 1,
     'with no data the screen is unchanged; each line needs its own fact')
   const layoutSrc = src('app/organizer/layout.tsx')
-  assert(/dedupeKey: `received:organizer:\$\{orgMember\.organizerId\}`/.test(layoutSrc) && /organizerDraftScope\(orgMember\.organizerId\)/.test(layoutSrc),
-    'the layout reads the queued confirmation and the draft (the line is never a promise we did not keep)')
+  assert(/awaitingLines = await organizerAwaitingLinesFor\(orgMember\.organizerId\)/.test(layoutSrc) && !/notification\./.test(layoutSrc),
+    'the layout gets the lines from organizerAwaitingLinesFor and never reads the email outbox (confirmation-email-safety)')
   assert(/Finish setting up \{firstDraft\.name\}/.test(src('app/organizer/page.tsx')) && /\/organizer\/fairs\/new\?draft=\$\{encodeURIComponent\(firstDraft\.slug\)\}/.test(src('app/organizer/page.tsx')),
     'the dashboard card says Finish setting up {event} and links to the wizard with the draft')
   const C = await import('../lib/calendar-date')

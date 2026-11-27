@@ -32,6 +32,7 @@
 import { EventStatus, VendorStatus, type Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { organizerDraftScope } from '@/lib/organizer-fair-context'
+import { organizerDecisionAddress } from '@/lib/organizer-portal-state'
 import { ApiError } from '@/lib/api-error'
 import { REQUIRED_VENDOR_DOCS, VENDOR_DOC_LABELS, type RequiredVendorDoc } from '@/lib/vendor-documents'
 import { GO_LIVE_LABELS, GO_LIVE_VENDOR_SELECT, vendorGoLiveRefusal } from '@/lib/vendor-go-live'
@@ -347,7 +348,7 @@ export async function decideOrganizer(organizerId: string, decision: Decision, r
   const actorName = await recordedActorName(actor)
   // The decision email goes to the organization email, or the owner's sign-in email when it is
   // blank (sign-up-fixes commit 4).
-  const to = org.contactEmail?.trim() || org.members[0]?.user.email || null
+  const to = organizerDecisionAddress(org.contactEmail, org.members[0]?.user.email)
   await db.$transaction(async tx => {
     // The event saved at sign-up (sign-up-fixes commit 4). Approve: left exactly as it is, and the
     // email's button finishes it. Reject: archived, and its address (urlSlug) freed for anyone else

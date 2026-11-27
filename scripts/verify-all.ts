@@ -121,6 +121,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'notifications',          file: 'scripts/notifications-test.ts' },
   { group: 'correctness', name: 'applicant-confirmation', file: 'scripts/applicant-confirmation-test.ts' },
   { group: 'security',    name: 'organizer-apply',        file: 'scripts/organizer-apply-test.ts' },
+  { group: 'security',    name: 'confirmation-safety',    file: 'scripts/confirmation-safety-test.ts' },
   { group: 'security',    name: 'resend-transport',       file: 'scripts/resend-transport-test.ts' },
   // Every email through the one FairSynq layout: html + plain text, escaped input, no images.
   { group: 'security',    name: 'email-layout',           file: 'scripts/email-layout-test.ts' },

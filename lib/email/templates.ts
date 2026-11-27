@@ -50,8 +50,10 @@ export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
 /** The applicant's "we got your application" email (sign-up-fixes commit 2; wording Jordan, Nov 26). */
 export const APPLICATION_RECEIVED_TEMPLATE = 'application_received'
 export type ConfirmationKind = 'vendor' | 'partner' | 'organizer' | 'runner'
-/** `name`: the business or organization name; for a runner, the first name they typed. */
-export interface ApplicationReceivedPayload { kind: ConfirmationKind; name: string }
+/** No name in this email (confirmation-email-safety, Jordan Nov 27). Every sign-up form lets the
+ *  applicant type the address it goes to, so a typed name would let anyone send their own words to a
+ *  stranger. `name` is only on rows queued before this change, and the email ignores it. */
+export interface ApplicationReceivedPayload { kind: ConfirmationKind; name?: string }
 const RECEIVED_SUBJECT: Record<ConfirmationKind, string> = {
   vendor: 'We got your FairSynq application',
   partner: 'We got your FairSynq partner application',
@@ -60,7 +62,7 @@ const RECEIVED_SUBJECT: Record<ConfirmationKind, string> = {
 }
 /** Runners get no decision email yet, so their confirmation makes no promise of one (Jordan, Nov 26). */
 function receivedSentence(p: ApplicationReceivedPayload): string {
-  const reviewing = `Thanks, ${p.name}. We got your ${p.kind} application and FairSynq is reviewing it now.`
+  const reviewing = `Thanks for applying. We got your ${p.kind} application and FairSynq is reviewing it now.`
   return p.kind === 'runner' ? reviewing : `${reviewing} We'll email you here when there's a decision.`
 }
 

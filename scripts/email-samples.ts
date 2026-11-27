@@ -56,9 +56,10 @@ const declined = (id: string, payload: Record<string, unknown>, text: string): E
   },
 })
 
-const received = (id: string, kind: 'vendor' | 'partner' | 'organizer' | 'runner', name: string, subject: string, text: string): EmailSample => ({
+// No name in the payload (confirmation-email-safety, Nov 27): the email never shows a typed name.
+const received = (id: string, kind: 'vendor' | 'partner' | 'organizer' | 'runner', subject: string, text: string): EmailSample => ({
   id, template: 'application_received', variant: 'standard',
-  payload: { kind, name },
+  payload: { kind },
   expect: { subject, text, heading: 'We got your application', preheader: 'FairSynq is reviewing it now.', button: null },
 })
 
@@ -148,16 +149,17 @@ export const EMAIL_SAMPLES: EmailSample[] = [
   declined('declined-partner-no-reason', { kind: 'partner', name: 'Rotary Club', contactName: 'Sam' },
     `Hi Sam, we're not able to approve Rotary Club right now. If you have questions, contact ${SUPPORT}.`),
 
-  // E7 — the applicant's "we got your application" (sign-up-fixes commit 2; wording Jordan, Nov 26)
-  received('received-vendor', 'vendor', 'Taco Stand', 'We got your FairSynq application',
-    "Thanks, Taco Stand. We got your vendor application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
-  received('received-partner', 'partner', 'Rotary Club', 'We got your FairSynq partner application',
-    "Thanks, Rotary Club. We got your partner application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
-  received('received-organizer', 'organizer', 'County Fair Board', 'We got your FairSynq organizer application',
-    "Thanks, County Fair Board. We got your organizer application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
+  // E7 — the applicant's "we got your application" (sign-up-fixes commit 2; wording Jordan, Nov 26;
+  // no typed name since confirmation-email-safety, Nov 27)
+  received('received-vendor', 'vendor', 'We got your FairSynq application',
+    "Thanks for applying. We got your vendor application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
+  received('received-partner', 'partner', 'We got your FairSynq partner application',
+    "Thanks for applying. We got your partner application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
+  received('received-organizer', 'organizer', 'We got your FairSynq organizer application',
+    "Thanks for applying. We got your organizer application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
   // Runners get no decision email yet, so no decision sentence.
-  received('received-runner', 'runner', 'Dee', 'We got your FairSynq runner application',
-    'Thanks, Dee. We got your runner application and FairSynq is reviewing it now.'),
+  received('received-runner', 'runner', 'We got your FairSynq runner application',
+    'Thanks for applying. We got your runner application and FairSynq is reviewing it now.'),
 
   // E4 — FairSynq decided a vendor at the organizer's event (C5: new subject)
   {
@@ -232,7 +234,11 @@ export function hostileSamples(): { id: string; template: string; payload: Recor
     { id: 'hostile-admin', template: 'signup_admin_alert', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, email: 'a@example.com', phone: HOSTILE } },
     { id: 'hostile-approved', template: 'decision_approved', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, decidedBy: HOSTILE } },
     { id: 'hostile-declined', template: 'decision_rejected', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, reason: HOSTILE, decidedBy: HOSTILE } },
+    // The confirmation ignores a name (an old queued row may still carry one): HOSTILE must not appear at all.
     { id: 'hostile-received', template: 'application_received', payload: { kind: 'vendor', name: HOSTILE } },
+    { id: 'hostile-received-partner', template: 'application_received', payload: { kind: 'partner', name: HOSTILE } },
+    { id: 'hostile-received-organizer', template: 'application_received', payload: { kind: 'organizer', name: HOSTILE } },
+    { id: 'hostile-received-runner', template: 'application_received', payload: { kind: 'runner', name: HOSTILE } },
     { id: 'hostile-admin-event', template: 'signup_admin_alert', payload: { kind: 'organizer', name: HOSTILE, contactName: HOSTILE, email: 'a@example.com', phone: null, event: { name: HOSTILE, city: HOSTILE, state: 'IL', startDate: '2027-06-05', endDate: '2027-06-07' } } },
     { id: 'hostile-approved-draft', template: 'decision_approved', payload: { kind: 'organizer', name: HOSTILE, contactName: null, draft: { name: HOSTILE, slug: 'x"><script>' } } },
     { id: 'hostile-override', template: 'vendor_override_organizer', payload: { vendorName: HOSTILE, fairName: HOSTILE, decision: 'rejected', reason: HOSTILE, link: OVERRIDE_LINK } },

@@ -64,15 +64,23 @@ export function organizerPortalState(
   return { state: 'ACTIVE', message: null, reason: null }
 }
 
+/** Where an organizer's decision email goes: the organization email, or the owner's sign-in email
+ *  when it is blank (sign-up-fixes commit 4). One rule for lib/approvals.ts and the "under review"
+ *  screen, so the screen names the address the decision really goes to. */
+export function organizerDecisionAddress(contactEmail: string | null | undefined, ownerEmail: string | null | undefined): string | null {
+  return contactEmail?.trim() || ownerEmail || null
+}
+
 /**
  * The extra lines on the "Application under review" screen (sign-up-fixes commit 4; wording
- * Jordan, Nov 26). Each shows only when its fact is true: the confirmation line only when a
- * confirmation email was actually queued for this organizer (never a promise we didn't keep), the
- * event line only when the sign-up form saved a draft. With neither, the screen is unchanged.
+ * Jordan, Nov 26). The email line names where we'll write about the application (the decision
+ * address), and reads the same whether or not a confirmation email was queued: the confirmation
+ * can be held back by the per-address limit (confirmation-email-safety, Nov 27), and the screen must
+ * not reveal that. The event line shows only when the sign-up form saved a draft.
  */
-export function organizerAwaitingLines(facts: { confirmationSentTo: string | null; draftEventName: string | null }): string[] {
+export function organizerAwaitingLines(facts: { updatesTo: string | null; draftEventName: string | null }): string[] {
   const lines: string[] = []
-  if (facts.confirmationSentTo) lines.push(`We sent a confirmation to ${facts.confirmationSentTo}.`)
+  if (facts.updatesTo) lines.push(`We'll email you at ${facts.updatesTo} about your application.`)
   if (facts.draftEventName) {
     lines.push(`Your event, ${facts.draftEventName}, is saved. Once you're approved, you can finish setting it up. You'll be able to change these details after approval.`)
   }

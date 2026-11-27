@@ -159,7 +159,12 @@ async function main() {
       const r = T.renderEmail(h.template, h.payload, { createdAt: SAMPLE_CREATED_AT })
       const html = r.html ?? ''
       assert(html.length > 0 && !html.includes('<script') && !html.includes(HOSTILE), `[${h.id}] no raw hostile text in the html`)
-      assert(html.includes(esc(HOSTILE)), `[${h.id}] escaped form is shown`)
+      if (h.template === 'application_received') {
+        // The confirmation never shows a typed name (confirmation-email-safety), so not even escaped.
+        assert(!html.includes(esc(HOSTILE)) && !r.text.includes(HOSTILE) && !r.subject.includes(HOSTILE), `[${h.id}] the typed name never appears, raw or escaped`)
+      } else {
+        assert(html.includes(esc(HOSTILE)), `[${h.id}] escaped form is shown`)
+      }
     }
   })
 

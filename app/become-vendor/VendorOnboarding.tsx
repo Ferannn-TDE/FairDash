@@ -527,7 +527,9 @@ function Step8({ data, eventSlug }: { data: FormData; eventSlug: string | null }
       </div>
 
       <p className="text-xs text-text-gray">
-        Confirmation sent to <span className="text-white">{data.email}</span>
+        {/* True whether or not the confirmation email went out (the per-address limit can hold it
+            back; confirmation-email-safety): the decision email always goes to this address. */}
+        We&apos;ll email you at <span className="text-white">{data.email}</span> about your application.
       </p>
 
       {/* ONE button, and it points at the thing they can actually use. POST /api/vendors
