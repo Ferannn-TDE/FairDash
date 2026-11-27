@@ -7,7 +7,9 @@
  *   [2] POST /api/vendors queues exactly ONE confirmation to the form email (beside the admin alert);
  *       queuing it again adds nothing; a blank form email queues none and the application stands
  *   [3] POST /api/partners/apply: the same
- *   [4] POST /api/drivers: the same, named by the typed first name
+ *   [4] POST /api/drivers: the same
+ *   (confirmation-email-safety, Nov 27: no confirmation carries or shows a typed name; the limit per
+ *   address is tested in scripts/confirmation-safety-test.ts)
  *   [5] Only the application-creating routes queue it (never an edit route), in the same transaction
  *   [6] (commit 3) Spaces around an email are trimmed before saving on every applicant route; an
  *       all-spaces email counts as blank
@@ -74,13 +76,15 @@ async function main() {
   // ── [1] wording ────────────────────────────────────────────────────────────────────────
   console.log('\n[1] The wording')
   const WANT: Array<[string, string, string, string]> = [
-    ['vendor', 'Taco Stand', 'We got your FairSynq application', "Thanks, Taco Stand. We got your vendor application and FairSynq is reviewing it now. We'll email you here when there's a decision."],
-    ['partner', 'Rotary Club', 'We got your FairSynq partner application', "Thanks, Rotary Club. We got your partner application and FairSynq is reviewing it now. We'll email you here when there's a decision."],
-    ['organizer', 'County Fair Board', 'We got your FairSynq organizer application', "Thanks, County Fair Board. We got your organizer application and FairSynq is reviewing it now. We'll email you here when there's a decision."],
-    ['runner', 'Dee', 'We got your FairSynq runner application', 'Thanks, Dee. We got your runner application and FairSynq is reviewing it now.'],
+    ['vendor', 'Taco Stand', 'We got your FairSynq application', "Thanks for applying. We got your vendor application and FairSynq is reviewing it now. We'll email you here when there's a decision."],
+    ['partner', 'Rotary Club', 'We got your FairSynq partner application', "Thanks for applying. We got your partner application and FairSynq is reviewing it now. We'll email you here when there's a decision."],
+    ['organizer', 'County Fair Board', 'We got your FairSynq organizer application', "Thanks for applying. We got your organizer application and FairSynq is reviewing it now. We'll email you here when there's a decision."],
+    ['runner', 'Dee', 'We got your FairSynq runner application', 'Thanks for applying. We got your runner application and FairSynq is reviewing it now.'],
   ]
+  // `name` is passed as an old queued row would carry it; the email must ignore it.
   for (const [kind, name, subject, body] of WANT) {
     const r = T.renderEmail('application_received', { kind, name })
+    assert(!r.subject.includes(name) && !r.text.includes(name) && !r.html.includes(name), `${kind}: the name "${name}" appears nowhere in the email`)
     assert(r.subject === subject, `${kind}: subject "${subject}"`)
     assert(r.text === L.emailTextWithFooter(body, 'standard'), `${kind}: body word for word, then the footer`)
     assert(r.text.includes('Questions? Just reply to this email') && r.html.includes('Questions? Just reply to this email'), `${kind}: footer keeps "Questions? Just reply to this email"`)
@@ -112,9 +116,9 @@ async function main() {
   const vRow = vRows[0]
   assert(vRow?.audience === 'applicant' && vRow?.to === vEmail && vRow?.template === 'application_received' && vRow?.status === 'PENDING',
     'to the form email, as an applicant email, PENDING in the outbox')
-  assert(JSON.stringify(vRow?.payload) === JSON.stringify({ kind: 'vendor', name: v.name }), 'payload: kind vendor and the business name')
+  assert(JSON.stringify(vRow?.payload) === JSON.stringify({ kind: 'vendor' }), 'payload: kind vendor only, no typed name')
   assert(v.id ? (await prisma.notification.count({ where: { dedupeKey: `signup:vendor:${v.id}` } })) === 1 : false, '[0] control: the admin alert is still queued beside it')
-  if (v.id) await N.enqueueApplicationReceived(prisma, v.id, vEmail, { kind: 'vendor', name: v.name ?? '' })
+  if (v.id) await N.enqueueApplicationReceived(prisma, v.id, vEmail, { kind: 'vendor' })
   assert(v.id ? (await received('vendor', v.id)).length === 1 : false, 'queuing it again for the same application adds nothing')
   const vBlank = await applyVendor('   ')
   assert(vBlank.status === 201 && vBlank.id ? (await received('vendor', vBlank.id)).length === 0 : false, 'a blank form email: the application is saved and no confirmation is queued')
@@ -133,7 +137,7 @@ async function main() {
   const pRow = await prisma.partnerOrganization.findFirst({ where: { name: pName }, select: { id: true } })
   const pRows = pRow ? await received('partner', pRow.id) : []
   assert(p.status === 201 && pRows.length === 1 && pRows[0].to === pEmail && pRows[0].audience === 'applicant', `one confirmation to the form email (got ${p.status}, ${pRows.length} row(s))`)
-  assert(JSON.stringify(pRows[0]?.payload) === JSON.stringify({ kind: 'partner', name: pName }), 'payload: kind partner and the organization name')
+  assert(JSON.stringify(pRows[0]?.payload) === JSON.stringify({ kind: 'partner' }), 'payload: kind partner only, no typed name')
   const dup = await partnerPOST(json('/api/partners/apply', 'POST',
     { name: pName, groupType: 'school', contactName: 'Sam', email: pEmail, phone: '(217) 555-0134', city: 'Alton', state: 'IL', agreedToTerms: true },
     { 'x-forwarded-for': '203.0.113.60' }))
@@ -160,7 +164,7 @@ async function main() {
   const rApp = await applyRunner(rEmail)
   const rRows = rApp.appId ? await received('runner', rApp.appId) : []
   assert(rApp.status === 201 && rRows.length === 1 && rRows[0].to === rEmail && rRows[0].audience === 'applicant', `one confirmation to the typed email (got ${rApp.status}, ${rRows.length} row(s))`)
-  assert(JSON.stringify(rRows[0]?.payload) === JSON.stringify({ kind: 'runner', name: rApp.first }), 'payload: kind runner and the typed first name')
+  assert(JSON.stringify(rRows[0]?.payload) === JSON.stringify({ kind: 'runner' }), 'payload: kind runner only, no typed first name')
 
   // ── [5] who queues it ──────────────────────────────────────────────────────────────────
   console.log('\n[5] Only the application-creating routes queue it')

@@ -91,9 +91,8 @@ export async function POST(req: NextRequest) {
         },
         select: { id: true },
       })
-      await enqueueApplicationReceived(tx, created.id, String(personal.email).trim(), {
-        kind: 'runner', name: String(personal.firstName).trim(),
-      })
+      // No typed name in the email (confirmation-email-safety): the payload is the kind only.
+      await enqueueApplicationReceived(tx, created.id, String(personal.email).trim(), { kind: 'runner' })
       return created
     })
 

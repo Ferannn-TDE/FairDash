@@ -106,7 +106,8 @@ export async function ensureOrganizerBootstrap(
           detail: { terms: WEBSITE_TERMS_VERSION, privacy: PRIVACY_POLICY_VERSION },
         },
       })
-      await enqueueApplicationReceived(tx, organizerId, profile.email, { kind: 'organizer', name: profile.name ?? profile.email })
+      // No typed name in it (confirmation-email-safety): the payload is the kind only.
+      await enqueueApplicationReceived(tx, organizerId, profile.email, { kind: 'organizer' })
     }
     await enqueueSignupAlert(tx, organizerId, {
       kind: 'organizer', name: profile.name ?? profile.email, contactName: profile.contactName ?? profile.name,

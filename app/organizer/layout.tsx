@@ -5,10 +5,8 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import OrganizerShell from './_components/OrganizerShell'
 import OrganizerGateScreen from './_components/OrganizerGateScreen'
-import { organizerPortalState, organizerAwaitingLines } from '@/lib/organizer-portal-state'
-import { ORGANIZER_APPLY_PATH } from '@/lib/organizer-onboarding'
-import { organizerDraftScope } from '@/lib/organizer-fair-context'
-import { APPLICATION_RECEIVED_TEMPLATE } from '@/lib/email/templates'
+import { organizerPortalState } from '@/lib/organizer-portal-state'
+import { ORGANIZER_APPLY_PATH, organizerAwaitingLinesFor } from '@/lib/organizer-onboarding'
 import QueryProvider from '../_providers/QueryProvider'
 
 export const metadata: Metadata = {
@@ -63,24 +61,10 @@ export default async function OrganizerLayout({ children }: { children: React.Re
 
     gate = organizerPortalState(orgMember.organizer)
 
-    // "Application under review": say where the confirmation went and that their event is saved,
-    // but only what is true — the confirmation row this organizer actually has, and their draft.
+    // "Application under review": where we'll email them about it, and that their event is saved.
+    // The email line never depends on whether a confirmation was queued (lib/organizer-onboarding).
     if (gate.state === 'AWAITING') {
-      const [confirmation, draft] = await Promise.all([
-        db.notification.findUnique({
-          where: { dedupeKey: `received:organizer:${orgMember.organizerId}` },
-          select: { to: true, template: true },
-        }),
-        db.event.findFirst({
-          where: organizerDraftScope(orgMember.organizerId),
-          orderBy: { createdAt: 'asc' },
-          select: { name: true },
-        }),
-      ])
-      awaitingLines = organizerAwaitingLines({
-        confirmationSentTo: confirmation?.template === APPLICATION_RECEIVED_TEMPLATE ? confirmation.to ?? null : null,
-        draftEventName: draft?.name ?? null,
-      })
+      awaitingLines = await organizerAwaitingLinesFor(orgMember.organizerId)
     }
   }
 

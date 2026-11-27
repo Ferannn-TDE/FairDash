@@ -177,7 +177,8 @@ export async function POST(req: Request) {
         kind: 'vendor', name: v.name, contactName: v.contactName, email: v.contactEmail ?? user.email, phone: v.contactPhone,
       })
       // The applicant's confirmation, to the email typed on the form (none when it was left blank).
-      await enqueueApplicationReceived(tx, v.id, v.contactEmail, { kind: 'vendor', name: v.name })
+      // No typed name in it (confirmation-email-safety): the payload is the kind only.
+      await enqueueApplicationReceived(tx, v.id, v.contactEmail, { kind: 'vendor' })
       // The Terms + Privacy versions accepted with the Vendor Agreement (the step 4 checkbox links
       // all three). Action TERMS_ACCEPTED, never a decision: no decision reader counts it
       // (sign-up-fixes commit 4). The Vendor's own terms columns are unchanged.

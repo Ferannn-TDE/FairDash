@@ -25,6 +25,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { db } from '@/lib/db'
 import { getSetting } from '@/lib/settings'
+import { logger } from '@/lib/logger'
 import {
   EmailSendError, getEmailTransport, outsideSafeDomain, resolveEmailTransport, safeRecipientDomain,
   type EmailTransport, type OutgoingEmail,
@@ -54,6 +55,9 @@ export const RATE_LIMIT_WAIT_MS = 15 * 60e3
 export const RATE_LIMIT_WAIT_MIN_MS = 60e3
 export const RATE_LIMIT_WAIT_MAX_MS = 24 * 3600e3
 const SENDING_RECLAIM_MS = 10 * 60e3
+/** "We got your application" emails one address can receive in CONFIRMATION_WINDOW_MS, all kinds together. */
+export const CONFIRMATIONS_PER_ADDRESS_PER_DAY = 3
+export const CONFIRMATION_WINDOW_MS = 24 * 3600e3
 
 // ── Enqueue (inside the caller's transaction) ───────────────────────────────────────────────
 export async function enqueueSignupAlert(tx: Tx, applicationId: string, payload: SignupAlertPayload) {
@@ -66,10 +70,25 @@ export async function enqueueSignupAlert(tx: Tx, applicationId: string, payload:
 /** The applicant's "we got your application" email (sign-up-fixes commit 2). Called in the SAME
  *  transaction that creates the application, so it exists only with it; the dedupe key makes it
  *  exactly once per application, and nothing on a later edit calls it. A blank form email queues
- *  nothing (the application itself still stands). */
+ *  nothing (the application itself still stands).
+ *  ONE INBOX, AT MOST CONFIRMATIONS_PER_ADDRESS_PER_DAY a day (confirmation-email-safety): every form
+ *  lets the applicant type the address, so many senders could aim at one stranger's inbox; the
+ *  per-user and per-connection limits only stop one sender. Over the limit the application still
+ *  stands and the reply is unchanged (nobody learns an address hit it); the log names no address. */
 export async function enqueueApplicationReceived(tx: Tx, applicationId: string, to: string | null | undefined, payload: ApplicationReceivedPayload) {
   const address = typeof to === 'string' ? to.trim() : ''
   if (!address) return
+  const recent = await tx.notification.count({
+    where: {
+      template: APPLICATION_RECEIVED_TEMPLATE,
+      to: { equals: address, mode: 'insensitive' },
+      createdAt: { gte: new Date(Date.now() - CONFIRMATION_WINDOW_MS) },
+    },
+  })
+  if (recent >= CONFIRMATIONS_PER_ADDRESS_PER_DAY) {
+    logger.warn('[Notifications] Confirmation not queued: address limit reached', { kind: payload.kind, applicationId })
+    return
+  }
   await tx.notification.createMany({
     data: [{
       audience: 'applicant', to: address, template: APPLICATION_RECEIVED_TEMPLATE,
