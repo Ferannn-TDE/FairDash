@@ -56,6 +56,12 @@ const declined = (id: string, payload: Record<string, unknown>, text: string): E
   },
 })
 
+const received = (id: string, kind: 'vendor' | 'partner' | 'organizer' | 'runner', name: string, subject: string, text: string): EmailSample => ({
+  id, template: 'application_received', variant: 'standard',
+  payload: { kind, name },
+  expect: { subject, text, heading: 'We got your application', preheader: 'FairSynq is reviewing it now.', button: null },
+})
+
 export const EMAIL_SAMPLES: EmailSample[] = [
   // E1 — admin alerts
   admin('admin-vendor', 'vendor', 'vendor', { name: 'Taco Stand', contactName: 'Ana Ruiz', email: 'ana@example.com', phone: '555-0101' }, 'Taco Stand', 'Ana Ruiz, ana@example.com, 555-0101'),
@@ -115,6 +121,17 @@ export const EMAIL_SAMPLES: EmailSample[] = [
     `Hi County Fair Board, we're not able to approve County Fair Board right now. Reason: We could not verify the event! If you have questions, contact ${SUPPORT}.`),
   declined('declined-partner-no-reason', { kind: 'partner', name: 'Rotary Club', contactName: 'Sam' },
     `Hi Sam, we're not able to approve Rotary Club right now. If you have questions, contact ${SUPPORT}.`),
+
+  // E7 — the applicant's "we got your application" (sign-up-fixes commit 2; wording Jordan, Nov 26)
+  received('received-vendor', 'vendor', 'Taco Stand', 'We got your FairSynq application',
+    "Thanks, Taco Stand. We got your vendor application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
+  received('received-partner', 'partner', 'Rotary Club', 'We got your FairSynq partner application',
+    "Thanks, Rotary Club. We got your partner application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
+  received('received-organizer', 'organizer', 'County Fair Board', 'We got your FairSynq organizer application',
+    "Thanks, County Fair Board. We got your organizer application and FairSynq is reviewing it now. We'll email you here when there's a decision."),
+  // Runners get no decision email yet, so no decision sentence.
+  received('received-runner', 'runner', 'Dee', 'We got your FairSynq runner application',
+    'Thanks, Dee. We got your runner application and FairSynq is reviewing it now.'),
 
   // E4 — FairSynq decided a vendor at the organizer's event (C5: new subject)
   {
@@ -189,6 +206,7 @@ export function hostileSamples(): { id: string; template: string; payload: Recor
     { id: 'hostile-admin', template: 'signup_admin_alert', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, email: 'a@example.com', phone: HOSTILE } },
     { id: 'hostile-approved', template: 'decision_approved', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, decidedBy: HOSTILE } },
     { id: 'hostile-declined', template: 'decision_rejected', payload: { kind: 'vendor', name: HOSTILE, contactName: HOSTILE, reason: HOSTILE, decidedBy: HOSTILE } },
+    { id: 'hostile-received', template: 'application_received', payload: { kind: 'vendor', name: HOSTILE } },
     { id: 'hostile-override', template: 'vendor_override_organizer', payload: { vendorName: HOSTILE, fairName: HOSTILE, decision: 'rejected', reason: HOSTILE, link: OVERRIDE_LINK } },
     { id: 'hostile-deleted', template: 'menu_items_deleted', payload: { alertType: 'MENU_ITEMS_DELETED', fairName: HOSTILE, vendorName: HOSTILE, lines: [HOSTILE], link: MENU_LINK } },
     { id: 'hostile-price', template: 'menu_price_change_pending', payload: { alertType: 'MENU_PRICE_CHANGE_PENDING', fairName: HOSTILE, vendorName: HOSTILE, lines: [HOSTILE], link: MENU_LINK } },

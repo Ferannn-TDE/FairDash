@@ -5,7 +5,7 @@ import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { uniqueVendorSlug } from '@/lib/vendor-slug'
 import { createVendorWithOwner, syncPayeeRoles } from '@/lib/payee-membership'
-import { enqueueSignupAlert } from '@/lib/notifications'
+import { enqueueSignupAlert, enqueueApplicationReceived } from '@/lib/notifications'
 import { VENDOR_AGREEMENT_VERSION } from '@/lib/legal/vendor-agreement'
 import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { demoHiddenWhere } from '@/lib/demo-vendor'
@@ -145,6 +145,8 @@ export async function POST(req: Request) {
       await enqueueSignupAlert(tx, v.id, {
         kind: 'vendor', name: v.name, contactName: v.contactName, email: v.contactEmail ?? user.email, phone: v.contactPhone,
       })
+      // The applicant's confirmation, to the email typed on the form (none when it was left blank).
+      await enqueueApplicationReceived(tx, v.id, v.contactEmail, { kind: 'vendor', name: v.name })
       return v
     })
     await syncPayeeRoles(user.id, 'payee-membership:vendor')

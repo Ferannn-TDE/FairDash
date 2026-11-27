@@ -4,7 +4,7 @@ import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { enforceRateLimit } from '@/lib/ratelimit'
 import { logger } from '@/lib/logger'
-import { enqueueSignupAlert } from '@/lib/notifications'
+import { enqueueSignupAlert, enqueueApplicationReceived } from '@/lib/notifications'
 import { normalizePartnerApplication, validatePartnerApplication, PARTNER_APPLY_SUCCESS, PARTNER_APPLY_DUPLICATE, HONEYPOT_FIELD } from '@/lib/partner-application'
 
 // POST /api/partners/apply — the public partner organization application (Batch 1 item 7, B1.11).
@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
     const row = await db.$transaction(async tx => {
       const created = await tx.partnerOrganization.create({ data: { ...app, requestIp: ip }, select: { id: true } })
       await enqueueSignupAlert(tx, created.id, { kind: 'partner', name: app.name, contactName: app.contactName, email: app.contactEmail, phone: app.contactPhone })
+      // The applicant's confirmation, to the email on the form (sign-up-fixes commit 2).
+      await enqueueApplicationReceived(tx, created.id, app.contactEmail, { kind: 'partner', name: app.name })
       return created
     })
     logger.info('[Partners] Application received', { partnerId: row.id, name: app.name, state: app.state })

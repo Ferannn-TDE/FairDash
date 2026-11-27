@@ -114,7 +114,7 @@ async function main() {
 
   await section('[3] Every template: multipart, one layout, approved heading / preheader / button', async () => {
     const names = T.EMAIL_TEMPLATES
-    assert(Array.isArray(names) && names.length === 6, 'EMAIL_TEMPLATES lists the 6 templates')
+    assert(Array.isArray(names) && names.length === 7, 'EMAIL_TEMPLATES lists the 7 templates')
     for (const name of names ?? []) assert(EMAIL_SAMPLES.some(s => s.template === name), `has a sample: ${name}`)
     let threw = false
     try { T.renderEmail('no_such_template', {}) } catch { threw = true }
