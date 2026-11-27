@@ -74,16 +74,16 @@ async function main() {
     console.log('\n[3] reload (fresh GET) → values persisted')
     const g1 = await get(A.u.clerkId)
     const r = g1.json?.data?.runner
-    assert(r?.phone === '+1 312-555-0199', `phone persisted + trimmed (got ${JSON.stringify(r?.phone)})`)
+    assert(r?.phone === '+13125550199', `phone persisted, saved as +1XXXXXXXXXX (got ${JSON.stringify(r?.phone)})`)
     assert(r?.vehicleMake === 'Honda' && r?.vehiclePlate === 'LMN 9012', 'vehicle persisted')
     assert(r?.notifyNewDelivery === false && r?.notifyEarnings === true, 'notification prefs persisted')
     assert(JSON.stringify(r?.availableDays) === JSON.stringify(['Fri', 'Sat']), `availableDays deduped + canonical order (got ${JSON.stringify(r?.availableDays)})`)
 
     // ── partial PATCH doesn't clobber ────────────────────────────────────────────
     console.log('\n[4] partial PATCH (only phone) leaves other fields intact')
-    await patch(A.u.clerkId, { phone: '+1 000' })
+    await patch(A.u.clerkId, { phone: '(618) 555-0100' })
     const g2 = (await get(A.u.clerkId)).json?.data?.runner
-    assert(g2?.phone === '+1 000' && g2?.vehicleMake === 'Honda' && JSON.stringify(g2?.availableDays) === JSON.stringify(['Fri', 'Sat']), 'only phone changed; vehicle + availability untouched')
+    assert(g2?.phone === '+16185550100' && g2?.vehicleMake === 'Honda' && JSON.stringify(g2?.availableDays) === JSON.stringify(['Fri', 'Sat']), 'only phone changed; vehicle + availability untouched')
 
     // ── status flip still works ──────────────────────────────────────────────────
     console.log('\n[5] status flip still works via the same endpoint')

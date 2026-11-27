@@ -40,6 +40,35 @@ export interface FairOrdersOpts {
 const FULFILLMENT_TYPES = ['BOOTH_PICKUP', 'CURBSIDE', 'HOME_DELIVERY']
 
 /**
+ * PHONE SEARCH BY DIGITS (sign-up-fixes 1b). Stored customer phones come in two shapes — older
+ * orders as typed ("(618) 555-0100"), newer ones as +16185550100 — so a text `contains` can't find
+ * both. Searches compare digits only: "(618) 555", "618555" and "+1618555" all find both shapes.
+ * A query that starts with a country code 1 is also tried without it, which is what finds the
+ * older 10-digit rows. Fewer than 3 digits is too broad to mean a phone: no phone search.
+ */
+export function phoneSearchDigits(q: string): string[] {
+  const digits = q.replace(/\D/g, '')
+  if (digits.length < 3) return []
+  const variants = [digits]
+  if (/^\s*\+?1/.test(q) && digits.length > 3) variants.push(digits.slice(1))
+  return variants
+}
+
+/** The ids of this event's orders whose phone digits contain the search's digits. Read-only. */
+async function ordersMatchingPhoneDigits(eventId: string, q: string): Promise<string[]> {
+  const variants = phoneSearchDigits(q)
+  if (!variants.length) return []
+  const first = `%${variants[0]}%`
+  const second = `%${variants[variants.length - 1]}%`
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM "Order"
+    WHERE "eventId" = ${eventId}
+      AND (regexp_replace("customerPhone", '[^0-9]', '', 'g') LIKE ${first}
+        OR regexp_replace("customerPhone", '[^0-9]', '', 'g') LIKE ${second})`
+  return rows.map(r => r.id)
+}
+
+/**
  * Authorization-agnostic shared core for a fair's order log.
  *
  * Given an ALREADY-RESOLVED and ALREADY-AUTHORIZED eventId, returns the fair's
@@ -75,11 +104,13 @@ export async function getFairOrders(eventId: string, opts: FairOrdersOpts = {}) 
   // `contains` on the (lowercase) id matches both the tail and a full-id paste; names are
   // case-insensitive.
   const q = opts.search?.trim()
+  const phoneMatchIds = q ? await ordersMatchingPhoneDigits(eventId, q) : []
   const searchWhere = q ? {
     OR: [
       { id: { contains: q.toLowerCase() } },
       { customerName: { contains: q, mode: 'insensitive' as const } },
       { customerPhone: { contains: q } },
+      ...(phoneMatchIds.length ? [{ id: { in: phoneMatchIds } }] : []),
       { vendor: { name: { contains: q, mode: 'insensitive' as const } } },
     ],
   } : {}

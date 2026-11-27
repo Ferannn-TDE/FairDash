@@ -6,6 +6,7 @@ import { User, Phone, Mail, Bell, Clock, LogOut, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import StripeConnectCard from '../../../_components/StripeConnectCard'
 import ConfirmModal from '@/app/_components/ui/ConfirmModal'
+import { checkPhone, PHONE_ERROR } from '@/lib/phone'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -49,6 +50,8 @@ export default function RunnerSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [signOutOpen, setSignOutOpen] = useState(false)
+  // The phone as last saved, so an unchanged older-format number still saves (lib/phone).
+  const [savedPhone, setSavedPhone] = useState<string | null>(null)
 
   const fullName = user?.fullName ?? user?.firstName ?? ''
   const email = user?.primaryEmailAddress?.emailAddress ?? ''
@@ -58,7 +61,12 @@ export default function RunnerSettingsPage() {
   useEffect(() => {
     fetch('/api/runners/me')
       .then(r => r.json())
-      .then(j => { if (j.success && j.data.runner) setForm(fromRunner(j.data.runner)) })
+      .then(j => {
+        if (j.success && j.data.runner) {
+          setForm(fromRunner(j.data.runner))
+          setSavedPhone((j.data.runner.phone as string | null) ?? null)
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -68,6 +76,11 @@ export default function RunnerSettingsPage() {
     setForm(f => ({ ...f, availableDays: f.availableDays.includes(day) ? f.availableDays.filter(d => d !== day) : [...f.availableDays, day] }))
 
   async function save() {
+    // Same rule as the server (lib/phone). A bad phone shows the message and sends nothing.
+    if (!checkPhone(form.phone, { required: false, previous: savedPhone }).ok) {
+      toast.error(PHONE_ERROR)
+      return
+    }
     setSaving(true)
     try {
       const res = await fetch('/api/runners/me', {
@@ -76,6 +89,7 @@ export default function RunnerSettingsPage() {
       const json = await res.json()
       if (res.ok && json.success) {
         setForm(fromRunner(json.data.runner)) // re-sync from what actually persisted
+        setSavedPhone((json.data.runner.phone as string | null) ?? null)
         toast.success('Settings saved')
       } else {
         toast.error(json.error?.message ?? 'Could not save settings')

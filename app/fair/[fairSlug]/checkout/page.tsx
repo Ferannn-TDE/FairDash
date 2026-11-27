@@ -24,6 +24,7 @@ import { validateDeliveryAddress, streetLineFromPlace, type DeliveryAddressError
 import { useFair } from '../../../_contexts/FairContext'
 import { useFairCart } from '../../../_contexts/FairCartContext'
 import AddressAutocomplete from '../../../_components/AddressAutocomplete'
+import { checkPhone, PHONE_ERROR, INVALID_PHONE } from '@/lib/phone'
 
 // ─── Style constants ──────────────────────────────────────────────────────────
 
@@ -74,14 +75,14 @@ const ALL_FULFILLMENT_OPTIONS = [
 ]
 
 // ─── Phone helpers ────────────────────────────────────────────────────────────
-
-const validatePhone = (phone: string): boolean => {
-  const cleaned = phone.replace(/[\s\-\(\)\.]/g, '')
-  return /^(\+1|1)?[2-9]\d{9}$/.test(cleaned)
-}
+// The check is the shared US phone rule (lib/phone checkPhone), the same one the server runs.
 
 const formatPhone = (raw: string): string => {
-  const digits = raw.replace(/\D/g, '').slice(0, 11)
+  let digits = raw.replace(/\D/g, '')
+  // A leading country code 1 ("+1 217…", "1 217…") is dropped before formatting, so the box shows
+  // the 10-digit number meant instead of shifting every digit by one ("(121) 755-5013").
+  if (digits.length > 10 && digits.startsWith('1')) digits = digits.slice(1)
+  digits = digits.slice(0, 10)
   if (digits.length <= 3) return digits
   if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
@@ -460,8 +461,8 @@ export default function CheckoutPage() {
       toast.error('Full name is required')
       return false
     }
-    if (!validatePhone(form.phone)) {
-      setFieldErrors(prev => ({ ...prev, phone: 'Enter a valid 10-digit US phone number' }))
+    if (!checkPhone(form.phone, { required: true }).ok) {
+      setFieldErrors(prev => ({ ...prev, phone: PHONE_ERROR }))
       return false
     }
     if (fairLoading) {
@@ -580,8 +581,14 @@ export default function CheckoutPage() {
         // inputs via the shared validator's field map; everything else becomes a readable toast.
         // This route's messages are written for customers; that is what makes it an exception and
         // not a leak. It is reviewed here, deliberately, rather than allowed by default anywhere.
+        if (json.error?.code === INVALID_PHONE) {
+          // The page's own sentence under the phone box (lib/phone), never the server's text.
+          setFieldErrors(prev => ({ ...prev, phone: PHONE_ERROR }))
+          toast.error(PHONE_ERROR)
+          return
+        }
         const message: string | undefined = json.error?.message
-        const fields = (json.error?.details as { fields?: DeliveryAddressError[] } | undefined)?.fields
+        const fields =(json.error?.details as { fields?: DeliveryAddressError[] } | undefined)?.fields
         if (fields?.length) {
           setFieldErrors(Object.fromEntries(fields.map(e => [FIELD_INPUT[e.field], e.message])))
           toast.error(message ?? 'Please check the delivery address')
@@ -749,8 +756,8 @@ export default function CheckoutPage() {
                           setFieldErrors(prev => ({ ...prev, phone: undefined }))
                         }}
                         onBlur={() => {
-                          if (form.phone && !validatePhone(form.phone)) {
-                            setFieldErrors(prev => ({ ...prev, phone: 'Enter a valid 10-digit US phone number' }))
+                          if (form.phone && !checkPhone(form.phone, { required: true }).ok) {
+                            setFieldErrors(prev => ({ ...prev, phone: PHONE_ERROR }))
                           }
                         }}
                         className={`${inputClass} ${fieldErrors.phone ? 'border-red-500 focus:border-red-500' : ''}`}
