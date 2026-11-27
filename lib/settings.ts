@@ -22,6 +22,7 @@
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { validateEmail } from '@/lib/runner-application-validation'
+import { normalizeUsPhone } from '@/lib/phone'
 import type { SettingsRole } from '@/lib/roles'
 import { dollarsToCents, percentToBps, formatBps, formatCents } from '@/lib/money-input'
 import { notifyMoneySettingChanged, type MoneySettingChange } from '@/lib/notify'
@@ -65,15 +66,9 @@ function parseEmailList(raw: unknown): Parsed<string[]> {
 }
 
 // ── alerts.phone ───────────────────────────────────────────────────────────────────────────
-/** A plausible US number in any common format → +1XXXXXXXXXX, or null if it isn't one. */
-export function normalizeUsPhone(input: string): string | null {
-  let digits = input.replace(/\D/g, '')
-  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1)
-  if (digits.length !== 10) return null
-  // NANP: area code and exchange both start 2–9.
-  if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(digits)) return null
-  return `+1${digits}`
-}
+// normalizeUsPhone lives in lib/phone.ts (one rule for every phone, sign-up-fixes commit 1) and is
+// re-exported here so existing readers of settings.normalizeUsPhone keep working.
+export { normalizeUsPhone }
 
 function parsePhone(raw: unknown): Parsed<string> {
   if (raw == null) return { ok: true, value: null }

@@ -1,6 +1,7 @@
 'use client'
 
 import toast from 'react-hot-toast'
+import { PHONE_ERROR } from './phone'
 
 /**
  * TOAST ERRORS — the one place an error becomes something a user reads.
@@ -59,6 +60,9 @@ const CODE_COPY: Record<string, string> = {
   CONFLICT:                'Someone else changed that first — reload and try again.',
   UNIQUE_CONSTRAINT:       'That’s already taken — please use a different value.',
   ALREADY_CLAIMED:         'Just claimed by another runner.',
+
+  // Form input (lib/phone — the same sentence the browser check shows)
+  INVALID_PHONE:           PHONE_ERROR,
 
   // Approval / availability
   RUNNER_NOT_APPROVED:     'Your runner account is awaiting admin approval.',

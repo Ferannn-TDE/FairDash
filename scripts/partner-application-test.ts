@@ -59,7 +59,7 @@ async function main() {
   assert(!!v.validatePartnerApplication({ ...VALID, groupType: 'cult' }).groupType, 'an unlisted group type → error')
   assert(!!v.validatePartnerApplication({ ...VALID, groupType: 'other' }).groupTypeOther, '"Other" without a description → error')
   assert(!v.validatePartnerApplication({ ...VALID, groupType: 'other', groupTypeOther: 'Scout troop' }).groupTypeOther, '[0] control: "Other" with a description is fine')
-  assert(!!v.validatePartnerApplication({ ...VALID, email: 'nope' }).email && !!v.validatePartnerApplication({ ...VALID, phone: '12' }).phone, 'bad email / phone → errors (runner sign-up rules)')
+  assert(!!v.validatePartnerApplication({ ...VALID, email: 'nope' }).email && !!v.validatePartnerApplication({ ...VALID, phone: '12' }).phone, 'bad email / phone → errors (US phone rule)')
   assert(!!v.validatePartnerApplication({ ...VALID, note: 'x'.repeat(2001) }).note, 'a note over 2,000 characters → error')
   assert(Object.keys(v.validatePartnerApplication({ ...VALID, interests: '', staffHours: '', note: '' })).length === 0, '[0] control: the optional fields can be empty')
   assert(v.US_STATES.length === 51, 'the state dropdown has 50 states + DC')

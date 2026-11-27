@@ -4,7 +4,8 @@
 // as the real gate. Pure and dependency-free apart from the runner validators it reuses (also pure),
 // so it is safe in a 'use client' component.
 
-import { validateEmail, validatePhone } from '@/lib/runner-application-validation'
+import { validateEmail } from '@/lib/runner-application-validation'
+import { checkPhone, normalizeUsPhone } from '@/lib/phone'
 
 export const GROUP_TYPES = [
   { value: 'school', label: 'School' },
@@ -74,7 +75,8 @@ export function validatePartnerApplication(input: PartnerApplicationInput): Part
   if (type === 'other') set('groupTypeOther', required(input.groupTypeOther, 'Describe your group', PARTNER_MAX_LEN.groupTypeOther))
   set('contactName', required(input.contactName, 'Contact name', PARTNER_MAX_LEN.contactName))
   set('email', validateEmail(input.email))
-  set('phone', validatePhone(input.phone))
+  const phone = checkPhone(input.phone, { required: true })
+  if (!phone.ok) e.phone = phone.error
   set('city', required(input.city, 'City', PARTNER_MAX_LEN.city))
   const st = str(input.state).toUpperCase()
   if (!st) e.state = 'State is required'
@@ -91,7 +93,9 @@ export function normalizePartnerApplication(input: PartnerApplicationInput): Par
   const type = str(input.groupType) as GroupType
   return {
     name: str(input.name), groupType: type, groupTypeOther: type === 'other' ? str(input.groupTypeOther) : null,
-    contactName: str(input.contactName), contactEmail: str(input.email).toLowerCase(), contactPhone: str(input.phone),
+    contactName: str(input.contactName), contactEmail: str(input.email).toLowerCase(),
+    // +1XXXXXXXXXX (lib/phone). Validation has already passed, so the fallback is never reached.
+    contactPhone: normalizeUsPhone(str(input.phone)) ?? str(input.phone),
     city: str(input.city), state: str(input.state).toUpperCase(),
     interests: opt(input.interests), staffHours: opt(input.staffHours), note: opt(input.note),
   }

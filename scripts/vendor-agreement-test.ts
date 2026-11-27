@@ -120,7 +120,7 @@ async function main() {
     login(u.clerkId)
     const r = await POST(new NextRequest('http://localhost/api/vendors', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ eventSlug: event.urlSlug, name: `${PFX}Booth ${rand()}`, cuisineType: 'Tacos', legalName: 'Jane Smith', ...extra }),
+      body: JSON.stringify({ eventSlug: event.urlSlug, name: `${PFX}Booth ${rand()}`, cuisineType: 'Tacos', legalName: 'Jane Smith', contactPhone: '(217) 555-0134', ...extra }),
     }) as any)
     const j: any = await r.json()
     return { status: r.status, code: j?.error?.code as string | undefined }

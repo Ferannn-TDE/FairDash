@@ -11,6 +11,7 @@ import { readinessWhereIfEnforced } from '@/lib/vendor-readiness'
 import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { PUBLIC_VENDOR_SELECT } from '@/lib/public-vendor-select'
 import { customerReachableScope } from '@/lib/event-listing'
+import { checkPhone, INVALID_PHONE } from '@/lib/phone'
 
 // GET /api/vendors?eventSlug=springfield-fair-2026&page=1&limit=20
 // Returns active, online vendors for a given event. When ENFORCE_VENDOR_READINESS
@@ -91,6 +92,10 @@ export async function POST(req: Request) {
     if (agreedToVendorAgreement !== true) {
       return apiError('You must agree to the FairSynq Vendor Agreement to apply', 400, 'CONSENT_REQUIRED')
     }
+    // Phone (sign-up-fixes commit 1): the same rule the wizard's step 1 checks, enforced here
+    // because the browser check can be skipped. Saved as +1XXXXXXXXXX.
+    const phoneCheck = checkPhone(contactPhone, { required: true })
+    if (!phoneCheck.ok) return apiError(phoneCheck.error, 400, INVALID_PHONE)
 
     // Can't apply to a soft-deleted fair. UPCOMING is allowed — vendors apply before
     // a fair goes live — so this is archivedAt-gated only, not ACTIVE-gated.
@@ -126,7 +131,7 @@ export async function POST(req: Request) {
           status: 'PENDING',
           contactName:  contactName  ?? null,
           contactEmail: contactEmail ?? null,
-          contactPhone: contactPhone ?? null,
+          contactPhone: phoneCheck.value,
           termsAcceptedName: String(legalName).trim(),
           // Always the version this server publishes (lib/legal/vendor-agreement.ts), never a value
           // from the browser: the record says which terms were actually shown.

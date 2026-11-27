@@ -237,7 +237,7 @@ async function main() {
   login(vu.clerkId)
   const vendorsPOST = (await import('../app/api/vendors/route')).POST
   const vr = await vendorsPOST(new NextRequest('http://localhost/api/vendors', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ eventSlug: ev.urlSlug, name: `${PFX}Booth`, cuisineType: 'Tacos', legalName: 'V V', agreedToVendorAgreement: true }) }) as any)
+    body: JSON.stringify({ eventSlug: ev.urlSlug, name: `${PFX}Booth`, cuisineType: 'Tacos', legalName: 'V V', agreedToVendorAgreement: true, contactPhone: '(217) 555-0134' }) }) as any)
   const vj: any = await vr.json()
   assert(vr.status === 201 && (await prisma.notification.count({ where: { dedupeKey: `signup:vendor:${vj.data.id}` } })) === 1, 'vendor sign-up → one admin alert')
   const { ensureOrganizerBootstrap } = await import('../lib/organizer-bootstrap')

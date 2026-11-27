@@ -112,6 +112,7 @@ const SUITES: Suite[] = [
   { group: 'correctness', name: 'test-fair',              file: 'scripts/test-fair-test.ts' },
   { group: 'correctness', name: 'delivery-switch',        file: 'scripts/delivery-test.ts' },
   { group: 'correctness', name: 'partner-application',    file: 'scripts/partner-application-test.ts' },
+  { group: 'correctness', name: 'phone-check',            file: 'scripts/phone-test.ts' },
   { group: 'correctness', name: 'vendor-agreement',       file: 'scripts/vendor-agreement-test.ts' },
   { group: 'correctness', name: 'approvals',              file: 'scripts/approvals-test.ts' },
   // Approvals front door (Nov 25): pending applications decided only on Approvals; the old routes refuse them.
