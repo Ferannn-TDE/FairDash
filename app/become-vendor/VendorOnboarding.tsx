@@ -35,6 +35,7 @@ import PitchVideo from '@/app/_components/PitchVideo'
 import type { VideoSource } from '@/lib/videos'
 import { fillEmptyFields, PREFILLED_EMAIL_HINT, type ContactPrefill } from '@/lib/contact-prefill'
 import { checkPhone } from '@/lib/phone'
+import { VENDOR_DESCRIPTION_MAX, DESCRIPTION_TOO_LONG_MESSAGE } from '@/lib/application-limits'
 
 const SUBMIT_FALLBACK = 'Couldn’t submit your application — please try again.'
 
@@ -117,7 +118,9 @@ const DOC_HINTS: Record<RequiredVendorDoc, string> = {
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+// Exported so the organizer sign-up form uses the same step style and field styles
+// (app/onboarding/organizer/OrganizerApplyForm.tsx, sign-up-fixes commit 4).
+export function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
     <p className="text-[0.6875rem] uppercase tracking-wide text-text-gray font-semibold mb-1.5">
       {children}{required && <span className="text-neon-pink ml-0.5">*</span>}
@@ -125,11 +128,12 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
   )
 }
 
-const iCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-white/20'
+export const iCls = 'w-full bg-bg-dark border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-neon-pink transition-colors placeholder:text-white/20'
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
 
-function ProgressBar({ step }: { step: number }) {
+export function ProgressBar({ step, steps = STEPS }: { step: number; steps?: readonly { num: number; label: string }[] }) {
+  const STEPS = steps
   return (
     <div className="mb-8">
       {/* Mobile */}
@@ -317,6 +321,11 @@ function Step2({ data, update }: { data: FormData; update: (p: Partial<FormData>
           placeholder="Tell fair-goers about your food and what makes it special... (20+ characters required)" />
         <p className={`text-xs mt-1 transition-colors ${data.description.trim().length >= 20 ? 'text-emerald-400' : 'text-text-gray'}`}>
           {data.description.trim().length} / 20 characters minimum
+        </p>
+        {/* At most 2,000 characters (sign-up-fixes commit 4): the same rule the server checks. */}
+        <p className={`text-xs mt-1 ${data.description.trim().length > VENDOR_DESCRIPTION_MAX ? 'text-red-400' : 'text-text-gray'}`}>
+          {data.description.trim().length.toLocaleString('en-US')} / {VENDOR_DESCRIPTION_MAX.toLocaleString('en-US')} characters
+          {data.description.trim().length > VENDOR_DESCRIPTION_MAX && <span role="alert"> · {DESCRIPTION_TOO_LONG_MESSAGE}</span>}
         </p>
       </div>
     </div>
@@ -602,7 +611,7 @@ export default function VendorOnboarding({ video, prefill }: { video: VideoSourc
   const canProceed = (() => {
     switch (step) {
       case 1: return !!(eventSlug && data.businessName.trim() && data.contactName.trim() && data.email.trim() && checkPhone(data.phone, { required: true }).ok)
-      case 2: return !!(cuisineChosen && data.description.trim().length >= 20)
+      case 2: return !!(cuisineChosen && data.description.trim().length >= 20 && data.description.trim().length <= VENDOR_DESCRIPTION_MAX)
       // Every required document must be chosen. Client-side only — the real
       // enforcement is the approve gate, which refuses a docs-incomplete vendor.
       case 3: return REQUIRED_VENDOR_DOCS.every(k => docFiles[k] !== null)

@@ -1,7 +1,7 @@
 import { currentUser, clerkClient } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import { safeRedirect } from '@/lib/safe-redirect'
-import { ensureOrganizerBootstrap } from '@/lib/organizer-bootstrap'
+import { organizerOnboardingDestination } from '@/lib/organizer-onboarding'
 import { ensureDbUser } from '@/lib/ensure-db-user'
 import { assertNotProductionClerk } from '@/lib/prod-clerk-guard'
 import { robotsFor } from '@/lib/seo'
@@ -89,8 +89,9 @@ export default async function OnboardingPage({
   //
   // WHAT THIS PAGE STILL DOES, and why routing sign-in through it (RoleAuthCard) still matters:
   // it is the ROUTER INTO role acquisition, not the writer of it. REDIRECT_MAP sends vendor to
-  // /become-vendor and runner to /become-driver, and the organizer branch below provisions the
-  // OrgMember synchronously. That is how an existing account picks up a second role.
+  // /become-vendor and runner to /become-driver, and the organizer branch below sends anyone who
+  // is not yet an organizer to the organizer sign-up form, whose submit provisions the OrgMember
+  // (sign-up-fixes commit 4). That is how an existing account picks up a second role.
   //
   // The legacy singular `role` is still mirrored for continuity (nothing reads it — see the DB
   // column note in schema.prisma), and skipped when it would be a no-op so the sign-in hop does
@@ -103,12 +104,13 @@ export default async function OnboardingPage({
     })
   }
 
-  // Organizer self-signup: provision FairOrganizer + owner OrgMember SYNCHRONOUSLY,
-  // before the redirect to /organizer, so the portal's DB authority check (and
-  // requireOrganizerAuth) pass on first load. Idempotent + concurrency-safe; see
-  // lib/organizer-bootstrap.ts. (Vendor/runner provision later, per-event.)
-  if (role === 'organizer' && dbUserId && primaryEmail) {
-    await ensureOrganizerBootstrap(dbUserId, { name, email: primaryEmail, phone })
+  // Organizer: this page creates NOTHING (sign-up-fixes commit 4). Someone who is already an
+  // organizer goes on to the portal (or their ?redirect=); anyone else goes to the organizer
+  // sign-up form, and only submitting that form creates the organizer (POST /api/organizer/apply).
+  // The read-only decision lives in lib/organizer-onboarding.ts so it can be tested.
+  if (role === 'organizer' && dbUserId) {
+    const next = await organizerOnboardingDestination(dbUserId)
+    if (next === 'apply') redirect('/onboarding/organizer')
   }
 
   const destination = safeRedirect(redirectParam, REDIRECT_MAP[role])

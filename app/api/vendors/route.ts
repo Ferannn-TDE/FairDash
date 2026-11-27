@@ -12,6 +12,15 @@ import { demoHiddenWhere } from '@/lib/demo-vendor'
 import { PUBLIC_VENDOR_SELECT } from '@/lib/public-vendor-select'
 import { customerReachableScope } from '@/lib/event-listing'
 import { checkPhone, INVALID_PHONE } from '@/lib/phone'
+import { enforceRateLimit } from '@/lib/ratelimit'
+import { readJsonBody } from '@/lib/read-json-body'
+import { validateEmail } from '@/lib/runner-application-validation'
+import { WEBSITE_TERMS_VERSION } from '@/lib/legal/website-terms'
+import { PRIVACY_POLICY_VERSION } from '@/lib/legal/privacy-policy'
+import {
+  APPLY_RATE_LIMITED, APPLY_RATE_LIMITED_MESSAGE,
+  VENDOR_DESCRIPTION_MAX, DESCRIPTION_TOO_LONG, DESCRIPTION_TOO_LONG_MESSAGE,
+} from '@/lib/application-limits'
 
 // GET /api/vendors?eventSlug=springfield-fair-2026&page=1&limit=20
 // Returns active, online vendors for a given event. When ENFORCE_VENDOR_READINESS
@@ -36,7 +45,7 @@ export async function GET(req: Request) {
     // ACQUISITION GATE: a DRAFT fair must never gain a Vendor — Vendor CASCADEs on Event delete,
     // and discarding a draft is a hard delete. Resolving by slug alone (as above) is exactly how a
     // leaked draft slug could attach one. See lib/fair-join-gate.ts.
-    assertFairAcceptsJoins(event.status, event.name)
+    assertFairAcceptsJoins(event.status)
 
     const where = {
       eventId: event.id,
@@ -72,7 +81,15 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const clerkId = await requireAuth()
-    const body = await req.json()
+    // Application limits (sign-up-fixes commit 4): 10 per hour per user, and a 10 KB body.
+    const { allowed, headers: rlHeaders } = await enforceRateLimit(`vendor-apply:${clerkId}`, 'vendorApply')
+    if (!allowed) {
+      const res = apiError(APPLY_RATE_LIMITED_MESSAGE, 429, APPLY_RATE_LIMITED)
+      for (const [k, v] of Object.entries(rlHeaders)) res.headers.set(k, v)
+      return res
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fields are checked one by one below
+    const body = await readJsonBody(req) as Record<string, any>
     const {
       eventSlug, name, description, cuisineType, boothNumber,
       contactName, contactEmail, contactPhone,
@@ -99,6 +116,17 @@ export async function POST(req: Request) {
     // Email (sign-up-fixes commit 3): spaces around the typed address are trimmed before saving;
     // an address of only spaces counts as blank (stored as null, so no confirmation email).
     const savedContactEmail = typeof contactEmail === 'string' && contactEmail.trim() ? contactEmail.trim() : null
+    // A typed email must look like one (sign-up-fixes commit 4, review finding 1): the confirmation
+    // email goes there, so a malformed address is refused rather than queued.
+    if (savedContactEmail) {
+      const emailError = validateEmail(savedContactEmail)
+      if (emailError) return apiError(emailError, 400, 'INVALID_EMAIL')
+    }
+    // The business description: at most 2,000 characters (D1, Jordan Nov 27), the same rule the
+    // wizard's counter shows.
+    if (typeof description === 'string' && description.trim().length > VENDOR_DESCRIPTION_MAX) {
+      return apiError(DESCRIPTION_TOO_LONG_MESSAGE, 400, DESCRIPTION_TOO_LONG)
+    }
 
     // Can't apply to a soft-deleted fair. UPCOMING is allowed — vendors apply before
     // a fair goes live — so this is archivedAt-gated only, not ACTIVE-gated.
@@ -107,7 +135,7 @@ export async function POST(req: Request) {
     // ACQUISITION GATE: a DRAFT fair must never gain a Vendor (Vendor CASCADEs on Event delete,
     // and discarding a draft is a hard delete). d026119 meant to put this here but it landed in
     // GET, which shares the same lookup line; signup stayed ungated until 2026-10-20.
-    assertFairAcceptsJoins(event.status, event.name)
+    assertFairAcceptsJoins(event.status)
 
     // Resolve internal user
     const user = await db.user.findUnique({ where: { clerkId } })
@@ -150,6 +178,16 @@ export async function POST(req: Request) {
       })
       // The applicant's confirmation, to the email typed on the form (none when it was left blank).
       await enqueueApplicationReceived(tx, v.id, v.contactEmail, { kind: 'vendor', name: v.name })
+      // The Terms + Privacy versions accepted with the Vendor Agreement (the step 4 checkbox links
+      // all three). Action TERMS_ACCEPTED, never a decision: no decision reader counts it
+      // (sign-up-fixes commit 4). The Vendor's own terms columns are unchanged.
+      await tx.approvalAction.create({
+        data: {
+          action: 'TERMS_ACCEPTED', applicationType: 'vendor', applicationId: v.id,
+          actorId: clerkId, actorType: 'applicant', actorName: String(legalName).trim(),
+          detail: { terms: WEBSITE_TERMS_VERSION, privacy: PRIVACY_POLICY_VERSION, vendorAgreement: VENDOR_AGREEMENT_VERSION },
+        },
+      })
       return v
     })
     await syncPayeeRoles(user.id, 'payee-membership:vendor')

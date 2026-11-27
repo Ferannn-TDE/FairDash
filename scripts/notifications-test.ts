@@ -247,7 +247,7 @@ async function main() {
   assert((await prisma.notification.count({ where: { dedupeKey: `signup:organizer:${ob.organizerId}` } })) === 1, 'organizer bootstrap → one admin alert, even when run twice')
   const partnerPOST = (await import('../app/api/partners/apply/route')).POST
   const pr = await partnerPOST(new NextRequest('http://localhost/api/partners/apply', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-forwarded-for': `10.9.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` },
-    body: JSON.stringify({ name: `${PFX}PTA`, groupType: 'school', contactName: 'P', email: `p-${rand()}${MAIL}`, phone: '6185550100', city: 'Alton', state: 'IL' }) }) as any)
+    body: JSON.stringify({ name: `${PFX}PTA`, groupType: 'school', contactName: 'P', email: `p-${rand()}${MAIL}`, phone: '6185550100', city: 'Alton', state: 'IL', agreedToTerms: true }) }) as any)
   const prow = await prisma.partnerOrganization.findFirst({ where: { name: `${PFX}PTA` } })
   assert(pr.status === 201 && !!prow && (await prisma.notification.count({ where: { dedupeKey: `signup:partner:${prow.id}` } })) === 1, 'partner application → one admin alert')
 

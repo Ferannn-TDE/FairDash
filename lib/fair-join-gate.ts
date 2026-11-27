@@ -34,10 +34,12 @@ export const FAIR_NOT_JOINABLE = 'FAIR_NOT_JOINABLE'
  * Throws when `status` belongs to a fair that must not gain vendors or runners.
  * Call immediately after resolving the fair and BEFORE any create.
  */
-export function assertFairAcceptsJoins(status: EventStatus, fairLabel = 'This fair'): void {
+export function assertFairAcceptsJoins(status: EventStatus): void {
   if (status === EventStatus.DRAFT) {
+    // The message never names the fair (sign-up-fixes commit 4): anyone who knows or guesses a
+    // draft's address must not learn the name of an event that isn't public. Same code as before.
     throw new ApiError(
-      `${fairLabel} has not been published yet and is not accepting applications.`,
+      'This event isn’t open for applications.',
       404,
       FAIR_NOT_JOINABLE,
     )

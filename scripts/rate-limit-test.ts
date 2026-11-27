@@ -57,6 +57,10 @@ const EXPECTED: Record<string, number> = {
   publicRoutes: 60,
   publicAnonymous: 600,
   partnerApply: 3,
+  // sign-up-fixes commit 4 (Jordan, Nov 27): application forms
+  vendorApply: 10,
+  organizerApply: 5,
+  runnerApply: 5,
 }
 
 async function main() {

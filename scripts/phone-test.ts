@@ -142,7 +142,7 @@ async function main() {
   const applyPartner = async (phone: string) => {
     const email = `p-${rand()}${MAIL}`
     const r = await partnerPOST(json('/api/partners/apply', 'POST',
-      { name: `${PFX}PTA`, groupType: 'school', contactName: 'Pat', email, phone, city: 'Alton', state: 'IL' },
+      { name: `${PFX}PTA`, groupType: 'school', contactName: 'Pat', email, phone, city: 'Alton', state: 'IL', agreedToTerms: true },
       { 'x-forwarded-for': '203.0.113.50' }))
     return { status: r.status, body: (await r.json()) as any, email }
   }

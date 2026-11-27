@@ -2,6 +2,9 @@
 
 import toast from 'react-hot-toast'
 import { PHONE_ERROR } from './phone'
+import {
+  APPLY_RATE_LIMITED_MESSAGE, PAYLOAD_TOO_LARGE_MESSAGE, DESCRIPTION_TOO_LONG_MESSAGE,
+} from './application-limits'
 
 /**
  * TOAST ERRORS — the one place an error becomes something a user reads.
@@ -63,6 +66,11 @@ const CODE_COPY: Record<string, string> = {
 
   // Form input (lib/phone — the same sentence the browser check shows)
   INVALID_PHONE:           PHONE_ERROR,
+  // Application forms (lib/application-limits — sign-up-fixes commit 4)
+  APPLY_RATE_LIMITED:      APPLY_RATE_LIMITED_MESSAGE,
+  PAYLOAD_TOO_LARGE:       PAYLOAD_TOO_LARGE_MESSAGE,
+  DESCRIPTION_TOO_LONG:    DESCRIPTION_TOO_LONG_MESSAGE,
+  INVALID_EMAIL:           'Enter a valid email address.',
 
   // Approval / availability
   RUNNER_NOT_APPROVED:     'Your runner account is awaiting admin approval.',

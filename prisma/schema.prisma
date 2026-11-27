@@ -1228,8 +1228,11 @@ model FairOrganizer {
   // by hiding buttons. /api/organizer/profile deliberately uses plain requireAuth, so a
   // pending organizer can still load an "awaiting approval" shell.
   //
-  // Because fair CREATION is gated, a pending organizer can never accumulate a fair —
-  // so there is no orphaned-fair problem on rejection (nothing downstream to clean up).
+  // Fair creation through the wizard stays gated. The ONE exception (sign-up-fixes commit 4,
+  // Jordan Nov 26; organizer spec 2.3 "set up your event (draft)" while in review): the
+  // organizer sign-up form saves their first event as a hidden DRAFT. A draft is never public or
+  // joinable, and only an admin's Go Live after approval makes a fair ACTIVE. On rejection the
+  // drafts are archived and their urlSlug freed in the decision's transaction (lib/approvals.ts).
   //
   // PLATFORM-LEVEL, not per-fair: an organizer owns many fairs, so approval means "you
   // may be an organizer at all". Approve/reject ride requireStrictAdminAuth, matching
@@ -2284,7 +2287,8 @@ model MenuChangeEvent {
 /// Audit for the approvals page (item 9): every approve, reject and document view. Append-only.
 model ApprovalAction {
   id              String   @id @default(cuid())
-  /// APPROVE | REJECT | VIEW_DOCUMENT | DEMO_ON | DEMO_OFF (the demo switch, Nov 16)
+  /// APPROVE | REJECT | VIEW_DOCUMENT | DEMO_ON | DEMO_OFF (the demo switch, Nov 16) |
+  /// TERMS_ACCEPTED (Terms + Privacy versions in detail; organizer, partner, vendor; never a decision)
   action          String
   /// vendor | organizer | partner
   applicationType String

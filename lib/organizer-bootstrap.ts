@@ -1,6 +1,23 @@
 import { db } from './db'
 import { addOrgOwner } from './payee-membership'
-import { enqueueSignupAlert } from './notifications'
+import { enqueueSignupAlert, enqueueApplicationReceived } from './notifications'
+import { createFairRecord, type CreateFairInput } from './create-fair'
+import { WEBSITE_TERMS_VERSION } from './legal/website-terms'
+import { PRIVACY_POLICY_VERSION } from './legal/privacy-policy'
+
+/**
+ * What the organizer sign-up form adds (sign-up-fixes commit 4; POST /api/organizer/apply is the
+ * only caller that passes it). With it, the FIRST bootstrap also saves the organizer's event as a
+ * hidden DRAFT (lib/create-fair, the wizard's own code), records their Terms + Privacy acceptance
+ * (an ApprovalAction row with action TERMS_ACCEPTED, never a decision) and queues their
+ * "we got your application" email — all in the same transaction as the organizer row. The backfill
+ * and seed scripts never pass it, so nothing changes for them.
+ */
+export interface OrganizerApplication {
+  website: string | null
+  event: CreateFairInput & { startDate: string; endDate: string }
+  acceptedBy: { clerkId: string; name: string | null }
+}
 
 // ─── Organizer bootstrap — the SINGLE HOME for "provision a self-signup organizer" ──
 //
@@ -9,12 +26,13 @@ import { enqueueSignupAlert } from './notifications'
 // Customers/vendors/runners are NOT bootstrapped here: vendor/runner are event-scoped
 // (need an eventId, created when joining an event); a plain customer has no org.
 //
-// Provisioning runs SYNCHRONOUSLY in app/onboarding/page.tsx (before its redirect to
-// /organizer) so the OrgMember exists by the time the portal's DB authority check runs
-// — no eventual-consistency bounce to /organizer/unauthorized. (Historically this lived
-// in the Clerk webhook gated on isNew, where the organizer signal never arrives, so it
-// never fired for a real self-signup. That branch is gone; this is the only live path.)
-// scripts/backfill-clerk-users.ts calls this too, so the logic has one home.
+// Provisioning runs SYNCHRONOUSLY in POST /api/organizer/apply when the person submits the
+// organizer sign-up form (sign-up-fixes commit 4) — never on a page load — so the OrgMember exists
+// by the time the portal's DB authority check runs. Until commit 4 it ran in app/onboarding/page.tsx
+// on every organizer sign-up; that page now only routes. (Historically this lived in the Clerk
+// webhook gated on isNew, where the organizer signal never arrives, so it never fired for a real
+// self-signup.) scripts/backfill-clerk-users.ts and scripts/seed-connect-walkthrough.ts call this
+// too, without the application argument, so the logic has one home.
 //
 // Idempotency / concurrency / crash-recovery — all via the repo's native primitive
 // (deterministic-id anchor + skipDuplicates = ON CONFLICT DO NOTHING; cf. place-order.ts,
@@ -38,7 +56,8 @@ import { enqueueSignupAlert } from './notifications'
  */
 export async function ensureOrganizerBootstrap(
   userId: string,
-  profile: { name: string | null; email: string; phone: string | null },
+  profile: { name: string | null; email: string; phone: string | null; contactName?: string | null },
+  application?: OrganizerApplication,
 ): Promise<{ organizerId: string; created: boolean }> {
   // GUARD 1 — never re-bootstrap. Protects already-provisioned organizers (incl.
   // backfilled cuid-id orgs whose id ≠ the deterministic anchor below).
@@ -57,19 +76,41 @@ export async function ensureOrganizerBootstrap(
   // idempotent: ON CONFLICT DO NOTHING on the id, and on the alert's dedupe key, so a retried or
   // concurrent bootstrap writes neither twice.
   await db.$transaction(async tx => {
-    await tx.fairOrganizer.createMany({
+    const inserted = await tx.fairOrganizer.createMany({
       data: [
         {
           id: organizerId,
           name: profile.name ?? profile.email,
           contactEmail: profile.email,
           ...(profile.phone ? { contactPhone: profile.phone } : {}),
+          ...(application?.website ? { website: application.website } : {}),
         },
       ],
       skipDuplicates: true, // ON CONFLICT (id) DO NOTHING
     })
+    // Only the run that actually inserted the organizer writes the sign-up form's extras, so a
+    // double submit can never save two drafts or two Terms records.
+    let event: { name: string; city: string | null; state: string | null; startDate: string; endDate: string } | undefined
+    if (application && inserted.count === 1) {
+      await createFairRecord(tx, organizerId, application.event, { asDraft: true })
+      event = {
+        name: String(application.event.name).trim(), city: application.event.venueCity ?? null, state: application.event.venueState ?? null,
+        startDate: application.event.startDate, endDate: application.event.endDate,
+      }
+      // Terms + Privacy acceptance: action TERMS_ACCEPTED, never APPROVE/REJECT, so no decision
+      // reader (lib/approvals nextDecisionSeq, lib/vendor-review, lib/vendor-go-live) counts it.
+      await tx.approvalAction.create({
+        data: {
+          action: 'TERMS_ACCEPTED', applicationType: 'organizer', applicationId: organizerId,
+          actorId: application.acceptedBy.clerkId, actorType: 'applicant', actorName: application.acceptedBy.name,
+          detail: { terms: WEBSITE_TERMS_VERSION, privacy: PRIVACY_POLICY_VERSION },
+        },
+      })
+      await enqueueApplicationReceived(tx, organizerId, profile.email, { kind: 'organizer', name: profile.name ?? profile.email })
+    }
     await enqueueSignupAlert(tx, organizerId, {
-      kind: 'organizer', name: profile.name ?? profile.email, contactName: profile.name, email: profile.email, phone: profile.phone,
+      kind: 'organizer', name: profile.name ?? profile.email, contactName: profile.contactName ?? profile.name,
+      email: profile.email, phone: profile.phone, ...(event ? { event } : {}),
     })
   })
 

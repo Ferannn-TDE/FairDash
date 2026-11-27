@@ -144,8 +144,23 @@ function monthsAhead(months: number, now = new Date()): Date {
   return new Date(now.getFullYear(), now.getMonth() + months, now.getDate())
 }
 
-/** How far ahead a fair may be scheduled at CREATION time. */
-export const CREATION_HORIZON_MONTHS = 3
+/** How far ahead a fair may be scheduled at CREATION time (and the edit pickers' ceiling).
+ *  18 months since sign-up-fixes commit 4 (Jordan, Nov 27; was 3): an organizer applying for
+ *  next year's event must be able to enter it, and the wizard must be able to show it. */
+export const CREATION_HORIZON_MONTHS = 18
+
+/**
+ * The SERVER's check for a new event's start date (organizer sign-up form): from today to the
+ * creation horizon, the same window the form's picker offers. One day of slack below "today",
+ * because the server's clock may already be on tomorrow (UTC) while the person is still on today.
+ */
+export function startDateInCreationWindow(value: CalendarDateString, now = new Date()): boolean {
+  const d = toPickerDate(value)
+  if (!d) return false
+  const { minDate, maxDate } = creationDateBounds(undefined, now)
+  const floor = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate() - 1)
+  return d >= floor && d <= maxDate
+}
 
 /**
  * CREATION: no past dates, hard horizon. `existingStart` is only used to choose the opening

@@ -6,6 +6,7 @@
 
 import { validateEmail } from '@/lib/runner-application-validation'
 import { checkPhone, normalizeUsPhone } from '@/lib/phone'
+import { TERMS_REQUIRED_MESSAGE } from '@/lib/application-limits'
 
 export const GROUP_TYPES = [
   { value: 'school', label: 'School' },
@@ -40,6 +41,8 @@ export interface PartnerApplicationInput {
   contactName?: unknown; email?: unknown; phone?: unknown
   city?: unknown; state?: unknown
   interests?: unknown; staffHours?: unknown; note?: unknown
+  /** The required "I agree to the FairSynq Terms and Privacy Policy" box (sign-up-fixes commit 4). */
+  agreedToTerms?: unknown
 }
 
 export interface PartnerApplication {
@@ -84,6 +87,7 @@ export function validatePartnerApplication(input: PartnerApplicationInput): Part
   set('interests', optional(input.interests, 'Fairs or events', PARTNER_MAX_LEN.interests))
   set('staffHours', optional(input.staffHours, 'Hours', PARTNER_MAX_LEN.staffHours))
   set('note', optional(input.note, 'Note', PARTNER_MAX_LEN.note))
+  if (input.agreedToTerms !== true) e.agreedToTerms = TERMS_REQUIRED_MESSAGE
   return e
 }
 

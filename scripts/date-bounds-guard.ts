@@ -49,7 +49,8 @@ function reachable(b: DateBounds, start: string, end: string): boolean {
 const FAIRS: [string, string, string][] = [
   ['running (started, not ended)', '2026-08-01', '2026-08-20'],
   ['finished (entirely past)',     '2026-06-01', '2026-06-05'],
-  ['beyond the creation horizon',  '2027-02-10', '2027-02-18'],
+  // The horizon is 18 months since sign-up-fixes 4 (Aug 13 2026 + 18 = Feb 13 2028; was 3 months).
+  ['beyond the creation horizon',  '2028-03-10', '2028-03-18'],
   ['starting today',               '2026-08-13', '2026-08-15'],
   ['normal upcoming',              '2026-09-01', '2026-09-07'],
 ]
@@ -78,15 +79,15 @@ console.log('\n[2] editing is widened, not unlimited')
   assert(iso(b.minDate) === '2026-08-13', 'a normal upcoming fair still floors at today (no wandering back years)')
   const past = editDateBounds('2026-06-01', '2026-06-05', NOW)
   assert(iso(past.minDate) === '2026-06-01', 'the floor widens EXACTLY to the fair start, not further')
-  const far = editDateBounds('2027-02-10', '2027-02-18', NOW)
-  assert(iso(far.maxDate) === '2027-02-18', 'the ceiling widens EXACTLY to the fair end, not further')
+  const far = editDateBounds('2028-03-10', '2028-03-18', NOW)
+  assert(iso(far.maxDate) === '2028-03-18', 'the ceiling widens EXACTLY to the fair end, not further')
 }
 
 console.log('\n[3] creation is stricter than editing')
 {
   const c = creationDateBounds(undefined, NOW)
   assert(iso(c.minDate) === '2026-08-13', 'creation floors at today (no fair that already happened)')
-  assert(iso(c.maxDate) === '2026-11-13', `creation ceiling is a hard +${CREATION_HORIZON_MONTHS} months`)
+  assert(CREATION_HORIZON_MONTHS === 18 && iso(c.maxDate) === '2028-02-13', `creation ceiling is a hard +${CREATION_HORIZON_MONTHS} months (18 since sign-up-fixes 4)`)
   const stale = creationDateBounds('2026-06-01', NOW)
   assert(iso(stale.minDate) === '2026-08-13', 'a STALE draft does not widen the creation floor — it must be re-dated')
   assert(iso(stale.defaultMonth) === '2026-08-13', '…and does not open on a month navigation cannot return from')

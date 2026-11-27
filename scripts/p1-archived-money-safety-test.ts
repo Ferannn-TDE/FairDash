@@ -98,7 +98,7 @@ async function seedDelivered(eventId: string, vendorId: string, runnerId: string
 }
 
 // Reproduces the create slug-uniqueness loop VERBATIM from
-// app/api/organizer/fairs/route.ts:9-19 (its helper is module-private). The
+// lib/create-fair.ts uniqueEventSlug (moved there from app/api/organizer/fairs/route.ts, sign-up-fixes 4). The
 // load-bearing DB read (findUnique by urlSlug) is exercised against the real DB;
 // this proves the archived row is still seen so the loop increments off it.
 function slugify(s: string): string {

@@ -17,6 +17,7 @@ import { CONTACT_EMAIL } from '@/lib/contact-info'
 import { MENU_ALERT_TEMPLATE } from '@/lib/menu-notify/constants'
 import type { MenuAlertEmailPayload } from '@/lib/menu-notify/digest'
 import { emailTextWithFooter, renderEmailLayout, type EmailLayoutInput } from '@/lib/email/layout'
+import { formatEventDateRange } from '@/lib/event-date'
 
 export type ApplicationKind = 'vendor' | 'organizer' | 'partner'
 const KIND_LABEL: Record<ApplicationKind, string> = { vendor: 'vendor', organizer: 'organizer', partner: 'partner organization' }
@@ -24,11 +25,24 @@ const KIND_LABEL: Record<ApplicationKind, string> = { vendor: 'vendor', organize
 const KIND_ARTICLE: Record<ApplicationKind, string> = { vendor: 'a', organizer: 'an', partner: 'a' }
 
 // ── Payloads ────────────────────────────────────────────────────────────────────────────────
-export interface SignupAlertPayload { kind: ApplicationKind; name: string; contactName: string | null; email: string | null; phone: string | null }
+/** The event an organizer applied with (sign-up-fixes commit 4): dates are 'YYYY-MM-DD' calendar dates. */
+export interface SignupAlertEvent { name: string; city: string | null; state: string | null; startDate: string; endDate: string }
+export interface SignupAlertPayload { kind: ApplicationKind; name: string; contactName: string | null; email: string | null; phone: string | null; event?: SignupAlertEvent }
 /** `decidedBy` (vendor decisions): who decided, as the VENDOR may see it — "FairSynq" or the
  *  organizer's organization name, never a person (lib/reviewer-label.ts; Jordan, Nov 16). Absent on
  *  rows queued before Nov 16, which read as FairSynq. */
-export interface DecisionPayload { kind: ApplicationKind; name: string; contactName: string | null; reason?: string; decidedBy?: string }
+export interface DecisionPayload {
+  kind: ApplicationKind; name: string; contactName: string | null; reason?: string; decidedBy?: string
+  /** Organizer approvals (sign-up-fixes commit 4): the draft event saved at sign-up, if any. */
+  draft?: { name: string; slug: string }
+}
+
+/** Where an approved organizer finishes their draft: sign in, then the wizard with it prefilled.
+ *  The return path is URL-encoded and is a same-site "/…" path, which /organizer/login follows
+ *  (lib/auth-destinations → lib/safe-redirect refuses anything else). */
+export function organizerDraftUrl(slug: string): string {
+  return `${SITE_URL}/organizer/login?redirect=${encodeURIComponent(`/organizer/fairs/new?draft=${encodeURIComponent(slug)}`)}`
+}
 /** The organizer's notice that FairSynq decided a vendor on their event (strict-admin override). */
 export interface OverridePayload { vendorName: string; fairName: string; decision: 'approved' | 'rejected'; reason: string; link: string }
 export const VENDOR_OVERRIDE_TEMPLATE = 'vendor_override_organizer'
@@ -105,14 +119,21 @@ function renderEmailParts(template: string, payload: unknown, context: EmailCont
     const contact = [p.contactName, p.email, p.phone].filter(Boolean).join(', ')
     const reviewUrl = `${SITE_URL}/admin/approvals`
     const applied = `${name} applied to join FairSynq as ${KIND_ARTICLE[p.kind]} ${label}.`
+    // An organizer's application carries the event they run (sign-up-fixes commit 4). Shown only
+    // when present, so vendor and partner alerts are unchanged.
+    const ev = p.event
+    const where = ev ? [ev.city, ev.state].filter(Boolean).join(', ') : ''
+    const dates = ev ? formatEventDateRange(ev.startDate, ev.endDate) : ''
+    const eventSentence = ev ? ` Event: ${ev.name}${where ? `, ${where}` : ''}, ${dates}.` : ''
     return {
       subject: `New ${label} application: ${name}`,
-      text: `${applied}${contact ? ` Contact: ${contact}.` : ''} Review it at ${reviewUrl}`,
+      text: `${applied}${contact ? ` Contact: ${contact}.` : ''}${eventSentence} Review it at ${reviewUrl}`,
       layout: {
         variant: 'admin', heading: `New ${label} application`, preheader: `${name} applied to join FairSynq.`,
         paragraphs: [applied],
         details: [
           ['Business', name], ['Contact', p.contactName], ['Email', p.email], ['Phone', p.phone],
+          ...(ev ? [['Event', ev.name], ['Where', where || null], ['Dates', dates]] as [string, string | null][] : []),
           ['Submitted', context.createdAt ? formatSubmitted(context.createdAt) : null],
         ],
         button: { label: 'Review application', url: reviewUrl },
@@ -132,6 +153,18 @@ function renderEmailParts(template: string, payload: unknown, context: EmailCont
       }
     }
     if (p.kind === 'organizer') {
+      // With the draft saved at sign-up (sign-up-fixes commit 4), the button finishes that event;
+      // without one, the email is unchanged.
+      if (p.draft) {
+        const url = organizerDraftUrl(p.draft.slug)
+        const label = `Finish setting up ${p.draft.name}`
+        const lead = `${hi}, your organizer account is approved. Sign in to finish setting up ${p.draft.name}`
+        return {
+          subject: 'Your FairSynq organizer account is approved',
+          text: `${lead}: ${url}`,
+          layout: { variant: 'standard', heading: "You're approved", preheader: 'Your organizer account is ready.', paragraphs: [`${lead}.`], button: { label, url } },
+        }
+      }
       const url = `${SITE_URL}/organizer/login`
       const lead = `${hi}, your organizer account is approved. Sign in to create your first fair`
       return {

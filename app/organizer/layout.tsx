@@ -5,7 +5,10 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
 import OrganizerShell from './_components/OrganizerShell'
 import OrganizerGateScreen from './_components/OrganizerGateScreen'
-import { organizerPortalState } from '@/lib/organizer-portal-state'
+import { organizerPortalState, organizerAwaitingLines } from '@/lib/organizer-portal-state'
+import { ORGANIZER_APPLY_PATH } from '@/lib/organizer-onboarding'
+import { organizerDraftScope } from '@/lib/organizer-fair-context'
+import { APPLICATION_RECEIVED_TEMPLATE } from '@/lib/email/templates'
 import QueryProvider from '../_providers/QueryProvider'
 
 export const metadata: Metadata = {
@@ -31,6 +34,7 @@ export default async function OrganizerLayout({ children }: { children: React.Re
   // gate screen directly, with no flash. Derived from the SAME helpers as requireOrganizerAuth,
   // so this screen and the server 403s can't disagree.
   let gate: ReturnType<typeof organizerPortalState> | null = null
+  let awaitingLines: string[] = []
 
   if (!exempt) {
     const { userId: clerkId } = await auth()
@@ -43,6 +47,7 @@ export default async function OrganizerLayout({ children }: { children: React.Re
       where: { userId: dbUser.id },
       select: {
         id: true,
+        organizerId: true,
         organizer: {
           select: {
             approvalStatus: true, rejectionReason: true,
@@ -51,9 +56,32 @@ export default async function OrganizerLayout({ children }: { children: React.Re
         },
       },
     })
-    if (!orgMember) redirect('/organizer/unauthorized')
+    // No organizer record yet → the organizer sign-up form (sign-up-fixes commit 4), for anyone
+    // signed in: the form says plainly it is an application, and nothing is created until they
+    // submit it. (No account row at all still goes to /organizer/unauthorized above.)
+    if (!orgMember) redirect(ORGANIZER_APPLY_PATH)
 
     gate = organizerPortalState(orgMember.organizer)
+
+    // "Application under review": say where the confirmation went and that their event is saved,
+    // but only what is true — the confirmation row this organizer actually has, and their draft.
+    if (gate.state === 'AWAITING') {
+      const [confirmation, draft] = await Promise.all([
+        db.notification.findUnique({
+          where: { dedupeKey: `received:organizer:${orgMember.organizerId}` },
+          select: { to: true, template: true },
+        }),
+        db.event.findFirst({
+          where: organizerDraftScope(orgMember.organizerId),
+          orderBy: { createdAt: 'asc' },
+          select: { name: true },
+        }),
+      ])
+      awaitingLines = organizerAwaitingLines({
+        confirmationSentTo: confirmation?.template === APPLICATION_RECEIVED_TEMPLATE ? confirmation.to ?? null : null,
+        draftEventName: draft?.name ?? null,
+      })
+    }
   }
 
   // Profile for the shell chrome (best-effort; Clerk may be absent locally).
@@ -82,7 +110,7 @@ export default async function OrganizerLayout({ children }: { children: React.Re
   if (gate && gate.state !== 'ACTIVE') {
     return (
       <QueryProvider>
-        <OrganizerGateScreen view={gate} />
+        <OrganizerGateScreen view={gate} awaitingLines={awaitingLines} />
       </QueryProvider>
     )
   }

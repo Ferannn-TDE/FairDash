@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server'
 import { unstable_cache, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
-import { EventStatus } from '@prisma/client'
 import { success, apiError } from '@/lib/api-response'
 import { parseVenueAddress, type VenueAddressInput } from '@/lib/venue-address'
 import { handleApiError } from '@/lib/api-error'
@@ -10,18 +9,9 @@ import { ACTIVE_VENDOR_WHERE } from '@/lib/vendor-queries'
 import { IN_MODEL_ORDERS } from '@/lib/order-scope'
 import { organizerFairScope } from '@/lib/organizer-fair-context'
 import { isDeliveryEnabled, DELIVERY_OFF_MESSAGE, DELIVERY_OFF_PLATFORM } from '@/lib/delivery'
-
-function slugify(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
-}
-async function uniqueEventSlug(base: string): Promise<string> {
-  const root = slugify(base) || 'fair'
-  let slug = root
-  for (let i = 2; await db.event.findUnique({ where: { urlSlug: slug }, select: { id: true } }); i++) {
-    slug = `${root}-${i}`
-  }
-  return slug
-}
+// The Event write (slug rule, DRAFT/UPCOMING, FulfillmentConfig) lives in lib/create-fair.ts, shared
+// with the organizer sign-up form's draft (sign-up-fixes commit 4). Moved there unchanged.
+import { createFairRecord } from '@/lib/create-fair'
 
 const ACTIVE_STATUSES = new Set(['PLACED', 'ACCEPTED', 'PREPARING', 'READY'])
 
@@ -168,40 +158,14 @@ export async function POST(req: NextRequest) {
       venue = parsed.value
     }
 
-    const urlSlug = await uniqueEventSlug(slug || name)
-
-    const event = await db.event.create({
-      data: {
-        organizerId,
-        name: String(name).trim(),
-        urlSlug,
-        description: description ?? null,
-        // "Save Draft" parks the fair as DRAFT; "Create" publishes it as UPCOMING. A DRAFT is
-        // excluded from every list/count/public surface by organizerFairScope until published.
-        status: asDraft === true ? EventStatus.DRAFT : EventStatus.UPCOMING,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        timezone: timezone || 'America/Chicago',
-        primaryColor: accentColor || '#FF0077',
-        venueAddress: (venue.venueAddress as string | undefined) ?? null,
-        venueCity:    (venue.venueCity as string | undefined) ?? null,
-        venueState:   (venue.venueState as string | undefined) ?? null,
-        venueZip:     (venue.venueZip as string | undefined) ?? null,
-        openTime:     openTime ?? null,
-        closeTime:    closeTime ?? null,
-        maxVendors:   typeof maxVendors === 'number' ? maxVendors : null,
-        admissionFree: admissionFree ?? true,
-        // Fulfillment toggles → the 1:1 FulfillmentConfig.
-        fulfillmentConfig: {
-          create: {
-            boothPickupEnabled:  pickupEnabled ?? true,
-            homeDeliveryEnabled: deliveryEnabled ?? false,
-            curbsideEnabled:     false,
-          },
-        },
-      },
-      select: { id: true, name: true, urlSlug: true, status: true },
-    })
+    const event = await createFairRecord(db, organizerId, {
+      name, slug, description, startDate, endDate, timezone, accentColor,
+      venueAddress: (venue.venueAddress as string | undefined) ?? null,
+      venueCity:    (venue.venueCity as string | undefined) ?? null,
+      venueState:   (venue.venueState as string | undefined) ?? null,
+      venueZip:     (venue.venueZip as string | undefined) ?? null,
+      openTime, closeTime, maxVendors, admissionFree, pickupEnabled, deliveryEnabled,
+    }, { asDraft: asDraft === true })
 
     // Refresh the organizer's fair-list cache (this endpoint's own GET tag) so the new fair shows
     // immediately, plus the public discovery cache.

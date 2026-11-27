@@ -44,6 +44,7 @@ async function main() {
   const VALID = {
     name: 'St. Mary PTA', groupType: 'school', contactName: 'Pat Lee', email: `Pat.Lee-${rand()}${MAIL}`.replace('@', '@'),
     phone: '(618) 555-0100', city: 'Edwardsville', state: 'il', interests: 'Italian Fest', staffHours: 'Saturdays 10–4', note: '',
+    agreedToTerms: true, // the required Terms + Privacy box (sign-up-fixes commit 4)
   }
 
   // ── [1] validation ─────────────────────────────────────────────────────────────────────

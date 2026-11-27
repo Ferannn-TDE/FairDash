@@ -50,7 +50,11 @@ const META: Record<
   },
 }
 
-export default function OrganizerGateScreen({ view }: { view: OrganizerPortalView }) {
+export default function OrganizerGateScreen({ view, awaitingLines = [] }: {
+  view: OrganizerPortalView
+  /** AWAITING only: the confirmation and saved-event lines (lib/organizer-portal-state organizerAwaitingLines). */
+  awaitingLines?: string[]
+}) {
   const { signOut } = useClerk()
   if (view.state === 'ACTIVE') return null // defensive — the layout never renders this for ACTIVE
   const m = META[view.state]
@@ -65,6 +69,9 @@ export default function OrganizerGateScreen({ view }: { view: OrganizerPortalVie
 
         <h1 className="font-bebas text-4xl tracking-wide text-white">{m.title}</h1>
         <p className="mt-3 text-sm font-inter text-[#999] leading-relaxed">{m.blurb}</p>
+        {view.state === 'AWAITING' && awaitingLines.map(line => (
+          <p key={line} className="mt-3 text-sm font-inter text-[#cfcfcf] leading-relaxed">{line}</p>
+        ))}
 
         {/* The reason — surfaced to the organizer, the same text the admin recorded and the
             gate returns. A declined/suspended organizer knows WHY, not just that. */}

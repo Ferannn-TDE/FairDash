@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { adminErrorText } from '@/lib/admin-error-text'
+import { formatEventDateRange } from '@/lib/event-date'
 
 // /admin/approvals panel (Batch 1 item 9). One decision per application through
 // POST /api/admin/approvals/{kind}/{id}. Loading shows skeletons, never placeholder data.
@@ -17,11 +18,26 @@ interface VendorApp {
   organizerName: string | null
   documents: { key: string; label: string; onFile: boolean }[]
 }
-interface OrganizerApp { id: string; name: string; contactEmail: string; contactPhone: string | null; createdAt: string }
+/** Terms + Privacy acceptance recorded at sign-up (sign-up-fixes commit 4). */
+interface TermsAccepted { terms: string | null; privacy: string | null; at: string }
+interface OrganizerApp {
+  id: string; name: string; contactEmail: string; contactPhone: string | null; createdAt: string
+  /** The event saved with the sign-up form, if any. */
+  draft: { name: string; venueCity: string | null; venueState: string | null; startDate: string; endDate: string } | null
+  termsAccepted: TermsAccepted | null
+}
 interface PartnerApp {
   id: string; name: string; groupType: string; groupTypeOther: string | null
   contactName: string; contactEmail: string; contactPhone: string; city: string; state: string
   interests: string | null; staffHours: string | null; note: string | null; createdAt: string
+  termsAccepted: TermsAccepted | null
+}
+
+/** "Accepted Terms and Privacy Policy (version 2026-11-23) · Nov 27, 2026" */
+function termsLine(t: TermsAccepted | null): string | null {
+  if (!t) return null
+  const versions = t.terms && t.privacy && t.terms !== t.privacy ? `Terms ${t.terms}, Privacy ${t.privacy}` : `version ${t.terms ?? t.privacy ?? '—'}`
+  return `Accepted Terms and Privacy Policy (${versions}) · ${new Date(t.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
 }
 interface Outbox { connected: boolean; waitingAdmin: number; waitingApplicant: number; heldNoAlertEmail: number; heldSafeDomain: number; failed: number }
 interface Data { vendors: VendorApp[]; organizers: OrganizerApp[]; partners: PartnerApp[]; outbox: Outbox }
@@ -277,7 +293,17 @@ export default function ApprovalsPanel({ canOverride = false }: { canOverride?: 
                   <h3 className="text-white font-semibold text-base">{o.name}</h3>
                   <span className="text-xs text-text-gray">Applied {fmtDate(o.createdAt)}</span>
                 </div>
-                <Row label="Contact" value={[o.contactEmail, o.contactPhone].filter(Boolean).join(' · ')} />
+                <div className="space-y-1">
+                  <Row label="Contact" value={[o.contactEmail, o.contactPhone].filter(Boolean).join(' · ')} />
+                  {o.draft && (
+                    <>
+                      <Row label="Event" value={o.draft.name} />
+                      <Row label="Location" value={[o.draft.venueCity, o.draft.venueState].filter(Boolean).join(', ')} />
+                      <Row label="Dates" value={formatEventDateRange(o.draft.startDate, o.draft.endDate)} />
+                    </>
+                  )}
+                  <Row label="Agreement" value={termsLine(o.termsAccepted)} />
+                </div>
                 <DecisionControls kind="organizer" id={o.id} onDone={load} />
               </div>
             ))}
@@ -295,6 +321,7 @@ export default function ApprovalsPanel({ canOverride = false }: { canOverride?: 
                   <Row label="Fairs or events" value={p.interests} />
                   <Row label="Hours" value={p.staffHours} />
                   <Row label="Note" value={p.note} />
+                  <Row label="Agreement" value={termsLine(p.termsAccepted)} />
                 </div>
                 <DecisionControls kind="partner" id={p.id} onDone={load} />
               </div>
