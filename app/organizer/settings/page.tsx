@@ -6,6 +6,7 @@ import { OrganizerBreadcrumb } from '../_components/Breadcrumb'
 import ConfirmModal from '../../_components/ui/ConfirmModal'
 import StripeConnectCard from '../../_components/StripeConnectCard'
 import MenuAlertPreferences from '../../_components/MenuAlertPreferences'
+import { checkPhone } from '@/lib/phone'
 import {
   UserCircleIcon,
   BellIcon,
@@ -181,8 +182,15 @@ export default function OrganizerSettingsPage() {
 
   const handleSave = async () => {
     if (!profileLoaded) return
-    setSaving(true)
     setSaveError(null)
+    // Same rule as the server (lib/phone): checked against the saved number, so an unchanged
+    // older-format number still saves. A bad one shows the message and sends nothing.
+    const phoneCheck = checkPhone(phone, { required: false, previous: profile?.phone ?? null })
+    if (!phoneCheck.ok) {
+      setSaveError(phoneCheck.error)
+      return
+    }
+    setSaving(true)
     try {
       const res = await fetch('/api/organizer/profile', {
         method: 'PATCH',
@@ -192,6 +200,11 @@ export default function OrganizerSettingsPage() {
       if (!res.ok) {
         const json = await res.json()
         throw new Error(json?.error?.message ?? 'Failed to save')
+      }
+      // Remember the number now saved, so the next save compares against it.
+      const savedJson = await res.json().catch(() => null)
+      if (savedJson?.data && 'phone' in savedJson.data) {
+        setProfile(prev => prev ? { ...prev, phone: savedJson.data.phone ?? null } : prev)
       }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)

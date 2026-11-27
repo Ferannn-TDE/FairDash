@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { success, apiError } from '@/lib/api-response'
 import { handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
+import { checkPhone, INVALID_PHONE } from '@/lib/phone'
 
 const ALLOWED_FIELDS = new Set([
   'name', 'phone',
@@ -46,6 +47,18 @@ export async function PATCH(req: NextRequest) {
 
     if (Object.keys(data).length === 0) {
       return apiError('No valid fields to update', 400, 'VALIDATION_ERROR')
+    }
+
+    // Phone (sign-up-fixes commit 1): the one US phone rule (lib/phone). A new or changed number is
+    // saved as +1XXXXXXXXXX; the stored number sent back unchanged is not rewritten; a bad one is
+    // refused before anything is written.
+    if ('phone' in data) {
+      const current = await db.user.findUnique({ where: { clerkId }, select: { phone: true } })
+      if (!current) return apiError('User not found', 404, 'NOT_FOUND')
+      const checked = checkPhone(data.phone, { required: false, previous: current.phone })
+      if (!checked.ok) return apiError(checked.error, 400, INVALID_PHONE)
+      if (checked.unchanged) delete data.phone
+      else data.phone = checked.value
     }
 
     const user = await db.user.update({

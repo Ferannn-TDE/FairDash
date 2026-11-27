@@ -34,6 +34,7 @@ import LegalDocument from '@/app/_components/LegalDocument'
 import PitchVideo from '@/app/_components/PitchVideo'
 import type { VideoSource } from '@/lib/videos'
 import { fillEmptyFields, PREFILLED_EMAIL_HINT, type ContactPrefill } from '@/lib/contact-prefill'
+import { checkPhone } from '@/lib/phone'
 
 const SUBMIT_FALLBACK = 'Couldn’t submit your application — please try again.'
 
@@ -193,6 +194,11 @@ function Step1({ data, update, fairs, eventSlug, setEventSlug, fairMode, emailPr
   fairMode: FairMode
   emailPrefilled: boolean
 }) {
+  // The phone message shows once the box has been left, so it doesn't nag mid-typing. The same
+  // check blocks Next (canProceed, step 1) and runs again on the server (lib/phone).
+  const [phoneTouched, setPhoneTouched] = useState(false)
+  const phoneCheck = checkPhone(data.phone, { required: true })
+  const phoneError = phoneTouched && !phoneCheck.ok ? phoneCheck.error : null
   return (
     <div className="bg-bg-card border border-white/10 rounded-2xl p-6 space-y-5">
       <div>
@@ -254,7 +260,10 @@ function Step1({ data, update, fairs, eventSlug, setEventSlug, fairMode, emailPr
         <div>
           <Label required>Phone Number</Label>
           <input type="tel" className={iCls} placeholder="(555) 000-0000" value={data.phone}
-            onChange={e => update({ phone: e.target.value })} />
+            onChange={e => update({ phone: e.target.value })}
+            onBlur={() => setPhoneTouched(true)}
+            aria-invalid={phoneError ? true : undefined} />
+          {phoneError && <p role="alert" className="text-xs text-red-400 mt-1.5">{phoneError}</p>}
         </div>
       </div>
     </div>
@@ -592,7 +601,7 @@ export default function VendorOnboarding({ video, prefill }: { video: VideoSourc
 
   const canProceed = (() => {
     switch (step) {
-      case 1: return !!(eventSlug && data.businessName.trim() && data.contactName.trim() && data.email.trim() && data.phone.trim())
+      case 1: return !!(eventSlug && data.businessName.trim() && data.contactName.trim() && data.email.trim() && checkPhone(data.phone, { required: true }).ok)
       case 2: return !!(cuisineChosen && data.description.trim().length >= 20)
       // Every required document must be chosen. Client-side only — the real
       // enforcement is the approve gate, which refuses a docs-incomplete vendor.
