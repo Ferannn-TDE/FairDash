@@ -18,6 +18,12 @@
  * deploy whose code expects a migration the database lacks stops at build time instead of going
  * live and turning /api/health 503. It also stops when the database can't be read.
  *
+ * PREVIEW WITHOUT A DATABASE (2026-11-26). Vercel Preview no longer has the production database variables, so a
+ * Preview build has no database to compare against. There — VERCEL_ENV=preview AND neither DATABASE_URL nor
+ * DIRECT_URL set — the check prints "skipped on Preview" and exits 0, so a red Preview means a real build problem.
+ * Production (or any non-Preview build) with no database URL still FAILS, and a Preview that does have a
+ * database URL is still checked (scripts/migration-drift-guard.ts proves all four).
+ *
  *   SKIP_MIGRATION_CHECK=1   the documented override, for when the check itself is wrong (e.g.
  *                            the database is down and you must ship a fix that doesn't touch it).
  *                            Set it on the Vercel deployment's environment for ONE deploy, then
@@ -41,6 +47,15 @@ export function migrationFolders(dir = MIGRATIONS_DIR): string[] {
   return readdirSync(dir).filter(n => statSync(join(dir, n)).isDirectory() && existsSync(join(dir, n, 'migration.sql'))).sort()
 }
 
+/** Why the check is skipped for this environment, or null when it must run. Pure: decided from env only. */
+export function driftSkipReason(env: Record<string, string | undefined>): string | null {
+  if (env.SKIP_MIGRATION_CHECK === '1') return 'SKIP_MIGRATION_CHECK=1 — migration drift NOT checked. Remove the override after this deploy.'
+  if (env.VERCEL_ENV === 'preview' && !env.DATABASE_URL && !env.DIRECT_URL) {
+    return 'migration drift: skipped on Preview (no DATABASE_URL — Preview builds have no database)'
+  }
+  return null
+}
+
 async function main() {
   const warnOnly = process.argv.includes('--warn')
   const say = (m: string) => (warnOnly ? console.warn(m) : console.log(m))
@@ -48,6 +63,8 @@ async function main() {
     console.warn('⚠️  SKIP_MIGRATION_CHECK=1 — migration drift NOT checked. Remove the override after this deploy.')
     process.exit(0)
   }
+  const skip = driftSkipReason(process.env)
+  if (skip) { console.log(`ℹ️  ${skip}`); process.exit(0) }
   const { assertNotProductionDatabase } = await import('../lib/prod-db-guard')
   assertNotProductionDatabase('migration-drift.ts') // production only with CONFIRM_PROD_DB=<ref>
   const { PrismaClient } = await import('@prisma/client')
