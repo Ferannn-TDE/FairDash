@@ -5,6 +5,7 @@ import { success, apiError } from '@/lib/api-response'
 import { ApiError, handleApiError } from '@/lib/api-error'
 import { requireAuth } from '@/lib/auth'
 import { diffProfileChanges } from '@/lib/runner-profile-log'
+import { checkPhone, INVALID_PHONE } from '@/lib/phone'
 
 // GET  /api/runners/me  — return the authenticated user's Runner record + event
 // PATCH /api/runners/me — update runner status (ACTIVE | OFFLINE)
@@ -70,9 +71,19 @@ export async function PATCH(req: NextRequest) {
     // Nullable free-text: trim, cap length, empty → null. Only assign if the key
     // was actually present, so a partial PATCH never clobbers unrelated fields.
     const STRING_FIELDS = ['phone', 'vehicleMake', 'vehicleModel', 'vehicleColor', 'vehiclePlate'] as const
+    // Phone (sign-up-fixes 1b): the one US phone rule (lib/phone). Blank clears it; the stored
+    // number sent back unchanged is not rewritten; a new one is saved as +1XXXXXXXXXX.
+    let phoneUnchanged = false
     for (const key of STRING_FIELDS) {
       if (!(key in body)) continue
       const raw = body[key]
+      if (key === 'phone') {
+        const checked = checkPhone(raw, { required: false, previous: runner.phone })
+        if (!checked.ok) throw new ApiError(checked.error, 400, INVALID_PHONE)
+        if (checked.unchanged) phoneUnchanged = true
+        else data.phone = checked.value
+        continue
+      }
       if (raw !== null && typeof raw !== 'string') {
         throw new ApiError(`${key} must be a string or null`, 400, 'VALIDATION_ERROR')
       }
@@ -105,6 +116,14 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (Object.keys(data).length === 0) {
+      // Only an unchanged phone was sent: nothing to write, the save still succeeds.
+      if (phoneUnchanged) {
+        const same = await db.runner.findUnique({
+          where: { id: runner.id },
+          include: { event: { select: { id: true, name: true, urlSlug: true } } },
+        })
+        return success({ runner: same })
+      }
       throw new ApiError('No updatable fields provided', 400, 'VALIDATION_ERROR')
     }
 

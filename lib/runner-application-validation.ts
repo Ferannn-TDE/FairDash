@@ -8,6 +8,8 @@
 // Pure + dependency-free (no Prisma, no Next) so it is safe to import into a
 // 'use client' component.
 
+import { checkPhone } from './phone'
+
 export const MAX_LEN = {
   firstName: 60,
   lastName: 60,
@@ -20,10 +22,8 @@ export const MAX_LEN = {
 // regexes reject real addresses; the real proof of an email is a message reaching it.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
-// Plausible, not authoritative — we accept international shapes and only require a
-// digit count in range once formatting (spaces, dashes, parens, +) is stripped.
-const PHONE_STRIP_RE = /[\s()+.-]/g
-const PHONE_DIGITS_RE = /^\d{7,15}$/
+// Phone: US numbers only, the one rule every FairSynq phone uses (lib/phone, sign-up-fixes 1b,
+// Jordan's decision 2026-11-26). International numbers were accepted here before that.
 
 export const MIN_AGE = 18 // DRIVER_TERMS §1(a) — drivers must be 18+
 const MAX_AGE = 100
@@ -77,12 +77,8 @@ export function validateEmail(raw: unknown): string | null {
 }
 
 export function validatePhone(raw: unknown): string | null {
-  const s = str(raw)
-  if (!s) return 'Phone number is required'
-  if (s.length > MAX_LEN.phone) return `Phone must be ${MAX_LEN.phone} characters or fewer`
-  const digits = s.replace(PHONE_STRIP_RE, '')
-  if (!PHONE_DIGITS_RE.test(digits)) return 'Enter a valid phone number'
-  return null
+  const checked = checkPhone(raw, { required: true })
+  return checked.ok ? null : checked.error
 }
 
 function requiredText(raw: unknown, label: string, max: number): string | null {

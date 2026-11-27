@@ -73,7 +73,7 @@ async function loadHandlers() {
 // ── Real-handler call wrappers ────────────────────────────────────────────────
 function driverBody(email: string, fairSlug: string | null) {
   return {
-    personal: { firstName: 'Ronb', lastName: 'Driver', email, phone: '+15550000000', dob: '1990-01-01', city: 'Testville' },
+    personal: { firstName: 'Ronb', lastName: 'Driver', email, phone: '+12175550134', dob: '1990-01-01', city: 'Testville' },
     vehicle: { type: 'Car', make: 'Toyota', model: 'Camry', year: '2020', color: 'Silver', plate: 'ABC 1234' },
     agreed: true, bgConsent: true, termsVersion: '2026-01-01',
     ...(fairSlug ? { fairSlug } : {}),

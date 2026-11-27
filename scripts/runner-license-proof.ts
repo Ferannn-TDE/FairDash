@@ -74,7 +74,7 @@ async function loadHandlers() {
 }
 
 const VALID = {
-  personal: { firstName: 'Rlic', lastName: 'Driver', email: '', phone: '+15550000000', dob: '1990-01-01', city: 'Testville' },
+  personal: { firstName: 'Rlic', lastName: 'Driver', email: '', phone: '+12175550134', dob: '1990-01-01', city: 'Testville' },
   agreed: true,
   bgConsent: true,
   termsVersion: '2026-11-04',
@@ -176,7 +176,7 @@ async function main() {
   const runnerA = await prisma.runner.findUnique({ where: { userId: userA.id } })
   assert(!!runnerA, 'Runner row exists for the applicant')
   assert(
-    runnerA?.phone === '+15550000000',
+    runnerA?.phone === '+12175550134',
     'onboarding phone landed on the RUNNER row (the record Settings reads) ← carry-through'
   )
   assert(
@@ -212,25 +212,25 @@ async function main() {
   const meRes = await meGET()
   const meJson: any = await meRes.json()
   assert(
-    meJson.data?.runner?.phone === '+15550000000',
+    meJson.data?.runner?.phone === '+12175550134',
     'GET /api/runners/me returns the onboarding data → Settings renders pre-filled, not blank'
   )
 
   login(userA.clerkId)
   const patch = await mePATCH(new NextRequest('http://localhost/api/runners/me', {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: '+15551234567', vehicleColor: 'Red' }),
+    body: JSON.stringify({ phone: '(312) 555-0199', vehicleColor: 'Red' }),
   }))
   assert(patch.status === 200, 'PATCH /api/runners/me accepts an edit')
   const after = await prisma.runner.findUnique({ where: { userId: userA.id } })
-  assert(after?.phone === '+15551234567' && after?.vehicleColor === 'Red', 'edited settings persisted')
+  assert(after?.phone === '+13125550199' && after?.vehicleColor === 'Red', 'edited settings persisted')
   login(userA.clerkId)
   await mePATCH(new NextRequest('http://localhost/api/runners/me', {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ vehicleColor: 'Blue' }),
   }))
   const after2 = await prisma.runner.findUnique({ where: { userId: userA.id } })
-  assert(after2?.vehicleColor === 'Blue' && after2?.phone === '+15551234567', 'partial PATCH did NOT clobber untouched fields')
+  assert(after2?.vehicleColor === 'Blue' && after2?.phone === '+13125550199', 'partial PATCH did NOT clobber untouched fields')
 
   // ── TASK 3: licence privacy + scoping ───────────────────────────────────────
   console.log('\n[5] Licence is SELF-SCOPED (no id accepted from the request)')

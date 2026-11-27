@@ -28,6 +28,7 @@ import { alertOrderingPaused, ORDERING_PAUSED_MESSAGE, ORDERING_PAUSED_CODE } fr
 import { runAfterResponse } from '@/lib/after-response'
 import { logger } from '@/lib/logger'
 import { effectiveFulfillment, isDeliveryEnabled } from '@/lib/delivery'
+import { checkPhone, PHONE_ERROR, INVALID_PHONE } from '@/lib/phone'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -201,6 +202,14 @@ export async function POST(req: NextRequest) {
         )
       }
     }
+
+    // Phone (sign-up-fixes 1b): the one US phone rule (lib/phone), enforced here because the page's
+    // check can be skipped. Last of the checks on the request body alone, so a more basic problem
+    // (an empty cart, a bad line) is the message shown first; still before any database read,
+    // ensureDbUser, Stripe call or order row. Saved as +1XXXXXXXXXX.
+    const phoneCheck = checkPhone(customerPhone, { required: true })
+    if (!phoneCheck.ok || !phoneCheck.value) throw new ApiError(PHONE_ERROR, 400, INVALID_PHONE)
+    const savedCustomerPhone = phoneCheck.value
 
     // ── 2. DB validation ───────────────────────────────────────────────────
 
@@ -727,7 +736,7 @@ export async function POST(req: NextRequest) {
             vendorTaxes: { create: totals.vendorTaxes.map(t => ({ vendorId: t.vendorId, foodCents: t.foodCents, salesTaxCents: t.salesTaxCents, localTaxCents: t.localTaxCents })) },
           } : {}),
           customerName,
-          customerPhone,
+          customerPhone: savedCustomerPhone,
           vehicleMake: vehicleMake ?? null,
           vehicleColor: vehicleColor ?? null,
           vehiclePlate: vehiclePlate ?? null,

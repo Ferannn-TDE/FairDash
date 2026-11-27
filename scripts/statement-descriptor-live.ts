@@ -80,7 +80,7 @@ async function main() {
   const res = await POST(new NextRequest('http://localhost/api/orders', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      eventId: event.id, fulfillmentType: 'BOOTH_PICKUP', customerName: 'Statement Test', customerPhone: '5550000000',
+      eventId: event.id, fulfillmentType: 'BOOTH_PICKUP', customerName: 'Statement Test', customerPhone: '2175550134',
       items: [{ menuItemId: item.id, vendorId: vendor.id, quantity: 1 }],
     }),
   }))

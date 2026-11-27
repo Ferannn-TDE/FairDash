@@ -8,6 +8,7 @@ import { getOptionalUserId } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import { validateApplication } from '@/lib/runner-application-validation'
 import { createRunnerRecord } from '@/lib/payee-membership'
+import { normalizeUsPhone } from '@/lib/phone'
 
 // GET  /api/drivers  — list driver applications (admin only, stub)
 // POST /api/drivers  — submit driver application (public + auth optional)
@@ -35,6 +36,9 @@ export async function POST(req: NextRequest) {
     }
 
     const dateOfBirth = new Date(personal.dob)
+    // +1XXXXXXXXXX (lib/phone). validateApplication has already passed the phone, so the
+    // fallback to the trimmed text is never reached.
+    const phone = normalizeUsPhone(String(personal.phone).trim()) ?? String(personal.phone).trim()
 
     // Optional applicant link — the form works signed-out, but if they're signed
     // in we attach the DB user so admin review can see the linked account.
@@ -55,7 +59,7 @@ export async function POST(req: NextRequest) {
         firstName: String(personal.firstName).trim(),
         lastName: String(personal.lastName).trim(),
         email: String(personal.email).trim(),
-        phone: String(personal.phone).trim(),
+        phone,
         dateOfBirth,
         city: personal.city?.trim() || null,
         // Vehicle columns are left null: sign-up no longer asks for a vehicle (Driver Terms
@@ -115,7 +119,7 @@ export async function POST(req: NextRequest) {
               // RunnerApplication and Settings rendered blank on first open — the user
               // re-typed everything they had just entered. RunnerApplication remains the
               // immutable consent/audit trail; Runner is the mutable working profile.
-              phone: String(personal.phone).trim() || null,
+              phone,
             })
             runnerMinted = true
             // The role is added inside createRunnerRecord (lib/payee-membership): this site was
