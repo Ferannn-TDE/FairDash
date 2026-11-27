@@ -101,7 +101,7 @@ assert(blankPrefill.length > 0 && !blankPrefill.includes(HINT_HTML), 'an empty p
 
 console.log('\n[3] The email does not have to match the login')
 type Validation = {
-  validatePartnerApplication?: (input: Record<string, string>) => Record<string, string | undefined>
+  validatePartnerApplication?: (input: Record<string, unknown>) => Record<string, string | undefined>
   GROUP_TYPES?: readonly { value: string }[]
   US_STATES?: readonly (readonly [string, string])[]
 }
@@ -109,12 +109,15 @@ const v = await load<Validation>('lib/partner-application.ts')
 if (typeof v?.validatePartnerApplication === 'function' && v.GROUP_TYPES?.length && v.US_STATES?.length) {
   const filled = {
     name: 'Riverside Lions Club', groupType: v.GROUP_TYPES[0].value, groupTypeOther: '',
-    contactName: 'Jane Smith', email: 'group@example.org', phone: '+15551234567',
+    contactName: 'Jane Smith', email: 'group@example.org', phone: '+12175550134',
     city: 'Collinsville', state: v.US_STATES[0][0], interests: '', staffHours: '', note: '',
+    // The Terms box is required since sign-up-fixes commit 4; the phone follows the US rule from
+    // commit 1 (an exchange can't start with 1, so the old +15551234567 is now refused, correctly).
+    agreedToTerms: true,
   }
   const errors = v.validatePartnerApplication(filled)
   assert(!errors.email, 'a changed email (not the login one) is accepted')
-  assert(!errors.phone, 'a Clerk-format phone (+15551234567) is accepted')
+  assert(!errors.phone, 'a Clerk-format phone (+12175550134) is accepted')
   assert(Object.keys(errors).filter(k => errors[k]).length === 0, 'a filled-in form has no errors')
 } else {
   assert(false, 'lib/partner-application.ts exports validatePartnerApplication, GROUP_TYPES and US_STATES')
